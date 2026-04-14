@@ -1,7 +1,7 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::Path;
 use tokio::fs;
 
@@ -113,5 +113,9 @@ impl Tool for WriteFileTool {
 }
 
 fn truncate_line(s: &str, max_len: usize) -> &str {
-    if s.len() > max_len { &s[..max_len] } else { s }
+    if s.len() > max_len {
+        &s[..max_len]
+    } else {
+        s
+    }
 }

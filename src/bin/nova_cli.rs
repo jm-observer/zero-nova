@@ -13,19 +13,19 @@ use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
 use zero_nova::provider::{LlmClient, ModelConfig};
-use zero_nova::tool::{ToolRegistry, builtin::register_builtin_tools};
+use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
 struct Cli {
     /// Model name
-    #[arg(long, default_value = "claude-sonnet-4-20250514")]
+    #[arg(long, default_value = "gpt-oss-120b", global = true)]
     model: String,
     /// Optional custom base URL for the LLM provider
-    #[arg(long)]
+    #[arg(long, global = true)]
     base_url: Option<String>,
     /// Verbose output (show tool inputs/outputs)
-    #[arg(long)]
+    #[arg(long, global = true)]
     verbose: bool,
     #[command(subcommand)]
     command: Command,
@@ -98,8 +98,8 @@ fn make_client(cli: &Cli) -> Result<impl LlmClient> {
         .base_url
         .clone()
         .unwrap_or_else(|| "https://api.anthropic.com".to_string());
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .context("Environment variable ANTHROPIC_API_KEY not found. Please set it to your Anthropic API key.")?;
+    let api_key =
+        std::env::var("API_KEY").context("Environment variable API_KEY not found. Please set it to your API key.")?;
     let client = zero_nova::provider::anthropic::AnthropicClient::new(api_key, base);
     Ok(client)
 }

@@ -6,5 +6,10 @@ default_to_workspace = false
 command = "cargo"
 args = ["build", "--workspace", "--release", "--features", "prod"]
 
+[tasks.run]
+env = { API_KEY = "your_api_key_here" }
+command = "cargo"
+args = ["run", "--bin", "nova_cli", "--", "--base-url", "http://192.168.0.68:12340", "--model", "gpt-oss-120b", "run", "${@}"]
+
 [tasks.default]
 alias = "prod"

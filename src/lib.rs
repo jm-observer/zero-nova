@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod event;
+pub mod mcp;
 pub mod message;
 pub mod prompt;
 pub mod provider;

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
+tokio-tungstenite = { version = "0.21", features = ["__rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 log = "0.4"
 custom-utils = { version = "0.10.21", features = ["daemon-async"] }

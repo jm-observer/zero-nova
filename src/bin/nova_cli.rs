@@ -53,6 +53,11 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let _ = custom_utils::logger::logger_feature("nova_cli", "debug", log::LevelFilter::Info, false).build();
+
+    log::info!("Starting Nova CLI with model: {}", cli.model);
+    log::info!("Base URL: {:?}", cli.base_url);
+
     let client = make_client(&cli)?;
     let mut tools = ToolRegistry::new();
     register_builtin_tools(&mut tools);

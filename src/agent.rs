@@ -64,6 +64,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         for iteration in 0..self.config.max_iterations {
             log::debug!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
             let tool_defs = self.tools.tool_definitions();
+            log::info!("Starting stream for iteration {}", iteration + 1);
             let mut receiver = self
                 .client
                 .stream(
@@ -72,13 +73,19 @@ impl<C: LlmClient> AgentRuntime<C> {
                     &tool_defs[..],
                     &self.config.model_config,
                 )
-                .await?;
+                .await
+                .inspect_err(|e| log::error!("Failed to start stream: {}", e))?;
 
+            log::info!("Stream started, receiving events...");
             let mut current_text = String::new();
             let mut current_blocks = Vec::new();
             let mut tool_calls = Vec::new(); // (id, name, input_json)
 
-            while let Some(event) = receiver.next_event().await? {
+            while let Some(event) = receiver
+                .next_event()
+                .await
+                .inspect_err(|e| log::error!("Error receiving event: {}", e))?
+            {
                 match event {
                     ProviderStreamEvent::TextDelta(delta) => {
                         current_text.push_str(&delta);
@@ -137,6 +144,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                     serde_json::from_str(&input_json).unwrap_or_else(|_| serde_json::json!({}));
 
                 tool_results_fut.push(async move {
+                    log::info!("Executing tool: {} with input: {}", name, input_json);
                     let _ = tx
                         .send(crate::event::AgentEvent::ToolStart {
                             id: id.clone(),
@@ -146,6 +154,10 @@ impl<C: LlmClient> AgentRuntime<C> {
                         .await;
 
                     let result = tool_registry.execute(&name, input_val).await;
+                    match &result {
+                        Ok(_out) => log::info!("Tool {} executed successfully", name),
+                        Err(e) => log::error!("Tool {} execution failed: {}", name, e),
+                    }
 
                     let (content, is_error) = match result {
                         Ok(out) => (out.content, out.is_error),

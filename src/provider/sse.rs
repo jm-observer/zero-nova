@@ -37,8 +37,9 @@ impl SseParser {
             };
 
             let _ = self.buffer.drain(..pos + terminator_len);
-
             let raw_str = std::str::from_utf8(&raw_bytes).map_err(|e| anyhow!("Invalid UTF-8 in SSE frame: {}", e))?;
+
+            log::debug!("Parsing SSE frame: {}", raw_str);
 
             let mut data_content = String::new();
             for line in raw_str.lines() {
@@ -48,18 +49,24 @@ impl SseParser {
                 } else if line == "data:" {
                     // Empty data line
                 }
-                // We ignore "event:", "id:", "retry:" for now as we mostly care about the data.
             }
 
             let json_str = data_content.trim();
 
-            if json_str.is_empty() || json_str == "[DONE]" {
+            if json_str.is_empty() {
                 return self.next_event();
             }
 
+            if json_str == "[DONE]" {
+                log::info!("SSE stream received [DONE]");
+                return Ok(None);
+            }
+
             // Parse JSON into StreamEvent
-            let event: StreamEvent =
-                from_str(json_str).map_err(|e| anyhow!("Failed to parse SSE JSON: {}, content: {}", e, json_str))?;
+            let event: StreamEvent = from_str(json_str).map_err(|e| {
+                log::error!("Failed to parse SSE JSON: {}, content: {}", e, json_str);
+                anyhow!("Failed to parse SSE JSON: {}, content: {}", e, json_str)
+            })?;
             return Ok(Some(event));
         }
         Ok(None)

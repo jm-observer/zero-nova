@@ -75,6 +75,7 @@ impl LlmClient for AnthropicClient {
             tools: if tools.is_empty() { None } else { Some(tools.to_vec()) },
         };
         let url = format!("{}/v1/messages", self.base_url);
+        log::info!("Sending POST request to: {}", url);
         let resp = self
             .http
             .post(&url)
@@ -83,8 +84,12 @@ impl LlmClient for AnthropicClient {
             .header(header::CONTENT_TYPE, "application/json")
             .json(&body)
             .send()
-            .await?
-            .error_for_status()?;
+            .await
+            .inspect_err(|e| log::error!("HTTP request failed: {}", e))?
+            .error_for_status()
+            .inspect_err(|e| log::error!("HTTP response error status: {}", e))?;
+
+        log::info!("HTTP response received: {}", resp.status());
         Ok(Box::new(AnthropicStreamReceiver {
             response: resp,
             parser: SseParser::new(),
@@ -136,11 +141,20 @@ impl StreamReceiver for AnthropicStreamReceiver {
             }
 
             // If no full event in buffer, read more from the response
-            match self.response.chunk().await? {
+            match self
+                .response
+                .chunk()
+                .await
+                .inspect_err(|e| log::error!("Failed to read chunk from response: {}", e))?
+            {
                 Some(chunk) => {
+                    log::debug!("Received chunk: {} bytes", chunk.len());
                     self.parser.feed(&chunk);
                 }
-                None => return Ok(None), // End of stream
+                None => {
+                    log::info!("Stream ended (no more chunks)");
+                    return Ok(None);
+                } // End of stream
             }
         }
     }

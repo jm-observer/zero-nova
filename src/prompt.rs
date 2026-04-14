@@ -44,8 +44,17 @@ impl SystemPromptBuilder {
     }
 
     pub fn with_tools(mut self, registry: &ToolRegistry) -> Self {
-        let names: Vec<String> = registry.tools.iter().map(|t| t.definition().name.clone()).collect();
-        self.sections.push(format!("Available tools: {}", names.join(", ")));
+        let mut tool_desc = String::new();
+        for tool in &registry.tools {
+            let def = tool.definition();
+            tool_desc.push_str(&format!(
+                "## {}\n\n{}\n\nInput schema:\n```json\n{}\n```\n\n---\n\n",
+                def.name,
+                def.description,
+                serde_json::to_string_pretty(&def.input_schema).unwrap_or_else(|_| "{}".to_string())
+            ));
+        }
+        self.sections.push(tool_desc);
         self
     }
 

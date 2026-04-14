@@ -1,0 +1,3 @@
+[submodule "gits/claw-code"]
+	path = gits/claw-code
+	url = https://github.com/jm-observer/claw-code.git

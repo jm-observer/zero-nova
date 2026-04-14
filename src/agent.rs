@@ -2,7 +2,7 @@ use crate::message::{ContentBlock, Message, Role};
 use serde_json;
 
 use crate::provider::{LlmClient, ProviderStreamEvent};
-use crate::tool::ToolRegistry;
+pub use crate::tool::ToolRegistry;
 use anyhow::Result;
 use tokio::sync::mpsc;
 

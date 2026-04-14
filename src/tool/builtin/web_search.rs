@@ -1,8 +1,8 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct WebSearchTool {
     api_key: String,

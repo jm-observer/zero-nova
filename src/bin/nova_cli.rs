@@ -3,17 +3,17 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 use clap::{Parser, Subcommand};
-use colored::*;
+use colored::Colorize;
+use rustyline::history::FileHistory;
 use serde_json::json;
 use tokio::sync::mpsc;
-use zero_nova::{
-    event::AgentEvent,
-    mcp::client::McpClient,
-    message::Message,
-    provider::anthropic::AnthropicClient,
-    provider::{LlmClient, ModelConfig},
-    register_builtin_tools, AgentConfig, AgentRuntime, SystemPromptBuilder, ToolRegistry,
-};
+use zero_nova::agent::{AgentConfig, AgentRuntime};
+use zero_nova::event::AgentEvent;
+use zero_nova::mcp::client::McpClient;
+use zero_nova::message::Message;
+use zero_nova::prompt::SystemPromptBuilder;
+use zero_nova::provider::{LlmClient, ModelConfig};
+use zero_nova::tool::{ToolRegistry, builtin::register_builtin_tools};
 
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
@@ -65,11 +65,13 @@ async fn main() -> Result<()> {
         .build();
 
     let config = AgentConfig {
+        max_iterations: 5,
         model_config: ModelConfig {
             model: cli.model.clone(),
-            ..Default::default()
+            max_tokens: 1024,
+            temperature: None,
+            top_p: None,
         },
-        ..Default::default()
     };
 
     let mut agent = AgentRuntime::new(client, tools, prompt, config);
@@ -103,13 +105,9 @@ fn make_client(cli: &Cli) -> Result<impl LlmClient> {
 }
 
 async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Result<()> {
-    let mut rl = rustyline::Editor::<()>::new();
+    let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
-    loop {
-        let line = match rl.readline("you> ") {
-            Ok(l) => l,
-            Err(_) => break,
-        };
+    while let Ok(line) = rl.readline("you> ") {
         let input = line.trim();
         if input.is_empty() {
             continue;
@@ -182,7 +180,7 @@ async fn run_oneshot(agent: &AgentRuntime<impl LlmClient>, prompt: &str, verbose
 }
 
 fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
-    for def in agent.tools.tool_definitions() {
+    for def in agent.tools().tool_definitions() {
         println!("- {}: {}", def.name, def.description);
     }
 }
@@ -235,7 +233,6 @@ fn render_event(event: &AgentEvent, verbose: bool) {
         }
         AgentEvent::Error(e) => {
             eprintln!("\n{}", format!("[error] {e}").red().bold());
-        }
-        _ => {}
+        } // ignore other events
     }
 }

@@ -29,7 +29,9 @@ mod tests {
 
     #[test]
     fn mcp_content_variant() {
-        let txt = McpContent::Text { text: "hello".to_string() };
+        let txt = McpContent::Text {
+            text: "hello".to_string(),
+        };
         match txt {
             McpContent::Text { text } => assert_eq!(text, "hello"),
             _ => panic!("unexpected variant"),

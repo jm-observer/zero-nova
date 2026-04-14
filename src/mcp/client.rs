@@ -121,7 +121,8 @@ impl McpClient {
                 Ok(parsed)
             }
             None => {
-                let err_msg = resp.error
+                let err_msg = resp
+                    .error
                     .map(|e| e.message)
                     .unwrap_or_else(|| "Unknown RPC error".to_string());
                 Err(anyhow!("RPC call '{}' failed: {}", method, err_msg))

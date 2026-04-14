@@ -36,6 +36,14 @@ impl<C: LlmClient> AgentRuntime<C> {
         self.tools.register(tool);
     }
 
+    pub fn system_prompt(&self) -> &str {
+        &self.system_prompt
+    }
+
+    pub fn tools(&self) -> &ToolRegistry {
+        &self.tools
+    }
+
     pub async fn run_turn(
         &self,
         history: &[Message],

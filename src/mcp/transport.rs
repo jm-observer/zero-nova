@@ -36,8 +36,14 @@ impl StdioTransport {
             .stderr(std::process::Stdio::null())
             .spawn()?;
 
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to open child stdin"))?;
-        let stdout = child.stdout.take().ok_or_else(|| anyhow!("Failed to open child stdout"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open child stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to open child stdout"))?;
 
         let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
         let pending_clone = Arc::clone(&pending);
@@ -47,7 +53,9 @@ impl StdioTransport {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
             while let Ok(n) = reader.read_line(&mut line).await {
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 if let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(line.trim_end()) {
                     if let Some(id) = resp.id {
                         let mut p = pending_clone.lock().await;
@@ -73,7 +81,7 @@ impl McpTransport for StdioTransport {
     async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
         let id = request.id.ok_or_else(|| anyhow!("Request ID missing"))?;
         let (tx, rx) = oneshot::channel();
-        
+
         {
             let mut p = self.pending.lock().await;
             p.insert(id, tx);

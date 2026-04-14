@@ -1,0 +1,10 @@
+[config]
+skip_core_tasks = true
+default_to_workspace = false
+
+[tasks.prod]
+command = "cargo"
+args = ["build", "--workspace", "--release", "--features", "prod"]
+
+[tasks.default]
+alias = "prod"

@@ -32,12 +32,30 @@ pub enum InputContentBlock {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamEvent {
-    MessageStart {},
-    ContentBlockStart { index: usize },
-    ContentBlockDelta { index: usize, delta: String },
-    ContentBlockStop { index: usize },
-    MessageDelta { delta: String },
-    MessageStop { usage: Usage },
+    MessageStart {
+        message: serde_json::Value,
+    },
+    ContentBlockStart {
+        index: usize,
+    },
+    ContentBlockDelta {
+        index: usize,
+        delta: serde_json::Value,
+    },
+    ContentBlockStop {
+        index: usize,
+    },
+    MessageDelta {
+        delta: serde_json::Value,
+        usage: Option<Usage>,
+    },
+    MessageStop {
+        usage: Option<Usage>,
+    },
+    Ping {},
+    Error {
+        error: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

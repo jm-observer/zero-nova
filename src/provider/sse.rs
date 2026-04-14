@@ -22,21 +22,38 @@ impl SseParser {
         // Split on double newline which terminates an SSE message
         if let Some(pos) = self.find_double_newline() {
             let raw_bytes = self.buffer[..pos].to_vec();
-            // Consume up to pos + 2 (the \n\n)
-            let _ = self.buffer.drain(..pos + 2);
-
-            let raw_str = std::str::from_utf8(&raw_bytes).map_err(|e| anyhow!("Invalid UTF-8 in SSE frame: {}", e))?;
-            let raw = raw_str.trim();
-
-            // Remove "data: " prefix if present
-            let json_str = if let Some(rest) = raw.strip_prefix("data: ") {
-                rest.trim()
+            // Consume up to pos + 2 (the \n\n or whatever terminator)
+            // SSE standard says \r\n\r\n or \n\n
+            let terminator_len = if self.buffer.get(pos + 1) == Some(&b'\n') {
+                if self.buffer.get(pos) == Some(&b'\r') {
+                    // This case is actually handled by find_double_newline mapping to the first \n
+                    // Let's refine find_double_newline to be more robust.
+                    2
+                } else {
+                    2
+                }
             } else {
-                raw
+                2
             };
 
+            let _ = self.buffer.drain(..pos + terminator_len);
+
+            let raw_str = std::str::from_utf8(&raw_bytes).map_err(|e| anyhow!("Invalid UTF-8 in SSE frame: {}", e))?;
+
+            let mut data_content = String::new();
+            for line in raw_str.lines() {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("data: ") {
+                    data_content.push_str(rest);
+                } else if line == "data:" {
+                    // Empty data line
+                }
+                // We ignore "event:", "id:", "retry:" for now as we mostly care about the data.
+            }
+
+            let json_str = data_content.trim();
+
             if json_str.is_empty() || json_str == "[DONE]" {
-                // If it was just an empty line or [DONE], try getting the next one recursively
                 return self.next_event();
             }
 
@@ -49,7 +66,20 @@ impl SseParser {
     }
 
     fn find_double_newline(&self) -> Option<usize> {
-        (0..self.buffer.len().saturating_sub(1)).find(|&i| self.buffer[i] == b'\n' && self.buffer[i + 1] == b'\n')
+        for i in 0..self.buffer.len().saturating_sub(1) {
+            if self.buffer[i] == b'\n' && self.buffer[i + 1] == b'\n' {
+                return Some(i);
+            }
+            if i + 3 < self.buffer.len()
+                && self.buffer[i] == b'\r'
+                && self.buffer[i + 1] == b'\n'
+                && self.buffer[i + 2] == b'\r'
+                && self.buffer[i + 3] == b'\n'
+            {
+                return Some(i + 2); // Return index of the second \r
+            }
+        }
+        None
     }
 }
 

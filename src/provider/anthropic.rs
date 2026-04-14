@@ -105,17 +105,30 @@ impl StreamReceiver for AnthropicStreamReceiver {
             if let Some(event) = self.parser.next_event()? {
                 // Convert StreamEvent to ProviderStreamEvent
                 let provider_event = match event {
-                    crate::provider::types::StreamEvent::MessageStart {} => {
+                    crate::provider::types::StreamEvent::MessageStart { .. } => {
                         continue;
                     }
                     crate::provider::types::StreamEvent::ContentBlockDelta { delta, .. } => {
-                        ProviderStreamEvent::TextDelta(delta)
+                        if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                            ProviderStreamEvent::TextDelta(text.to_string())
+                        } else {
+                            continue;
+                        }
                     }
-                    crate::provider::types::StreamEvent::MessageDelta { delta } => {
-                        ProviderStreamEvent::TextDelta(delta)
+                    crate::provider::types::StreamEvent::MessageDelta { delta, .. } => {
+                        if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                            ProviderStreamEvent::TextDelta(text.to_string())
+                        } else {
+                            continue;
+                        }
                     }
                     crate::provider::types::StreamEvent::MessageStop { usage } => {
-                        ProviderStreamEvent::MessageComplete { usage }
+                        ProviderStreamEvent::MessageComplete {
+                            usage: usage.unwrap_or_default(),
+                        }
+                    }
+                    crate::provider::types::StreamEvent::Error { error } => {
+                        return Err(anyhow!("Anthropic API Error: {}", error));
                     }
                     _ => continue,
                 };

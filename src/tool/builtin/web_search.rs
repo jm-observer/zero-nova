@@ -1,16 +1,19 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+/// Tool for performing web searches.
 pub struct WebSearchTool {
     api_key: String,
     endpoint: String,
     client: Client,
 }
 
+/// Implementation of methods for the web search tool.
 impl WebSearchTool {
+    /// Constructs a new `WebSearchTool` with the given API key and endpoint.
     pub fn new(api_key: String, endpoint: String) -> Self {
         Self {
             api_key,
@@ -19,6 +22,7 @@ impl WebSearchTool {
         }
     }
 
+    /// Creates a `WebSearchTool` from environment variables.
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("SEARCH_API_KEY").map_err(|_| anyhow!("SEARCH_API_KEY not set"))?;
         let endpoint = std::env::var("SEARCH_ENDPOINT")
@@ -28,7 +32,9 @@ impl WebSearchTool {
 }
 
 #[async_trait]
+/// Implementation of the `Tool` trait for web search.
 impl Tool for WebSearchTool {
+    /// Returns the tool definition for the web search tool.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "web_search".to_string(),
@@ -44,6 +50,7 @@ impl Tool for WebSearchTool {
         }
     }
 
+    /// Executes the web search based on the input query.
     async fn execute(&self, input: Value) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()

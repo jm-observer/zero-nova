@@ -1,25 +1,29 @@
 // src/mcp/transport.rs
 use crate::mcp::types::{JsonRpcRequest, JsonRpcResponse};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, Command};
-use tokio::sync::{oneshot, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream};
+use tokio::sync::{Mutex, oneshot};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message};
 
 #[async_trait]
 pub trait McpTransport: Send + Sync {
+    /// Sends a JSON-RPC request and awaits the response.
     async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse>;
+    /// Sends a JSON-RPC notification (no response expected).
     async fn notify(&self, request: JsonRpcRequest) -> Result<()>;
+    /// Closes the transport, cleaning up resources.
     async fn close(&self) -> Result<()>;
 }
 
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>;
 
 /// Stdio transport – spawns a child process and talks JSON‑RPC over its stdin/stdout.
+/// Transport implementation using a child process via stdio.
 pub struct StdioTransport {
     child: Mutex<Child>,
     stdin: Mutex<BufWriter<tokio::process::ChildStdin>>,
@@ -78,6 +82,7 @@ impl StdioTransport {
 
 #[async_trait]
 impl McpTransport for StdioTransport {
+    /// Sends a JSON-RPC request and awaits the response.
     async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
         let id = request.id.ok_or_else(|| anyhow!("Request ID missing"))?;
         let (tx, rx) = oneshot::channel();
@@ -97,6 +102,7 @@ impl McpTransport for StdioTransport {
         rx.await.map_err(|_| anyhow!("Response channel closed"))
     }
 
+    /// Sends a JSON-RPC notification (no response expected).
     async fn notify(&self, request: JsonRpcRequest) -> Result<()> {
         let json = serde_json::to_string(&request)? + "\n";
         {
@@ -107,6 +113,7 @@ impl McpTransport for StdioTransport {
         Ok(())
     }
 
+    /// Closes the transport, cleaning up resources.
     async fn close(&self) -> Result<()> {
         let mut child = self.child.lock().await;
         child.kill().await.ok();
@@ -116,6 +123,7 @@ impl McpTransport for StdioTransport {
 }
 
 /// WebSocket transport – connects to a ws:// or wss:// endpoint.
+/// Transport implementation using a WebSocket connection.
 pub struct WebSocketTransport {
     write_sink: Mutex<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>,
     pending: PendingRequests,
@@ -153,6 +161,7 @@ impl WebSocketTransport {
 
 #[async_trait]
 impl McpTransport for WebSocketTransport {
+    /// Sends a JSON-RPC request and awaits the response.
     async fn send(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
         let id = request.id.ok_or_else(|| anyhow!("Request ID missing"))?;
         let (tx, rx) = oneshot::channel();
@@ -171,6 +180,7 @@ impl McpTransport for WebSocketTransport {
         rx.await.map_err(|_| anyhow!("Response channel closed"))
     }
 
+    /// Sends a JSON-RPC notification (no response expected).
     async fn notify(&self, request: JsonRpcRequest) -> Result<()> {
         let json = serde_json::to_string(&request)?;
         {
@@ -180,6 +190,7 @@ impl McpTransport for WebSocketTransport {
         Ok(())
     }
 
+    /// Closes the transport, cleaning up resources.
     async fn close(&self) -> Result<()> {
         let mut sink = self.write_sink.lock().await;
         sink.close().await?;

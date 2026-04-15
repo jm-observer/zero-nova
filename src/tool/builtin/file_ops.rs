@@ -1,14 +1,17 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 use tokio::fs;
 
+/// Tool to read file contents.
 pub struct ReadFileTool;
 
 #[async_trait]
+/// Implementation of the `Tool` trait for reading files.
 impl Tool for ReadFileTool {
+    /// Returns the tool definition.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "read_file".to_string(),
@@ -25,6 +28,7 @@ impl Tool for ReadFileTool {
         }
     }
 
+    /// Executes the file operation based on the provided input.
     async fn execute(&self, input: Value) -> Result<ToolOutput> {
         let path_str = input["path"]
             .as_str()
@@ -72,10 +76,13 @@ impl Tool for ReadFileTool {
     }
 }
 
+/// Tool to write content to a file.
 pub struct WriteFileTool;
 
 #[async_trait]
+/// Implementation of the `Tool` trait for writing files.
 impl Tool for WriteFileTool {
+    /// Returns the tool definition.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "write_file".to_string(),
@@ -91,6 +98,7 @@ impl Tool for WriteFileTool {
         }
     }
 
+    /// Executes the file operation based on the provided input.
     async fn execute(&self, input: Value) -> Result<ToolOutput> {
         let path_str = input["path"]
             .as_str()
@@ -112,10 +120,7 @@ impl Tool for WriteFileTool {
     }
 }
 
+/// Truncates a line to a maximum length, returns a slice.
 fn truncate_line(s: &str, max_len: usize) -> &str {
-    if s.len() > max_len {
-        &s[..max_len]
-    } else {
-        s
-    }
+    if s.len() > max_len { &s[..max_len] } else { s }
 }

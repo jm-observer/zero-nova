@@ -1,15 +1,18 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use reqwest::Client;
 use scraper::{Html, Selector};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+/// Tool for fetching a URL and extracting text content.
 pub struct WebFetchTool {
     client: Client,
 }
 
+/// Implementation of methods for `WebFetchTool`.
 impl WebFetchTool {
+    /// Creates a new `WebFetchTool` with a configured HTTP client.
     pub fn new() -> Self {
         Self {
             client: Client::builder()
@@ -22,6 +25,7 @@ impl WebFetchTool {
     }
 }
 
+/// Provides a default constructor for `WebFetchTool`.
 impl Default for WebFetchTool {
     fn default() -> Self {
         Self::new()
@@ -29,7 +33,9 @@ impl Default for WebFetchTool {
 }
 
 #[async_trait]
+/// Implementation of the `Tool` trait for fetching web content.
 impl Tool for WebFetchTool {
+    /// Returns the tool definition for web fetching.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "web_fetch".to_string(),
@@ -46,6 +52,7 @@ impl Tool for WebFetchTool {
         }
     }
 
+    /// Executes the web fetch based on input parameters.
     async fn execute(&self, input: Value) -> Result<ToolOutput> {
         let url = input["url"].as_str().ok_or_else(|| anyhow!("Missing 'url' field"))?;
         let selector_str = input["selector"].as_str().unwrap_or("body");
@@ -93,6 +100,7 @@ impl Tool for WebFetchTool {
     }
 }
 
+/// Truncates a string to a maximum length, adding an ellipsis.
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
         format!("{}... [truncated]", &s[..max_len])

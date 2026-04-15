@@ -1,11 +1,12 @@
 use crate::provider::sse::SseParser;
 use crate::provider::types::{MessageRequest, ToolDefinition};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use reqwest::{header, Client};
+use reqwest::{Client, header};
 use serde_json::json;
 
+/// Client for interacting with the Anthropic API.
 pub struct AnthropicClient {
     http: Client,
     api_key: String,
@@ -13,6 +14,7 @@ pub struct AnthropicClient {
 }
 
 impl AnthropicClient {
+    /// Constructs an `AnthropicClient` using environment variables.
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| anyhow!("ANTHROPIC_API_KEY not set"))?;
         let base_url = std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string());
@@ -23,6 +25,7 @@ impl AnthropicClient {
         })
     }
 
+    /// Constructs a new `AnthropicClient` with the provided API key and base URL.
     pub fn new(api_key: String, base_url: String) -> Self {
         Self {
             http: Client::new(),
@@ -35,6 +38,7 @@ impl AnthropicClient {
 #[allow(clippy::single_match)]
 #[async_trait]
 impl LlmClient for AnthropicClient {
+    /// Streams responses from the Anthropic API based on the provided messages and configuration.
     async fn stream(
         &self,
         messages: &[crate::message::Message],
@@ -93,6 +97,8 @@ impl LlmClient for AnthropicClient {
         Ok(Box::new(AnthropicStreamReceiver {
             response: resp,
             parser: SseParser::new(),
+            current_tool_id: None,
+            current_tool_name: None,
         }))
     }
 }
@@ -100,22 +106,52 @@ impl LlmClient for AnthropicClient {
 pub struct AnthropicStreamReceiver {
     response: reqwest::Response,
     parser: SseParser,
+    current_tool_id: Option<String>,
+    current_tool_name: Option<String>,
 }
 
 #[async_trait]
 impl StreamReceiver for AnthropicStreamReceiver {
+    /// Retrieves the next streamed event from the Anthropic response.
     async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>> {
         loop {
             // First, try to get an event from the already buffered data
             if let Some(event) = self.parser.next_event()? {
                 // Convert StreamEvent to ProviderStreamEvent
                 let provider_event = match event {
-                    crate::provider::types::StreamEvent::MessageStart { .. } => {
-                        continue;
+                    crate::provider::types::StreamEvent::ContentBlockStart { content_block, .. } => {
+                        if content_block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                            let id = content_block
+                                .get("id")
+                                .and_then(|i| i.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            let name = content_block
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            self.current_tool_id = Some(id.clone());
+                            self.current_tool_name = Some(name.clone());
+                            ProviderStreamEvent::ToolUseStart { id, name }
+                        } else {
+                            continue;
+                        }
                     }
                     crate::provider::types::StreamEvent::ContentBlockDelta { delta, .. } => {
                         if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
                             ProviderStreamEvent::TextDelta(text.to_string())
+                        } else if let Some(partial_json) = delta.get("partial_json").and_then(|p| p.as_str()) {
+                            ProviderStreamEvent::ToolUseInputDelta(partial_json.to_string())
+                        } else {
+                            continue;
+                        }
+                    }
+                    crate::provider::types::StreamEvent::ContentBlockStop { .. } => {
+                        if self.current_tool_id.is_some() {
+                            self.current_tool_id = None;
+                            self.current_tool_name = None;
+                            ProviderStreamEvent::ToolUseEnd
                         } else {
                             continue;
                         }

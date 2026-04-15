@@ -1,8 +1,8 @@
 // src/mcp/client.rs
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 // use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 // use std::sync::Arc;
 
 use crate::mcp::transport::{McpTransport, StdioTransport, WebSocketTransport};
@@ -10,6 +10,7 @@ use crate::mcp::types::{
     CallToolResult, InitializeResult, JsonRpcRequest, ListToolsResult, McpToolDef, ServerCapabilities, ServerInfo,
 };
 
+/// Client for communicating with an MCP server.
 pub struct McpClient {
     transport: Box<dyn McpTransport>,
     server_info: Option<ServerInfo>,
@@ -98,6 +99,7 @@ impl McpClient {
     }
 
     // ---------- internal helpers ----------
+    /// Generates a new unique request ID.
     fn next_id(&self) -> u64 {
         // Simple wrapper – generate a fresh id each time; use atomic internally via transport if needed.
         // For simplicity we just use a random high number (client side doesn't need to be atomic across calls)
@@ -107,6 +109,7 @@ impl McpClient {
         COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Sends a JSON-RPC request and deserializes the response.
     async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> Result<T> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0",

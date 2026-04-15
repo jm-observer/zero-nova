@@ -30,7 +30,7 @@ pub struct JsonRpcError {
     pub data: Option<Value>,
 }
 
-/// 初始化返回结构体
+/// Result struct for the `initialize` method.
 #[derive(Debug, Deserialize)]
 pub struct InitializeResult {
     pub protocol_version: String,
@@ -38,7 +38,9 @@ pub struct InitializeResult {
     pub server_info: ServerInfo,
 }
 
+/// Server capabilities returned by the server.
 #[derive(Debug, Deserialize, Default)]
+/// Represents the server's declared capabilities.
 pub struct ServerCapabilities {
     #[serde(default)]
     pub tools: Option<ToolsCapability>,
@@ -49,9 +51,11 @@ pub struct ServerCapabilities {
 }
 
 #[derive(Debug, Deserialize)]
+/// Capability indicating available tools.
 pub struct ToolsCapability {}
 
 #[derive(Debug, Deserialize)]
+/// Information about the MCP server.
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
@@ -68,12 +72,14 @@ pub struct McpToolDef {
 
 /// tools/list result
 #[derive(Debug, Deserialize)]
+/// Result of the `tools/list` RPC call.
 pub struct ListToolsResult {
     pub tools: Vec<McpToolDef>,
 }
 
 /// tools/call result
 #[derive(Debug, Deserialize)]
+/// Result of the `tools/call` RPC call.
 pub struct CallToolResult {
     pub content: Vec<McpContent>,
     #[serde(default)]

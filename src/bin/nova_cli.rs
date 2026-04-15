@@ -13,7 +13,7 @@ use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
 use zero_nova::provider::{LlmClient, ModelConfig};
-use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
+use zero_nova::tool::{ToolRegistry, builtin::register_builtin_tools};
 
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
@@ -53,7 +53,8 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let _ = custom_utils::logger::logger_feature("nova_cli", "debug", log::LevelFilter::Info, false).build();
+    let _ =
+        custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
     log::info!("Starting Nova CLI with model: {}", cli.model);
     log::info!("Base URL: {:?}", cli.base_url);
@@ -96,6 +97,7 @@ fn current_date() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// Creates an LLM client based on CLI arguments.
 fn make_client(cli: &Cli) -> Result<impl LlmClient> {
     // Use Anthropic client; it reads ANTHROPIC_API_KEY from env.
     // If a custom base URL was supplied, use it, otherwise default.
@@ -109,6 +111,7 @@ fn make_client(cli: &Cli) -> Result<impl LlmClient> {
     Ok(client)
 }
 
+/// Runs the REPL loop for interactive chat.
 async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Result<()> {
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
@@ -171,6 +174,7 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
     Ok(())
 }
 
+/// Executes a one-shot interaction with the given prompt.
 async fn run_oneshot(agent: &AgentRuntime<impl LlmClient>, prompt: &str, verbose: bool) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
     let printer = tokio::spawn(async move {
@@ -184,12 +188,14 @@ async fn run_oneshot(agent: &AgentRuntime<impl LlmClient>, prompt: &str, verbose
     Ok(())
 }
 
+/// Prints the list of available tools.
 fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
     for def in agent.tools().tool_definitions() {
         println!("- {}: {}", def.name, def.description);
     }
 }
 
+/// Tests the MCP server by invoking the first tool.
 async fn test_mcp(cmd: &[String]) -> Result<()> {
     if cmd.is_empty() {
         anyhow::bail!("No command provided for MCP test");
@@ -209,6 +215,7 @@ async fn test_mcp(cmd: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Renders an `AgentEvent` to the console, optionally verbose.
 fn render_event(event: &AgentEvent, verbose: bool) {
     match event {
         AgentEvent::TextDelta(text) => {

@@ -5,7 +5,7 @@ pub mod web_search;
 
 use crate::tool::ToolRegistry;
 
-/// 注册所有内置工具到 registry
+/// Registers all built-in tools into the provided `ToolRegistry`.
 pub fn register_builtin_tools(registry: &mut ToolRegistry) {
     let _ = registry;
 

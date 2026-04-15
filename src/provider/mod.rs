@@ -9,6 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 #[async_trait]
+/// Trait for language model clients that can stream responses.
 pub trait LlmClient: Send + Sync {
     async fn stream(
         &self,
@@ -20,11 +21,13 @@ pub trait LlmClient: Send + Sync {
 }
 
 #[async_trait]
+/// Trait for receiving streamed events from the LLM.
 pub trait StreamReceiver: Send {
     async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>>;
 }
 
 #[derive(Debug, Clone)]
+/// Events emitted by the provider during streaming.
 pub enum ProviderStreamEvent {
     TextDelta(String),
     ToolUseStart { id: String, name: String },
@@ -33,6 +36,7 @@ pub enum ProviderStreamEvent {
     MessageComplete { usage: Usage },
 }
 
+/// Configuration for the LLM model behavior.
 pub struct ModelConfig {
     pub model: String,
     pub max_tokens: u32,

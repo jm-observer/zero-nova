@@ -10,6 +10,10 @@ args = ["build", "--workspace", "--release", "--features", "prod"]
 env = { API_KEY = "your_api_key_here" }
 command = "cargo"
 args = ["run", "--bin", "nova_cli", "--", "--base-url", "http://192.168.0.68:12340", "--model", "gpt-oss-120b", "run", "${@}"]
+[tasks.chat]
+env = { API_KEY = "your_api_key_here" }
+command = "cargo"
+args = ["run", "--bin", "nova_cli", "--", "--base-url", "http://192.168.0.68:12340", "--model", "gpt-oss-120b", "chat"]
 
 [tasks.default]
 alias = "prod"

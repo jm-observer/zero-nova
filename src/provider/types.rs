@@ -37,6 +37,7 @@ pub enum StreamEvent {
     },
     ContentBlockStart {
         index: usize,
+        content_block: serde_json::Value,
     },
     ContentBlockDelta {
         index: usize,
@@ -59,6 +60,7 @@ pub enum StreamEvent {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+/// Definition of a tool, including its name, description, and input schema.
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,
@@ -66,6 +68,7 @@ pub struct ToolDefinition {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+/// Token usage statistics for a request.
 pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -77,6 +80,7 @@ pub struct Usage {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// Specifies tool selection behavior for the LLM.
 pub enum ToolChoice {
     Auto,
     Any,

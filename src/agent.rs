@@ -6,6 +6,7 @@ pub use crate::tool::ToolRegistry;
 use anyhow::Result;
 use tokio::sync::mpsc;
 
+/// Runtime for the zero-nova agent.
 pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
@@ -13,12 +14,14 @@ pub struct AgentRuntime<C: LlmClient> {
     config: AgentConfig,
 }
 
+/// Configuration for the zero-nova agent.
 pub struct AgentConfig {
     pub max_iterations: usize,
     pub model_config: crate::provider::ModelConfig,
 }
 
 impl<C: LlmClient> AgentRuntime<C> {
+    /// Creates a new `AgentRuntime` instance.
     pub fn new(client: C, tools: ToolRegistry, system_prompt: String, config: AgentConfig) -> Self {
         Self {
             client,
@@ -28,22 +31,27 @@ impl<C: LlmClient> AgentRuntime<C> {
         }
     }
 
+    /// Sets the tool registry for this runtime.
     pub fn set_tools(&mut self, tools: ToolRegistry) {
         self.tools = tools;
     }
 
+    /// Registers a new tool with the registry.
     pub fn register_tool(&mut self, tool: Box<dyn crate::tool::Tool>) {
         self.tools.register(tool);
     }
 
+    /// Returns a reference to the system prompt string.
     pub fn system_prompt(&self) -> &str {
         &self.system_prompt
     }
 
+    /// Returns a reference to the tool registry.
     pub fn tools(&self) -> &ToolRegistry {
         &self.tools
     }
 
+    /// Executes a single turn of the agent, handling LLM streaming and tool execution.
     pub async fn run_turn(
         &self,
         history: &[Message],
@@ -133,7 +141,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 break;
             }
 
-            // Execute tools (parallel)
+            // Execute tool calls (parallel) - encapsulated for clarity
             use futures_util::stream::{FuturesUnordered, StreamExt};
             let mut tool_results_fut = FuturesUnordered::new();
 

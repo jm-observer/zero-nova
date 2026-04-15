@@ -1,23 +1,27 @@
 use crate::provider::types::StreamEvent;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::from_str;
 
+/// Parser for Server Sent Events (SSE) streams.
 pub struct SseParser {
     // buffer for incoming SSE data
     buffer: Vec<u8>,
 }
 
 impl SseParser {
+    /// Creates a new `SseParser` with an empty buffer.
     pub fn new() -> Self {
         Self { buffer: Vec::new() }
     }
 
     /// Add new data to the buffer.
+    /// Feeds a chunk of data into the parser's buffer.
     pub fn feed(&mut self, chunk: &[u8]) {
         self.buffer.extend_from_slice(chunk);
     }
 
     /// Try to parse the next event from the buffer.
+    /// Attempts to parse the next `StreamEvent` from the internal buffer.
     pub fn next_event(&mut self) -> Result<Option<StreamEvent>> {
         // Split on double newline which terminates an SSE message
         if let Some(pos) = self.find_double_newline() {
@@ -72,6 +76,7 @@ impl SseParser {
         Ok(None)
     }
 
+    /// Finds the position of a double newline terminator in the buffer.
     fn find_double_newline(&self) -> Option<usize> {
         for i in 0..self.buffer.len().saturating_sub(1) {
             if self.buffer[i] == b'\n' && self.buffer[i + 1] == b'\n' {
@@ -90,6 +95,7 @@ impl SseParser {
     }
 }
 
+/// Provides a default constructor for `SseParser`.
 impl Default for SseParser {
     fn default() -> Self {
         Self::new()

@@ -1,15 +1,18 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+/// Tool for executing shell commands.
 pub struct BashTool;
 
 #[async_trait]
+/// Implementation of the `Tool` trait for BashTool.
 impl Tool for BashTool {
+    /// Returns the tool definition for BashTool.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "bash".to_string(),
@@ -25,6 +28,7 @@ impl Tool for BashTool {
         }
     }
 
+    /// Executes the bash command as defined in the input JSON.
     async fn execute(&self, input: Value) -> Result<ToolOutput> {
         let command_str = input["command"]
             .as_str()
@@ -74,6 +78,7 @@ impl Tool for BashTool {
     }
 }
 
+/// Truncates a string to `max_len` characters, adding a truncation notice if needed.
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
         format!("{}... [truncated]", &s[..max_len])

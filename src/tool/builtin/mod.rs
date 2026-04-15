@@ -16,8 +16,9 @@ pub fn register_builtin_tools(registry: &mut ToolRegistry) {
         registry.register(Box::new(file_ops::WriteFileTool));
     }
 
-    if let Ok(tool) = web_search::WebSearchTool::from_env() {
-        registry.register(Box::new(tool));
+    match web_search::WebSearchTool::from_env() {
+        Ok(tool) => registry.register(Box::new(tool)),
+        Err(e) => log::error!("Failed to register web_search tool: {}", e),
     }
 
     registry.register(Box::new(web_fetch::WebFetchTool::new()));

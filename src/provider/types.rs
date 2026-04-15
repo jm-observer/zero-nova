@@ -37,7 +37,9 @@ pub enum InputContentBlock {
     /// Tool result block, containing the result output and error flag.
     ToolResult {
         tool_use_id: String,
+        #[serde(alias = "content", default)]
         output: String,
+        #[serde(default)]
         is_error: bool,
     },
 }
@@ -61,9 +63,11 @@ pub enum StreamEvent {
     },
     MessageDelta {
         delta: serde_json::Value,
+        #[serde(default)]
         usage: Option<Usage>,
     },
     MessageStop {
+        #[serde(default)]
         usage: Option<Usage>,
     },
     Ping {},

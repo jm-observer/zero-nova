@@ -163,13 +163,22 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                         render_event(&event, verbose);
                     }
                 });
-                let msgs = agent.run_turn(&history, input, tx.clone()).await?;
-                drop(tx);
-                printer.await.ok();
-                // Ensure a newline separates output from next prompt
-                println!();
-                for msg in msgs {
-                    history.push(msg);
+
+                tokio::select! {
+                    result = agent.run_turn(&history, input, tx.clone()) => {
+                        let msgs = result?;
+                        drop(tx);
+                        printer.await.ok();
+                        // Ensure a newline separates output from next prompt
+                        println!();
+                        for msg in msgs {
+                            history.push(msg);
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        printer.abort();
+                        println!("\n{}", "Interrupted by user.".yellow());
+                    }
                 }
             }
         }

@@ -25,8 +25,21 @@ pub struct InputMessage {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InputContentBlock {
-    Text { text: String },
-    // Additional variants can be added as needed
+    Text {
+        text: String,
+    },
+    /// Tool usage block, containing tool ID, name, and input.
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    /// Tool result block, containing the result output and error flag.
+    ToolResult {
+        tool_use_id: String,
+        output: String,
+        is_error: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

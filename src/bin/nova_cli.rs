@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use rustyline::history::FileHistory;
 use serde_json::json;
+use std::io::Write;
 use tokio::sync::mpsc;
 use zero_nova::agent::{AgentConfig, AgentRuntime};
 use zero_nova::event::AgentEvent;
@@ -74,7 +75,7 @@ async fn main() -> Result<()> {
         max_iterations: 5,
         model_config: ModelConfig {
             model: cli.model.clone(),
-            max_tokens: 1024,
+            max_tokens: 8192,
             temperature: None,
             top_p: None,
         },
@@ -165,6 +166,8 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                 let msgs = agent.run_turn(&history, input, tx.clone()).await?;
                 drop(tx);
                 printer.await.ok();
+                // Ensure a newline separates output from next prompt
+                println!();
                 for msg in msgs {
                     history.push(msg);
                 }
@@ -220,6 +223,7 @@ fn render_event(event: &AgentEvent, verbose: bool) {
     match event {
         AgentEvent::TextDelta(text) => {
             print!("{text}");
+            let _ = std::io::stdout().flush();
         }
         AgentEvent::ToolStart { name, input, .. } => {
             if verbose {

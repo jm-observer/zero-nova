@@ -88,6 +88,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             let mut current_text = String::new();
             let mut current_blocks = Vec::new();
             let mut tool_calls = Vec::new(); // (id, name, input_json)
+            let mut last_usage = None;
 
             while let Some(event) = receiver
                 .next_event()
@@ -107,8 +108,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                             last.2.push_str(&delta);
                         }
                     }
-                    ProviderStreamEvent::MessageComplete { usage: _ } => {
-                        // Logic handled after stream ends
+                    ProviderStreamEvent::MessageComplete { usage } => {
+                        last_usage = Some(usage);
                     }
                     _ => {}
                 }
@@ -137,7 +138,15 @@ impl<C: LlmClient> AgentRuntime<C> {
             turn_messages.push(assistant_msg);
 
             if tool_calls.is_empty() {
-                // No more tools, we are done
+                // No more tools, send TurnComplete and finish
+                if let Some(usage) = last_usage {
+                    let _ = event_tx
+                        .send(crate::event::AgentEvent::TurnComplete {
+                            new_messages: turn_messages.clone(),
+                            usage,
+                        })
+                        .await;
+                }
                 break;
             }
 
@@ -200,6 +209,18 @@ impl<C: LlmClient> AgentRuntime<C> {
             };
             all_messages.push(tool_res_msg.clone());
             turn_messages.push(tool_res_msg);
+
+            // Send TurnComplete with usage from last stream if this is the final iteration
+            if iteration == self.config.max_iterations - 1 {
+                if let Some(usage) = last_usage {
+                    let _ = event_tx
+                        .send(crate::event::AgentEvent::TurnComplete {
+                            new_messages: turn_messages.clone(),
+                            usage,
+                        })
+                        .await;
+                }
+            }
         }
 
         Ok(turn_messages)

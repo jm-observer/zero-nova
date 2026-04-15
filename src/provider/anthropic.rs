@@ -59,8 +59,26 @@ impl LlmClient for AnthropicClient {
                     crate::message::ContentBlock::Text { text } => {
                         content_vec.push(json!({"type": "text", "text": text}));
                     }
-                    // Simplify: ignore other block types for now
-                    _ => {}
+                    crate::message::ContentBlock::ToolUse { id, name, input } => {
+                        content_vec.push(json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": input
+                        }));
+                    }
+                    crate::message::ContentBlock::ToolResult {
+                        tool_use_id,
+                        output,
+                        is_error,
+                    } => {
+                        content_vec.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": output,
+                            "is_error": is_error
+                        }));
+                    }
                 }
             }
             input_messages.push(json!({"role": role, "content": content_vec}));

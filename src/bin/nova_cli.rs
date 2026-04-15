@@ -13,7 +13,7 @@ use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
 use zero_nova::provider::{LlmClient, ModelConfig};
-use zero_nova::tool::{ToolRegistry, builtin::register_builtin_tools};
+use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]

@@ -9,7 +9,7 @@ use crate::tool::ToolRegistry;
 pub fn register_builtin_tools(registry: &mut ToolRegistry) {
     let _ = registry;
 
-    registry.register(Box::new(bash::BashTool));
+    registry.register(Box::new(bash::BashTool::new()));
 
     {
         registry.register(Box::new(file_ops::ReadFileTool));

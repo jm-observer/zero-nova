@@ -1,8 +1,8 @@
 // src/mcp/client.rs
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 // use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 // use std::sync::Arc;
 
 use crate::mcp::transport::{McpTransport, StdioTransport, WebSocketTransport};

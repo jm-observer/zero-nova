@@ -1,9 +1,9 @@
 use crate::provider::sse::SseParser;
 use crate::provider::types::{MessageRequest, ToolDefinition};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::{Client, header};
+use reqwest::{header, Client};
 use serde_json::json;
 
 /// Client for interacting with the Anthropic API.

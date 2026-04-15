@@ -1,5 +1,5 @@
 use crate::provider::types::StreamEvent;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde_json::from_str;
 
 /// Parser for Server Sent Events (SSE) streams.

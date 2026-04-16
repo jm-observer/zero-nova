@@ -12,32 +12,6 @@ pub struct GatewayMessage {
     pub payload: Value,
 }
 
-/// Gateway 配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayConfig {
-    pub host: String,          // default: "127.0.0.1"
-    pub port: u16,             // default: 9090
-    pub model: String,         // default: "gpt-oss-120b"
-    pub max_tokens: u32,       // default: 8192
-    pub max_iterations: usize, // default: 10
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-}
-
-impl Default for GatewayConfig {
-    fn default() -> Self {
-        Self {
-            host: "127.0.0.1".to_string(),
-            port: 9090,
-            model: "gpt-oss-120b".to_string(),
-            max_tokens: 8192,
-            max_iterations: 10,
-            api_key: None,
-            base_url: None,
-        }
-    }
-}
-
 // --- Inbound payloads ---
 
 #[derive(Debug, Deserialize)]

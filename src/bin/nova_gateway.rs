@@ -38,30 +38,15 @@ async fn main() -> anyhow::Result<()> {
     let _ = custom_utils::logger::logger_feature("nova-gateway", "info", log::LevelFilter::Info, true).build();
     log::info!("Starting Nova Gateway...");
 
-    let args = Args::parse();
+    let _args = Args::parse();
 
-    let config = GatewayConfig {
-        host: args.host,
-        port: args.port,
-        model: args.model,
-        max_tokens: args.max_tokens,
-        max_iterations: args.max_iterations,
-        api_key: env::var("ANTHROPIC_API_KEY").ok(),
-        base_url: args.base_url,
-    };
+    let config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
+        log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
+        zero_nova::config::AppConfig::default()
+    });
 
     // Initialize client (using Anthropic as default for now)
-    let api_key = config
-        .api_key
-        .clone()
-        .unwrap_or_else(|| env::var("API_KEY").unwrap_or_default());
-
-    let base_url = config
-        .base_url
-        .clone()
-        .unwrap_or_else(|| "https://api.anthropic.com".to_string());
-
-    let client = AnthropicClient::new(api_key, base_url);
+    let client = AnthropicClient::from_config(&config.llm);
 
     // Start server
     start_server(config, client).await?;

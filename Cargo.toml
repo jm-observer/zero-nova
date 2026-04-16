@@ -16,6 +16,8 @@ async-trait = "0.1.74"
 scraper = "0.19"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
+toml = "0.8"
+
 
 # Optional dependencies for CLI
 clap = { version = "4", features = ["derive"], optional = true }

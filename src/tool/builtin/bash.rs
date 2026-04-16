@@ -95,9 +95,9 @@ impl ShellBackend for CmdBackend {
     }
 }
 
-fn select_shell() -> Box<dyn ShellBackend> {
-    // 1. 环境变量覆盖
-    if let Ok(shell) = std::env::var("ZERO_NOVA_SHELL") {
+fn select_shell(config: &crate::config::BashConfig) -> Box<dyn ShellBackend> {
+    // 1. 配置覆盖
+    if let Some(shell) = &config.shell {
         match shell.to_lowercase().as_str() {
             "sh" | "bash" => return Box::new(UnixSh),
             "pwsh" | "powershell" => {
@@ -129,16 +129,10 @@ pub struct BashTool {
 }
 
 impl BashTool {
-    pub fn new() -> Self {
-        let shell = select_shell();
+    pub fn new(config: &crate::config::BashConfig) -> Self {
+        let shell = select_shell(config);
         info!("BashTool initialized using shell: {}", shell.name());
         Self { shell }
-    }
-}
-
-impl Default for BashTool {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -223,7 +217,8 @@ mod tests {
 
     #[test]
     fn test_shell_selection_default() {
-        let shell = select_shell();
+        let config = crate::config::BashConfig::default();
+        let shell = select_shell(&config);
         if cfg!(windows) {
             // Check if one of the expected Windows shells is selected
             let name = shell.name();
@@ -250,7 +245,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_execution() {
-        let tool = BashTool::new();
+        let config = crate::config::BashConfig::default();
+        let tool = BashTool::new(&config);
         let input = json!({
             "command": "echo hello",
             "timeout_ms": 5000
@@ -260,3 +256,4 @@ mod tests {
         assert!(!result.is_error);
     }
 }
+

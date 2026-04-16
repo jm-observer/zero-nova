@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use log::{debug, error, info};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::env;
 
 pub mod duckduckgo;
 pub mod google;
@@ -22,33 +21,76 @@ pub struct WebSearchTool {
 }
 
 impl WebSearchTool {
-    /// Creates a `WebSearchTool` from environment variables.
-    /// Implements priority: Google > Tavily > DuckDuckGo.
-    pub fn from_env() -> Result<Self> {
+    /// Creates a `WebSearchTool` from configuration.
+    pub fn new(config: &crate::config::SearchConfig) -> Self {
         let client = Client::new();
 
-        // 1. Google CSE
-        if let Ok(api_key) = env::var("GOOGLE_SEARCH_API_KEY") {
-            let cx = env::var("GOOGLE_SEARCH_CX").map_err(|_| anyhow!("GOOGLE_SEARCH_CX not set"))?;
-            let endpoint = env::var("GOOGLE_SEARCH_ENDPOINT")
-                .unwrap_or_else(|_| "https://www.googleapis.com/customsearch/v1".to_string());
-
-            let backend = Box::new(GoogleBackend::new(api_key, endpoint, cx, client.clone()));
-            info!("Web search backend initialized: Google");
-            return Ok(Self { backend });
+        // 1. 优先处理显式指定的后端
+        if let Some(backend) = &config.backend {
+            match backend.to_lowercase().as_str() {
+                "google" => {
+                    if let (Some(api_key), Some(cx)) = (&config.google_api_key, &config.google_cx) {
+                        let endpoint = config
+                            .google_endpoint
+                            .clone()
+                            .unwrap_or_else(|| "https://www.googleapis.com/customsearch/v1".to_string());
+                        info!("Web search backend selected: Google");
+                        return Self {
+                            backend: Box::new(GoogleBackend::new(api_key.clone(), endpoint, cx.clone(), client)),
+                        };
+                    } else {
+                        error!("Explicitly selected Google backend but keys are missing. Falling back...");
+                    }
+                }
+                "tavily" => {
+                    if let Some(api_key) = &config.tavily_api_key {
+                        info!("Web search backend selected: Tavily");
+                        return Self {
+                            backend: Box::new(TavilyBackend::new(api_key.clone(), client)),
+                        };
+                    } else {
+                        error!("Explicitly selected Tavily backend but API key is missing. Falling back...");
+                    }
+                }
+                "duckduckgo" => {
+                    info!("Web search backend selected: DuckDuckGo");
+                    return Self {
+                        backend: Box::new(DuckDuckGoBackend::new(client)),
+                    };
+                }
+                _ => {
+                    error!("Unknown search backend: {}. Falling back to priority logic.", backend);
+                }
+            }
         }
 
-        // 2. Tavily
-        if let Ok(api_key) = env::var("TAVILY_API_KEY") {
-            let backend = Box::new(TavilyBackend::new(api_key, client.clone()));
-            info!("Web search backend initialized: Tavily");
-            return Ok(Self { backend });
+        // 2. 无显式指定或回退：按照优先级 Google > Tavily > DuckDuckGo
+        // Google CSE
+        if let (Some(api_key), Some(cx)) = (&config.google_api_key, &config.google_cx) {
+            let endpoint = config
+                .google_endpoint
+                .clone()
+                .unwrap_or_else(|| "https://www.googleapis.com/customsearch/v1".to_string());
+
+            info!("Web search backend automatically initialized: Google");
+            return Self {
+                backend: Box::new(GoogleBackend::new(api_key.clone(), endpoint, cx.clone(), client.clone())),
+            };
         }
 
-        // 3. DuckDuckGo (Fallback)
-        let backend = Box::new(DuckDuckGoBackend::new(client.clone()));
-        info!("Web search backend initialized: DuckDuckGo");
-        Ok(Self { backend })
+        // Tavily
+        if let Some(api_key) = &config.tavily_api_key {
+            info!("Web search backend automatically initialized: Tavily");
+            return Self {
+                backend: Box::new(TavilyBackend::new(api_key.clone(), client.clone())),
+            };
+        }
+
+        // DuckDuckGo (Fallback)
+        info!("Web search backend automatically initialized: DuckDuckGo");
+        Self {
+            backend: Box::new(DuckDuckGoBackend::new(client)),
+        }
     }
 }
 

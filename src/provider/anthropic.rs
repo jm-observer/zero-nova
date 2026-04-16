@@ -14,15 +14,13 @@ pub struct AnthropicClient {
 }
 
 impl AnthropicClient {
-    /// Constructs an `AnthropicClient` using environment variables.
-    pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| anyhow!("ANTHROPIC_API_KEY not set"))?;
-        let base_url = std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string());
-        Ok(Self {
+    /// Constructs an `AnthropicClient` using the provided configuration.
+    pub fn from_config(config: &crate::config::LlmConfig) -> Self {
+        Self {
             http: Client::new(),
-            api_key,
-            base_url,
-        })
+            api_key: config.api_key.clone(),
+            base_url: config.base_url.clone(),
+        }
     }
 
     /// Constructs a new `AnthropicClient` with the provided API key and base URL.

@@ -1,6 +1,6 @@
 //! CLI for zero-nova library
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -13,7 +13,8 @@ use zero_nova::event::AgentEvent;
 use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
-use zero_nova::provider::{LlmClient, ModelConfig};
+use zero_nova::provider::LlmClient;
+
 use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
 #[derive(Parser)]
@@ -57,12 +58,16 @@ async fn main() -> Result<()> {
     let _ =
         custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
-    log::info!("Starting Nova CLI with model: {}", cli.model);
-    log::info!("Base URL: {:?}", cli.base_url);
+    let config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
+        log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
+        zero_nova::config::AppConfig::default()
+    });
 
-    let client = make_client(&cli)?;
+    log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
+
+    let client = zero_nova::provider::anthropic::AnthropicClient::from_config(&config.llm);
     let mut tools = ToolRegistry::new();
-    register_builtin_tools(&mut tools);
+    register_builtin_tools(&mut tools, &config);
 
     // Build system prompt including loaded tools and environment information
     let prompt = SystemPromptBuilder::personal_assistant()
@@ -71,17 +76,12 @@ async fn main() -> Result<()> {
         .environment("platform", std::env::consts::OS)
         .build();
 
-    let config = AgentConfig {
+    let agent_config = AgentConfig {
         max_iterations: 5,
-        model_config: ModelConfig {
-            model: cli.model.clone(),
-            max_tokens: 8192,
-            temperature: None,
-            top_p: None,
-        },
+        model_config: config.llm.model_config.clone(),
     };
 
-    let mut agent = AgentRuntime::new(client, tools, prompt, config);
+    let mut agent = AgentRuntime::new(client, tools, prompt, agent_config);
 
     match cli.command {
         Command::Chat => run_repl(&mut agent, cli.verbose).await?,
@@ -96,20 +96,6 @@ async fn main() -> Result<()> {
 
 fn current_date() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-/// Creates an LLM client based on CLI arguments.
-fn make_client(cli: &Cli) -> Result<impl LlmClient> {
-    // Use Anthropic client; it reads ANTHROPIC_API_KEY from env.
-    // If a custom base URL was supplied, use it, otherwise default.
-    let base = cli
-        .base_url
-        .clone()
-        .unwrap_or_else(|| "https://api.anthropic.com".to_string());
-    let api_key =
-        std::env::var("API_KEY").context("Environment variable API_KEY not found. Please set it to your API key.")?;
-    let client = zero_nova::provider::anthropic::AnthropicClient::new(api_key, base);
-    Ok(client)
 }
 
 /// Runs the REPL loop for interactive chat.

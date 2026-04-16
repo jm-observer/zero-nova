@@ -1,0 +1,38 @@
+[llm]
+# LLM 服务的 API Key
+api_key = "your-anthropic-key"
+# 模型服务的 Base URL，默认为 Anthropic 官方地址
+base_url = "https://api.anthropic.com"
+# 使用的模型名称
+model = "gpt-oss-120b"
+# 最大输出 Token 数
+max_tokens = 8192
+# 生成随机性 (0.0 到 1.0)，选填
+# temperature = 0.7
+# 核采样参数 (0.0 到 1.0)，选填
+# top_p = 0.9
+
+[search]
+# 显式指定搜索后端，可选: "google", "tavily", "duckduckgo"
+# 如果不指定，将按 Google > Tavily > DuckDuckGo 的优先级自动选择
+# backend = "tavily"
+
+# --- Google 搜索配置 ---
+# google_api_key = "your-google-api-key"
+# google_cx = "your-google-search-engine-id"
+# google_endpoint = "https://www.googleapis.com/customsearch/v1"
+
+# --- Tavily 搜索配置 ---
+tavily_api_key = "your-tavily-key"
+
+[tool.bash]
+# 默认 shell。Windows 下可选 "pwsh", "powershell", "cmd"；Unix 下可选 "sh", "bash"
+shell = "pwsh" 
+
+[gateway]
+# 网关监听地址
+host = "127.0.0.1"
+# 网关监听端口
+port = 9090
+# 代理最大思考轮数（防止死循环）
+max_iterations = 10

@@ -36,7 +36,10 @@ pub enum ProviderStreamEvent {
     MessageComplete { usage: Usage },
 }
 
+use serde::{Deserialize, Serialize};
+
 /// Configuration for the LLM model behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub model: String,
     pub max_tokens: u32,

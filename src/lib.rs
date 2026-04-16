@@ -3,6 +3,8 @@
 //! This module re-exports the project sub-modules and provides the library entry point.
 
 pub mod agent;
+pub mod config;
+
 pub mod event;
 pub mod mcp;
 pub mod message;

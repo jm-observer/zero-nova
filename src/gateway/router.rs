@@ -1,10 +1,10 @@
 use crate::agent::AgentRuntime;
 use crate::gateway::protocol::{
-    Agent, ChatPayload, ErrorPayload, GatewayMessage, MessageEnvelope, Session, SessionCreateRequest,
+    Agent, AuthRequest, ChatPayload, ErrorPayload, GatewayMessage, MessageEnvelope, Session, SessionCreateRequest, SessionIdPayload,
 };
 use crate::gateway::session::SessionStore;
 use crate::provider::LlmClient;
-use log::{error, warn};
+use log::{error, info, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -29,7 +29,7 @@ pub async fn handle_message<C: LlmClient>(
     };
 
     match msg.envelope {
-        MessageEnvelope::Auth { token: _ } => {
+        MessageEnvelope::Auth(AuthRequest { token: _ }) => {
             handle_auth(&msg_id, &outbound_tx).await;
         }
         MessageEnvelope::Chat(payload) => {
@@ -38,14 +38,65 @@ pub async fn handle_message<C: LlmClient>(
         MessageEnvelope::SessionsList => {
             handle_sessions_list(state, outbound_tx, msg_id).await;
         }
-        MessageEnvelope::SessionsMessages { session_id } => {
-            handle_session_get(session_id, state, outbound_tx, msg_id).await;
+        MessageEnvelope::SessionsMessages(payload) => {
+            handle_session_get(payload.session_id, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsCreate(payload) => {
             handle_session_create(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentsList => {
             handle_agents_list::<C>(state, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::AgentsSwitch(payload) => {
+            info!("Switched to agent: {}", payload.agent_id);
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::AgentsSwitchResponse(crate::gateway::protocol::AgentsSwitchResponse {
+                    agent: Agent {
+                        id: payload.agent_id,
+                        name: "Zero-Nova".to_string(),
+                        ..Default::default()
+                    },
+                    messages: vec![],
+                }),
+            ));
+        }
+        MessageEnvelope::BrowserStatus => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::BrowserStatusResponse(serde_json::json!({ "status": "ok" })),
+            ));
+        }
+        MessageEnvelope::ConfigGetLlmSource => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::ConfigGetLlmSourceResponse(serde_json::json!({ "source": "default" })),
+            ));
+        }
+        MessageEnvelope::RouterConfigGet => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::ConfigGetResponse(serde_json::json!({ "connected": false, "config": {} })),
+            ));
+        }
+        MessageEnvelope::VoiceGetStatus => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::VoiceGetStatusResponse(serde_json::json!({ "status": "idle" })),
+            ));
+        }
+        MessageEnvelope::OpenFluxStatus => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::OpenFluxStatusResponse(serde_json::json!({ "loggedIn": false })),
+            ));
+        }
+        MessageEnvelope::LanguageUpdate(payload) => {
+            info!("Language updated to: {}", payload.language);
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::LanguageUpdateResponse(serde_json::json!({ "success": true })),
+            ));
         }
         MessageEnvelope::Unknown => {
             error!("Unknown message type received: id={}", msg_id);
@@ -104,9 +155,9 @@ async fn handle_chat<C: LlmClient>(
     // 1. 发送 chat.start
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id.clone(),
-        MessageEnvelope::ChatStart {
+        MessageEnvelope::ChatStart(SessionIdPayload {
             session_id: session_id.clone(),
-        },
+        }),
     ));
 
     // 2. 创建事件转发通道
@@ -175,7 +226,7 @@ async fn handle_sessions_list<C: LlmClient>(
 
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        MessageEnvelope::SessionsListResponse { sessions },
+        MessageEnvelope::SessionsListResponse(crate::gateway::protocol::SessionsListResponse { sessions }),
     ));
 }
 
@@ -191,7 +242,7 @@ async fn handle_session_get<C: LlmClient>(
 
         let _ = outbound_tx.send(GatewayMessage::new(
             request_id,
-            MessageEnvelope::SessionsMessagesResponse { messages },
+            MessageEnvelope::SessionsMessagesResponse(crate::gateway::protocol::SessionsMessagesResponse { messages }),
         ));
     } else {
         send_general_error(
@@ -220,7 +271,7 @@ async fn handle_session_create<C: LlmClient>(
 
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        MessageEnvelope::SessionsCreateResponse { session },
+        MessageEnvelope::SessionsCreateResponse(crate::gateway::protocol::SessionCreateResponse { session }),
     ));
 }
 
@@ -231,7 +282,7 @@ async fn handle_agents_list<C: LlmClient>(
 ) {
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        MessageEnvelope::AgentsListResponse {
+        MessageEnvelope::AgentsListResponse(crate::gateway::protocol::AgentsListResponse {
             agents: vec![Agent {
                 id: "nova".to_string(),
                 name: "Zero-Nova".to_string(),
@@ -239,7 +290,7 @@ async fn handle_agents_list<C: LlmClient>(
                 icon: None,
                 system_prompt: None,
             }],
-        },
+        }),
     ));
 }
 

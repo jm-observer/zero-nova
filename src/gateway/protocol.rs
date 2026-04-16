@@ -44,27 +44,35 @@ pub enum MessageEnvelope {
     #[serde(rename = "chat")]
     Chat(ChatPayload),
     #[serde(rename = "chat.stop")]
-    ChatStop { session_id: String },
+    ChatStop(SessionIdPayload),
     #[serde(rename = "sessions.list")]
     SessionsList,
     #[serde(rename = "sessions.list.response")]
-    SessionsListResponse { sessions: Vec<Session> },
+    SessionsListResponse(SessionsListResponse),
     #[serde(rename = "sessions.messages")]
-    SessionsMessages { session_id: String },
+    SessionsMessages(SessionIdPayload),
     #[serde(rename = "sessions.messages.response")]
-    SessionsMessagesResponse { messages: Vec<Value> },
+    SessionsMessagesResponse(SessionsMessagesResponse),
     #[serde(rename = "sessions.create")]
     SessionsCreate(SessionCreateRequest),
     #[serde(rename = "sessions.create.response")]
-    SessionsCreateResponse { session: Session },
+    SessionsCreateResponse(SessionCreateResponse),
     #[serde(rename = "sessions.delete")]
-    SessionsDelete { session_id: String },
+    SessionsDelete(SessionIdPayload),
     #[serde(rename = "sessions.delete.response")]
-    SessionsDeleteResponse { success: bool },
+    SessionsDeleteResponse(SuccessResponse),
+    #[serde(rename = "sessions.logs")]
+    SessionsLogs(SessionIdPayload),
+    #[serde(rename = "sessions.logs.response")]
+    SessionsLogsResponse(Value),
+    #[serde(rename = "sessions.artifacts")]
+    SessionsArtifacts(SessionIdPayload),
+    #[serde(rename = "sessions.artifacts.response")]
+    SessionsArtifactsResponse(Value),
 
     // --- 3.1 Progress & Chat Events ---
     #[serde(rename = "chat.start")]
-    ChatStart { session_id: String },
+    ChatStart(SessionIdPayload),
     #[serde(rename = "chat.progress")]
     ChatProgress(ProgressEvent),
     #[serde(rename = "chat.complete")]
@@ -74,19 +82,19 @@ pub enum MessageEnvelope {
     #[serde(rename = "agents.list")]
     AgentsList,
     #[serde(rename = "agents.list.response")]
-    AgentsListResponse { agents: Vec<Agent> },
+    AgentsListResponse(AgentsListResponse),
     #[serde(rename = "agents.switch")]
-    AgentsSwitch { agent_id: String },
+    AgentsSwitch(AgentIdPayload),
     #[serde(rename = "agents.switch.response")]
-    AgentsSwitchResponse { agent: Agent, messages: Vec<Value> },
+    AgentsSwitchResponse(AgentsSwitchResponse),
 
     // --- 2.3 Scheduler API ---
     #[serde(rename = "scheduler.list")]
     SchedulerList,
     #[serde(rename = "scheduler.list.response")]
-    SchedulerListResponse { tasks: Vec<Value> },
+    SchedulerListResponse(Value),
     #[serde(rename = "scheduler.trigger")]
-    SchedulerTrigger { task_id: String },
+    SchedulerTrigger(TaskIdPayload),
 
     // --- 2.4 Memory & Distillation ---
     #[serde(rename = "memory.stats")]
@@ -96,24 +104,54 @@ pub enum MessageEnvelope {
 
     // --- 2.5 System & Integration ---
     #[serde(rename = "auth")]
-    Auth { token: String },
+    Auth(AuthRequest),
     #[serde(rename = "config.get")]
     ConfigGet,
     #[serde(rename = "config.get.response")]
     ConfigGetResponse(Value),
+    #[serde(rename = "config.get-llm-source")]
+    ConfigGetLlmSource,
+    #[serde(rename = "config.get-llm-source.response")]
+    ConfigGetLlmSourceResponse(Value),
     #[serde(rename = "browser.launch")]
     BrowserLaunch,
+    #[serde(rename = "browser.status")]
+    BrowserStatus,
+    #[serde(rename = "browser.status.response")]
+    BrowserStatusResponse(Value),
 
     // --- Router & Weixin ---
     #[serde(rename = "router.config.get")]
     RouterConfigGet,
     #[serde(rename = "router.status")]
-    RouterStatus { connected: bool, status: String },
+    RouterStatus(ConnectStatusPayload),
     #[serde(rename = "weixin.status")]
-    WeixinStatus { connected: bool, status: String },
+    WeixinStatus(ConnectStatusPayload),
+
+    // --- Voice ---
+    #[serde(rename = "voice.get-status")]
+    VoiceGetStatus,
+    #[serde(rename = "voice.get-status.response")]
+    VoiceGetStatusResponse(Value),
+
+    // --- OpenFlux Cloud ---
+    #[serde(rename = "openflux.status")]
+    OpenFluxStatus,
+    #[serde(rename = "openflux.status.response")]
+    OpenFluxStatusResponse(Value),
+    #[serde(rename = "language.update")]
+    LanguageUpdate(LanguageUpdatePayload),
+    #[serde(rename = "language.update.response")]
+    LanguageUpdateResponse(Value),
 
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageUpdatePayload {
+    pub language: String,
 }
 
 // --- Payload Definitions ---
@@ -171,9 +209,77 @@ pub struct SessionCreateRequest {
     pub agent_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionIdPayload {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentIdPayload {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskIdPayload {
+    pub task_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthRequest {
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectStatusPayload {
+    pub connected: bool,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SuccessResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsListResponse {
+    pub sessions: Vec<Session>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsMessagesResponse {
+    pub messages: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCreateResponse {
+    pub session: Session,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentsListResponse {
+    pub agents: Vec<Agent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentsSwitchResponse {
+    pub agent: Agent,
+    pub messages: Vec<Value>,
+}
+
 // --- Data Models ---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: String,
@@ -183,7 +289,7 @@ pub struct Session {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
     pub id: String,
@@ -249,6 +355,23 @@ mod tests {
             assert_eq!(p.kind, "token");
             assert_eq!(p.token.unwrap(), "Hello");
             assert_eq!(p.session_id.unwrap(), "s1");
+        } else {
+            panic!("Wrong variant");
+        }
+    }
+
+    #[test]
+    fn test_deserialize_agents_switch() {
+        let json = r#"{
+            "type": "agents.switch",
+            "id": "req-3",
+            "payload": {
+                "agentId": "nova"
+            }
+        }"#;
+        let msg: GatewayMessage = serde_json::from_str(json).unwrap();
+        if let MessageEnvelope::AgentsSwitch(payload) = msg.envelope {
+            assert_eq!(payload.agent_id, "nova");
         } else {
             panic!("Wrong variant");
         }

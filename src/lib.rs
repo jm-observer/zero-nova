@@ -1,6 +1,6 @@
 //! Core library module for zero-nova.
 //!
-// This module re-exports the project sub-modules and provides the library entry point.
+//! This module re-exports the project sub-modules and provides the library entry point.
 
 pub mod agent;
 pub mod event;
@@ -10,6 +10,9 @@ pub mod prompt;
 pub mod provider;
 pub mod tool;
 
+#[cfg(feature = "gateway")]
+pub mod gateway;
+
 /// Runs the library initialization and entry point.
 ///
 /// This function currently only logs that the application has started. It is a placeholder
@@ -17,7 +20,6 @@ pub mod tool;
 /// or establishing connections.
 ///
 /// Returns an `anyhow::Result<()>` which will be `Ok(())` on success.
-/// Runs the library initialization and entry point.
 pub async fn run() -> anyhow::Result<()> {
     log::info!("application started");
     // Placeholder for future initialization

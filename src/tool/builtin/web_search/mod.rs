@@ -1,10 +1,10 @@
-use crate::tool::builtin::web_search::types::{SearchBackend, SearchResult};
+use crate::tool::builtin::web_search::types::SearchBackend;
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reqwest::Client;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::env;
 
 pub mod duckduckgo;

@@ -160,7 +160,19 @@ payload 使用 `kind` 字段区分子类型：
 ```json
 {
   "session_id": "uuid",
-  "error": "error description"
+  "error": "error description",
+  "code": "ERROR_CODE"
+}
+```
+
+#### `error` (Universal Error, Server → Client)
+
+用于非 chat 场景的通用错误返回。
+
+```json
+{
+  "message": "error description",
+  "code": "ERROR_CODE"
 }
 ```
 
@@ -204,7 +216,7 @@ payload 使用 `kind` 字段区分子类型：
   "id": "uuid",
   "name": "...",
   "messages": [ /* Vec<Message> */ ],
-  "created_at": "..."
+  "created_at": 1713200000000
 }
 ```
 
@@ -599,8 +611,11 @@ WS Client                  nova_gateway                        zero-nova
 **目标**: 确保 OpenFlux 前端可以直连 nova_gateway。
 
 - [ ] 对齐 `chat.progress` payload 格式与 OpenFlux 前端 `gateway-client` 的期望
-- [ ] 对齐 `sessions.list` / `sessions.get` 的响应结构
-- [ ] 对齐 `agents.list` 的响应结构
+    - [ ] 确保 `id` 为稳定的 UUID
+    - [ ] 确保 `tool_start` 的 `input` 符合前端渲染要求
+- [ ] 统一时间戳格式为 **毫秒 (ms)** 数值
+- [ ] 完善错误处理：引入统一的 `ErrorPayload` 和错误码 (Error Codes)
+- [ ] 稳定化消息序列化：确保 `Message` 结构对前端友好
 - [ ] 使用 OpenFlux 前端实际连接测试
 - [ ] 修复格式差异
 

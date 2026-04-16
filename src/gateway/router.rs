@@ -1,11 +1,5 @@
-use crate::agent::{AgentConfig, AgentRuntime};
-use crate::anthropic::AnthropicClient;
-use crate::event::AgentEvent;
-use crate::gateway::bridge::agent_event_to_gateway;
-use crate::gateway::protocol::{
-    AgentInfo, ChatCompletePayload, ChatErrorPayload, ChatPayload, GatewayMessage, SessionCreatePayload,
-    SessionGetPayload, SessionInfo,
-};
+use crate::agent::AgentRuntime;
+use crate::gateway::protocol::{ChatPayload, GatewayMessage, SessionCreatePayload, SessionGetPayload};
 use crate::gateway::session::SessionStore;
 use crate::provider::LlmClient;
 use log::{error, info, warn};
@@ -62,20 +56,25 @@ pub async fn handle_message<C: LlmClient>(
             }
         }
         "agents.list" => {
-            handle_agents_list(outbound_tx, msg_id).await;
+            handle_agents_list::<C>(state, outbound_tx, msg_id).await;
         }
         _ => {
             error!("Unknown message type: {}", msg_type);
-            send_error(&outbound_tx, &msg_id, format!("Unknown message type: {}", msg_type));
+            send_general_error(
+                &outbound_tx,
+                &msg_id,
+                format!("Unknown message type: {}", msg_type),
+                "UNKNOWN_MESSAGE_TYPE",
+            );
         }
     }
 }
 
-async fn handle_auth(_msg: &GatewayMessage, outbound_tx: &mpsc::UnboundedSender<GatewayMessage>) {
+async fn handle_auth(msg: &GatewayMessage, outbound_tx: &mpsc::UnboundedSender<GatewayMessage>) {
     // 简化认证：直接返回 success
     let _ = outbound_tx.send(GatewayMessage {
         msg_type: "auth.success".to_string(),
-        id: "system".to_string(), // 实际应从 msg 中提取或关联
+        id: msg.id.clone(),
         payload: json!({}),
     });
 }
@@ -89,17 +88,19 @@ async fn handle_chat<C: LlmClient>(
     let session = match state.sessions.get(&payload.session_id).await {
         Some(s) => s,
         None => {
-            send_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Session {} not found", payload.session_id),
+                "SESSION_NOT_FOUND",
             );
             return;
         }
     };
 
     // 使用 session 的 chat_lock 确保同一会话内的聊天串行执行
-    let _lock = session.chat_lock.lock().unwrap();
+    // 注意：这里使用的是 tokio::sync::Mutex，需要 .lock().await
+    let _lock = session.chat_lock.lock().await;
 
     // 1. 发送 chat.start
     let _ = outbound_tx.send(GatewayMessage {
@@ -136,10 +137,6 @@ async fn handle_chat<C: LlmClient>(
         Ok(new_messages) => {
             // 6. 成功: 追加 user message + new_messages 到 session.history
             let mut h = session.history.write().unwrap();
-            // 注意：run_turn 内部其实已经在 history 副本中追加了 user message，
-            // 但我们这里需要把最终的完整消息序列存入持久化 history。
-            // 根据 AgentRuntime 实现，new_messages 是当前 turn 产生的所有消息。
-            // 我们需要补齐 user message。
             let user_msg = crate::message::Message {
                 role: crate::message::Role::User,
                 content: vec![crate::message::ContentBlock::Text { text: payload.message }],
@@ -148,7 +145,13 @@ async fn handle_chat<C: LlmClient>(
             h.extend(new_messages);
         }
         Err(e) => {
-            send_error(&outbound_tx, &request_id, format!("Agent execution error: {}", e));
+            send_chat_error(
+                &outbound_tx,
+                &request_id,
+                &payload.session_id,
+                format!("Agent execution error: {}", e),
+                "AGENT_EXECUTION_ERROR",
+            );
         }
     }
 
@@ -211,8 +214,19 @@ async fn handle_session_create<C: LlmClient>(
     });
 }
 
-async fn handle_agents_list<C: LlmClient>(outbound_tx: mpsc::UnboundedSender<GatewayMessage>, request_id: String) {
-    // 简化实现：硬编码返回一个 agent
+async fn handle_agents_list<C: LlmClient>(
+    state: Arc<AppState<C>>,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
+    let tool_names: Vec<String> = state
+        .agent
+        .tools()
+        .tool_definitions()
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+
     let _ = outbound_tx.send(GatewayMessage {
         msg_type: "agents.list".to_string(),
         id: request_id,
@@ -222,17 +236,49 @@ async fn handle_agents_list<C: LlmClient>(outbound_tx: mpsc::UnboundedSender<Gat
                     "id": "nova",
                     "name": "Zero-Nova",
                     "description": "A powerful AI agent built on zero-nova",
-                    "tools": ["bash", "read_file", "write_file", "list_dir"]
+                    "tools": tool_names
                 }
             ]
         }),
     });
 }
 
-fn send_error(outbound_tx: &mpsc::UnboundedSender<GatewayMessage>, request_id: &str, error_msg: String) {
+fn send_chat_error(
+    outbound_tx: &mpsc::UnboundedSender<GatewayMessage>,
+    request_id: &str,
+    session_id: &str,
+    error_msg: String,
+    code: &str,
+) {
     let _ = outbound_tx.send(GatewayMessage {
         msg_type: "chat.error".to_string(),
         id: request_id.to_string(),
-        payload: json!({ "error": error_msg }),
+        payload: serde_json::to_value(crate::gateway::protocol::ChatErrorPayload {
+            session_id: session_id.to_string(),
+            error: error_msg,
+            code: code.to_string(),
+        })
+        .unwrap(),
     });
+}
+
+fn send_general_error(
+    outbound_tx: &mpsc::UnboundedSender<GatewayMessage>,
+    request_id: &str,
+    error_msg: String,
+    code: &str,
+) {
+    let _ = outbound_tx.send(GatewayMessage {
+        msg_type: "error".to_string(),
+        id: request_id.to_string(),
+        payload: serde_json::to_value(crate::gateway::protocol::ErrorPayload {
+            message: error_msg,
+            code: code.to_string(),
+        })
+        .unwrap(),
+    });
+}
+
+fn send_error(outbound_tx: &mpsc::UnboundedSender<GatewayMessage>, request_id: &str, error_msg: String) {
+    send_general_error(outbound_tx, request_id, error_msg, "GENERAL_ERROR");
 }

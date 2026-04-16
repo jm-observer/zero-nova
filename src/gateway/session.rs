@@ -1,7 +1,8 @@
 use crate::message::Message;
 use chrono::Utc;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// 单个会话的详细信息与状态
@@ -9,7 +10,7 @@ pub struct Session {
     pub id: String,
     pub name: String,
     pub history: RwLock<Vec<Message>>,
-    pub created_at: String,   // unix timestamp string
+    pub created_at: i64,      // unix timestamp in milliseconds
     pub chat_lock: Mutex<()>, // 确保同一会话内的聊天请求串行执行
 }
 
@@ -25,12 +26,20 @@ impl SessionStore {
             sessions: RwLock::new(HashMap::new()),
         }
     }
+}
 
+impl Default for SessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SessionStore {
     /// 创建一个新会话
     pub async fn create(&self, name: Option<String>) -> Arc<Session> {
         let id = Uuid::new_v4().to_string();
-        let session_name = name.unwrap_or_else(|| format!("Session {}", id[..8].to_string()));
-        let created_at = Utc::now().timestamp().to_string();
+        let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..8]));
+        let created_at = Utc::now().timestamp_millis();
 
         let session = Arc::new(Session {
             id: id.clone(),
@@ -62,7 +71,7 @@ impl SessionStore {
                     id: s.id.clone(),
                     name: s.name.clone(),
                     message_count: history.len(),
-                    created_at: s.created_at.clone(),
+                    created_at: s.created_at,
                 }
             })
             .collect()

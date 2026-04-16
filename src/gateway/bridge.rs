@@ -1,7 +1,5 @@
 use crate::event::AgentEvent;
-use crate::gateway::protocol::{
-    ChatCompletePayload, ChatErrorPayload, ChatProgressPayload, GatewayMessage, ProgressType,
-};
+use crate::gateway::protocol::GatewayMessage;
 use serde_json::json;
 
 /// 将 AgentEvent 转换为 GatewayMessage。
@@ -42,7 +40,7 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
                 "id": id,
                 "name": name,
                 "output": output,
-                "is_error"
+                "is_error": is_error
             }),
         },
         AgentEvent::TurnComplete { new_messages, usage } => GatewayMessage {

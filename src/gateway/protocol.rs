@@ -105,6 +105,13 @@ pub struct ChatCompletePayload {
 pub struct ChatErrorPayload {
     pub session_id: String,
     pub error: String,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ErrorPayload {
+    pub message: String,
+    pub code: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,7 +119,7 @@ pub struct SessionInfo {
     pub id: String,
     pub name: String,
     pub message_count: usize,
-    pub created_at: String,
+    pub created_at: i64, // unix timestamp in milliseconds
 }
 
 #[derive(Debug, Clone, Serialize)]

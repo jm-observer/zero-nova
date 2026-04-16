@@ -34,7 +34,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize logger
-    let _ = custom_utils::logger::logger_feature("nova-gateway", "debug", log::LevelFilter::Debug, true).build();
+    let _ = custom_utils::logger::logger_feature("nova-gateway", "debug", log::LevelFilter::Debug, false).build();
 
     log::info!(
         "Current working directory: {:?}",
@@ -60,8 +60,30 @@ async fn main() -> anyhow::Result<()> {
     // Initialize client (using Anthropic as default for now)
     let client = AnthropicClient::from_config(&config.llm);
 
-    // Start server
-    start_server(config, client).await?;
+    // Use tokio::select! to run the server and monitor stdin for parent process termination
+    tokio::select! {
+        // Task 1: Run the server
+        res = start_server(config, client) => {
+            if let Err(e) = res {
+                log::error!("Server error: {}", e);
+                return Err(e);
+            }
+        }
+        // Task 2: Monitor stdin for EOF (Sidecar Self-Protection)
+        _ = async {
+            use tokio::io::{AsyncReadExt, stdin};
+            let mut stdin = stdin();
+            let mut buf = [0u8; 1];
+            loop {
+                if stdin.read(&mut buf).await.unwrap_or(0) == 0 {
+                    break;
+                }
+            }
+        } => {
+            log::warn!("Stdin closed (EOF). Parent process might have exited. Sidecar shutting down...");
+            std::process::exit(0);
+        }
+    }
 
     Ok(())
 }

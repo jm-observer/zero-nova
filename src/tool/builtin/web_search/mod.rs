@@ -74,7 +74,12 @@ impl WebSearchTool {
 
             info!("Web search backend automatically initialized: Google");
             return Self {
-                backend: Box::new(GoogleBackend::new(api_key.clone(), endpoint, cx.clone(), client.clone())),
+                backend: Box::new(GoogleBackend::new(
+                    api_key.clone(),
+                    endpoint,
+                    cx.clone(),
+                    client.clone(),
+                )),
             };
         }
 

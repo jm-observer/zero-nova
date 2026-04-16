@@ -21,10 +21,22 @@ pub struct AuthPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct ChatPayload {
-    pub session_id: String,
+    /// 前端字段名为 sessionId (camelCase)
+    #[serde(alias = "sessionId")]
+    pub session_id: Option<String>,
+    /// 前端字段名为 input
+    #[serde(alias = "input")]
     pub message: String,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default, alias = "agentId")]
+    pub agent_id: Option<String>,
+    #[serde(default, alias = "chatroomId")]
+    pub chatroom_id: Option<u64>,
+    #[serde(default)]
+    pub attachments: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

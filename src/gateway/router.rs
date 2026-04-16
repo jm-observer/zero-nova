@@ -22,39 +22,39 @@ pub async fn handle_message<C: LlmClient>(
     let msg_type = msg.msg_type.clone();
     let msg_id = msg.id.clone();
 
-    info!("Received message: type={}, id={}", msg_type, msg_id);
+    info!(
+        "Received message: type={}, id={}, payload={}",
+        msg_type, msg_id, msg.payload
+    );
 
     match msg_type.as_str() {
         "auth" => {
             handle_auth(&msg, &outbound_tx).await;
         }
-        "chat" => {
-            if let Ok(payload) = serde_json::from_value::<ChatPayload>(msg.payload) {
-                handle_chat(payload, state, outbound_tx, msg_id).await;
-            } else {
-                warn!("Invalid chat payload for message {}", msg_id);
-                send_error(&outbound_tx, &msg_id, "Invalid chat payload".to_string());
+        "chat" => match serde_json::from_value::<ChatPayload>(msg.payload) {
+            Ok(payload) => handle_chat(payload, state, outbound_tx, msg_id).await,
+            Err(e) => {
+                warn!("Invalid chat payload for message {}: {}", msg_id, e);
+                send_error(&outbound_tx, &msg_id, format!("Invalid chat payload: {}", e));
             }
-        }
+        },
         "sessions.list" => {
             handle_sessions_list(state, outbound_tx, msg_id).await;
         }
-        "sessions.get" => {
-            if let Ok(payload) = serde_json::from_value::<SessionGetPayload>(msg.payload) {
-                handle_session_get(payload, state, outbound_tx, msg_id).await;
-            } else {
-                warn!("Invalid sessions.get payload for message {}", msg_id);
-                send_error(&outbound_tx, &msg_id, "Invalid sessions.get payload".to_string());
+        "sessions.get" => match serde_json::from_value::<SessionGetPayload>(msg.payload) {
+            Ok(payload) => handle_session_get(payload, state, outbound_tx, msg_id).await,
+            Err(e) => {
+                warn!("Invalid sessions.get payload for message {}: {}", msg_id, e);
+                send_error(&outbound_tx, &msg_id, format!("Invalid sessions.get payload: {}", e));
             }
-        }
-        "sessions.create" => {
-            if let Ok(payload) = serde_json::from_value::<SessionCreatePayload>(msg.payload) {
-                handle_session_create(payload, state, outbound_tx, msg_id).await;
-            } else {
-                warn!("Invalid sessions.create payload for message {}", msg_id);
-                send_error(&outbound_tx, &msg_id, "Invalid sessions.create payload".to_string());
+        },
+        "sessions.create" => match serde_json::from_value::<SessionCreatePayload>(msg.payload) {
+            Ok(payload) => handle_session_create(payload, state, outbound_tx, msg_id).await,
+            Err(e) => {
+                warn!("Invalid sessions.create payload for message {}: {}", msg_id, e);
+                send_error(&outbound_tx, &msg_id, format!("Invalid sessions.create payload: {}", e));
             }
-        }
+        },
         "agents.list" => {
             handle_agents_list::<C>(state, outbound_tx, msg_id).await;
         }
@@ -85,13 +85,21 @@ async fn handle_chat<C: LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let session = match state.sessions.get(&payload.session_id).await {
+    let session_id = match payload.session_id {
+        Some(id) => id,
+        None => {
+            let new_session = state.sessions.create(None).await;
+            new_session.id.clone()
+        }
+    };
+
+    let session = match state.sessions.get(&session_id).await {
         Some(s) => s,
         None => {
             send_general_error(
                 &outbound_tx,
                 &request_id,
-                format!("Session {} not found", payload.session_id),
+                format!("Session {} not found", session_id),
                 "SESSION_NOT_FOUND",
             );
             return;
@@ -106,14 +114,14 @@ async fn handle_chat<C: LlmClient>(
     let _ = outbound_tx.send(GatewayMessage {
         msg_type: "chat.start".to_string(),
         id: request_id.clone(),
-        payload: json!({ "session_id": payload.session_id }),
+        payload: json!({ "session_id": session_id }),
     });
 
     // 2. 创建事件转发通道
     let (event_tx, mut event_rx) = mpsc::channel(100);
     let outbound_tx_clone = outbound_tx.clone();
     let request_id_clone = request_id.clone();
-    let session_id_clone = payload.session_id.clone();
+    let session_id_clone = session_id.clone();
 
     // 3. Spawn 转发任务: event_rx.recv() -> bridge 转换 -> outbound_tx.send()
     let bridge_handle = tokio::spawn(async move {
@@ -148,7 +156,7 @@ async fn handle_chat<C: LlmClient>(
             send_chat_error(
                 &outbound_tx,
                 &request_id,
-                &payload.session_id,
+                &session_id,
                 format!("Agent execution error: {}", e),
                 "AGENT_EXECUTION_ERROR",
             );

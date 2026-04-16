@@ -1,6 +1,7 @@
 use crate::gateway::protocol::GatewayMessage;
 use crate::gateway::router::{handle_message, AppState};
 use futures_util::{SinkExt, StreamExt};
+use log::debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -36,9 +37,20 @@ async fn handle_connection<C: crate::provider::LlmClient + 'static>(
     let (mut ws_sink, mut ws_source) = ws_stream.split();
     let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<GatewayMessage>();
 
+    // 发送 welcome 消息（OpenFlux 前端握手协议要求）
+    let _ = outbound_tx.send(GatewayMessage {
+        msg_type: "welcome".to_string(),
+        id: String::new(),
+        payload: serde_json::json!({
+            "requireAuth": false,
+            "setupRequired": false,
+        }),
+    });
+
     // Write Task: 发送消息到客户端
     let write_task = tokio::spawn(async move {
         while let Some(msg) = outbound_rx.recv().await {
+            debug!("send: {:?}", msg);
             if let Ok(json_str) = serde_json::to_string(&msg) {
                 if ws_sink.send(WsMessage::Text(json_str)).await.is_err() {
                     break;
@@ -49,6 +61,7 @@ async fn handle_connection<C: crate::provider::LlmClient + 'static>(
 
     // Read Loop: 接收客户端消息
     while let Some(msg_result) = ws_source.next().await {
+        debug!("recv: {:?}", msg_result);
         match msg_result {
             Ok(WsMessage::Text(text)) => {
                 if let Ok(gateway_msg) = serde_json::from_str::<GatewayMessage>(&text) {

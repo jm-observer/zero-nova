@@ -52,7 +52,6 @@ pub struct SearchConfig {
     pub tavily_api_key: Option<String>,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ToolConfig {
     #[serde(default)]

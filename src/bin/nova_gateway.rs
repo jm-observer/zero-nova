@@ -1,7 +1,6 @@
 //! Independent WebSocket gateway binary
 use clap::Parser;
-use std::env;
-use zero_nova::gateway::{start_server, GatewayConfig};
+use zero_nova::gateway::start_server;
 use zero_nova::provider::anthropic::AnthropicClient;
 
 #[derive(Parser, Debug)]
@@ -35,15 +34,28 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize logger
-    let _ = custom_utils::logger::logger_feature("nova-gateway", "info", log::LevelFilter::Info, true).build();
-    log::info!("Starting Nova Gateway...");
+    let _ = custom_utils::logger::logger_feature("nova-gateway", "debug", log::LevelFilter::Debug, true).build();
+
+    log::info!(
+        "Current working directory: {:?}",
+        std::env::current_dir().unwrap_or_else(|e| std::path::PathBuf::from(e.to_string()))
+    );
+    log::info!(
+        "Attempting to load config from: {:?}",
+        std::env::current_dir().unwrap_or_default().join("config.toml")
+    );
 
     let _args = Args::parse();
 
-    let config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
+    let mut config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
         log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
         zero_nova::config::AppConfig::default()
     });
+
+    config.gateway.host = _args.host;
+    config.gateway.port = _args.port;
+
+    log::info!("Starting Nova Gateway {config:?}...");
 
     // Initialize client (using Anthropic as default for now)
     let client = AnthropicClient::from_config(&config.llm);

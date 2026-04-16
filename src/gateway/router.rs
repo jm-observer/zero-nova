@@ -1,6 +1,7 @@
 use crate::agent::AgentRuntime;
 use crate::gateway::protocol::{
-    Agent, AuthRequest, ChatPayload, ErrorPayload, GatewayMessage, MessageEnvelope, Session, SessionCreateRequest, SessionIdPayload,
+    Agent, AuthRequest, ChatPayload, ErrorPayload, GatewayMessage, MessageEnvelope, Session, SessionCreateRequest,
+    SessionIdPayload,
 };
 use crate::gateway::session::SessionStore;
 use crate::provider::LlmClient;
@@ -73,6 +74,35 @@ pub async fn handle_message<C: LlmClient>(
                 MessageEnvelope::ConfigGetLlmSourceResponse(serde_json::json!({ "source": "default" })),
             ));
         }
+        MessageEnvelope::SettingsGet => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::ConfigGetResponse(serde_json::json!({
+                    "outputPath": "./output",
+                    "defaultOutputPath": "./output"
+                })),
+            ));
+        }
+        MessageEnvelope::AgentsCreate(payload) => {
+            info!("Creating agent: {}", payload.name);
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::AgentsSwitchResponse(crate::gateway::protocol::AgentsSwitchResponse {
+                    agent: Agent {
+                        id: if payload.id.is_empty() {
+                            uuid::Uuid::new_v4().to_string()
+                        } else {
+                            payload.id
+                        },
+                        name: payload.name,
+                        description: payload.description,
+                        icon: payload.icon,
+                        system_prompt: payload.system_prompt,
+                    },
+                    messages: vec![],
+                }),
+            ));
+        }
         MessageEnvelope::RouterConfigGet => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 msg_id,
@@ -96,6 +126,45 @@ pub async fn handle_message<C: LlmClient>(
             let _ = outbound_tx.send(GatewayMessage::new(
                 msg_id,
                 MessageEnvelope::LanguageUpdateResponse(serde_json::json!({ "success": true })),
+            ));
+        }
+        MessageEnvelope::SessionsLogs(payload) => {
+            info!("Fetching logs for session: {}", payload.session_id);
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::SessionsLogsResponse(crate::gateway::protocol::LogListResponse { logs: vec![] }),
+            ));
+        }
+        MessageEnvelope::SessionsArtifacts(payload) => {
+            info!("Fetching artifacts for session: {}", payload.session_id);
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::SessionsArtifactsResponse(crate::gateway::protocol::ArtifactListResponse {
+                    artifacts: vec![],
+                }),
+            ));
+        }
+        MessageEnvelope::RouterConfigUpdate(payload) => {
+            info!("Router config update: {:?}", payload);
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::ConfigGetResponse(serde_json::json!({ "success": true })),
+            ));
+        }
+        MessageEnvelope::WeixinConfigGet => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::ConfigGetResponse(serde_json::json!({
+                    "connected": false,
+                    "enabled": false,
+                    "accountId": null
+                })),
+            ));
+        }
+        MessageEnvelope::WeixinConfigUpdate(_) => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                msg_id,
+                MessageEnvelope::ConfigGetResponse(serde_json::json!({ "success": true })),
             ));
         }
         MessageEnvelope::Unknown => {
@@ -132,21 +201,20 @@ async fn handle_chat<C: LlmClient>(
     let session_id = match payload.session_id {
         Some(id) => id,
         None => {
-            let new_session = state.sessions.create(None).await;
-            new_session.id.clone()
+            send_general_error(
+                &outbound_tx,
+                &request_id,
+                format!("session id not found"),
+                Some("SESSION_ID_NOT_FOUND".to_string()),
+            );
+            return;
         }
     };
 
     let session = match state.sessions.get(&session_id).await {
         Some(s) => s,
         None => {
-            send_general_error(
-                &outbound_tx,
-                &request_id,
-                format!("Session {} not found", session_id),
-                Some("SESSION_NOT_FOUND".to_string()),
-            );
-            return;
+            state.sessions.create_with_id(session_id.clone(), None).await
         }
     };
 

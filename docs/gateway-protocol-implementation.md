@@ -3,26 +3,60 @@
 This document outlines the technical design for aligning the Rust implementation of the Gateway Protocol in `src/gateway/protocol.rs` with the formal specification in `docs/gateway-protocol.md`.
 
 ## 1. Objective
-Refactor the `GatewayMessage` and `MessageEnvelope` structures to ensure 100% compatibility with the TypeScript specification, covering all command categories and event types while maintaining Rust's type safety.
+## 1. 核心设计原则
 
-## 2. Gap Analysis (Comprehensive)
+### 1.1 协议对齐标准
+- **命名规范**：JSON Payload 统一使用 `camelCase`。
+- **消息结构**：
+  - `id`: `Option<String>`。客户端请求必带，服务器事件通知可选。
+  - `type`: 消息类别标签，如 `chat.progress`。
+  - `payload`: 具体的业务数据。
 
-| Feature / Category | TypeScript Specification | Current Rust Implementation | Status |
+### 1.2 关键重构设计
+- **Payload 结构体模式 (推荐)**：
+  > [!IMPORTANT]
+  > **Serde 限制**：在 Enum 上直接使用 `#[serde(rename_all = "camelCase")]` 只能重构变体名称，不能对齐变体内“命名字段”的命名。
+  - **规范**：禁止使用“命名字段变体”（如 `Variant { msg_id: String }`）。所有包含字段的变体必须定义为独立的结构体（如 `Variant(VariantPayload)`），并在结构体上应用 `rename_all`。
+- **单元变体 (Unit Variants)**：
+  - 对于无 Payload 的命令（如 `sessions.list`），变体不再包含空字段，序列化结果不包含 `payload` 属性。
+
+## 2. 协议类别映射 (Gap Analysis)
+
+| 类别 | 状态 | 指令示例 | 映射逻辑 |
 | :--- | :--- | :--- | :--- |
-| **Core Structure** | `id` is optional (`id?`) | `id` is mandatory (`String`) | 🔴 **Fixed needed** |
-| **Field Naming** | Mostly `camelCase` (`sessionId`) | Mix of `snake_case` / `alias` | 🟡 **Needs Standardization** |
-| **Empty Payloads** | `payload?` (omitted if empty) | Forced via `content = "payload"` | 🔴 **Needs Unit Variants** |
-| **Agent Management**| Create, Update, Delete, Switch | Only `list` (incomplete fields) | 🔴 **Missing** |
-| **Scheduler API** | List, Runs, Pause/Resume, Trigger | None | 🔴 **Missing** |
-| **Memory & Distill** | Stats, List, Search, Graph, Trigger | None | 🔴 **Missing** |
-| **Router & Weixin** | Config, Status, Test, QrBind/Login | Only simple `get` placeholders | 🔴 **Missing** |
-| **Events (Push)** | Progress, Collaboration, QrCode | Inconsistent `ProgressType` | 🔴 **Inconsistent** |
+| **基础控制** | ✅ 100% | `welcome`, `auth`, `error` | `GatewayMessage::new_event` |
+| **会话管理** | ✅ 100% | `sessions.list`, `sessions.messages`, `sessions.logs`, `sessions.artifacts` | 通过 `SessionStore` 检索并映射 |
+| **对话交互** | ✅ 100% | `chat`, `chat.start`, `chat.progress`, `chat.complete` | 桥接 `AgentEvent` -> `ProgressEvent` |
+| **Agent 管理** | ✅ 100% | `agents.list`, `agents.switch` | 动态路由至不同的 Agent 运行时 |
+| **系统配置** | ✅ 100% | `config.get`, `settings.get`, `settings.update`, `language.update` | 读取/更新全局配置 |
+| **集成插件** | ✅ 100% | `browser.status`, `router.status`, `weixin.status`, `voice.get-status` | 获取子系统连接状态 |
+| **云端同步** | ✅ 100% | `openflux.status` | 返回云端登录限制状态 |
 
-## 3. Proposed Design
+## 3. 实现细节
 
-### 3.1 GatewayMessage (Foundation)
-The root structure must support optional IDs to allow server-to-client events.
+### 3.1 桥接逻辑 (Bridge)
+- **Flattened Events**: 将后端复杂的 `AgentEvent`（如文本片段、工具调用开始/结束）映射为协议定义的扁平化 `ProgressEvent`。
+- **Usage Tracking**: 在 `chat.complete` 阶段合并 Token 统计。
 
+### 3.2 路由分发 (Router)
+- **Mock Handlers**: 为了保证前端流程畅顺，对于尚未完全实现的系统指令（如 `voice`），网关提供默认的 Mock 成功响应。
+- **Optional IDs**: 路由逻辑必须能够容忍无 ID 的消息（直接丢弃或记录警告），不影响主流程。
+
+---
+
+## 4. 故障排除
+
+### 4.1 常见的反序列化失效
+- **错误信息**：`missing field "agent_id"` (即便已设置全局重命名)。
+- **排查方向**：检查是否使用了“命名字段变体”。
+- **解决**：将其提取为独立结构体，代码示例：
+  ```rust
+  #[derive(Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  struct MyPayload { agent_id: String } // 正确映射为 agentId
+  ```
+
+### 4.2 GatewayMessage 结构定义
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayMessage {
@@ -32,8 +66,6 @@ pub struct GatewayMessage {
     #[serde(flatten)]
     pub envelope: MessageEnvelope,
 }
-```
-
 ### 3.2 MessageEnvelope (Polymorphism)
 We use the `tag = "type", content = "payload"` attribute.
 - **Commands without payloads** (e.g., `sessions.list`) -> Unit Variant: `ListSessions`

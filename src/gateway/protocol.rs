@@ -64,11 +64,11 @@ pub enum MessageEnvelope {
     #[serde(rename = "sessions.logs")]
     SessionsLogs(SessionIdPayload),
     #[serde(rename = "sessions.logs.response")]
-    SessionsLogsResponse(Value),
+    SessionsLogsResponse(LogListResponse),
     #[serde(rename = "sessions.artifacts")]
     SessionsArtifacts(SessionIdPayload),
     #[serde(rename = "sessions.artifacts.response")]
-    SessionsArtifactsResponse(Value),
+    SessionsArtifactsResponse(ArtifactListResponse),
 
     // --- 3.1 Progress & Chat Events ---
     #[serde(rename = "chat.start")]
@@ -83,6 +83,8 @@ pub enum MessageEnvelope {
     AgentsList,
     #[serde(rename = "agents.list.response")]
     AgentsListResponse(AgentsListResponse),
+    #[serde(rename = "agents.create")]
+    AgentsCreate(AgentCreateRequest),
     #[serde(rename = "agents.switch")]
     AgentsSwitch(AgentIdPayload),
     #[serde(rename = "agents.switch.response")]
@@ -113,6 +115,8 @@ pub enum MessageEnvelope {
     ConfigGetLlmSource,
     #[serde(rename = "config.get-llm-source.response")]
     ConfigGetLlmSourceResponse(Value),
+    #[serde(rename = "settings.get")]
+    SettingsGet,
     #[serde(rename = "browser.launch")]
     BrowserLaunch,
     #[serde(rename = "browser.status")]
@@ -125,6 +129,10 @@ pub enum MessageEnvelope {
     RouterConfigGet,
     #[serde(rename = "router.status")]
     RouterStatus(ConnectStatusPayload),
+    #[serde(rename = "weixin.config.get")]
+    WeixinConfigGet,
+    #[serde(rename = "weixin.config.update")]
+    WeixinConfigUpdate(Value),
     #[serde(rename = "weixin.status")]
     WeixinStatus(ConnectStatusPayload),
 
@@ -144,8 +152,31 @@ pub enum MessageEnvelope {
     #[serde(rename = "language.update.response")]
     LanguageUpdateResponse(Value),
 
+    #[serde(rename = "router.config.update")]
+    RouterConfigUpdate(RouterConfigUpdatePayload),
+
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterConfigUpdatePayload {
+    pub app_user_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LogListResponse {
+    pub logs: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactListResponse {
+    pub artifacts: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -207,6 +238,17 @@ pub struct ErrorPayload {
 pub struct SessionCreateRequest {
     pub title: Option<String>,
     pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCreateRequest {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub system_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

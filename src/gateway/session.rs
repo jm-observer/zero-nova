@@ -38,7 +38,12 @@ impl SessionStore {
     /// 创建一个新会话
     pub async fn create(&self, name: Option<String>) -> Arc<Session> {
         let id = Uuid::new_v4().to_string();
-        let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..8]));
+        self.create_with_id(id, name).await
+    }
+
+    pub async fn create_with_id(&self, id: String, name: Option<String>) -> Arc<Session> {
+        let length = if id.len() > 8 { 8 } else { id.len() };
+        let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..length]));
         let created_at = Utc::now().timestamp_millis();
 
         let session = Arc::new(Session {

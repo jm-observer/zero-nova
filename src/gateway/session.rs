@@ -60,20 +60,9 @@ impl SessionStore {
         sessions.get(id).cloned()
     }
 
-    /// 列出所有会话的简要信息
-    pub async fn list(&self) -> Vec<crate::gateway::protocol::SessionInfo> {
+    /// 获取所有会话
+    pub async fn get_all(&self) -> Vec<Arc<Session>> {
         let sessions = self.sessions.read().unwrap();
-        sessions
-            .values()
-            .map(|s| {
-                let history = s.history.read().unwrap();
-                crate::gateway::protocol::SessionInfo {
-                    id: s.id.clone(),
-                    name: s.name.clone(),
-                    message_count: history.len(),
-                    created_at: s.created_at,
-                }
-            })
-            .collect()
+        sessions.values().cloned().collect()
     }
 }

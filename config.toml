@@ -2,9 +2,10 @@
 # LLM 服务的 API Key
 api_key = "your-anthropic-key"
 # 模型服务的 Base URL，默认为 Anthropic 官方地址
-base_url = "https://api.anthropic.com"
+#base_url = "http://192.168.0.68:12340"
+base_url = "http://127.0.0.1:8082"
 # 使用的模型名称
-model = "gpt-oss-120b"
+model = "google/gemma-4-26B-A4B-it"
 # 最大输出 Token 数
 max_tokens = 8192
 # 生成随机性 (0.0 到 1.0)，选填
@@ -27,7 +28,7 @@ tavily_api_key = "your-tavily-key"
 
 [tool.bash]
 # 默认 shell。Windows 下可选 "pwsh", "powershell", "cmd"；Unix 下可选 "sh", "bash"
-shell = "pwsh" 
+shell = "pwsh"
 
 [gateway]
 # 网关监听地址

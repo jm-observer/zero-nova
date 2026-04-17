@@ -1,5 +1,6 @@
 //! Independent WebSocket gateway binary
 use clap::Parser;
+use sysinfo::{Pid, System};
 use zero_nova::gateway::start_server;
 use zero_nova::provider::anthropic::AnthropicClient;
 
@@ -22,13 +23,13 @@ struct Args {
     #[arg(long, default_value_t = 8192)]
     max_tokens: u32,
 
-    /// Max iterations
-    #[arg(long, default_value_t = 10)]
-    max_iterations: usize,
-
     /// Base URL for LLM
     #[arg(long)]
     base_url: Option<String>,
+
+    /// Parent PID for lifecycle management
+    #[arg(long)]
+    parent_pid: Option<u32>,
 }
 
 #[tokio::main]
@@ -60,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     // Initialize client (using Anthropic as default for now)
     let client = AnthropicClient::from_config(&config.llm);
 
-    // Use tokio::select! to run the server and monitor stdin for parent process termination
+    // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {
         // Task 1: Run the server
         res = start_server(config, client) => {
@@ -69,7 +70,24 @@ async fn main() -> anyhow::Result<()> {
                 return Err(e);
             }
         }
-        // Task 2: Monitor stdin for EOF (Sidecar Self-Protection)
+        // Task 2: PID monitoring (Strategy A)
+        _ = async {
+            if let Some(pid_val) = _args.parent_pid {
+                let mut sys = System::new();
+                let pid = Pid::from(pid_val as usize);
+                loop {
+                    // refresh_process returns false if the process does not exist or fails to refresh
+                    if !sys.refresh_process(pid) {
+                        log::warn!("Detected parent process exit via PID monitoring (PID: {}).", pid_val);
+                        std::process::exit(0);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            } else {
+                std::future::pending::<()>().await
+            }
+        } => {}
+        // Task 3: Monitor stdin for EOF (Strategy B)
         _ = async {
             use tokio::io::{AsyncReadExt, stdin};
             let mut stdin = stdin();

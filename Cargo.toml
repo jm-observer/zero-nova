@@ -18,6 +18,8 @@ scraper = "0.19"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
 toml = "0.8"
+sysinfo = "0.30"
+
 
 
 # Optional dependencies for CLI

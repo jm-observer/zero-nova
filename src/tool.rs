@@ -4,6 +4,7 @@ use serde_json::Value;
 pub mod builtin;
 
 /// Definition of a tool, including name, description, and input schema.
+#[derive(Clone)]
 pub struct ToolDefinition {
     pub name: String,
     pub description: String,

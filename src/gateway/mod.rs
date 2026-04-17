@@ -12,6 +12,7 @@ pub use server::run_server;
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::gateway::router::AppState;
 use crate::gateway::session::SessionStore;
+use crate::prompt::SystemPromptBuilder;
 use crate::tool::ToolRegistry;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,13 +26,15 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     let mut tools = ToolRegistry::new();
     crate::tool::builtin::register_builtin_tools(&mut tools, &config);
 
+    let prompt = SystemPromptBuilder::new().with_tools(&tools).build();
+
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
         model_config: config.llm.model_config.clone(),
         tool_timeout: std::time::Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
     };
 
-    let agent = AgentRuntime::new(client, tools, "You are a helpful assistant.".to_string(), agent_config);
+    let agent = AgentRuntime::new(client, tools, prompt, agent_config);
 
     let state = Arc::new(AppState {
         agent,

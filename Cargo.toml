@@ -33,7 +33,7 @@ which = "8.0.2"
 [features]
 gateway = ["uuid"]
 cli = ["clap", "rustyline", "chrono", "colored"]
-default = ["cli"]
+default = ["cli", "gateway"]
 prod = ["custom-utils/prod"]
 
 [[bin]]

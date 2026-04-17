@@ -20,11 +20,7 @@ impl SystemPromptBuilder {
 
     /// Creates a builder pre‑configured for a personal assistant role.
     pub fn personal_assistant() -> Self {
-        let mut builder = Self::new();
-        builder
-            .sections
-            .push("You are a helpful personal assistant.".to_string());
-        builder
+        Self::new()
     }
 
     /// Adds a role section to the prompt.

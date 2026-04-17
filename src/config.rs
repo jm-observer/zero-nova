@@ -71,6 +71,8 @@ pub struct GatewayConfig {
     pub port: u16,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: usize,
+    #[serde(default)]
+    pub tool_timeout_secs: Option<u64>,
 }
 
 fn default_host() -> String {
@@ -89,6 +91,7 @@ impl Default for GatewayConfig {
             host: default_host(),
             port: default_port(),
             max_iterations: default_max_iterations(),
+            tool_timeout_secs: None,
         }
     }
 }

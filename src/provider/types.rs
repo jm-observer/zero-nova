@@ -95,11 +95,28 @@ pub struct Usage {
     pub cache_read_input_tokens: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 /// Specifies tool selection behavior for the LLM.
 pub enum ToolChoice {
     Auto,
     Any,
     Tool { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+/// Specifies the reason why the model stopped generating.
+pub enum StopReason {
+    /// Model thinks it has finished the response.
+    EndTurn,
+    /// Output reached max_tokens limit.
+    MaxTokens,
+    /// Encountered a custom stop sequence.
+    StopSequence,
+    /// Model requested a tool call.
+    ToolUse,
+    /// Unknown reason (forward compatibility).
+    #[serde(other)]
+    Unknown,
 }

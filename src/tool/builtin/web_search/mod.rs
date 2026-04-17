@@ -44,7 +44,7 @@ impl WebSearchTool {
                 }
                 "tavily" => {
                     if let Some(api_key) = &config.tavily_api_key {
-                        info!("Web search backend selected: Tavily");
+                        info!("Web search backend selected: Tavily (API key present)");
                         return Self {
                             backend: Box::new(TavilyBackend::new(api_key.clone(), client)),
                         };
@@ -85,7 +85,7 @@ impl WebSearchTool {
 
         // Tavily
         if let Some(api_key) = &config.tavily_api_key {
-            info!("Web search backend automatically initialized: Tavily");
+            info!("Web search backend automatically initialized: Tavily (API key present)");
             return Self {
                 backend: Box::new(TavilyBackend::new(api_key.clone(), client.clone())),
             };

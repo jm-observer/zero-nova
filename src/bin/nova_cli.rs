@@ -79,6 +79,7 @@ async fn main() -> Result<()> {
     let agent_config = AgentConfig {
         max_iterations: 5,
         model_config: config.llm.model_config.clone(),
+        tool_timeout: std::time::Duration::from_secs(120),
     };
 
     let mut agent = AgentRuntime::new(client, tools, prompt, agent_config);
@@ -92,10 +93,6 @@ async fn main() -> Result<()> {
         Command::McpTest { cmd } => test_mcp(&cmd).await?,
     }
     Ok(())
-}
-
-fn current_date() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// Runs the REPL loop for interactive chat.
@@ -151,7 +148,7 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                 });
 
                 tokio::select! {
-                    result = agent.run_turn(&history, input, tx.clone()) => {
+                    result = agent.run_turn(&history, input, tx.clone(), None) => {
                         let msgs = result?;
                         drop(tx);
                         printer.await.ok();
@@ -180,7 +177,7 @@ async fn run_oneshot(agent: &AgentRuntime<impl LlmClient>, prompt: &str, verbose
             render_event(&event, verbose);
         }
     });
-    let _ = agent.run_turn(&[], prompt, tx.clone()).await?;
+    let _ = agent.run_turn(&[], prompt, tx.clone(), None).await?;
     drop(tx);
     printer.await.ok();
     Ok(())
@@ -242,8 +239,18 @@ fn render_event(event: &AgentEvent, verbose: bool) {
                 format!("[tokens: input={}, output={}]", usage.input_tokens, usage.output_tokens).bright_black()
             );
         }
+        AgentEvent::IterationLimitReached { iterations } => {
+            println!(
+                "\n{}",
+                format!("[warn] iteration limit reached ({iterations} iterations)").yellow()
+            );
+        }
         AgentEvent::Error(e) => {
             eprintln!("\n{}", format!("[error] {e}").red().bold());
-        } // ignore other events
+        }
     }
+}
+
+fn current_date() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }

@@ -44,6 +44,12 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
                 usage: Some(usage),
             })
         }
+        AgentEvent::IterationLimitReached { iterations } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "iteration_limit".to_string(),
+            session_id: Some(session_id.to_string()),
+            iteration: Some(iterations as i32),
+            ..Default::default()
+        }),
         AgentEvent::Error(e) => MessageEnvelope::Error(ErrorPayload {
             message: format!("{:#}", e),
             code: Some("AGENT_RUNTIME_ERROR".to_string()),

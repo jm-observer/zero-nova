@@ -1,10 +1,9 @@
-use crate::message::Message;
-
 use crate::provider::types::{ToolDefinition, Usage};
 
 pub mod anthropic;
 pub mod sse;
 pub mod types;
+use crate::provider::types::StopReason;
 use anyhow::Result;
 use async_trait::async_trait;
 
@@ -13,7 +12,7 @@ use async_trait::async_trait;
 pub trait LlmClient: Send + Sync {
     async fn stream(
         &self,
-        messages: &[Message],
+        messages: &[crate::message::Message],
         system: &str,
         tools: &[ToolDefinition],
         config: &ModelConfig,
@@ -30,10 +29,16 @@ pub trait StreamReceiver: Send {
 /// Events emitted by the provider during streaming.
 pub enum ProviderStreamEvent {
     TextDelta(String),
-    ToolUseStart { id: String, name: String },
+    ToolUseStart {
+        id: String,
+        name: String,
+    },
     ToolUseInputDelta(String),
     ToolUseEnd,
-    MessageComplete { usage: Usage },
+    MessageComplete {
+        usage: Usage,
+        stop_reason: Option<crate::provider::types::StopReason>,
+    },
 }
 
 use serde::{Deserialize, Serialize};

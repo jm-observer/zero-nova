@@ -1,6 +1,6 @@
 use crate::provider::sse::SseParser;
 use crate::provider::types::{MessageRequest, ToolDefinition};
-use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
+use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StopReason, StreamReceiver};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::{header, Client};
@@ -115,6 +115,7 @@ impl LlmClient for AnthropicClient {
             parser: SseParser::new(),
             current_tool_id: None,
             current_tool_name: None,
+            pending_stop_reason: None,
         }))
     }
 }
@@ -124,6 +125,7 @@ pub struct AnthropicStreamReceiver {
     parser: SseParser,
     current_tool_id: Option<String>,
     current_tool_name: Option<String>,
+    pending_stop_reason: Option<StopReason>,
 }
 
 #[async_trait]
@@ -173,6 +175,16 @@ impl StreamReceiver for AnthropicStreamReceiver {
                         }
                     }
                     crate::provider::types::StreamEvent::MessageDelta { delta, .. } => {
+                        if let Some(stop_reason_val) = delta.get("stop_reason") {
+                            if !stop_reason_val.is_null() {
+                                if let Ok(reason) = serde_json::from_value::<crate::provider::types::StopReason>(
+                                    stop_reason_val.clone(),
+                                ) {
+                                    self.pending_stop_reason = Some(reason);
+                                }
+                            }
+                        }
+
                         if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
                             ProviderStreamEvent::TextDelta(text.to_string())
                         } else {
@@ -182,6 +194,7 @@ impl StreamReceiver for AnthropicStreamReceiver {
                     crate::provider::types::StreamEvent::MessageStop { usage } => {
                         ProviderStreamEvent::MessageComplete {
                             usage: usage.unwrap_or_default(),
+                            stop_reason: self.pending_stop_reason.take(),
                         }
                     }
                     crate::provider::types::StreamEvent::Error { error } => {

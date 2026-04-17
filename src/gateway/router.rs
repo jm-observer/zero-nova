@@ -204,7 +204,7 @@ async fn handle_chat<C: LlmClient>(
             send_general_error(
                 &outbound_tx,
                 &request_id,
-                format!("session id not found"),
+                "session id not found".to_string(),
                 Some("SESSION_ID_NOT_FOUND".to_string()),
             );
             return;
@@ -213,9 +213,7 @@ async fn handle_chat<C: LlmClient>(
 
     let session = match state.sessions.get(&session_id).await {
         Some(s) => s,
-        None => {
-            state.sessions.create_with_id(session_id.clone(), None).await
-        }
+        None => state.sessions.create_with_id(session_id.clone(), None).await,
     };
 
     let _lock = session.chat_lock.lock().await;
@@ -252,7 +250,7 @@ async fn handle_chat<C: LlmClient>(
     };
 
     // 5. 调用 agent.run_turn
-    match state.agent.run_turn(&history, &payload.input, event_tx).await {
+    match state.agent.run_turn(&history, &payload.input, event_tx, None).await {
         Ok(new_messages) => {
             let mut h = session.history.write().unwrap();
             let user_msg = crate::message::Message {

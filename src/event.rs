@@ -3,7 +3,7 @@ use crate::provider::types::Usage;
 use anyhow::Error;
 
 #[derive(Debug)]
-/// Events emitted by the Zero-Nova agent during a turn.
+/// Turn complete event, containing new messages and usage information.
 pub enum AgentEvent {
     /// Text delta emitted by the LLM.
     TextDelta(String),
@@ -22,6 +22,8 @@ pub enum AgentEvent {
     },
     /// Turn complete event, containing new messages and usage information.
     TurnComplete { new_messages: Vec<Message>, usage: Usage },
+    /// Agent reached the maximum number of iterations.
+    IterationLimitReached { iterations: usize },
     /// Generic error event.
     Error(Error),
 }

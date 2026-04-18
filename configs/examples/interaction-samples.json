@@ -1,0 +1,88 @@
+{
+  "_comment": "PendingInteraction 测试样例集，用于验证 InteractionResolver 的解析行为",
+
+  "select_option": {
+    "description": "方案选择场景",
+    "interaction": {
+      "id": "int-select-001",
+      "kind": "Select",
+      "subject": "tts_solution_selection",
+      "prompt": "请选择您希望部署的 TTS 方案",
+      "risk_level": "Low",
+      "options": [
+        { "id": "fish-speech", "label": "Fish Speech (开源，中文效果好)", "aliases": ["第一个", "1", "fish"] },
+        { "id": "cosyvoice", "label": "CosyVoice (阿里出品，多语言)", "aliases": ["第二个", "2", "cosy"] },
+        { "id": "chattts", "label": "ChatTTS (轻量级，易部署)", "aliases": ["第三个", "3", "chat"] }
+      ]
+    },
+    "test_cases": [
+      { "input": "第二个",        "expected_intent": "Select", "expected_option": "cosyvoice" },
+      { "input": "2",             "expected_intent": "Select", "expected_option": "cosyvoice" },
+      { "input": "cosy",          "expected_intent": "Select", "expected_option": "cosyvoice" },
+      { "input": "CosyVoice",     "expected_intent": "Select", "expected_option": "cosyvoice" },
+      { "input": "选那个阿里的",   "expected_intent": "Select", "expected_option": "cosyvoice", "requires_llm": true },
+      { "input": "算了不选了",     "expected_intent": "Reject", "expected_option": null }
+    ]
+  },
+
+  "approve_high_risk": {
+    "description": "高风险部署确认场景",
+    "interaction": {
+      "id": "int-approve-001",
+      "kind": "Approve",
+      "subject": "deploy_fish_speech",
+      "prompt": "即将执行: docker run -d -p 7860:7860 fishaudio/fish-speech:latest，预计下载 12GB 模型文件",
+      "risk_level": "High",
+      "options": [
+        { "id": "approve", "label": "确认执行", "aliases": ["好的", "继续", "开始吧", "确认"] },
+        { "id": "reject", "label": "取消", "aliases": ["不要", "先不要", "取消", "算了"] }
+      ]
+    },
+    "test_cases": [
+      { "input": "好的，开始吧",       "expected_intent": "Approve", "min_confidence": 0.9 },
+      { "input": "确认执行",           "expected_intent": "Approve", "min_confidence": 0.95 },
+      { "input": "嗯",                "expected_intent": "Approve", "requires_clarification": true, "note": "高风险场景模糊确认应追问" },
+      { "input": "行吧",              "expected_intent": "Approve", "requires_clarification": true, "note": "高风险场景低置信度应追问" },
+      { "input": "先不要动，我再想想",  "expected_intent": "Reject" },
+      { "input": "取消",              "expected_intent": "Reject" },
+      { "input": "今天天气怎么样",     "expected_intent": "Unclear", "note": "与挂起交互无关的输入" }
+    ]
+  },
+
+  "approve_low_risk": {
+    "description": "低风险操作确认场景",
+    "interaction": {
+      "id": "int-approve-002",
+      "kind": "Approve",
+      "subject": "switch_agent",
+      "prompt": "确定要切换到 OpenClaw 吗？",
+      "risk_level": "Low",
+      "options": [
+        { "id": "confirm", "label": "确认切换", "aliases": ["是", "对", "切换"] },
+        { "id": "cancel", "label": "取消", "aliases": ["不", "算了"] }
+      ]
+    },
+    "test_cases": [
+      { "input": "好",    "expected_intent": "Approve", "min_confidence": 0.6 },
+      { "input": "嗯",    "expected_intent": "Approve", "min_confidence": 0.6, "requires_clarification": false, "note": "低风险场景模糊确认可通过" },
+      { "input": "不用了", "expected_intent": "Reject" }
+    ]
+  },
+
+  "fill_input": {
+    "description": "自由文本输入场景 (需求收集)",
+    "interaction": {
+      "id": "int-input-001",
+      "kind": "Input",
+      "subject": "tts_constraints",
+      "prompt": "请提供您的环境信息：1. 是否有 GPU？2. 操作系统？3. 优先关注什么（效果/速度/易用性）？",
+      "risk_level": "Low",
+      "options": []
+    },
+    "test_cases": [
+      { "input": "有 GPU，Ubuntu 22.04，优先中文效果",  "expected_intent": "ProvideInput", "expected_free_text": true },
+      { "input": "Windows，没有 GPU，要求简单易用",     "expected_intent": "ProvideInput", "expected_free_text": true },
+      { "input": "算了不需要了",                       "expected_intent": "Reject" }
+    ]
+  }
+}

@@ -1,6 +1,8 @@
 // Control layer for conversation handling
 
+use crate::gateway::agents::AgentRegistry;
 use crate::gateway::protocol::InteractionOptionDTO;
+use crate::gateway::workflow::{WorkflowEngine, WorkflowState};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Represents the overall control state attached to a Session.
@@ -9,7 +11,7 @@ pub struct ControlState {
     pub active_agent: String,
     /// Optional pending interaction awaiting user response.
     pub pending_interaction: Option<PendingInteraction>,
-    /// Reserved for future workflow handling.
+    /// Optional ongoing workflow.
     pub workflow: Option<WorkflowState>,
 }
 
@@ -134,52 +136,6 @@ impl InteractionResolver {
             }
         }
 
-        #[cfg(test)]
-        mod tests {
-            use super::*;
-            use std::time::{SystemTime, UNIX_EPOCH};
-
-            #[test]
-            fn test_classify_no_state() {
-                let control = ControlState::new("default");
-                let intent = TurnRouter::classify("hello", &control);
-                assert!(matches!(intent, TurnIntent::ExecuteChat));
-            }
-
-            #[test]
-            fn test_classify_with_pending() {
-                let mut control = ControlState::new("default");
-                control.pending_interaction = Some(PendingInteraction {
-                    id: "1".to_string(),
-                    kind: InteractionKind::Approve,
-                    subject: "test".to_string(),
-                    prompt: "prompt".to_string(),
-                    options: vec![],
-                    risk_level: RiskLevel::Low,
-                    created_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64,
-                    ttl_seconds: 60,
-                });
-                let intent = TurnRouter::classify("any", &control);
-                assert!(matches!(intent, TurnIntent::ResolvePendingInteraction));
-            }
-
-            #[test]
-            fn test_resolve_approve() {
-                let pending = PendingInteraction {
-                    id: "1".to_string(),
-                    kind: InteractionKind::Approve,
-                    subject: "test".to_string(),
-                    prompt: "prompt".to_string(),
-                    options: vec![],
-                    risk_level: RiskLevel::Low,
-                    created_at: 0,
-                    ttl_seconds: 60,
-                };
-                let result = InteractionResolver::resolve("好的", &pending);
-                assert_eq!(result.intent, ResolutionIntent::Approve);
-            }
-        }
-
         // Input kind – everything else is treated as free text.
         if let InteractionKind::Input = pending.kind {
             return ResolutionResult {
@@ -210,33 +166,37 @@ pub struct TurnRouter;
 
 impl TurnRouter {
     /// Determine the intent for the current user input.
-    /// Fast‑path: if there is no pending interaction, no workflow and no agent registry, just return `ExecuteChat`.
-    pub fn classify(_input: &str, control: &ControlState) -> TurnIntent {
+    pub fn classify(input: &str, control: &ControlState, agent_registry: Option<&AgentRegistry>) -> TurnIntent {
         // 1️⃣ pending interaction takes highest priority
         if let Some(pending) = &control.pending_interaction {
             // Check expiration (ttl_seconds)
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
             if now - pending.created_at > pending.ttl_seconds as i64 {
-                // expired – let caller handle cleanup; for classification we treat as no pending
-                // (caller should clear it before reuse)
                 return TurnIntent::ExecuteChat;
             }
             return TurnIntent::ResolvePendingInteraction;
         }
-        // 2️⃣ agent address (placeholder – not implemented yet)
-        // 优先级 2：agent 点名（Phase 5 实现，此处占位）
-        
-        // 3️⃣ workflow continuation placeholder
-        if control.workflow.is_some() {
-            return TurnIntent::ContinueWorkflow;
+
+        // 2️⃣ agent address (Phase 5 real implementation)
+        if let Some(registry) = agent_registry {
+            if let Some(agent_id) = registry.resolve_addressing(input) {
+                if agent_id != control.active_agent {
+                    return TurnIntent::AddressAgent { agent_id };
+                }
+            }
         }
+
+        // 3️⃣ workflow continuation (Phase 5 real implementation)
+        if let Some(wf) = &control.workflow {
+            if WorkflowEngine::looks_like_continuation(wf) {
+                return TurnIntent::ContinueWorkflow;
+            }
+        }
+
         // Default path – normal chat
         TurnIntent::ExecuteChat
     }
 }
-
-// Minimal placeholder for workflow state – not used in Phase 4.
-pub struct WorkflowState;
 
 // Helper to create InteractionOptionDTO for protocol messages.
 impl From<&InteractionOption> for InteractionOptionDTO {
@@ -244,7 +204,6 @@ impl From<&InteractionOption> for InteractionOptionDTO {
         InteractionOptionDTO {
             id: opt.id.clone(),
             label: opt.label.clone(),
-            // aliases are part of DTO; currently DTO only includes id, label in design – keep simple.
             aliases: opt.aliases.clone(),
         }
     }

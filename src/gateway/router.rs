@@ -1,3 +1,4 @@
+use crate::gateway::agents::AgentRegistry;
 use crate::gateway::handlers::{agents, chat, sessions, system};
 use crate::gateway::protocol::{AuthRequest, GatewayMessage, MessageEnvelope};
 use crate::provider::LlmClient;
@@ -8,6 +9,7 @@ use tokio::sync::mpsc;
 /// 共享应用状态
 pub struct AppState<C: LlmClient> {
     pub agent: crate::agent::AgentRuntime<C>,
+    pub agent_registry: AgentRegistry,
     pub sessions: crate::gateway::session::SessionStore,
 }
 

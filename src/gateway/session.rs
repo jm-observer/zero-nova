@@ -11,6 +11,8 @@ use crate::gateway::protocol::{ContentBlockDTO, MessageDTO, Session as SessionPr
 
 /// 单个会话的详细信息与状态
 pub struct Session {
+    // Control layer state (Phase 4)
+    pub control: std::sync::RwLock<crate::gateway::control::ControlState>,
     pub id: String,
     pub name: String,
     pub history: RwLock<Vec<Message>>,
@@ -150,6 +152,7 @@ impl SessionStore {
         let now = Utc::now().timestamp_millis();
 
         let session = Arc::new(Session {
+            control: std::sync::RwLock::new(crate::gateway::control::ControlState::new("default")),
             id: id.clone(),
             name: session_name,
             history: RwLock::new(Vec::new()),

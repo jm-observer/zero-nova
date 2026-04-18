@@ -1,4 +1,5 @@
 pub mod bridge;
+pub mod control;
 pub mod handlers;
 pub mod protocol;
 pub mod router;

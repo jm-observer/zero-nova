@@ -1,6 +1,8 @@
-use crate::gateway::handlers::system::{send_general_error, send_general_error_direct};
+// Chat handler with turn routing (Phase 4)
+
+use crate::gateway::handlers::system::send_general_error;
 use crate::gateway::protocol::{
-    ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload,
+    ChatCompletePayload, ChatPayload, GatewayMessage, InteractionResolvedPayload, MessageEnvelope, SessionIdPayload,
 };
 use crate::provider::LlmClient;
 use log::error;
@@ -10,39 +12,141 @@ use tokio_util::sync::CancellationToken;
 
 use crate::gateway::router::AppState;
 
+/// Main entry point for a chat turn.
 pub async fn handle_chat<C: LlmClient>(
     payload: ChatPayload,
     state: Arc<AppState<C>>,
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
+    // Retrieve (or create) the session.
     let session = state.sessions.get_or_create(payload.session_id.clone()).await;
-    let session_id = session.id.clone();
 
+    // Serialize access to the session's chat state.
     let _lock = session.chat_lock.lock().await;
 
+    // Determine the turn intent.
+    let intent = {
+        let control = session.control.read().unwrap();
+        crate::gateway::control::TurnRouter::classify(&payload.input, &*control)
+    };
+
+    match intent {
+        crate::gateway::control::TurnIntent::ResolvePendingInteraction => {
+            handle_resolve_interaction::<C>(session.clone(), &payload.input, outbound_tx.clone(), request_id.clone()).await;
+            return;
+        }
+        crate::gateway::control::TurnIntent::AddressAgent { .. } => {
+            send_general_error(
+                &outbound_tx,
+                &request_id,
+                "Agent switching not yet implemented".to_string(),
+                Some("NOT_IMPLEMENTED".to_string()),
+            );
+            return;
+        }
+        crate::gateway::control::TurnIntent::ContinueWorkflow => {
+            send_general_error(
+                &outbound_tx,
+                &request_id,
+                "Workflow not yet implemented".to_string(),
+                Some("NOT_IMPLEMENTED".to_string()),
+            );
+            return;
+        }
+        crate::gateway::control::TurnIntent::ExecuteChat => {
+            // Normal chat flow.
+            execute_chat_turn(session.clone(), &payload, state.clone(), outbound_tx, request_id).await;
+        }
+    }
+}
+
+/// Handle a chat stop request (cancellation).
+pub async fn handle_chat_stop<C: LlmClient>(
+    payload: SessionIdPayload,
+    state: Arc<AppState<C>>,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
+    if let Some(session) = state.sessions.get(&payload.session_id).await {
+        if let Some(token) = session.take_cancellation_token() {
+            token.cancel();
+        }
+        let _ = outbound_tx.send(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::ChatStopResponse(SessionIdPayload {
+                session_id: payload.session_id,
+            }),
+        ));
+    } else {
+        send_general_error(
+            &outbound_tx,
+            &request_id,
+            format!("Session {} not found", payload.session_id),
+            Some("SESSION_NOT_FOUND".to_string()),
+        );
+    }
+}
+
+/// Resolve a pending interaction and send the result back to the client.
+async fn handle_resolve_interaction<C: LlmClient>(
+    session: Arc<crate::gateway::session::Session>,
+    user_input: &str,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
+    let mut control = session.control.write().unwrap();
+    if let Some(pending) = control.pending_interaction.take() {
+        let result = crate::gateway::control::InteractionResolver::resolve(user_input, &pending);
+        let result_str = match result.intent {
+            crate::gateway::control::ResolutionIntent::Approve => "approved",
+            crate::gateway::control::ResolutionIntent::Reject => "rejected",
+            crate::gateway::control::ResolutionIntent::Select => "selected",
+            crate::gateway::control::ResolutionIntent::ProvideInput => "input",
+            crate::gateway::control::ResolutionIntent::Unclear => "unclear",
+        };
+        let payload = InteractionResolvedPayload {
+            session_id: session.id.clone(),
+            interaction_id: pending.id,
+            result: result_str.to_string(),
+        };
+        let _ = outbound_tx.send(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::InteractionResolved(payload),
+        ));
+    }
+}
+
+/// Normal chat processing (Phase 3 unchanged).
+async fn execute_chat_turn<C: LlmClient>(
+    session: Arc<crate::gateway::session::Session>,
+    payload: &ChatPayload,
+    state: Arc<AppState<C>>,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
     // 1. 发送 chat.start
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id.clone(),
         MessageEnvelope::ChatStart(SessionIdPayload {
-            session_id: session_id.clone(),
+            session_id: session.id.clone(),
         }),
     ));
 
-    // 2. 写入 User Message (Step 3 conversion: 预写入以防失败丢失)
+    // 2. 写入 User Message (预写入防止失败丢失)
     session.append_user_message(&payload.input);
 
     // 3. 创建并注册 CancellationToken
     let token = CancellationToken::new();
     session.set_cancellation_token(token.clone());
 
-    // 4. 创建事件转发通道
+    // 4. 事件转发通道
     let (event_tx, mut event_rx) = mpsc::channel(100);
     let outbound_tx_clone = outbound_tx.clone();
     let request_id_clone = request_id.clone();
-    let session_id_clone = session_id.clone();
+    let session_id_clone = session.id.clone();
 
-    // 5. Spawn 转发任务
+    // 5. 转发任务
     let bridge_handle = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let gateway_msg =
@@ -53,18 +157,11 @@ pub async fn handle_chat<C: LlmClient>(
         }
     });
 
-    // 6. 准备历史上下文 (包含刚刚写入的 user message)
+    // 6. 准备历史上下文（排除刚写入的用户消息）
     let history = session.get_history();
-
-    // 7. 调用 agent.run_turn
-    // 注意：history 里面已经包含了当前用户输入，但 run_turn 内部还会再次 push。
-    // 为了修复这个问题，我们需要从 history 中剥离最后一条 user message 传给 run_turn，
-    // 或者修改 run_turn 不再自己 push。
-    // 根据 phase3-session-management.md，run_turn 的签名是 run_turn(history, input, ...)。
-    // 如果 history 包含了 input，则会重复。
-    // 解决方法：传入 history[..history.len()-1]
     let history_for_turn = &history[..history.len() - 1];
 
+    // 7. 运行 turn
     match state
         .agent
         .run_turn(history_for_turn, &payload.input, event_tx, Some(token))
@@ -72,19 +169,17 @@ pub async fn handle_chat<C: LlmClient>(
     {
         Ok(turn_result) => {
             session.append_assistant_messages(turn_result.messages);
-
-            // 8. 发送 chat.complete
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id.clone(),
                 MessageEnvelope::ChatComplete(ChatCompletePayload {
-                    session_id: session_id.clone(),
+                    session_id: session.id.clone(),
                     output: None,
                     usage: Some(turn_result.usage),
                 }),
             ));
         }
         Err(e) => {
-            error!("Agent execution error for session {}: {}", session_id, e);
+            error!("Agent execution error for session {}: {}", session.id, e);
             send_general_error(
                 &outbound_tx,
                 &request_id,
@@ -97,37 +192,4 @@ pub async fn handle_chat<C: LlmClient>(
     session.clear_cancellation_token();
     session.touch_updated_at();
     let _ = bridge_handle.await;
-}
-
-pub async fn handle_chat_stop<C: LlmClient>(
-    payload: SessionIdPayload,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
-    request_id: String,
-) {
-    if let Some(session) = state.sessions.get(&payload.session_id).await {
-        if let Some(token) = session.take_cancellation_token() {
-            token.cancel();
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::ChatStopResponse(SessionIdPayload {
-                    session_id: payload.session_id,
-                }),
-            ));
-        } else {
-            send_general_error_direct(
-                &outbound_tx,
-                &request_id,
-                "No active chat to stop".to_string(),
-                Some("NO_ACTIVE_CHAT".to_string()),
-            );
-        }
-    } else {
-        send_general_error_direct(
-            &outbound_tx,
-            &request_id,
-            "Session not found".to_string(),
-            Some("SESSION_NOT_FOUND".to_string()),
-        );
-    }
 }

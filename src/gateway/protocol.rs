@@ -80,6 +80,12 @@ pub enum MessageEnvelope {
     #[serde(rename = "chat.complete")]
     ChatComplete(ChatCompletePayload),
 
+    // --- Interaction Events ---
+    #[serde(rename = "interaction.request")]
+    InteractionRequest(InteractionRequestPayload),
+    #[serde(rename = "interaction.resolved")]
+    InteractionResolved(InteractionResolvedPayload),
+
     // --- 2.2 Agent Management ---
     #[serde(rename = "agents.list")]
     AgentsList,
@@ -185,6 +191,32 @@ pub struct ArtifactListResponse {
 #[serde(rename_all = "camelCase")]
 pub struct LanguageUpdatePayload {
     pub language: String,
+}
+
+// --- Interaction protocol structs ---
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionOptionDTO {
+    pub id: String,
+    pub label: String,
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionRequestPayload {
+    pub session_id: String,
+    pub interaction_id: String,
+    pub kind: String, // "approve" | "select" | "input"
+    pub subject: String,
+    pub prompt: String,
+    pub options: Vec<InteractionOptionDTO>,
+    pub risk_level: String, // "low" | "medium" | "high"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionResolvedPayload {
+    pub session_id: String,
+    pub interaction_id: String,
+    pub result: String, // "approved" | "rejected" | "selected" | "input" | "expired"
 }
 
 // --- Payload Definitions ---

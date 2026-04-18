@@ -1,228 +1,142 @@
-# Phase 5: Tauri Integration & Channel Switch
+# Phase 5：Workflow 与 Multi-Agent 接入
 
-## Goal
+> 前置依赖：Phase 4  
+> 基线设计：`docs/conversation-control-plane-design.md`
 
-将 nova-gateway 集成到 Tauri 应用生命周期中，支持在配置中切换 nova / node 两种 channel，改造 gateway commands。
+## 1. 目标
 
-## Prerequisites
+第五阶段把控制层骨架变成真正可用的行为系统，重点落两件事：
 
-- Phase 4 完成 (chat 端到端可用)
-- 已 fork OpenFlux 仓库并能编译运行
+1. **workflow**
+2. **multi-agent**
 
-## Tasks
+这两件事都建立在当前 `src` 已有的：
 
-### 5.1 扩展配置 — Channel 模式
+- gateway
+- session
+- runtime
+- control plane skeleton
 
-在 OpenFlux 的 `openflux.yaml` 配置中增加 nova channel 支持:
+之上。
 
-```yaml
-gateway:
-  channel: "nova"            # "nova" | "node" (默认 "node" 保持向后兼容)
-  host: "localhost"
-  port: 18801
+## 2. 本 phase 范围
 
-# 仅 channel: "nova" 时使用
-nova:
-  model: "claude-sonnet-4-20250514"
-  max_tokens: 8192
-  max_iterations: 10
-  temperature: null           # null = 不设置，使用 API 默认值
-  # API key 从 ANTHROPIC_API_KEY 环境变量读取
-  # base_url 从 ANTHROPIC_BASE_URL 读取，默认 https://api.anthropic.com
-```
+### 2.1 要做
 
-对应 Rust 结构:
+- 增加 `WorkflowState`
+- 落地一个通用 `solution-workflow`
+- 增加 `AgentRegistry / AgentDescriptor`
+- 支持自然语言 agent addressing 与切换
 
-```rust
-#[derive(Debug, Deserialize)]
-pub struct GatewayConfig {
-    pub channel: String,     // "nova" | "node"
-    pub host: String,
-    pub port: u16,
-}
+### 2.2 不做
 
-#[derive(Debug, Deserialize)]
-pub struct NovaConfig {
-    pub model: String,
-    pub max_tokens: u32,
-    pub max_iterations: usize,
-    pub temperature: Option<f64>,
-}
-```
+- 不做 skill 系统
+- 不做复杂 agent 间协商
+- 不做多 workflow 并行
 
-### 5.2 改造 commands/gateway.rs
+## 3. 设计结论
 
-```rust
-use crate::nova_gateway::NovaGateway;
+### 3.1 先做一个通用 workflow，不做垂直 skill
 
-/// Gateway 状态: 支持两种 channel
-enum GatewayHandle {
-    Nova(tokio::task::JoinHandle<()>),     // Rust WS server task
-    Node(std::process::Child),              // Node.js 子进程
-}
+第一版建议只落一个：
 
-struct GatewayState {
-    handle: Mutex<Option<GatewayHandle>>,
-}
+- `solution-workflow`
 
-#[tauri::command]
-pub async fn start_gateway(
-    config: tauri::State<'_, AppConfig>,
-    gw_state: tauri::State<'_, GatewayState>,
-) -> Result<(), String> {
-    let mut handle = gw_state.handle.lock().await;
-    if handle.is_some() {
-        return Err("Gateway already running".into());
-    }
+用于覆盖：
 
-    match config.gateway.channel.as_str() {
-        "nova" => {
-            // 初始化 zero-nova runtime
-            let client = AnthropicClient::from_env()
-                .map_err(|e| e.to_string())?;
-            let mut tools = ToolRegistry::new();
-            register_builtin_tools(&mut tools);
+- TTS
+- 文生图
+- OCR
+- 其他方案搜索、选型、部署、测试
 
-            let agent_config = AgentConfig {
-                max_iterations: config.nova.max_iterations,
-                model_config: ModelConfig {
-                    model: config.nova.model.clone(),
-                    max_tokens: config.nova.max_tokens,
-                    temperature: config.nova.temperature,
-                    top_p: None,
-                },
-            };
+### 3.2 workflow 的状态必须显式
 
-            let system_prompt = SystemPromptBuilder::default().build();
-            let runtime = AgentRuntime::new(client, tools, system_prompt, agent_config);
+建议最小阶段：
 
-            let state = Arc::new(nova_gateway::GatewayState {
-                agent: Mutex::new(runtime),
-                sessions: SessionStore::new(),
-                config: config.nova.clone(),
-            });
+- `Discover`
+- `Compare`
+- `AwaitSelection`
+- `AwaitExecutionConfirmation`
+- `Executing`
+- `AwaitTestInput`
+- `Completed`
 
-            let h = NovaGateway::start(
-                &config.gateway.host,
-                config.gateway.port,
-                state,
-            ).await.map_err(|e| e.to_string())?;
+### 3.3 多 agent 先做“点名和切换”，不做自动协商
 
-            *handle = Some(GatewayHandle::Nova(h));
-            Ok(())
-        }
-        "node" | _ => {
-            // 保留原有 Node.js sidecar 逻辑
-            let child = start_node_sidecar(&config)?;
-            *handle = Some(GatewayHandle::Node(child));
-            Ok(())
-        }
-    }
-}
+建议先支持：
 
-#[tauri::command]
-pub async fn stop_gateway(
-    gw_state: tauri::State<'_, GatewayState>,
-) -> Result<(), String> {
-    let mut handle = gw_state.handle.lock().await;
-    match handle.take() {
-        Some(GatewayHandle::Nova(h)) => {
-            h.abort();  // 停止 WS server task
-            Ok(())
-        }
-        Some(GatewayHandle::Node(mut child)) => {
-            child.kill().map_err(|e| e.to_string())?;
-            child.wait().map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        None => Err("Gateway not running".into()),
-    }
-}
+- “OpenClaw 在不在”
+- “让 OpenClaw 处理”
+- “OpenClaw，帮我看这个”
 
-#[tauri::command]
-pub async fn restart_gateway(
-    config: tauri::State<'_, AppConfig>,
-    gw_state: tauri::State<'_, GatewayState>,
-) -> Result<(), String> {
-    stop_gateway(gw_state.clone()).await.ok();
-    start_gateway(config, gw_state).await
-}
-```
+而不是一上来做 agent 之间自动 delegation。
 
-### 5.3 改造 Tauri main (lib.rs)
+## 4. 实现细节
+
+### 4.1 AgentRegistry
+
+建议新增：
 
 ```rust
-fn main() {
-    tauri::Builder::default()
-        .manage(AppConfig::load())
-        .manage(GatewayState { handle: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![
-            start_gateway,
-            stop_gateway,
-            restart_gateway,
-            // ... 其他 commands
-        ])
-        .setup(|app| {
-            // 应用启动时自动启动 gateway
-            let config = app.state::<AppConfig>();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = start_gateway(config, gw_state).await {
-                    log::error!("Failed to start gateway: {}", e);
-                }
-            });
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+pub struct AgentDescriptor {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub aliases: Vec<String>,
 }
 ```
 
-### 5.4 优雅关闭
+初期哪怕只有 `nova` 一个真实 agent，也要把抽象先立起来。
 
-```rust
-// 在 Tauri setup 中注册窗口关闭事件
-app.on_window_event(|event| {
-    if let tauri::WindowEvent::CloseRequested { .. } = event.event() {
-        // 停止 gateway
-        tauri::async_runtime::block_on(async {
-            stop_gateway(gw_state).await.ok();
-        });
-    }
-});
-```
+### 4.2 WorkflowState
 
-### 5.5 Cargo.toml 依赖
+建议挂在 `SessionState` 上，不挂在全局状态上。  
+原因：workflow 是会话级，而不是服务级。
 
-```toml
-# src-tauri/Cargo.toml 新增
-[dependencies]
-zero-nova = { path = "../../zero-nova" }
-tokio-tungstenite = "0.24"
-uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
-```
+### 4.3 Interaction 与 Workflow 联动
 
-### 5.6 集成测试
+当 workflow 进入：
 
-1. 配置 `channel: "nova"` → 启动应用 → WS server 在 18801 端口可达
-2. 配置 `channel: "node"` → 启动应用 → Node.js sidecar 正常启动
-3. restart_gateway command → 旧 server 停止，新 server 启动
-4. 关闭窗口 → gateway 正确停止，无残留进程
+- `AwaitSelection`
+- `AwaitExecutionConfirmation`
 
-## Modified Files
+应自动生成 `PendingInteraction`，而不是让模型自由发挥。
 
-```
-src-tauri/src/
-├── commands/gateway.rs    # MAJOR REWRITE
-├── config.rs              # MODIFIED: 增加 NovaConfig
-├── lib.rs                 # MODIFIED: 注册 state 和 setup
-└── nova_gateway/mod.rs    # MODIFIED: pub start/stop 接口
-```
+## 5. 测试方案
 
-## Definition of Done
+### 5.1 Workflow 测试
 
-- [ ] `channel: "nova"` 配置下应用正常启动
-- [ ] WS server 自动启动，前端自动连接成功
-- [ ] `channel: "node"` 配置下原有行为不受影响
-- [ ] start/stop/restart commands 正常工作
-- [ ] 应用关闭时 gateway 正确清理
+覆盖：
+
+- 新任务进入 `solution-workflow`
+- 方案选择推进阶段
+- 部署确认推进阶段
+
+### 5.2 Multi-agent 测试
+
+覆盖：
+
+- 点名已存在 agent
+- 点名不存在 agent
+- 切换 active agent
+
+## 6. 风险点
+
+### 6.1 把 workflow 做成 prompt 约定而不是 runtime 状态
+
+这会让阶段不可观测，也无法做稳定确认。
+
+### 6.2 多 agent 直接建立在 `agents.switch` 协议之上
+
+协议切换只是外部接口，不是内部控制模型本身。  
+内部仍需要 `AgentContext / AgentRegistry`。
+
+## 7. 完成定义
+
+- `solution-workflow` 可运行
+- agent addressing 与切换可运行
+- interaction 与 workflow 已打通
+
+## 8. 给下一阶段的交接信息
+
+Phase 6 将在已有 control plane、workflow、multi-agent 之上，再引入 skill 与历史压缩，而不是重做控制模型。

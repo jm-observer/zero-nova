@@ -1,9 +1,8 @@
 use crate::message::Message;
 use crate::provider::types::Usage;
-use anyhow::Error;
 
-#[derive(Debug)]
-/// Turn complete event, containing new messages and usage information.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Agent events emitted during a turn.
 pub enum AgentEvent {
     /// Text delta emitted by the LLM.
     TextDelta(String),
@@ -25,5 +24,5 @@ pub enum AgentEvent {
     /// Agent reached the maximum number of iterations.
     IterationLimitReached { iterations: usize },
     /// Generic error event.
-    Error(Error),
+    Error(String),
 }

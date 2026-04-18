@@ -194,10 +194,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             if tool_calls.is_empty() {
                 completed_naturally = true;
                 let _ = event_tx
-                    .send(crate::event::AgentEvent::TurnComplete {
-                        new_messages: turn_messages.clone(),
-                        usage: cumulative_usage.clone(),
-                    })
+                    .send(crate::event::AgentEvent::TextDelta("".to_string())) // No-op to maintain stream if needed, but we removed TurnComplete
                     .await;
                 break;
             }

@@ -1,150 +1,168 @@
-# Phase 3: Session Management
+# Phase 3：会话模型与聊天生命周期修正
 
-## Goal
+> 前置依赖：Phase 2  
+> 基线代码：`src/gateway/session.rs`、`src/gateway/router.rs`、`src/agent.rs`
 
-实现内存会话存储，支持 OpenFlux 前端的会话列表、历史消息加载、新建会话等 UI 功能。
+## 1. 目标
 
-## Prerequisites
+当前系统已经能跑 chat，但 `session` 和 `chat` 生命周期仍然比较粗糙。  
+第三阶段要解决的是：**让“消息写入顺序、历史读取、并发约束、完成态”一致化。**
 
-- Phase 2 完成 (WS server + router 骨架)
+## 2. 当前问题
 
-## Tasks
+根据现有 `src`：
 
-### 3.1 实现 session.rs — SessionStore
+1. `SessionStore` 只有：
+   - `create`
+   - `create_with_id`
+   - `get`
+   - `get_all`
+2. `Session` 只有：
+   - `id`
+   - `name`
+   - `history`
+   - `created_at`
+   - `chat_lock`
+3. `handle_chat()` 当前是在 `run_turn()` 成功后才把 user message 写入 `history`。
+4. session 没有 `updated_at`
+5. session 没有统一的消息追加 API
+6. `sessions.messages` 直接 `serde_json::to_value(m).unwrap()`，对外格式不稳定
+
+这会导致：
+
+- 失败请求丢失 user message
+- 历史和真实会话状态不一致
+- 会话列表缺少排序依据
+
+## 3. 本 phase 范围
+
+### 3.1 要做
+
+- 重做 `SessionStore` API
+- 修正 `handle_chat()` 的读写顺序
+- 稳定会话消息输出格式
+- 引入 `updated_at`
+- 明确 session 级串行策略
+
+### 3.2 不做
+
+- 不做持久化数据库
+- 不做 history summary
+- 不做 workflow / agent context
+
+## 4. 设计结论
+
+### 4.1 `SessionStore` 必须负责消息追加
+
+不要让 `router` 直接抓 `RwLock<Vec<Message>>` 然后自己 push。  
+建议新增 API：
+
+- `append_user_text(...)`
+- `append_messages(...)`
+- `list_summaries(...)`
+- `get_history(...)`
+
+让 session 的时间戳和并发边界都由 store 负责。
+
+### 4.2 user message 必须先落库，再执行 runtime
+
+建议顺序：
+
+1. 校验/创建 session
+2. 获取 session lock
+3. 追加 user message
+4. 读取完整 history 作为 runtime 输入
+5. 执行 `run_turn()`
+6. 追加 assistant / tool messages
+7. 发送 `chat.complete`
+
+这样即使 LLM 失败，也能保留用户输入。
+
+### 4.3 会话对外格式单独转换
+
+不能继续直接 `serde_json::to_value(Message)`。  
+要单独定义转换函数，把内部 `Message` 变成稳定对外结构。
+
+## 5. 实现细节
+
+### 5.1 扩展 `Session`
+
+建议至少增加：
 
 ```rust
-pub struct SessionStore {
-    sessions: RwLock<HashMap<String, Session>>,
-}
-
 pub struct Session {
     pub id: String,
-    pub title: String,
-    pub agent_id: String,
-    pub messages: Vec<Message>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-impl SessionStore {
-    pub fn new() -> Self;
-
-    /// 创建新会话
-    pub async fn create(&self, title: &str, agent_id: &str) -> Session;
-
-    /// 列出所有会话 (按 updated_at 降序)
-    pub async fn list(&self) -> Vec<SessionSummary>;
-
-    /// 获取会话详情 (含消息历史)
-    pub async fn get(&self, id: &str) -> Option<Session>;
-
-    /// 获取消息历史 (只要 messages，给 run_turn 用)
-    pub async fn get_messages(&self, id: &str) -> Vec<Message>;
-
-    /// 追加消息 (user input + agent response)
-    pub async fn append_messages(&self, id: &str, msgs: &[Message]);
-
-    /// 更新标题 (可选: 从首条消息自动生成)
-    pub async fn update_title(&self, id: &str, title: &str);
-
-    /// 删除会话
-    pub async fn delete(&self, id: &str) -> bool;
-}
-
-/// 列表展示用的摘要 (不含完整消息)
-pub struct SessionSummary {
-    pub id: String,
-    pub title: String,
-    pub agent_id: String,
-    pub message_count: usize,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub name: String,
+    pub history: RwLock<Vec<Message>>,
+    pub created_at: i64,
+    pub updated_at: AtomicI64 or RwLock<i64>,
+    pub chat_lock: Mutex<()>,
 }
 ```
 
-### 3.2 实现 session handlers in router.rs
+### 5.2 扩展 `SessionStore`
 
-**sessions.list**:
+建议新增方法：
 
-```rust
-/// 返回格式需与 OpenFlux 前端 sessions store 对齐
-/// payload: [{ id, title, agentId, messageCount, createdAt, updatedAt }]
-async fn handle_sessions_list(msg, state, ws_tx) {
-    let sessions = state.sessions.list().await;
-    send(ws_tx, "sessions.list", msg.id, json!(sessions)).await;
-}
-```
+- `list()`
+- `append_messages(id, msgs)`
+- `append_user_text(id, text)`
+- `delete(id)`
 
-**sessions.get**:
+### 5.3 重写 `handle_chat()` 的持久化顺序
 
-```rust
-/// payload: { session: { id, title, ... }, messages: [...] }
-async fn handle_session_get(msg, state, ws_tx) {
-    let id = msg.payload["sessionId"].as_str();
-    match state.sessions.get(id).await {
-        Some(s) => send(ws_tx, "sessions.get", msg.id, json!({
-            "session": { "id": s.id, "title": s.title, ... },
-            "messages": convert_messages_to_frontend_format(&s.messages),
-        })).await,
-        None => send_error(ws_tx, msg.id, "Session not found").await,
-    }
-}
-```
+当前代码里：
 
-**sessions.create**:
+- 先取历史
+- 再 `run_turn()`
+- 成功后才写 user message
 
-```rust
-/// payload: { title?, agentId? }
-async fn handle_session_create(msg, state, ws_tx) {
-    let title = msg.payload["title"].as_str().unwrap_or("New Chat");
-    let session = state.sessions.create(title, "nova").await;
-    send(ws_tx, "sessions.create", msg.id, json!(session)).await;
-}
-```
+这个顺序必须修正。
 
-### 3.3 消息格式转换
+### 5.4 稳定 `sessions.list` / `sessions.messages`
 
-zero-nova 的 `Message { role, content: Vec<ContentBlock> }` 需要转为前端期望的格式:
+要求：
 
-```rust
-/// zero-nova Message → 前端展示格式
-fn convert_messages_to_frontend_format(msgs: &[Message]) -> Vec<serde_json::Value> {
-    msgs.iter().map(|m| json!({
-        "role": match m.role { Role::User => "user", Role::Assistant => "assistant" },
-        "content": m.content.iter().map(|block| match block {
-            ContentBlock::Text { text } => json!({ "type": "text", "text": text }),
-            ContentBlock::ToolUse { id, name, input } => json!({
-                "type": "tool_use", "id": id, "name": name, "input": input
-            }),
-            ContentBlock::ToolResult { tool_use_id, output, is_error } => json!({
-                "type": "tool_result", "tool_use_id": tool_use_id,
-                "output": output, "is_error": is_error
-            }),
-        }).collect::<Vec<_>>(),
-    })).collect()
-}
-```
+- `sessions.list` 使用 `updated_at` 排序
+- `sessions.messages` 使用稳定 DTO，不直接透出内部序列化结果
 
-### 3.4 单元测试
+## 6. 测试方案
 
-- SessionStore CRUD 操作
-- 并发读写安全性 (多个 tokio task 同时操作)
-- 消息格式转换正确性
-- 空会话 / 不存在的会话 边界处理
+### 6.1 SessionStore 单元测试
 
-## New/Modified Files
+覆盖：
 
-```
-src-tauri/src/nova_gateway/
-├── session.rs    # NEW
-├── router.rs     # MODIFIED: 加入 session handlers
-└── mod.rs        # MODIFIED: pub mod session
-```
+- 创建
+- 获取
+- 列表排序
+- 追加消息
+- 删除
 
-## Definition of Done
+### 6.2 Chat 生命周期测试
 
-- [ ] sessions.list 返回会话列表
-- [ ] sessions.create 创建新会话
-- [ ] sessions.get 返回会话详情和消息历史
-- [ ] 消息格式与前端渲染器兼容
-- [ ] 单元测试通过
+覆盖：
+
+- 成功对话
+- 失败对话仍保留 user message
+- 同 session 并发聊天被串行化
+
+## 7. 风险点
+
+### 7.1 继续在 router 内直接写 `session.history`
+
+这是后续演进的大障碍，必须收口。
+
+### 7.2 用 `serde_json::to_value(Message)` 充当 API contract
+
+这会让协议被内部结构绑死。
+
+## 8. 完成定义
+
+- SessionStore 已有完整基本 API
+- `handle_chat()` 写入顺序已修正
+- user message 不再因失败丢失
+- `sessions.*` 输出稳定
+
+## 9. 给下一阶段的交接信息
+
+Phase 4 会在稳定的 session/chat 生命周期之上，引入会话控制层骨架，而不是先碰控制逻辑。

@@ -15,19 +15,23 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
         AgentEvent::ToolStart { id, name, input } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "tool_start".to_string(),
             session_id: Some(session_id.to_string()),
-            tool: Some(format!("{}:{}", name, id)),
+            tool_name: Some(name.clone()),
+            tool_use_id: Some(id.clone()),
             args: Some(input),
             ..Default::default()
         }),
         AgentEvent::ToolEnd {
-            id: _,
-            name: _,
+            id,
+            name,
             output,
-            is_error: _,
+            is_error,
         } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "tool_result".to_string(),
             session_id: Some(session_id.to_string()),
+            tool_name: Some(name.clone()),
+            tool_use_id: Some(id.clone()),
             result: Some(output.into()),
+            is_error: Some(is_error),
             ..Default::default()
         }),
         AgentEvent::TurnComplete { new_messages, usage } => {

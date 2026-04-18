@@ -1,156 +1,166 @@
-# Phase 6: Polish & Production Ready
+# Phase 6：Skill 接入、历史管理与稳定性收口
 
-## Goal
+> 前置依赖：Phase 1-5  
+> 相关设计：`docs/skill-system-design.md`、`docs/conversation-control-plane-design.md`
 
-前端兼容性调试、边界情况处理、日志完善，确保端到端可用。
+## 1. 目标
 
-## Prerequisites
+第六阶段才处理 skill。  
+原因很简单：在当前 `src` 基础上，**skill 不是顶层问题**，控制层才是。  
+等 session、chat 生命周期、control plane、workflow、multi-agent 都稳定后，再把 skill 作为执行层能力接进来，成本最低。
 
-- Phase 5 完成 (Tauri 集成可运行)
-- 能在 OpenFlux 前端中正常打开聊天界面
+本阶段目标：
 
-## Tasks
+- skill 定义与加载
+- skill prompt 注入
+- tool 白名单过滤
+- 历史消息摘要压缩
+- 日志与稳定性收口
 
-### 6.1 前端兼容性调试
+## 2. 本 phase 范围
 
-这是最关键的调试阶段。OpenFlux 前端的各种 UI 组件对 WebSocket 消息的字段名、结构有具体期望。
+### 2.1 要做
 
-**方法**: 在浏览器 DevTools 中观察前端对收到消息的解析，逐一对齐:
+- 接入 `src/skill/*`
+- 调整 `prompt.rs`
+- 调整 `tool.rs`
+- 引入 skill history 管理
+- 完善日志与回归测试
 
-- [ ] `chat.progress` 的 token 字段能被 markdown 渲染器正确消费
-- [ ] `chat.progress` 的 tool 事件能被工具调用 UI 正确展示
-- [ ] `chat.complete` 后消息正确添加到对话列表
-- [ ] `sessions.list` 返回的格式能被侧边栏正确渲染
-- [ ] `sessions.get` 的历史消息能正确回显
-- [ ] `agents.list` 能在 agent 选择器中正确展示
+### 2.2 不做
 
-### 6.2 消息格式微调
+- 不把 skill 提升回顶层入口
+- 不做过度复杂的 skill 组合执行
 
-根据 6.1 调试结果，可能需要调整:
+## 3. 设计结论
 
-```rust
-// bridge.rs 中可能需要的调整示例:
+### 3.1 skill 是执行层，不是控制层
 
-// 前端可能期望 progress 包含 iteration 信息
-AgentEvent::TextDelta(text) => json!({
-    "kind": "token",
-    "token": text,
-    "iteration": current_iteration,  // 可能需要新增
-})
+最终分层应是：
 
-// 前端可能期望 tool 信息包含描述
-AgentEvent::ToolStart { name, input, .. } => json!({
-    "kind": "tool_start",
-    "name": name,
-    "description": format!("Calling {}", name),  // 可能需要
-    "input": input,
-})
-```
+- control plane
+- workflow / agent context
+- skill
+- tool execution
 
-### 6.3 并发与稳定性
+不要反过来让 skill 再次决定顶层输入流向。
 
-- [ ] 快速连续发送多条消息: 前一条未完成时发送下一条，应排队或拒绝
-- [ ] 客户端断开重连: WS server 正确清理旧连接状态
-- [ ] Agent 执行超时: 设置合理的 max_iterations，避免无限循环
-- [ ] 大量文本输出: 工具返回超长内容时的截断处理
+### 3.2 `SystemPromptBuilder` 要从“全量工具静态拼接”升级成“按 turn 组装”
 
-```rust
-// 消息排队/拒绝机制
-struct ConnectionState {
-    is_processing: AtomicBool,
-}
+当前 `src/prompt.rs` 的问题是：
 
-async fn handle_chat(msg, state, ws_tx) {
-    if state.conn.is_processing.swap(true, Ordering::SeqCst) {
-        send_error(ws_tx, msg.id, "A chat request is already in progress").await;
-        return;
-    }
-    // ... 执行 agent
-    state.conn.is_processing.store(false, Ordering::SeqCst);
-}
-```
+- 默认 prompt 固定
+- `.with_tools(&registry)` 会把全部工具描述塞进去
 
-### 6.4 日志体系
+Phase 6 需要改成：
 
-```rust
-// server.rs
-log::info!("[nova-gw] WS server listening on {}:{}", host, port);
-log::info!("[nova-gw] Client connected: {}", addr);
-log::debug!("[nova-gw] ← recv: type={}", msg.msg_type);
-log::debug!("[nova-gw] → send: type={}", response.msg_type);
+- base prompt
+- skill prompt（可选）
+- environment info（可选）
+- filtered tools
 
-// router.rs
-log::info!("[nova-gw] chat start: session={}, input_len={}", session_id, input.len());
-log::info!("[nova-gw] chat complete: session={}, tokens={}/{}",
-    session_id, usage.input_tokens, usage.output_tokens);
-log::error!("[nova-gw] chat error: session={}, err={}", session_id, e);
+### 3.3 `ToolRegistry` 需要支持过滤
 
-// bridge.rs
-log::trace!("[nova-gw] bridge: {:?} → {}", event_type, msg_type);
-```
+当前只有：
 
-### 6.5 优雅关闭增强
+- `tool_definitions()`
+- `execute(name, input)`
+
+需要补：
+
+- `tool_definitions_filtered(...)`
+
+以便 skill 或 workflow 限制工具暴露面。
+
+## 4. 实现细节
+
+### 4.1 接入 skill 模块
+
+在当前 `src` 结构上，skill 相关代码应作为新增模块接入，而不是侵入 `gateway`。
+
+### 4.2 引入按 turn 的上下文对象
+
+建议在 runtime 层引入：
 
 ```rust
-// 使用 CancellationToken 实现优雅关闭
-use tokio_util::sync::CancellationToken;
-
-pub struct NovaGateway {
-    cancel: CancellationToken,
-}
-
-impl NovaGateway {
-    pub async fn start(...) -> Self {
-        let cancel = CancellationToken::new();
-        let token = cancel.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = token.cancelled() => {
-                        log::info!("[nova-gw] shutting down...");
-                        break;
-                    }
-                    result = listener.accept() => {
-                        // handle connection
-                    }
-                }
-            }
-        });
-
-        Self { cancel }
-    }
-
-    pub fn stop(&self) {
-        self.cancel.cancel();
-    }
+pub struct TurnContext {
+    pub system_prompt: String,
+    pub tool_definitions: Vec<ToolDefinition>,
+    pub history: Vec<Message>,
+    pub active_skill: Option<String>,
 }
 ```
 
-### 6.6 可选: 持久化 SessionStore
+这样 `AgentRuntime::run_turn()` 才能摆脱“固定 prompt + 全量工具”的限制。
 
-如果需要重启后保留会话历史:
+### 4.3 引入历史压缩
 
-```rust
-// 使用 SQLite (via rusqlite)
-pub struct SqliteSessionStore {
-    db: Connection,
-}
+当 skill 或 workflow 上下文发生明显切换时，对旧历史做规则摘要，而不是永远把全量 history 带给模型。
 
-// 或简单方案: JSON 文件
-pub struct FileSessionStore {
-    path: PathBuf,
-}
+## 5. 稳定性收口
+
+这一阶段要补：
+
+- 更完整日志
+- 更清晰错误码
+- timeout / cancel 回归测试
+- protocol / control plane / skill 的组合测试
+
+## 6. 测试方案
+
+### 6.1 Skill 测试
+
+覆盖：
+
+- 目录加载
+- prompt 注入
+- 工具过滤
+- skill fallback
+
+### 6.2 历史测试
+
+覆盖：
+
+- 同 skill 下完整保留
+- 切 skill 后触发摘要
+- 摘要保留必要上下文
+
+### 6.3 全量回归
+
+命令：
+
+```powershell
+cargo clippy --workspace -- -D warnings
+cargo fmt --check --all
+cargo test --workspace
 ```
 
-MVP 阶段保持 in-memory 即可，此项标记为 optional。
+## 7. 风险点
 
-## Definition of Done
+### 7.1 在控制层未稳定前先接 skill
 
-- [ ] OpenFlux 前端所有 UI 功能正常工作
-- [ ] 聊天流式输出平滑无卡顿
-- [ ] 工具调用过程正确展示
-- [ ] 会话切换和历史加载正常
-- [ ] 错误情况有明确的 UI 提示
-- [ ] 应用启动/关闭无异常
-- [ ] 日志输出清晰可追踪
+这会导致 skill 承担本不该承担的顶层职责，最终还是要返工。
+
+### 7.2 历史压缩做得过早或过重
+
+先做规则摘要，不要一开始就引入昂贵 LLM 摘要路径。
+
+## 8. 完成定义
+
+- skill 已作为执行层能力接入
+- prompt 和工具按 turn 动态组装
+- 历史压缩可工作
+- 系统进入相对稳定可扩展状态
+
+## 9. 最终交付判断
+
+当 Phase 6 完成时，系统应具备：
+
+- 稳定后端网关
+- 可控会话模型
+- control plane
+- workflow
+- multi-agent
+- skill 执行层
+
+这时再继续扩展新 agent / 新 workflow / 新 skill，成本才是线性的，而不是继续堆 patch。

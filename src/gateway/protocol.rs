@@ -210,9 +210,11 @@ pub struct ProgressEvent {
     pub kind: String, // 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete'
     pub session_id: Option<String>,
     pub iteration: Option<i32>,
-    pub tool: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_use_id: Option<String>,
     pub args: Option<Value>,
     pub result: Option<Value>,
+    pub is_error: Option<bool>,
     pub thinking: Option<String>,
     pub token: Option<String>,
     pub output: Option<String>,

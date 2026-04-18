@@ -1,185 +1,157 @@
-# Phase 4: Chat Integration
+# Phase 4：会话控制层骨架
 
-## Goal
+> 前置依赖：Phase 1-3  
+> 基线设计：`docs/conversation-control-plane-design.md`
 
-替换 Phase 2 的 chat stub，接入真实的 zero-nova AgentRuntime，实现完整的流式聊天功能。这是整个集成的核心阶段。
+## 1. 目标
 
-## Prerequisites
+这是从“普通 chat gateway”走向“可控 agent 系统”的第一阶段。  
+第四阶段不直接做完整 workflow，而是先把**会话控制层骨架**接到当前 `src` 结构上。
 
-- Phase 1-3 全部完成
-- ANTHROPIC_API_KEY 环境变量可用
+核心目标：
 
-## Tasks
+- 在 `gateway/router` 之前增加一层 turn 解释
+- 让 session 不只知道 `history`，还知道：
+  - 当前 active agent
+  - 当前 workflow
+  - 当前 pending interaction
 
-### 4.1 实现 handle_chat — 完整版
+## 2. 当前问题
 
-核心流程:
+当前 `src` 的路由方式本质上只有一种：
 
-```
-Client                      Router                    Bridge / Agent
-  │                            │                           │
-  │─── {type:"chat"} ────────►│                           │
-  │                            │ 1. parse payload          │
-  │                            │ 2. get/create session     │
-  │                            │ 3. load history           │
-  │◄── {type:"chat.start"} ───│                           │
-  │                            │ 4. create mpsc channel    │
-  │                            │ 5. spawn forwarder task ─►│
-  │                            │ 6. agent.run_turn() ─────►│
-  │                            │                           │── LLM call
-  │                            │              TextDelta ◄──│
-  │◄── {chat.progress/token} ──│◄─── bridge convert ──────│
-  │                            │              ToolStart ◄──│
-  │◄── {chat.progress/tool} ───│◄─── bridge convert ──────│
-  │                            │              ToolEnd   ◄──│
-  │◄── {chat.progress/tool} ───│◄─── bridge convert ──────│
-  │                            │           TurnComplete ◄──│
-  │◄── {type:"chat.complete"} ─│ 7. save messages          │
-  │                            │ 8. update session title   │
-  │                            │                           │
-```
+- 收到 `chat`
+- 直接调 `agent.run_turn()`
 
-### 4.2 详细实现
+这无法覆盖：
+
+- 多 agent 点名
+- 自然语言确认
+- 长流程任务
+- workflow 续接
+
+所以第四阶段的重点不是“多加几个 handler”，而是引入新的顶层状态机入口。
+
+## 3. 本 phase 范围
+
+### 3.1 要做
+
+- 定义 `SessionState`
+- 定义 `TurnRouter`
+- 定义 `PendingInteraction`
+- 在 `chat` 路径前插入 turn 解释层
+
+### 3.2 不做
+
+- 不做完整 solution workflow
+- 不做 skill 路由
+- 不做 agent 自动协商
+
+## 4. 设计结论
+
+### 4.1 新增 `SessionState`
+
+建议不要再让 session 只有 `history`。  
+引入一个更完整的会话状态：
 
 ```rust
-async fn handle_chat(
-    msg: GatewayMessage,
-    state: &Arc<GatewayState>,
-    ws_tx: &WsSender,
-) {
-    let request_id = msg.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-    let payload = msg.payload.unwrap_or(json!({}));
-
-    let input = payload["input"].as_str().unwrap_or("").to_string();
-    let session_id = payload["sessionId"]
-        .as_str()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            // 无 sessionId 时自动创建
-            // 注意: 实际需要 async，这里简化表示
-            Uuid::new_v4().to_string()
-        });
-
-    // 1. 加载历史
-    let history = state.sessions.get_messages(&session_id).await;
-
-    // 2. 添加 user message 到 session
-    let user_msg = Message {
-        role: Role::User,
-        content: vec![ContentBlock::Text { text: input.clone() }],
-    };
-    state.sessions.append_messages(&session_id, &[user_msg]).await;
-
-    // 3. 通知前端开始
-    send(ws_tx, GatewayMessage::new("chat.start", &request_id, json!({}))).await;
-
-    // 4. 创建事件通道
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
-
-    // 5. 启动转发任务: AgentEvent → WS
-    let ws_tx_clone = ws_tx.clone();
-    let rid = request_id.clone();
-    let forwarder = tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            let ws_msg = bridge::agent_event_to_gateway_msg(&event, &rid);
-            // TurnComplete 不在这里发，由主流程发 chat.complete
-            if ws_msg.msg_type != "chat.complete" {
-                let _ = ws_tx_clone.send(ws_msg).await;
-            }
-        }
-    });
-
-    // 6. 执行 Agent
-    let result = {
-        let agent = state.agent.lock().await;
-        agent.run_turn(&history, &input, event_tx).await
-    };
-
-    // 等待转发任务完成
-    let _ = forwarder.await;
-
-    // 7. 处理结果
-    match result {
-        Ok(new_msgs) => {
-            // 保存 assistant 消息到 session
-            state.sessions.append_messages(&session_id, &new_msgs).await;
-
-            // 提取纯文本作为 output
-            let output = extract_assistant_text(&new_msgs);
-
-            send(ws_tx, GatewayMessage::new("chat.complete", &request_id, json!({
-                "output": output,
-                "sessionId": session_id,
-            }))).await;
-        }
-        Err(e) => {
-            send(ws_tx, GatewayMessage::new("chat.error", &request_id, json!({
-                "message": e.to_string(),
-            }))).await;
-        }
-    }
+pub struct SessionState {
+    pub active_agent: String,
+    pub pending_interaction: Option<PendingInteraction>,
+    pub workflow: Option<WorkflowState>,
 }
 ```
 
-### 4.3 辅助函数
+这部分可以先挂在 `Session` 上，哪怕最开始字段都是 `Option`。
+
+### 4.2 新增 `TurnRouter`
+
+建议优先级：
+
+1. 解析 `pending_interaction`
+2. 解析 agent 点名
+3. 解析 workflow 续接
+4. 否则按普通 chat/new task 处理
+
+### 4.3 `handle_chat()` 不再直接等于“执行 LLM”
+
+当前 `handle_chat()` 既是入口，又是执行器。  
+Phase 4 后，它应拆成：
+
+- `route_turn(...)`
+- `execute_turn(...)`
+
+## 5. 实现细节
+
+### 5.1 新增控制层模块
+
+建议新增：
+
+```text
+src/control/
+├── mod.rs
+├── turn_router.rs
+├── interaction.rs
+└── workflow.rs
+```
+
+初期只实现最小结构，不追求功能完整。
+
+### 5.2 最小 `PendingInteraction`
+
+建议先支持两类：
+
+- `ApproveAction`
+- `SelectOption`
+
+足够验证自然语言确认这条链路。
+
+### 5.3 `TurnRouter` 的最小输出
+
+例如：
 
 ```rust
-/// 从 assistant 消息中提取纯文本
-fn extract_assistant_text(msgs: &[Message]) -> String {
-    msgs.iter()
-        .filter(|m| m.role == Role::Assistant)
-        .flat_map(|m| m.content.iter())
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("")
+pub enum TurnIntent {
+    ResolvePendingInteraction,
+    AddressAgent,
+    ContinueWorkflow,
+    ExecuteChat,
 }
 ```
 
-### 4.4 并发安全考虑
+## 6. 测试方案
 
-当前 AgentRuntime 通过 `Mutex<AgentRuntime>` 包装:
-- 同一时间只有一个 chat 请求可以执行 (agent.lock)
-- 如果需要并发，后续可以改为每次 clone AgentRuntime 或使用 agent pool
+### 6.1 单元测试
 
-对于 MVP 阶段，单一 Mutex 足够 (桌面应用通常只有一个用户)。
+覆盖：
 
-### 4.5 Chat Progress 格式对齐
+- session 有 pending interaction 时，`继续` 被路由到 interaction resolver
+- `OpenClaw 在不在` 被识别为 agent addressing
+- 普通问题落到 `ExecuteChat`
 
-需要确认 OpenFlux 前端 `onProgress` handler 期望的 payload 字段:
+### 6.2 集成测试
 
-```typescript
-// gateway-client.ts 中的 progress 处理
-// 需要验证前端解析的具体字段名
-onProgress(handler: (event: ProgressEvent) => void)
-```
+最小覆盖：
 
-可能需要微调 bridge.rs 的输出格式以匹配前端期望。这是集成中最可能需要调试的地方。
+- 先挂起一个 interaction，再发送自然语言确认
+- 无 interaction 时发送相同文本，不应被误判
 
-### 4.6 端到端测试
+## 7. 风险点
 
-1. **纯文本对话**: 发送简单问题 → 收到 token 流 → complete
-2. **工具调用**: 发送需要调用 bash/file 的指令 → 收到 tool_start/tool_end → 最终回复
-3. **多轮对话**: 在同一 session 中连续发送多条消息 → 验证历史上下文正确传递
-4. **错误处理**: 无效 API key → 收到 chat.error
-5. **长时间执行**: 多轮工具调用 → 所有 progress 事件都正确传递
+### 7.1 在现有 `router.rs` 里继续堆 if/else
 
-## Modified Files
+应新增控制层模块，不要继续把控制逻辑塞回 gateway router。
 
-```
-src-tauri/src/nova_gateway/
-├── router.rs     # MODIFIED: handle_chat 从 stub 替换为真实实现
-├── bridge.rs     # MODIFIED: 可能微调 progress payload 格式
-└── session.rs    # MODIFIED: 可能需要调整 append 逻辑
-```
+### 7.2 workflow / interaction 状态只存在 prompt 里
 
-## Definition of Done
+关键状态必须落在 runtime，不然这个 phase 等于没做。
 
-- [ ] 发送 chat 消息能触发 zero-nova agent 执行
-- [ ] TextDelta 流式传递到前端 (chat.progress/token)
-- [ ] 工具调用正确展示 (tool_start → tool_end)
-- [ ] 对话历史正确保存和加载
-- [ ] 多轮对话上下文连贯
-- [ ] 错误情况正确返回 chat.error
+## 8. 完成定义
+
+- `Session` 已具备控制层扩展位
+- `TurnRouter` 已接入 chat 入口
+- 最小 `PendingInteraction` 能工作
+
+## 9. 给下一阶段的交接信息
+
+Phase 5 会在这层控制骨架上，接入 workflow 与 multi-agent，而不是再回头改 session 结构。

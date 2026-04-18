@@ -1,5 +1,5 @@
 use crate::gateway::protocol::{GatewayMessage, MessageEnvelope, WelcomePayload};
-use crate::gateway::router::{handle_message, AppState};
+use crate::gateway::router::{AppState, handle_message};
 use futures_util::{SinkExt, StreamExt};
 use log::info;
 use std::net::SocketAddr;

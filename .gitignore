@@ -6,3 +6,4 @@
 .DS_Store
 Thumbs.db
 Cargo.lock
+node_modules

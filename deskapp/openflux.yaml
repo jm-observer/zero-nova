@@ -1,0 +1,264 @@
+# OpenFlux 配置文件
+
+# ========================
+# LLM 供应商配置
+# ========================
+providers:
+  openai:
+    apiKey: 123
+    baseUrl: http://192.168.0.68:12340/v1
+
+# ========================
+# LLM 使用配置 
+# ========================
+llm:
+  # 主编排 LLM (用于任务规划)
+  # 注意：Kimi K2.5 不支持自定义 temperature，只能使用默认值
+  orchestration:
+    provider: moonshot
+    model: kimi-k2.5
+    # temperature: 不传，Kimi K2.5 只允许默认值
+    maxTokens: 4096
+
+  # 执行 LLM (用于工具调用)
+  execution:
+    provider: moonshot
+    model: kimi-k2.5
+    # temperature: 不传，Kimi K2.5 只允许默认值
+    maxTokens: 4096
+
+  # 嵌入 LLM (用于长期记忆，已随安装包打包)
+  # ------------------------------------------------------------------
+  # 默认: 折中均衡 (已打包，vectorDim: 384)
+  # model: Xenova/paraphrase-multilingual-MiniLM-L12-v2
+  # 大小: ~120MB | 语言: 中英均衡 | 速度: 快
+  # ------------------------------------------------------------------
+  # 可选: 性能最强 (需额外下载 ~560MB，vectorDim: 1024)
+  # model: Xenova/bge-m3
+  # ------------------------------------------------------------------
+  embedding:
+    provider: local
+    model: Xenova/paraphrase-multilingual-MiniLM-L12-v2
+
+  # 备用 LLM (可选)
+  fallback:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.5
+
+# ========================
+# 长期记忆配置
+# ========================
+memory:
+  enabled: false
+  dbName: openflux_memory.db
+  vectorDim: 384
+  debug: false
+  distillation:
+    enabled: true
+    startTime: "02:00"
+    endTime: "06:00"
+    qualityThreshold: 40
+    sessionDensityThreshold: 5
+    similarityThreshold: 0.85
+
+# ========================
+# 远程访问配置
+# ========================
+remote:
+  enabled: true
+  port: 18801
+  # token: your-secret-token
+
+# ========================
+# 权限配置
+# ========================
+permissions:
+  autoApproveLevel: 1
+  allowedDirectories:
+    - D:\edeProject
+  blockedDirectories:
+    - C:\Windows
+    - C:\Program Files
+
+# ========================
+# 浏览器和工具配置
+# ========================
+browser:
+  enabled: true
+  headless: false
+
+opencode:
+  enabled: true
+  autoApprove: false
+
+# ========================
+# Web 搜索与获取配置
+# ========================
+web:
+  search:
+    # 搜索提供商: brave 或 perplexity
+    provider: brave
+    # Brave Search API Key（免费层：每月 2000 次请求）
+    # 申请地址: https://brave.com/search/api/
+    apiKey: ${BRAVE_API_KEY}
+    # 默认返回结果数
+    maxResults: 5
+    # 超时时间（秒）
+    timeoutSeconds: 30
+    # 缓存 TTL（分钟）
+    cacheTtlMinutes: 15
+    # Perplexity 配置（当 provider: perplexity 时生效）
+    # perplexity:
+    #   apiKey: ${PERPLEXITY_API_KEY}
+    #   baseUrl: https://api.perplexity.ai
+    #   model: perplexity/sonar-pro
+
+  fetch:
+    # 是否启用 Readability 提取（默认 true）
+    readability: true
+    # 最大字符数
+    maxChars: 50000
+    # 超时时间（秒）
+    timeoutSeconds: 30
+    # 缓存 TTL（分钟）
+    cacheTtlMinutes: 15
+    # Firecrawl 配置（可选，用于 JS 密集型网站的回退提取）
+    # firecrawl:
+    #   apiKey: ${FIRECRAWL_API_KEY}
+    #   baseUrl: https://api.firecrawl.dev
+    #   onlyMainContent: true
+
+# ========================
+# MCP 外部工具服务器配置
+# ========================
+# mcp:
+#   servers:
+#     - name: excel
+#       transport: stdio
+#       command: uvx
+#       args: ["excel-mcp-server", "stdio"]
+#       # enabled: true
+#       # timeout: 30
+#     - name: ppt
+#       transport: stdio
+#       command: uvx
+#       args: ["--from", "office-powerpoint-mcp-server", "ppt_mcp_server"]
+
+# workspace: .
+
+# ========================
+# 语音配置（STT + TTS）
+# ========================
+voice:
+  stt:
+    enabled: false
+    # 模型目录（可选，默认自动搜索 resources/models/sherpa-onnx/）
+    # modelDir: D:\path\to\sherpa-onnx-paraformer-zh-2023-09-14
+    # numThreads: 2
+  tts:
+    enabled: true
+    voice: zh-CN-XiaoxiaoNeural    # 默认语音角色
+    rate: "+0%"                     # 语速调节
+    autoPlay: false                 # 是否自动播放助手回复
+
+# ========================
+# 多 Agent 配置
+# ========================
+agents:
+  # 路由配置（自动分析用户意图，分派到合适的 Agent）
+  router:
+    enabled: true
+    # 路由模型（可选，默认复用 orchestration）
+    # model:
+    #   provider: moonshot
+    #   model: kimi-k2.5
+
+  # 全局默认配置（被各 Agent 继承）
+  defaults:
+    tools:
+      profile: full
+    subagents:
+      maxConcurrent: 5
+      defaultTimeout: 300
+      tools:
+        deny:
+          - scheduler
+          - workflow
+          - desktop
+
+  # Agent 列表
+  list:
+    - id: default
+      default: true
+      name: "通用助手"
+      description: "处理一般性问题、闲聊、知识问答、信息查询、文本翻译、方案咨询等不涉及文件操作和代码执行的任务"
+      tools:
+        profile: full
+
+    - id: coder
+      name: "编码助手"
+      description: "处理编程、文件操作、代码编写、代码重构、脚本执行、视频/图片/音频等文件生成、数据处理、文档生成等需要使用工具的任务"
+      tools:
+        profile: coding
+
+    - id: automation
+      name: "自动化助手"
+      description: "处理浏览器网页操作（搜索、网购、采购、下单、表单填写）、桌面应用控制、定时任务、工作流自动化、网页数据抓取等自动化任务"
+      tools:
+        profile: automation
+
+# ========================
+# 沙盒隔离配置
+# ========================
+sandbox:
+  # 执行模式: local（仅代码加固）| docker（容器隔离）
+  mode: local
+  # Docker 配置（mode: docker 时生效）
+  # 使用前需先构建镜像: docker build -f Dockerfile.sandbox -t openflux-sandbox .
+  # docker:
+  #   image: openflux-sandbox
+  #   memoryLimit: 512m
+  #   cpuLimit: "1"
+  #   networkMode: none         # none=断网, bridge=允许网络
+  #   cacheVolumes:
+  #     nexus-npm-cache: /root/.npm
+  #     nexus-pip-cache: /root/.cache/pip
+  #   timeout: 60
+  # 命令白名单（可选，设置后只允许这些命令前缀）
+  # allowedCommands:
+  #   - node
+  #   - npm
+  #   - npx
+  #   - python
+  #   - pip
+  #   - git
+  #   - conda
+  # 禁止写入的文件扩展名（默认已内置 exe/bat/cmd/ps1 等）
+  blockedExtensions:
+    - exe
+    - bat
+    - ps1
+    - cmd
+    - vbs
+    - reg
+    - msi
+
+# ========================
+# 预置模型列表（UI 下拉菜单默认选项）
+# ========================
+presetModels:
+  openai:
+    - value: google/gemma-4-31B-it
+      label: "gemma-4-31B-it"
+      multimodal: true
+
+# ========================
+# Sidecar 配置 (AI Engine)
+# ========================
+sidecar:
+  name: "Built-in Gateway"
+  command: "D:\git\zero-nova\target\debug\nova_gateway.exe"
+  args: []
+  working_dir: "."
+  port_arg: "--port"

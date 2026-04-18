@@ -1,4 +1,6 @@
 use crate::tool::ToolRegistry;
+use std::fs;
+use std::path::Path;
 
 /// Builder for constructing system prompts with optional sections.
 pub struct SystemPromptBuilder {
@@ -6,21 +8,43 @@ pub struct SystemPromptBuilder {
 }
 
 impl SystemPromptBuilder {
-    /// Creates a new SystemPromptBuilder and loads the default prompt.
-    pub fn new() -> Self {
-        // Load default prompt from the prompts/default.md file at compile time.
-        // If the file contains any content (non‑empty after trimming), it will be added as the initial section.
+    /// Creates a new `SystemPromptBuilder` by loading the default prompt from a specific base path.
+    /// If the file `prompts/default.md` does not exist at the given base path, it falls back to an empty builder.
+    pub fn new_from_path(base_path: &Path) -> Self {
         let mut builder = Self { sections: Vec::new() };
-        let default_content = include_str!("../prompts/default.md");
-        if !default_content.trim().is_empty() {
-            builder.sections.push(default_content.to_string());
+        let prompt_path = base_path.join("prompts").join("default.md");
+
+        match fs::read_to_string(&prompt_path) {
+            Ok(content) => {
+                if !content.trim().is_empty() {
+                    builder.sections.push(content);
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "Could not load default prompt from {:?}: {}. Using empty prompt.",
+                    prompt_path,
+                    e
+                );
+            }
         }
         builder
+    }
+
+    /// Creates a new `SystemPromptBuilder` and loads the default prompt from the current directory.
+    pub fn new() -> Self {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Self::new_from_path(&current_dir)
     }
 
     /// Creates a builder pre‑configured for a personal assistant role.
     pub fn personal_assistant() -> Self {
         Self::new()
+    }
+
+    /// Creates a builder pre‑configured for a personal assistant role from a specific base path.
+    pub fn personal_assistant_from_path(base_path: &Path) -> Self {
+        Self::new_from_path(base_path)
     }
 
     /// Adds a role section to the prompt.

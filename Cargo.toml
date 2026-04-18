@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "deskapp/src-tauri"]
+
 [package]
 name = "zero-nova"
 version = "0.1.0"

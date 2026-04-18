@@ -12,9 +12,11 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     let menu = MenuBuilder::new(app).items(&[&show, &quit]).build()?;
 
     let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().cloned().unwrap_or_else(|| {
-            tauri::image::Image::new_owned(vec![0u8; 4 * 32 * 32], 32, 32)
-        }))
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .unwrap_or_else(|| tauri::image::Image::new_owned(vec![0u8; 4 * 32 * 32], 32, 32)),
+        )
         .tooltip("OpenFlux")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {

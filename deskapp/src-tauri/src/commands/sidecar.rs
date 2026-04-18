@@ -1,5 +1,5 @@
 use crate::config::{AppConfig, SidecarManagementMode};
-use log::{error, info, warn};
+use log::{error, info};
 use serde::Serialize;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -34,11 +34,15 @@ impl GatewaySidecar {
     }
 }
 
+impl Default for GatewaySidecar {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// [COMPATIBILITY] 获取配置。前端仍调用 get_gateway_config，但返回的是 sidecar 的配置。
 #[tauri::command]
-pub async fn get_gateway_config(
-    config: tauri::State<'_, AppConfig>,
-) -> Result<GatewayConfig, String> {
+pub async fn get_gateway_config(config: tauri::State<'_, AppConfig>) -> Result<GatewayConfig, String> {
     Ok(GatewayConfig {
         url: format!("ws://{}:{}", config.host, config.port),
         token: config.token.clone(),
@@ -55,9 +59,13 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     let config = config.inner();
 
     // 1. 获取基础命令
-    let name = config.sidecar.name.clone();
+    let _name = config.sidecar.name.clone();
     let mut args = config.sidecar.args.clone().unwrap_or_default();
-    let working_dir = config.sidecar.working_dir.clone().unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
+    let working_dir = config
+        .sidecar
+        .working_dir
+        .clone()
+        .unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
 
     // 2. 注入端口参数
     if let Some(arg_fmt) = &config.sidecar.port_arg {
@@ -123,7 +131,10 @@ pub fn start_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
     cmd.creation_flags(CREATE_NO_WINDOW);
 
     let mut child = cmd.spawn().map_err(|e| {
-        let err_msg = format!("Failed to spawn sidecar '{}' ({}): {}", config.sidecar.name, config.sidecar.command, e);
+        let err_msg = format!(
+            "Failed to spawn sidecar '{}' ({}): {}",
+            config.sidecar.name, config.sidecar.command, e
+        );
         error!("[Sidecar:ERR] {}", err_msg);
         err_msg
     })?;
@@ -133,10 +144,8 @@ pub fn start_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
         std::thread::spawn(move || {
             use std::io::BufRead;
             let reader = std::io::BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    info!("[Sidecar] {}", line);
-                }
+            for line in reader.lines().map_while(Result::ok) {
+                info!("[Sidecar] {}", line);
             }
         });
     }
@@ -145,10 +154,8 @@ pub fn start_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
         std::thread::spawn(move || {
             use std::io::BufRead;
             let reader = std::io::BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    error!("[Sidecar:ERR] {}", line);
-                }
+            for line in reader.lines().map_while(Result::ok) {
+                error!("[Sidecar:ERR] {}", line);
             }
         });
     }
@@ -166,7 +173,7 @@ pub fn stop_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<Mutex<GatewaySidecar>>();
     let mut sidecar = state.lock().map_err(|e| e.to_string())?;
 
-    if let Some(mut child) = sidecar.child.take() {
+    if let Some(child) = sidecar.child.take() {
         let pid = child.id();
         #[cfg(target_os = "windows")]
         {
@@ -209,7 +216,7 @@ pub async fn restart_gateway(app: AppHandle) -> Result<(), String> {
     if config.sidecar.mode == SidecarManagementMode::Manual {
         return Err("Restart not supported in manual mode.".to_string());
     }
-    
+
     stop_gateway_sidecar(&app)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
     start_gateway_sidecar(&app)

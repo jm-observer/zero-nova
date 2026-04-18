@@ -30,6 +30,9 @@ struct Args {
     /// Parent PID for lifecycle management
     #[arg(long)]
     parent_pid: Option<u32>,
+    /// Optional workspace directory for config and prompts
+    #[arg(long)]
+    workspace: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -37,21 +40,26 @@ async fn main() -> anyhow::Result<()> {
     // Initialize logger
     let _ = custom_utils::logger::logger_feature("nova-gateway", "debug", log::LevelFilter::Debug, false).build();
 
+    let _args = Args::parse();
+
     log::info!(
         "Current working directory: {:?}",
         std::env::current_dir().unwrap_or_else(|e| std::path::PathBuf::from(e.to_string()))
     );
-    log::info!(
-        "Attempting to load config from: {:?}",
-        std::env::current_dir().unwrap_or_default().join("config.toml")
-    );
 
-    let _args = Args::parse();
+    let config_path = _args
+        .workspace
+        .as_ref()
+        .map(|w| w.join("config.toml"))
+        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"));
 
-    let mut config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
-        log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
-        zero_nova::config::AppConfig::default()
-    });
+    log::info!("Attempting to load config from: {:?}", config_path);
+
+    let mut config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
+            zero_nova::config::AppConfig::default()
+        });
 
     config.gateway.host = _args.host;
     config.gateway.port = _args.port;
@@ -64,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {
         // Task 1: Run the server
-        res = start_server(config, client) => {
+        res = start_server(config, client, _args.workspace) => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

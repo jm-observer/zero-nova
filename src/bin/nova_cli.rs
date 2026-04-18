@@ -26,6 +26,9 @@ struct Cli {
     /// Optional custom base URL for the LLM provider
     #[arg(long, global = true)]
     base_url: Option<String>,
+    /// Optional workspace directory for config and prompts
+    #[arg(long, global = true)]
+    workspace: Option<std::path::PathBuf>,
     /// Verbose output (show tool inputs/outputs)
     #[arg(long, global = true)]
     verbose: bool,
@@ -58,10 +61,17 @@ async fn main() -> Result<()> {
     let _ =
         custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
-    let config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
-        log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
-        zero_nova::config::AppConfig::default()
-    });
+    let config_path = cli
+        .workspace
+        .as_ref()
+        .map(|w| w.join("config.toml"))
+        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"));
+
+    let config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
+            zero_nova::config::AppConfig::default()
+        });
 
     log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
 
@@ -70,7 +80,13 @@ async fn main() -> Result<()> {
     register_builtin_tools(&mut tools, &config);
 
     // Build system prompt including loaded tools and environment information
-    let prompt = SystemPromptBuilder::personal_assistant()
+    let prompt_builder = if let Some(ref workspace) = cli.workspace {
+        SystemPromptBuilder::new_from_path(workspace)
+    } else {
+        SystemPromptBuilder::new()
+    };
+
+    let prompt = prompt_builder
         .with_tools(&tools)
         .environment("date", current_date())
         .environment("platform", std::env::consts::OS)

@@ -2,8 +2,8 @@ pub mod commands;
 pub mod config;
 pub mod tray;
 
-use std::sync::Mutex;
 use log::info;
+use std::sync::Mutex;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,9 +43,8 @@ pub fn run() {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 // 使用 spawn_blocking 避免同步 I/O 阻塞 tokio 运行时
                 let handle = app_handle.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    commands::gateway::start_gateway_sidecar(&handle)
-                }).await;
+                let result =
+                    tokio::task::spawn_blocking(move || commands::gateway::start_gateway_sidecar(&handle)).await;
                 match result {
                     Ok(Ok(())) => eprintln!("[OpenFlux] Gateway sidecar started"),
                     Ok(Err(e)) => eprintln!("[OpenFlux] Gateway sidecar start failed: {}", e),

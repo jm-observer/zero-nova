@@ -26,12 +26,18 @@ use std::sync::Arc;
 pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     config: crate::config::AppConfig,
     client: C,
+    workspace: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     let session_store = SessionStore::new();
     let mut tools = ToolRegistry::new();
     crate::tool::builtin::register_builtin_tools(&mut tools, &config);
 
-    let prompt = SystemPromptBuilder::new().with_tools(&tools).build();
+    let prompt_builder = if let Some(ref path) = workspace {
+        SystemPromptBuilder::new_from_path(path)
+    } else {
+        SystemPromptBuilder::new()
+    };
+    let prompt = prompt_builder.with_tools(&tools).build();
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,

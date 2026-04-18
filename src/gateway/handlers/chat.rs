@@ -12,7 +12,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::gateway::router::AppState;
 
-
 pub async fn handle_chat<C: LlmClient>(
     payload: ChatPayload,
     state: Arc<AppState<C>>,
@@ -28,24 +27,39 @@ pub async fn handle_chat<C: LlmClient>(
     // Determine the turn intent.
     let intent = {
         let control = session.control.read().unwrap();
-        crate::gateway::control::TurnRouter::classify(&payload.input, &*control, Some(&state.agent_registry))
+        crate::gateway::control::TurnRouter::classify(&payload.input, &control, Some(&state.agent_registry))
     };
 
     match intent {
         crate::gateway::control::TurnIntent::ResolvePendingInteraction => {
-            handle_resolve_interaction::<C>(session.clone(), &payload.input, state.clone(), outbound_tx.clone(), request_id.clone())
-                .await;
-            return;
+            handle_resolve_interaction::<C>(
+                session.clone(),
+                &payload.input,
+                state.clone(),
+                outbound_tx.clone(),
+                request_id.clone(),
+            )
+            .await;
         }
         crate::gateway::control::TurnIntent::AddressAgent { agent_id } => {
-            handle_address_agent(session.clone(), agent_id, state.clone(), outbound_tx.clone(), request_id.clone())
-                .await;
-            return;
+            handle_address_agent(
+                session.clone(),
+                agent_id,
+                state.clone(),
+                outbound_tx.clone(),
+                request_id.clone(),
+            )
+            .await;
         }
         crate::gateway::control::TurnIntent::ContinueWorkflow => {
-            handle_continue_workflow::<C>(session.clone(), &payload.input, state.clone(), outbound_tx.clone(), request_id.clone())
-                .await;
-            return;
+            handle_continue_workflow::<C>(
+                session.clone(),
+                &payload.input,
+                state.clone(),
+                outbound_tx.clone(),
+                request_id.clone(),
+            )
+            .await;
         }
         crate::gateway::control::TurnIntent::ExecuteChat => {
             // Normal chat flow.
@@ -95,7 +109,9 @@ async fn handle_resolve_interaction<C: LlmClient>(
         let result_str = match result.intent {
             crate::gateway::control::ResolutionIntent::Approve => {
                 // If it was a ConfirmSwitch, actually perform the switch
-                if pending.kind == crate::gateway::control::InteractionKind::Approve && pending.id.starts_with("switch:") {
+                if pending.kind == crate::gateway::control::InteractionKind::Approve
+                    && pending.id.starts_with("switch:")
+                {
                     let target_id = &pending.id[7..];
                     control.active_agent = target_id.to_string();
                 }
@@ -147,9 +163,9 @@ async fn handle_continue_workflow<C: LlmClient>(
 ) {
     let result = {
         let (wf_opt, event_tx) = {
-            let mut control = session.control.write().unwrap();
+            let control = session.control.read().unwrap();
             let wf_opt = control.workflow.clone();
-            
+
             let (event_tx, mut event_rx) = mpsc::channel(100);
             let outbound_tx_clone = outbound_tx.clone();
             let request_id_clone = request_id.clone();
@@ -169,9 +185,11 @@ async fn handle_continue_workflow<C: LlmClient>(
         };
 
         if let Some(mut workflow) = wf_opt {
-            let adv_res = crate::gateway::workflow::WorkflowEngine::advance(&mut workflow, user_input, &state.agent, event_tx).await;
-            
-            if let Ok(_) = adv_res {
+            let adv_res =
+                crate::gateway::workflow::WorkflowEngine::advance(&mut workflow, user_input, &state.agent, event_tx)
+                    .await;
+
+            if adv_res.is_ok() {
                 let mut control = session.control.write().unwrap();
                 control.workflow = Some(workflow);
             }
@@ -209,7 +227,11 @@ async fn handle_continue_workflow<C: LlmClient>(
                     },
                     subject: pending.subject.clone(),
                     prompt: pending.prompt.clone(),
-                    options: pending.options.iter().map(|o| crate::gateway::protocol::InteractionOptionDTO::from(o)).collect(),
+                    options: pending
+                        .options
+                        .iter()
+                        .map(crate::gateway::protocol::InteractionOptionDTO::from)
+                        .collect(),
                     risk_level: match pending.risk_level {
                         crate::gateway::control::RiskLevel::Low => "low".to_string(),
                         crate::gateway::control::RiskLevel::Medium => "medium".to_string(),
@@ -279,7 +301,10 @@ async fn handle_address_agent<C: LlmClient>(
         };
 
         control.pending_interaction = Some(pending);
-        let _ = outbound_tx.send(GatewayMessage::new(request_id, MessageEnvelope::InteractionRequest(payload)));
+        let _ = outbound_tx.send(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::InteractionRequest(payload),
+        ));
     } else {
         send_general_error(
             &outbound_tx,

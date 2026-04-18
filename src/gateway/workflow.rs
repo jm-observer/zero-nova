@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowCandidate {
@@ -96,7 +95,6 @@ impl WorkflowEngine {
                 // 模拟：用户提供了约束，自动进入 Discover 阶段
                 workflow.constraints = serde_json::json!({ "user_input": input });
                 workflow.stage = WorkflowStage::Discover;
-                stage_changed = true;
                 messages.push("正在为您搜索合适的方案...".to_string());
 
                 // 模拟发现候选方案

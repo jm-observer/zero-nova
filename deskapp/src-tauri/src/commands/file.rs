@@ -30,19 +30,12 @@ pub async fn file_read(file_path: String) -> Result<FileReadResult, String> {
     let size = metadata.len();
 
     // 根据扩展名判断是否为二进制
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
 
     let binary_exts = [
-        "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "svg",
-        "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm",
-        "mp3", "wav", "ogg", "flac", "aac",
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-        "zip", "rar", "7z", "tar", "gz",
-        "exe", "dll", "so", "dylib",
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "svg", "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm",
+        "mp3", "wav", "ogg", "flac", "aac", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z",
+        "tar", "gz", "exe", "dll", "so", "dylib",
     ];
 
     let image_exts = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "svg"];
@@ -71,7 +64,13 @@ pub async fn file_read(file_path: String) -> Result<FileReadResult, String> {
         "txt" => "text/plain",
         "xml" => "text/xml",
         "yaml" | "yml" => "text/yaml",
-        _ => if is_binary { "application/octet-stream" } else { "text/plain" },
+        _ => {
+            if is_binary {
+                "application/octet-stream"
+            } else {
+                "text/plain"
+            }
+        }
     }
     .to_string();
 
@@ -195,7 +194,7 @@ pub async fn file_save_as(source_path: String, dest_path: String) -> Result<(), 
 /// 简易 Base64 编码（无外部依赖）
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };

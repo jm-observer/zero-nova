@@ -25,6 +25,8 @@ export interface Session {
     title?: string;
     createdAt: number;
     updatedAt: number;
+    cloudChatroomId?: number;
+    cloudAgentName?: string;
 }
 
 export interface GatewayMessage {
@@ -256,7 +258,7 @@ export class GatewayClient {
             // 处理响应 —— 只对「最终」消息 resolve/reject
             // chat.start / chat.progress / config.progress 是中间状态消息，不应触发 resolve
             const isIntermediateMessage =
-                message.type === 'chat.start' || message.type === 'chat.progress' || message.type === 'config.progress';
+                message.type === 'chat.start' || message.type === 'chat.progress' || message.type === 'config.progress' || message.type === 'nexusai.auth-expired';
 
             if (message.id && this.pendingRequests.has(message.id) && !isIntermediateMessage) {
                 console.log('[GatewayClient] Matched pending request (final):', message.id, message.type);
@@ -389,13 +391,17 @@ export class GatewayClient {
         input: string,
         sessionId?: string,
         attachments?: Array<{ path: string; name: string; size: number; ext: string }>,
-        options?: { agentId?: string }
+        options?: { source?: 'local' | 'cloud'; chatroomId?: number; agentId?: string }
     ): Promise<string> {
         const payload: Record<string, unknown> = { input, sessionId };
         if (attachments?.length) {
             payload.attachments = attachments;
         }
+        if (options?.source) {
+            payload.source = options.source;
         }
+        if (options?.chatroomId) {
+            payload.chatroomId = options.chatroomId;
         }
         if (options?.agentId) {
             payload.agentId = options.agentId;
@@ -444,8 +450,8 @@ export class GatewayClient {
     /**
      * 创建会话
      */
-    async createSession(title?: string): Promise<Session> {
-        const result = await this.request<{ session: Session }>('sessions.create', { title });
+    async createSession(title?: string, cloudChatroomId?: number, cloudAgentName?: string): Promise<Session> {
+        const result = await this.request<{ session: Session }>('sessions.create', { title, cloudChatroomId, cloudAgentName });
         return result.session;
     }
 
@@ -563,6 +569,16 @@ export class GatewayClient {
         return result.run;
     }
 
+    /**
+     * 监听 NexusAI 认证过期事件（Atlas 模式 token 失效时触发）
+     */
+    onAuthExpired(handler: (message: string) => void): () => void {
+        const messageHandler = (msg: GatewayMessage) => {
+            if (msg.type === 'nexusai.auth-expired') {
+                const payload = msg.payload as { message?: string };
+                handler(payload?.message || 'NexusAI access token 已过期，请重新登录');
+            }
+        };
         this.addMessageHandler(messageHandler);
         return () => this.removeMessageHandler(messageHandler);
     }
@@ -938,6 +954,44 @@ export class GatewayClient {
         });
     }
 
+    // ========================
+    // OpenFlux 云端 API
+    // ========================
+
+    /** 登录 OpenFlux 云端 */
+    async openfluxLogin(username: string, password: string): Promise<{ success: boolean; message?: string }> {
+        return this.request<{ success: boolean; message?: string }>('openflux.login', { username, password });
+    }
+
+    /** 登出 OpenFlux 云端 */
+    async openfluxLogout(): Promise<void> {
+        await this.request('openflux.logout');
+    }
+
+    /** 获取 OpenFlux 登录状态 */
+    async openfluxStatus(): Promise<{ loggedIn: boolean; username?: string }> {
+        return this.request<{ loggedIn: boolean; username?: string }>('openflux.status');
+    }
+
+    /** 获取云端 Agent 列表 */
+    async openfluxAgents(): Promise<OpenFluxAgentInfo[]> {
+        const result = await this.request<{ agents: OpenFluxAgentInfo[] }>('openflux.agents');
+        return result.agents || [];
+    }
+
+    /** 获取单个 Agent 信息 */
+    async openfluxAgentInfo(appId: number): Promise<OpenFluxAgentInfo | null> {
+        const result = await this.request<{ agent: OpenFluxAgentInfo | null }>('openflux.agent-info', { appId });
+        return result.agent;
+    }
+
+    /** 获取云端聊天历史 */
+    async openfluxChatHistory(chatroomId: number, page?: number, pageSize?: number): Promise<OpenFluxChatMessage[]> {
+        const result = await this.request<{ messages: OpenFluxChatMessage[] }>('openflux.chat-history', { chatroomId, page, pageSize });
+        return result.messages || [];
+    }
+
+    // ========================
     // OpenFluxRouter API
     // ========================
 
@@ -1121,13 +1175,13 @@ export class GatewayClient {
 
 
     /** 设置 LLM 配置来源 */
-    async setLlmSource(source: 'local' | 'managed'): Promise<{ source: string; error?: string }> {
+    async setLlmSource(source: 'local' | 'managed' | 'atlas_managed'): Promise<{ source: string; error?: string }> {
         return this.request('config.set-llm-source', { source });
     }
 
     /** 获取 LLM 配置来源 */
     async getLlmSource(): Promise<{
-        source: 'local' | 'managed';
+        source: 'local' | 'managed' | 'atlas_managed';
         managed?: {
             available: boolean;
             provider?: string;

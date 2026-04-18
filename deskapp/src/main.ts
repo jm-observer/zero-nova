@@ -84,6 +84,8 @@ interface Session {
     createdAt: number;
     updatedAt?: number;
     lastMessagePreview?: string;
+    cloudChatroomId?: number;
+    cloudAgentName?: string;
 }
 
 // ========================
@@ -237,6 +239,7 @@ const btnClose = document.getElementById('btn-close') as HTMLButtonElement;
 
 
 // 用户区和设置
+const agentListLoginPrompt = document.getElementById('agent-list-login-prompt') as HTMLDivElement;
 const settingsBtn = document.getElementById('settings-btn') as HTMLButtonElement;
 
 // 设置视图（中部区域）
@@ -858,6 +861,27 @@ async function init(): Promise<void> {
         if (gw.isSetupRequired()) {
             console.log('[Init] First-time setup needed, showing wizard');
             await showSetupWizard(gw);
+        }
+
+        // 监听 Atlas 认证过期 → 保存失败请求上下文 + 弹出登录框
+        gw.onAuthExpired((message) => {
+            console.warn('[Atlas] Auth expired:', message);
+            // 保存当前正在加载的会话的最后一条用户消息，登录成功后自动重发
+            if (currentSessionId && loadingSessions.has(currentSessionId)) {
+                // 找到最后一条用户消息的内容
+                const allMsgEls = messagesContainer.querySelectorAll('.message.user .message-text');
+                const lastUserMsg = allMsgEls.length > 0 ? allMsgEls[allMsgEls.length - 1] : null;
+                const lastContent = lastUserMsg?.textContent?.trim();
+                if (lastContent) {
+                    pendingAuthRetry = {
+                        content: lastContent,
+                        sessionId: currentSessionId,
+                    };
+                    console.log('[Atlas] Saved pending retry:', pendingAuthRetry.content.slice(0, 50));
+                }
+            }
+            showLoginModalForAtlas();
+        });
 
         // 监听调度器事件（自动刷新视图 + Toast 通知）
         gw.onSchedulerEvent((event) => {
@@ -2349,12 +2373,12 @@ if (agentListLoginBtn) {
 // ========================
 
 // ---- 工作模式选择器 ----
-type WorkingMode = 'standalone' | 'router';
-const VALID_MODES: WorkingMode[] = ['standalone', 'router'];
+type WorkingMode = 'standalone' | 'router' | 'managed';
+const VALID_MODES: WorkingMode[] = ['standalone', 'router', 'managed'];
 const storedMode = localStorage.getItem('openflux-working-mode') as WorkingMode | null;
 let currentWorkingMode: WorkingMode = storedMode && VALID_MODES.includes(storedMode) ? storedMode : 'standalone';
+let pendingManagedSwitch = false; // 等待登录后再切换到 managed 模式
 let pendingAuthRetry: { content: string; sessionId: string | null; attachments?: Array<{ path: string; name: string; size: number; ext: string }> } | null = null; // 401 后登录成功自动重试
-
 
 const workingModeCards = document.querySelectorAll('.working-mode-card') as NodeListOf<HTMLDivElement>;
 
@@ -2380,8 +2404,10 @@ function applyWorkingMode(mode: WorkingMode): void {
         card.classList.toggle('active', card.dataset.mode === mode);
     });
 
-    const isRouter = mode === 'router';
+
     const routerManaged = t('mode.managed_by_router');
+    const nexusManaged = t('mode.managed_by_nexus');
+    const isRouterOrManaged = mode === 'router' || mode === 'managed';
 
     // --- 模型 Tab：编排/执行模型 + 供应商密钥（Router 模式遮罩） ---
     const orchGroup = document.getElementById('server-orch-provider')?.closest('.settings-model-group') as HTMLElement | null;
@@ -2389,13 +2415,17 @@ function applyWorkingMode(mode: WorkingMode): void {
     const providerKeysSection = document.getElementById('server-provider-keys');
     const keysParent = providerKeysSection?.closest('.settings-model-group') as HTMLElement || providerKeysSection;
 
-    setManagedOverlay(orchGroup, isRouter, isRouter ? routerManaged : undefined);
-    setManagedOverlay(execGroup, isRouter, isRouter ? routerManaged : undefined);
-    setManagedOverlay(keysParent, isRouter, isRouter ? routerManaged : undefined);
+    setManagedOverlay(orchGroup, isRouterOrManaged,
+        mode === 'router' ? routerManaged : nexusManaged);
+    setManagedOverlay(execGroup, isRouterOrManaged,
+        mode === 'router' ? routerManaged : nexusManaged);
+    setManagedOverlay(keysParent, isRouterOrManaged,
+        mode === 'router' ? routerManaged : nexusManaged);
 
     // --- 工具 Tab：Web 搜索 API Key ---
     const webSearchGroup = document.getElementById('server-web-search-provider')?.closest('.settings-model-group') as HTMLElement | null;
-    setManagedOverlay(webSearchGroup, isRouter, isRouter ? routerManaged : undefined);
+    setManagedOverlay(webSearchGroup, isRouterOrManaged,
+        mode === 'router' ? routerManaged : nexusManaged);
 
     // --- 模型 Tab：Agent 独立模型配置（仅单机模式显示） ---
     const agentModelSection = document.getElementById('agent-model-section');
@@ -2403,24 +2433,73 @@ function applyWorkingMode(mode: WorkingMode): void {
         agentModelSection.style.display = mode === 'standalone' ? '' : 'none';
     }
 
+    // --- Router Tab：Router 配置区域始终显示（所有模式都可能需要连接 Router 来对接 App/飞书） ---
+
+    // --- "使用托管配置"开关：始终显示，但团队模式下强制开启且锁定 ---
+    const routerManagedConfig = document.getElementById('router-managed-config');
     const llmSourceToggle = document.getElementById('llm-source-toggle') as HTMLInputElement | null;
+    if (routerManagedConfig) {
+        routerManagedConfig.style.display = '';
+    }
     if (llmSourceToggle) {
         if (mode === 'router') {
+            // 团队模式：强制开启，禁止用户关闭
             llmSourceToggle.checked = true;
             llmSourceToggle.disabled = true;
         } else {
+            // 单机/托管模式：关闭托管配置开关，锁定
             llmSourceToggle.checked = false;
             llmSourceToggle.disabled = true;
         }
     }
 
-    if (gatewayClient) {
-        const targetSource = mode === 'router' ? 'managed' : 'local';
-        gatewayClient.setLlmSource(targetSource).then(() => {
-            currentLlmSource = targetSource as any;
-        }).catch(() => {});
+    // --- Gateway llmSource 同步 ---
+    if (typeof gatewayClient !== 'undefined' && gatewayClient) {
+        if (mode === 'managed') {
+            // NexusAI 托管模式 → atlas_managed
+            gatewayClient.setLlmSource('atlas_managed').then((res: any) => {
+                if (res.error) {
+                    console.warn('[Atlas] Switch failed:', res.error);
+                    // 标记等待登录，connecte 后 checkOpenFluxLoginStatus 会自动处理
+                    pendingManagedSwitch = true;
+                    // 只有用户主动点击时才弹出登录框（非初始化恢复）
+                    if (document.readyState === 'complete' && performance.now() > 5000) {
+                        showLoginModalForAtlas();
+                    }
+                } else {
+                    currentLlmSource = 'atlas_managed';
+                }
+            }).catch((err: any) => {
+                console.error('[Atlas] setLlmSource error:', err);
+                pendingManagedSwitch = true;
+            });
+        } else if (mode === 'router' && (managedLlmAvailable)) {
+            // 团队模式 + Router 有托管配置 → managed
+            gatewayClient.setLlmSource('managed').then(() => {
+                currentLlmSource = 'managed';
+            }).catch(() => {});
+        } else if (currentLlmSource !== 'local') {
+            // 单机模式或无托管 → local
+            gatewayClient.setLlmSource('local').then(() => {
+                currentLlmSource = 'local';
+            }).catch(() => {});
+        }
     }
 }
+
+// 绑定卡片点击事件
+workingModeCards.forEach(card => {
+    card.addEventListener('click', () => {
+        const mode = card.dataset.mode as WorkingMode;
+        if (mode && mode !== currentWorkingMode) {
+            applyWorkingMode(mode);
+        }
+    });
+});
+
+// 初始化应用当前模式
+applyWorkingMode(currentWorkingMode);
+
 // ---- 设置 Tab 切换 ----
 settingsTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -6251,6 +6330,11 @@ const loginModalTitle = openfluxLoginModal.querySelector('.openflux-login-modal-
 const loginModalUsernameInput = openfluxModalUsername;
 
 /** 以 Atlas 品牌弹出登录框（从 NexusAI 托管模式切换触发时） */
+function showLoginModalForAtlas(): void {
+    if (loginModalTitle) loginModalTitle.textContent = 'NexusAI Atlas 登录';
+    if (loginModalUsernameInput) loginModalUsernameInput.placeholder = '输入 NexusAI 账号';
+    openfluxLoginModal.classList.remove('hidden');
+}
 
 /** 恢复登录框默认标题 */
 function restoreLoginModalTitle(): void {
@@ -6295,6 +6379,7 @@ openfluxModalLoginBtn.addEventListener('click', async () => {
             openfluxLoginModal.classList.add('hidden');
             openfluxModalPassword.value = '';
             openfluxModalHint.textContent = '';
+            onopenfluxLoggedIn(username);
         } else {
             openfluxModalHint.textContent = res.message || t('login.failed_short');
             openfluxModalHint.className = 'settings-save-hint error';
@@ -6325,6 +6410,47 @@ openfluxSettingsLogoutBtn.addEventListener('click', async () => {
 });
 
 /** 登录成功后的 UI 更新 */
+async function onopenfluxLoggedIn(username: string): Promise<void> {
+    openfluxLoggedIn = true;
+    // Agent 列表内：隐藏登录提示
+    agentListLoginPrompt.classList.add('hidden');
+    // 设置面板：显示已登录状态
+    openfluxSettingsNotLogged.classList.add('hidden');
+    openfluxSettingsLogged.classList.remove('hidden');
+    openfluxSettingsUsername.textContent = username;
+    // 保存用户名供反馈窗口使用
+    localStorage.setItem('nexusai-username', username);
+    // 更新输入框状态（如果当前在云端会话，解除禁用）
+    updateInputForCloudSession();
+    // 加载云端 Agent 列表（NexusAi tab 用），同时刷新 Agent tab（可能有已用的云端 Agent）
+    loadSidebarAgents();
+    loadLocalAgents();
+
+    // 如果是从 managed 模式切换触发的登录，登录成功后重试切换
+    if (pendingManagedSwitch) {
+        pendingManagedSwitch = false;
+        // 关闭登录弹窗（如果打开的话）
+        openfluxLoginModal.classList.add('hidden');
+        restoreLoginModalTitle();
+        applyWorkingMode('managed');
+    }
+
+    // 如果是 401 认证失败触发的登录，登录成功后自动重发失败的请求
+    if (pendingAuthRetry) {
+        const retry = pendingAuthRetry;
+        pendingAuthRetry = null;
+        console.log('[Atlas] Re-login success, retrying failed request:', retry.content.slice(0, 50));
+        // 确保切换到目标会话
+        if (retry.sessionId && retry.sessionId !== currentSessionId) {
+            await selectSession(retry.sessionId);
+        }
+        // 延迟一下让 Gateway 重建 LLM
+        setTimeout(() => {
+            messageInput.value = retry.content;
+            sendMessage();
+        }, 500);
+    }
+}
 
 /** 登出后的 UI 更新 */
 function onOpenFluxLoggedOut(): void {
@@ -6337,6 +6463,7 @@ function onOpenFluxLoggedOut(): void {
     // 更新输入框状态（如果当前在云端会话，禁用输入）
     updateInputForCloudSession();
     // 切回 Chat 模式
+    switchSidebarMode('agent');
     cachedOpenFluxAgents = [];
     // 重渲染 Agent tab（去掉云端 Agent 分组）
     renderLocalAgents();
@@ -6348,6 +6475,7 @@ async function checkOpenFluxLoginStatus(): Promise<void> {
     try {
         const status = await gatewayClient.openfluxStatus();
         if (status.loggedIn) {
+            onopenfluxLoggedIn(status.username || '已登录');
         } else {
             onOpenFluxLoggedOut();
         }
@@ -6359,7 +6487,20 @@ async function checkOpenFluxLoginStatus(): Promise<void> {
 // ---- Agent / NexusAi 侧边栏切换 ----
 
 modeChatBtn.addEventListener('click', () => switchSidebarMode('agent'));
+modeAgentBtn.addEventListener('click', () => switchSidebarMode('nexusai'));
 
+function switchSidebarMode(mode: 'agent' | 'nexusai'): void {
+    modeChatBtn.classList.toggle('active', mode === 'agent');
+    modeAgentBtn.classList.toggle('active', mode === 'nexusai');
+    sessionList.classList.toggle('hidden', mode !== 'agent');
+    sidebarAgentList.classList.toggle('hidden', mode !== 'nexusai');
+    // 切到 NexusAi 模式时加载云端 Agent
+    if (mode === 'nexusai') {
+        // 如果已有缓存直接渲染，不重新请求 API
+        if (cachedOpenFluxAgents.length > 0) {
+            renderSidebarAgents();
+        } else {
+            loadSidebarAgents();
         }
     }
 }
@@ -6756,6 +6897,7 @@ async function switchToAgent(agentId: string): Promise<void> {
         // 刷新 Agent 列表高亮
         renderLocalAgents();
         // 切到 Chat 视图显示对话
+        switchSidebarMode('agent');
         updateSendButtonState();
         messageInput.focus();
         console.log(`[Agent] 已切换到 Agent: ${agentId}, session: ${sessionKey}`);
@@ -7015,6 +7157,7 @@ async function startCloudChat(appId: number, agentName: string, chatroomId?: num
             document.body.classList.remove('router-active');
             hideRouterBindUI();
             (document.querySelector('.input-area') as HTMLElement).classList.remove('hidden');
+            switchSidebarMode('agent');
             closeSettingsView();
 
             // 清除未读标记
@@ -7058,6 +7201,7 @@ async function startCloudChat(appId: number, agentName: string, chatroomId?: num
             document.body.classList.remove('router-active');
             hideRouterBindUI();
             (document.querySelector('.input-area') as HTMLElement).classList.remove('hidden');
+            switchSidebarMode('agent');
             clearMessages();
             clearLogs();
 
@@ -7089,11 +7233,11 @@ let routerBound = false;
 let routerRealSessionId: string | null = null;
 
 // 托管 LLM 配置状态
-
-
-
-
-let currentLlmSource: 'local' | 'managed' = 'local';
+let managedLlmAvailable = false;
+let managedLlmProvider = '';
+let managedLlmModel = '';
+let managedLlmQuota: { daily_limit: number; used_today: number } | null = null;
+let currentLlmSource: 'local' | 'managed' | 'atlas_managed' = 'local';
 
 /** 切换到 Router 会话 */
 async function switchToRouterSession(): Promise<void> {
@@ -7395,10 +7539,38 @@ function initRouterListeners(): void {
     });
 
     // 监听托管 LLM 配置推送
-    // 连接后同步 LLM source
+    gatewayClient.onManagedLlmConfig((cfg) => {
+        managedLlmAvailable = cfg.available;
+        managedLlmProvider = cfg.provider || '';
+        managedLlmModel = cfg.model || '';
+        managedLlmQuota = cfg.quota || null;
+        if (cfg.currentSource) currentLlmSource = cfg.currentSource;
+        updateManagedLlmUI();
+        console.log('[LLM] Hosted config updated:', { available: cfg.available, provider: cfg.provider, model: cfg.model });
+    });
+
+    // 连接后查询当前 LLM source
     gatewayClient.getLlmSource().then((result) => {
-        currentLlmSource = result.source as any;
-    }).catch(() => {});
+        currentLlmSource = result.source;
+        if (result.managed) {
+            managedLlmAvailable = result.managed.available;
+            managedLlmProvider = result.managed.provider || '';
+            managedLlmModel = result.managed.model || '';
+            managedLlmQuota = result.managed.quota || null;
+        }
+        // 同步前端模式卡片状态
+        if (result.source === 'atlas_managed' && currentWorkingMode !== 'managed') {
+            currentWorkingMode = 'managed';
+            localStorage.setItem('openflux-working-mode', 'managed');
+            workingModeCards.forEach(card => {
+                card.classList.toggle('active', card.dataset.mode === 'managed');
+            });
+        }
+        updateManagedLlmUI();
+    }).catch(() => {
+        // 旧版 Gateway 不支持或请求失败，仍需创建 UI 容器显示默认状态
+        updateManagedLlmUI();
+    });
 
     // 保存按钮
     // 重新生成 App User ID
@@ -7617,6 +7789,20 @@ function initRouterListeners(): void {
 }
 
 /** 更新托管 LLM 配置 UI（仅同步开关状态） */
+function updateManagedLlmUI(): void {
+    const toggle = document.getElementById('llm-source-toggle') as HTMLInputElement | null;
+    if (!toggle) return;
+
+    // 首次绑定事件（避免重复绑定）
+    if (!toggle.dataset.bound) {
+        toggle.dataset.bound = '1';
+        toggle.addEventListener('change', async () => {
+            if (!gatewayClient) return;
+            const source = toggle.checked ? 'managed' : 'local';
+            try {
+                await gatewayClient.setLlmSource(source);
+                currentLlmSource = source;
+            } catch (err) {
                 console.error('Switch LLM source failed:', err);
                 toggle.checked = !toggle.checked; // 回退
             }

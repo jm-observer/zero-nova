@@ -95,7 +95,7 @@ impl LlmClient for AnthropicClient {
             tools: if tools.is_empty() { None } else { Some(tools.to_vec()) },
         };
         let url = format!("{}/v1/messages", self.base_url);
-        log::info!("Sending POST request to: {}", url);
+        log::trace!("Sending POST request to: {}", url);
         let resp = self
             .http
             .post(&url)
@@ -213,11 +213,11 @@ impl StreamReceiver for AnthropicStreamReceiver {
                 .inspect_err(|e| log::error!("Failed to read chunk from response: {}", e))?
             {
                 Some(chunk) => {
-                    log::debug!("Received chunk: {} bytes", chunk.len());
+                    log::trace!("Received chunk: {} bytes", chunk.len());
                     self.parser.feed(&chunk);
                 }
                 None => {
-                    log::info!("Stream ended (no more chunks)");
+                    log::trace!("Stream ended (no more chunks)");
                     return Ok(None);
                 } // End of stream
             }

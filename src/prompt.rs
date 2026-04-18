@@ -12,21 +12,42 @@ impl SystemPromptBuilder {
     /// If the file `prompts/default.md` does not exist at the given base path, it falls back to an empty builder.
     pub fn new_from_path(base_path: &Path) -> Self {
         let mut builder = Self { sections: Vec::new() };
-        let prompt_path = base_path.join("prompts").join("default.md");
+        let mut prompt_path = None;
 
-        match fs::read_to_string(&prompt_path) {
-            Ok(content) => {
-                if !content.trim().is_empty() {
-                    builder.sections.push(content);
+        // Search for default.md in .nova/prompts or prompts, starting from base_path and going up
+        for ancestor in base_path.ancestors() {
+            let p1 = ancestor.join(".nova").join("prompts").join("default.md");
+            if p1.exists() {
+                prompt_path = Some(p1);
+                break;
+            }
+            let p2 = ancestor.join("prompts").join("default.md");
+            if p2.exists() {
+                prompt_path = Some(p2);
+                break;
+            }
+        }
+
+        if let Some(path) = prompt_path {
+            match fs::read_to_string(&path) {
+                Ok(content) => {
+                    if !content.trim().is_empty() {
+                        builder.sections.push(content);
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Could not load default prompt from {:?}: {}. Using empty prompt.",
+                        path,
+                        e
+                    );
                 }
             }
-            Err(e) => {
-                log::warn!(
-                    "Could not load default prompt from {:?}: {}. Using empty prompt.",
-                    prompt_path,
-                    e
-                );
-            }
+        } else {
+            log::warn!(
+                "Could not find default prompt in any search paths (tried .nova/prompts/default.md and prompts/default.md in {:?} and its ancestors). Using empty prompt.",
+                base_path
+            );
         }
         builder
     }

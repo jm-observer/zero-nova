@@ -4,7 +4,7 @@
   "version": "0.5.2",
   "identifier": "com.openflux.app",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "cargo build --bin nova_gateway --features gateway,cli,prod && pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"

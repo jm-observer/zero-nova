@@ -228,13 +228,17 @@ mod tests {
         let mut wf = WorkflowState::new("TTS".to_string());
 
         // 1. GatherRequirements -> AwaitSelection (模拟 Discover 过程)
-        let res = WorkflowEngine::advance(&mut wf, "我需要一个快速的 TTS", &agent, tx.clone()).await.unwrap();
+        let res = WorkflowEngine::advance(&mut wf, "我需要一个快速的 TTS", &agent, tx.clone())
+            .await
+            .unwrap();
         assert!(res.stage_changed);
         assert_eq!(wf.stage, WorkflowStage::AwaitSelection);
         assert!(res.messages[0].contains("搜索"));
 
         // 2. AwaitSelection -> AwaitExecutionConfirm
-        let res = WorkflowEngine::advance(&mut wf, "选 1", &agent, tx.clone()).await.unwrap();
+        let res = WorkflowEngine::advance(&mut wf, "选 1", &agent, tx.clone())
+            .await
+            .unwrap();
         assert!(res.stage_changed);
         assert_eq!(wf.stage, WorkflowStage::AwaitExecutionConfirm);
         assert_eq!(wf.selected_candidate, Some("c1".to_string()));

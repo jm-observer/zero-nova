@@ -60,6 +60,14 @@ pub async fn handle_message<C: LlmClient>(
         MessageEnvelope::AgentsSwitch(payload) => {
             agents::handle_agents_switch(payload, outbound_tx, msg_id).await;
         }
+        MessageEnvelope::BrowserStatus
+        | MessageEnvelope::ConfigGetLlmSource
+        | MessageEnvelope::RouterConfigGet
+        | MessageEnvelope::WeixinConfigGet
+        | MessageEnvelope::SessionsArtifacts(_)
+        | MessageEnvelope::SessionsLogs(_)
+        | MessageEnvelope::VoiceGetStatus => {}
+
         // Stub / Not implemented handling
         _ => {
             warn!(

@@ -190,22 +190,57 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_advance_flow() {
+        use crate::agent::{AgentConfig, AgentRuntime};
+        use crate::provider::{LlmClient, ModelConfig, StreamReceiver};
+        use crate::tool::ToolRegistry;
+        use async_trait::async_trait;
+        use std::time::Duration;
+
+        struct DummyClient;
+        #[async_trait]
+        impl LlmClient for DummyClient {
+            async fn stream(
+                &self,
+                _msgs: &[crate::message::Message],
+                _sys: &str,
+                _tools: &[crate::provider::types::ToolDefinition],
+                _conf: &ModelConfig,
+            ) -> anyhow::Result<Box<dyn StreamReceiver>> {
+                unimplemented!()
+            }
+        }
+
+        let client = DummyClient;
+        let tools = ToolRegistry::new();
+        let agent_config = AgentConfig {
+            max_iterations: 1,
+            model_config: ModelConfig {
+                model: "test".to_string(),
+                max_tokens: 10,
+                temperature: None,
+                top_p: None,
+            },
+            tool_timeout: Duration::from_secs(1),
+        };
+        let agent = AgentRuntime::new(client, tools, "prompt".to_string(), agent_config);
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
         let mut wf = WorkflowState::new("TTS".to_string());
 
         // 1. GatherRequirements -> AwaitSelection (模拟 Discover 过程)
-        let res = WorkflowEngine::advance(&mut wf, "我需要一个快速的 TTS").await.unwrap();
+        let res = WorkflowEngine::advance(&mut wf, "我需要一个快速的 TTS", &agent, tx.clone()).await.unwrap();
         assert!(res.stage_changed);
         assert_eq!(wf.stage, WorkflowStage::AwaitSelection);
         assert!(res.messages[0].contains("搜索"));
 
         // 2. AwaitSelection -> AwaitExecutionConfirm
-        let res = WorkflowEngine::advance(&mut wf, "选 1").await.unwrap();
+        let res = WorkflowEngine::advance(&mut wf, "选 1", &agent, tx.clone()).await.unwrap();
         assert!(res.stage_changed);
         assert_eq!(wf.stage, WorkflowStage::AwaitExecutionConfirm);
         assert_eq!(wf.selected_candidate, Some("c1".to_string()));
 
         // 3. AwaitExecutionConfirm -> Executing
-        let res = WorkflowEngine::advance(&mut wf, "确认").await.unwrap();
+        let res = WorkflowEngine::advance(&mut wf, "确认", &agent, tx).await.unwrap();
         assert!(res.stage_changed);
         assert_eq!(wf.stage, WorkflowStage::Executing);
     }

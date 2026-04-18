@@ -105,9 +105,9 @@ cd gateway && npm install && cd ..
 
 ```bash
 # 复制配置模板
-cp openflux.example.yaml openflux.yaml
+cp nova.example.yaml config.toml
 
-# 编辑 openflux.yaml，填入你的 API Key
+# 编辑 config.toml，填入你的 API Key
 # 至少配置一个 LLM 供应商即可使用
 ```
 
@@ -125,7 +125,7 @@ pnpm tauri build
 
 ## ⚙️ 配置说明
 
-所有配置集中在 `openflux.yaml`，参考 [`openflux.example.yaml`](openflux.example.yaml)：
+所有配置集中在 `config.toml`，参考 [`nova.example.yaml`](nova.example.yaml)：
 
 | 配置项 | 说明 |
 |--------|------|
@@ -147,11 +147,11 @@ OpenFlux/
 ├── src-tauri/        # Rust 后端（Tauri Shell）
 │   └── src/          # Rust 源码
 ├── gateway/          # Gateway Sidecar（AI 引擎）
-│   └── src/          # TypeScript 源码
+│   └── src/          # TypeScript source code
 ├── public/           # 静态资源
 ├── resources/        # 模型文件
 ├── scripts/          # 构建脚本
-└── openflux.example.yaml  # 配置模板
+└── nova.example.yaml  # 配置模板
 ```
 
 ## 🤝 贡献

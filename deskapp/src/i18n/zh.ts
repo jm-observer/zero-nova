@@ -276,7 +276,7 @@ const zh: Record<string, string> = {
     'memory.manual_distill': '⚡ 手动蒸馏',
     'memory.tab_all': '全部',
     'memory.no_cards': '暂无记忆卡片',
-    'memory.disabled_notice': '记忆系统未启用。请在 openflux.yaml 中配置 <code>memory.enabled: true</code>',
+    'memory.disabled_notice': '记忆系统未启用。请在 config.toml 中配置 <code>memory.enabled: true</code>',
     'memory.search_placeholder': '搜索记忆（语义 + 关键词）...',
     'memory.clear_search': '清除搜索',
     'memory.empty_loading': '加载中...',

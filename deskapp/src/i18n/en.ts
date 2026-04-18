@@ -274,7 +274,7 @@ const en: Record<string, string> = {
     'memory.manual_distill': '⚡ Manual Distill',
     'memory.tab_all': 'All',
     'memory.no_cards': 'No memory cards yet',
-    'memory.disabled_notice': 'Memory system is not enabled. Configure <code>memory.enabled: true</code> in openflux.yaml',
+    'memory.disabled_notice': 'Memory system is not enabled. Configure <code>memory.enabled: true</code> in config.toml',
     'memory.search_placeholder': 'Search memories (semantic + keyword)...',
     'memory.clear_search': 'Clear search',
     'memory.empty_loading': 'Loading...',

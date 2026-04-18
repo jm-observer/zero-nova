@@ -76,6 +76,12 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
         args.push(config.port.to_string());
     }
 
+    // 2.2 注入 Workspace 参数
+    if let Some(workspace) = &config.sidecar.workspace {
+        args.push("--workspace".to_string());
+        args.push(workspace.to_string_lossy().to_string());
+    }
+
     // 3. 构建命令路径
     let mut cmd_path = config.sidecar.command.clone();
     if !std::path::Path::new(&cmd_path).is_absolute() {

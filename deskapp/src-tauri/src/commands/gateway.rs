@@ -179,8 +179,8 @@ pub fn start_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
         let script = gateway_data.join("src").join("gateway").join("start.ts");
 
         // 首次启动：将 openflux.example.yaml 复制为初始配置
-        // Gateway 的 loadConfig() 会在 cwd (app_data_dir) 下查找 openflux.yaml
-        let config_dest = app_data_dir.join("openflux.yaml");
+        // Gateway 的 loadConfig() 会在 cwd (app_data_dir) 下查找 config.toml
+        let config_dest = app_data_dir.join("config.toml");
         if !config_dest.exists() {
             // Tauri 对 "../" 前缀的 resource 会放到 _up_ 子目录
             let candidates = [

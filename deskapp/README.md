@@ -103,9 +103,9 @@ cd gateway && npm install && cd ..
 
 ```bash
 # Copy the config template
-cp openflux.example.yaml openflux.yaml
+cp nova.example.yaml config.toml
 
-# Edit openflux.yaml and add your API keys
+# Edit config.toml and add your API keys
 # At least one LLM provider is required
 ```
 
@@ -123,7 +123,7 @@ pnpm tauri build
 
 ## ⚙️ Configuration
 
-All settings are in `openflux.yaml`. See [`openflux.example.yaml`](openflux.example.yaml) for reference:
+All settings are in `config.toml`. See [`nova.example.yaml`](nova.example.yaml) for reference:
 
 | Section | Description |
 |---------|-------------|
@@ -149,7 +149,7 @@ OpenFlux/
 ├── public/           # Static assets
 ├── resources/        # Model files
 ├── scripts/          # Build scripts
-└── openflux.example.yaml  # Config template
+└── nova.example.yaml  # Config template
 ```
 
 ## 🤝 Contributing

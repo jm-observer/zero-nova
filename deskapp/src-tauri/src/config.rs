@@ -24,13 +24,15 @@ pub struct SidecarConfig {
     pub working_dir: Option<PathBuf>,
     /// 端口参数的格式。例如: "--port" 或 "-p"。如果为 None，默认使用 "--port"。
     pub port_arg: Option<String>,
+    /// 工作区路径 (Workspace)，传递给 nova-gateway 的 --workspace 参数
+    pub workspace: Option<PathBuf>,
 }
 
 fn default_sidecar_mode() -> SidecarManagementMode {
     SidecarManagementMode::Auto
 }
 
-/// 应用配置（从 openflux.yaml 和 server-config.json 读取）
+/// 应用配置（从 nova.yaml 和 server-config.json 读取）
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub host: String,
@@ -40,9 +42,9 @@ pub struct AppConfig {
     pub sidecar: SidecarConfig,
 }
 
-/// openflux.yaml 中的配置
+/// config.toml 中的配置
 #[derive(Deserialize)]
-struct YamlConfig {
+struct TomlConfig {
     remote: RemoteConfig,
     sidecar: SidecarConfig,
 }
@@ -56,28 +58,53 @@ struct RemoteConfig {
 
 /// 加载配置
 pub fn load_config(_app: &tauri::AppHandle) -> Result<AppConfig, Box<dyn std::error::Error>> {
-    // 默认配置目录：可执行文件同级
+    // 1. 尝试路径 1：可执行文件同级目录 (生产环境)
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
+    let config_path_1 = exe_dir.join("config.toml");
 
-    // 尝试读取 openflux.yaml
-    let yaml_path = exe_dir.join("openflux.yaml");
-    info!("{yaml_path:?} exists={}", yaml_path.exists());
-    let content = std::fs::read_to_string(&yaml_path)?;
-    let yaml_config: YamlConfig = serde_yaml::from_str(&content).unwrap();
+    // 2. 尝试路径 2：项目根目录下的 .nova/ 目录 (开发环境回退)
+    // 假设开发时的结构是 deskapp/src-tauri/target/debug/xxx.exe
+    // 我们向上找几层以寻找 .nova 目录
+    let mut config_path_2 = exe_dir.clone();
+    let mut found_dev_config = false;
+    for _ in 0..5 {
+        let dev_nova_path = config_path_2.join(".nova").join("config.toml");
+        if dev_nova_path.exists() {
+            config_path_2 = dev_nova_path;
+            found_dev_config = true;
+            break;
+        }
+        if let Some(parent) = config_path_2.parent() {
+            config_path_2 = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
 
-    let remote = yaml_config.remote;
+    let final_config_path = if config_path_1.exists() {
+        config_path_1
+    } else if found_dev_config {
+        info!("Falling back to dev config at: {:?}", config_path_2);
+        config_path_2
+    } else {
+        return Err(format!("找不到配置文件 config.toml (已尝试 {:?} 和 .nova 目录)", config_path_1).into());
+    };
 
-    // 如果没有配置 sidecar，提供一个默认值（指向系统 node 或用户指定的默认值）
-    let sidecar = yaml_config.sidecar;
+    info!("Loading config from: {:?}", final_config_path);
+    let content = std::fs::read_to_string(&final_config_path)?;
+    let toml_config: TomlConfig = toml::from_str(&content)?;
+
+    let remote = toml_config.remote;
+    let sidecar = toml_config.sidecar;
 
     Ok(AppConfig {
         host: remote.host.unwrap_or_else(|| "localhost".to_string()),
         port: remote.port.unwrap_or(18801),
         token: remote.token,
-        config_dir: exe_dir,
+        config_dir: final_config_path.parent().unwrap_or(&exe_dir).to_path_buf(),
         sidecar,
     })
 }

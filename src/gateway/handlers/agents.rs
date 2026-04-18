@@ -1,8 +1,6 @@
-use crate::agent::AgentRuntime;
-use crate::gateway::handlers::system::send_general_error;
 use crate::gateway::protocol::{Agent, AgentsListResponse, AgentsSwitchResponse};
 use crate::gateway::router::AppState;
-use log::{error, info, warn};
+use log::info;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

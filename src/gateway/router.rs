@@ -37,6 +37,9 @@ pub async fn handle_message<C: LlmClient>(
         MessageEnvelope::Chat(payload) => {
             chat::handle_chat(payload, state, outbound_tx, msg_id).await;
         }
+        MessageEnvelope::ChatStop(payload) => {
+            chat::handle_chat_stop(payload, state, outbound_tx, msg_id).await;
+        }
         MessageEnvelope::SessionsList => {
             sessions::handle_sessions_list(state, outbound_tx, msg_id).await;
         }
@@ -45,6 +48,9 @@ pub async fn handle_message<C: LlmClient>(
         }
         MessageEnvelope::SessionsCreate(payload) => {
             sessions::handle_session_create(payload, state, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionsDelete(payload) => {
+            sessions::handle_session_delete(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentsList => {
             agents::handle_agents_list::<C>(state, outbound_tx, msg_id).await;

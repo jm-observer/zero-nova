@@ -140,7 +140,6 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
             }
             _ => {
                 let (tx, mut rx) = mpsc::channel(100);
-                // Spawn a task to render events as they arrive
                 let printer = tokio::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         render_event(&event, verbose);
@@ -149,13 +148,18 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
 
                 tokio::select! {
                     result = agent.run_turn(&history, input, tx.clone(), None) => {
-                        let msgs = result?;
                         drop(tx);
                         printer.await.ok();
-                        // Ensure a newline separates output from next prompt
-                        println!();
-                        for msg in msgs {
-                            history.push(msg);
+                        match result {
+                            Ok(turn_result) => {
+                                println!();
+                                for msg in turn_result.messages {
+                                    history.push(msg);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("\n{}", format!("[error] {}", e).red());
+                            }
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {

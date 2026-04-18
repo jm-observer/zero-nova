@@ -10,6 +10,12 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone)]
+pub struct TurnResult {
+    pub messages: Vec<Message>,
+    pub usage: crate::provider::types::Usage,
+}
+
 /// Runtime for the zero-nova agent.
 pub struct AgentRuntime<C: LlmClient> {
     client: C,
@@ -63,7 +69,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         user_input: &str,
         event_tx: mpsc::Sender<crate::event::AgentEvent>,
         cancellation_token: Option<CancellationToken>,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<TurnResult> {
         let mut all_messages = history.to_vec();
         // Append initial user message
         all_messages.push(Message {
@@ -80,13 +86,16 @@ impl<C: LlmClient> AgentRuntime<C> {
         for iteration in 0..self.config.max_iterations {
             if let Some(token) = &cancellation_token {
                 if token.is_cancelled() {
-                    return Ok(turn_messages);
+                    return Ok(TurnResult {
+                        messages: turn_messages,
+                        usage: cumulative_usage,
+                    });
                 }
             }
 
             log::debug!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
-            let tool_defs = self.tools.tool_definitions();
             log::info!("Starting stream for iteration {}", iteration + 1);
+            let tool_defs = self.tools.tool_definitions();
 
             let mut receiver = self
                 .client
@@ -111,7 +120,10 @@ impl<C: LlmClient> AgentRuntime<C> {
             {
                 if let Some(token) = &cancellation_token {
                     if token.is_cancelled() {
-                        return Ok(turn_messages);
+                        return Ok(TurnResult {
+                            messages: turn_messages,
+                            usage: cumulative_usage,
+                        });
                     }
                 }
 
@@ -255,7 +267,10 @@ impl<C: LlmClient> AgentRuntime<C> {
             while let Some(res) = tool_results_fut.next().await {
                 if let Some(token) = &cancellation_token {
                     if token.is_cancelled() {
-                        return Ok(turn_messages);
+                        return Ok(TurnResult {
+                            messages: turn_messages,
+                            usage: cumulative_usage,
+                        });
                     }
                 }
                 indexed_results.push(res);
@@ -286,6 +301,9 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .await;
         }
 
-        Ok(turn_messages)
+        Ok(TurnResult {
+            messages: turn_messages,
+            usage: cumulative_usage,
+        })
     }
 }

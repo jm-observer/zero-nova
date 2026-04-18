@@ -1,8 +1,10 @@
 use crate::gateway::handlers::system::send_general_error;
 use crate::gateway::protocol::GatewayMessage;
-use crate::gateway::protocol::{Session, SessionCreateRequest, SessionCreateResponse, SessionIdPayload};
+use crate::gateway::protocol::{
+    MessageEnvelope, Session, SessionCreateRequest, SessionCreateResponse, SessionIdPayload, SessionsListResponse,
+    SessionsMessagesResponse, SuccessResponse,
+};
 use crate::gateway::router::AppState;
-use log::{error, info, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -11,23 +13,11 @@ pub async fn handle_sessions_list<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let internal_sessions = state.sessions.get_all().await;
-    let sessions: Vec<Session> = internal_sessions
-        .into_iter()
-        .map(|s| Session {
-            id: s.id.clone(),
-            title: Some(s.name.clone()),
-            agent_id: "nova".to_string(),
-            created_at: s.created_at,
-            updated_at: s.created_at,
-        })
-        .collect();
+    let sessions = state.sessions.list_sorted().await;
 
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        crate::gateway::protocol::MessageEnvelope::SessionsListResponse(
-            crate::gateway::protocol::SessionsListResponse { sessions },
-        ),
+        MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
     ));
 }
 
@@ -38,14 +28,11 @@ pub async fn handle_session_get<C: crate::provider::LlmClient>(
     request_id: String,
 ) {
     if let Some(session) = state.sessions.get(&session_id).await {
-        let history = session.history.read().unwrap().clone();
-        let messages: Vec<serde_json::Value> = history.into_iter().map(|m| serde_json::to_value(m).unwrap()).collect();
+        let messages = session.get_messages_dto();
 
         let _ = outbound_tx.send(GatewayMessage::new(
             request_id,
-            crate::gateway::protocol::MessageEnvelope::SessionsMessagesResponse(
-                crate::gateway::protocol::SessionsMessagesResponse { messages },
-            ),
+            MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse { messages }),
         ));
     } else {
         send_general_error(
@@ -67,15 +54,37 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
     let session = Session {
         id: internal_session.id.clone(),
         title: Some(internal_session.name.clone()),
-        agent_id: payload.agent_id.unwrap_or_else(|| "nova".to_string()),
+        agent_id: payload.agent_id.unwrap_or_else(|| "default".to_string()),
         created_at: internal_session.created_at,
         updated_at: internal_session.created_at,
+        message_count: 0,
     };
 
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        crate::gateway::protocol::MessageEnvelope::SessionsCreateResponse(
-            crate::gateway::protocol::SessionCreateResponse { session },
-        ),
+        MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
     ));
+}
+
+pub async fn handle_session_delete<C: crate::provider::LlmClient>(
+    payload: SessionIdPayload,
+    state: Arc<AppState<C>>,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
+    let success = state.sessions.delete(&payload.session_id).await;
+
+    if success {
+        let _ = outbound_tx.send(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success: true }),
+        ));
+    } else {
+        send_general_error(
+            &outbound_tx,
+            &request_id,
+            "Session not found".to_string(),
+            Some("SESSION_NOT_FOUND".to_string()),
+        );
+    }
 }

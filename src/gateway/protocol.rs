@@ -45,6 +45,8 @@ pub enum MessageEnvelope {
     Chat(ChatPayload),
     #[serde(rename = "chat.stop")]
     ChatStop(SessionIdPayload),
+    #[serde(rename = "chat.stop.response")]
+    ChatStopResponse(SessionIdPayload),
     #[serde(rename = "sessions.list")]
     SessionsList,
     #[serde(rename = "sessions.list.response")]
@@ -299,7 +301,7 @@ pub struct SessionsListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsMessagesResponse {
-    pub messages: Vec<Value>,
+    pub messages: Vec<MessageDTO>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -331,6 +333,34 @@ pub struct Session {
     pub agent_id: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub message_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageDTO {
+    pub role: String,
+    pub content: Vec<ContentBlockDTO>,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ContentBlockDTO {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -61,6 +61,17 @@ pub struct ToolConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AgentConfig {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub aliases: Vec<String>,
+    pub system_prompt_template: Option<String>,
+    pub tool_whitelist: Option<Vec<String>>,
+    pub model_config: Option<crate::gateway::agents::ModelConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct BashConfig {
     pub shell: Option<String>,
 }
@@ -75,6 +86,8 @@ pub struct GatewayConfig {
     pub max_iterations: usize,
     #[serde(default)]
     pub tool_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub agents: Vec<AgentConfig>,
 }
 
 fn default_host() -> String {
@@ -94,6 +107,7 @@ impl Default for GatewayConfig {
             port: default_port(),
             max_iterations: default_max_iterations(),
             tool_timeout_secs: None,
+            agents: Vec::new(),
         }
     }
 }

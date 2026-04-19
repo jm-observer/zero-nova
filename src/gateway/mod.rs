@@ -45,15 +45,40 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
         tool_timeout: std::time::Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
     };
 
-    let agent_registry = AgentRegistry::new(AgentDescriptor {
-        id: "openclaw".to_string(),
-        display_name: "OpenClaw".to_string(),
-        description: "Default agent".to_string(),
-        aliases: vec!["oc".to_string(), "open-claw".to_string()],
-        system_prompt_template: "You are OpenClaw".to_string(),
-        tool_whitelist: None,
-        model_config: None,
-    });
+    let mut agents = config
+        .gateway
+        .agents
+        .iter()
+        .map(|a| AgentDescriptor {
+            id: a.id.clone(),
+            display_name: a.display_name.clone(),
+            description: a.description.clone(),
+            aliases: a.aliases.clone(),
+            system_prompt_template: a
+                .system_prompt_template
+                .clone()
+                .unwrap_or_else(|| "You are an AI assistant.".to_string()),
+            tool_whitelist: a.tool_whitelist.clone(),
+            model_config: a.model_config.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    if agents.is_empty() {
+        agents.push(AgentDescriptor {
+            id: "openclaw".to_string(),
+            display_name: "OpenClaw".to_string(),
+            description: "Default agent".to_string(),
+            aliases: vec!["oc".to_string(), "open-claw".to_string()],
+            system_prompt_template: "You are OpenClaw".to_string(),
+            tool_whitelist: None,
+            model_config: None,
+        });
+    }
+
+    let mut agent_registry = AgentRegistry::new(agents.remove(0));
+    for agent in agents {
+        agent_registry.register(agent);
+    }
 
     let agent = AgentRuntime::new(client, tools, prompt, agent_config);
 

@@ -5,7 +5,7 @@ use crate::gateway::protocol::{
     ChatCompletePayload, ChatPayload, GatewayMessage, InteractionResolvedPayload, MessageEnvelope, SessionIdPayload,
 };
 use crate::provider::LlmClient;
-use log::{debug, error};
+use log::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -29,7 +29,7 @@ pub async fn handle_chat<C: LlmClient>(
         let control = session.control.read().unwrap();
         crate::gateway::control::TurnRouter::classify(&payload.input, &control, Some(&state.agent_registry))
     };
-    debug!("{} {:?}", payload.input, intent);
+    info!("{} {:?}", payload.input, intent);
 
     match intent {
         crate::gateway::control::TurnIntent::ResolvePendingInteraction => {

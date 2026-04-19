@@ -56,6 +56,8 @@
    SESSION_CREATED: 'session:created',     // { session: any }
    SESSION_DELETED: 'session:deleted',     // { sessionId: string }
    SESSION_UPDATED: 'session:updated',     // { sessions: any[] }
+   SESSION_CREATE: 'session:create',       // { title?: string }
+   SESSION_DELETE: 'session:delete',       // { id: string }
    MESSAGE_ADDED: 'message:added',         // { sessionId: string, message: any }
    MESSAGES_UPDATED: 'messages:updated',   // { sessionId: string, messages: any[] }
    AGENT_SWITCHED: 'agent:switched',       // { agentId: string }

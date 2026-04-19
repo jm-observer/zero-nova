@@ -70,7 +70,6 @@ export class AppState {
     setMessages(messages: Message[]) {
         this.messages = messages;
         this.bus.emit(Events.MESSAGES_UPDATED, { sessionId: this.currentSessionId, messages });
-        this.bus.emit(Events.SESSION_CHANGED, { sessionId: this.currentSessionId, messages });
     }
 
     addMessage(message: Message) {

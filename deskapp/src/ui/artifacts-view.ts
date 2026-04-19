@@ -4,15 +4,8 @@ import { EventBus, Events } from '../core/event-bus';
 import { invoke } from '@tauri-apps/api/core';
 import { save as tauriDialogSave } from '@tauri-apps/plugin-dialog';
 
-export interface Artifact {
-    type: 'file' | 'code' | 'output';
-    path?: string;
-    filename?: string;
-    content?: string;
-    language?: string;
-    size?: number;
-    timestamp: number;
-}
+
+export type { SessionArtifactView } from './types';
 
 export type ArtifactCategory = 'all' | 'document' | 'code' | 'image' | 'data' | 'media' | 'other';
 
@@ -34,7 +27,7 @@ export class ArtifactsView {
     private list: HTMLDivElement;
     private filterTabs: HTMLDivElement;
     private activeFilter: ArtifactCategory = 'all';
-    private artifacts: Artifact[] = [];
+    private artifacts: SessionArtifactView[] = [];
     private addedPaths = new Set<string>();
 
     constructor(private state: AppState, private bus: EventBus) {
@@ -44,11 +37,15 @@ export class ArtifactsView {
     }
 
     init() {
-        this.bus.on(Events.SESSION_CHANGED, () => {
-            this.clear();
+        this.bus.on(Events.SESSION_SELECTED, (payload: { sessionId: string }) => {
+            if (payload.sessionId) {
+                this.loadArtifacts(payload.sessionId);
+            } else {
+                this.clear();
+            }
         });
 
-        this.bus.on('artifact:added', (payload: { artifact: Artifact }) => {
+        this.bus.on('artifact:added', (payload: { artifact: SessionArtifactView }) => {
             this.addArtifact(payload.artifact);
         });
 
@@ -98,12 +95,28 @@ export class ArtifactsView {
         this.updateFilterTabs();
     }
 
-    async addArtifact(artifact: Artifact, persist = true) {
+    async loadArtifacts(sessionId: string) {
+        if (!this.state.gatewayClient) return;
+        this.clear();
+        try {
+            const artifacts = await this.state.gatewayClient.getArtifacts(sessionId);
+            for (const art of artifacts) {
+                this.addArtifact(art, false);
+            }
+        } catch (err) {
+            console.error('[Artifacts] Load failed:', err);
+        }
+    }
+
+    async addArtifact(artifact: SessionArtifactView, persist = true) {
         if (artifact.path && this.addedPaths.has(artifact.path)) return;
         if (artifact.path) this.addedPaths.add(artifact.path);
 
         this.artifacts.push(artifact);
-        this.panel.classList.remove('collapsed');
+        // 如果是新添加的（不是从历史加载的），显示面板
+        if (persist) {
+            this.panel.classList.remove('collapsed');
+        }
 
         const dateKey = this.getDateKey(artifact.timestamp);
         const group = this.ensureDateGroup(dateKey);
@@ -115,7 +128,7 @@ export class ArtifactsView {
         this.applyFilter();
     }
 
-    private createItemElement(artifact: Artifact): HTMLDivElement {
+    private createItemElement(artifact: SessionArtifactView): HTMLDivElement {
         const item = document.createElement('div');
         item.className = 'artifact-item';
         item.dataset.category = this.getCategory(artifact);
@@ -151,7 +164,7 @@ export class ArtifactsView {
         return item;
     }
 
-    private getCategory(artifact: Artifact): ArtifactCategory {
+    private getCategory(artifact: SessionArtifactView): ArtifactCategory {
         const fname = artifact.filename || artifact.path?.split(/[/\\]/).pop() || '';
         const ext = fname.split('.').pop()?.toLowerCase() || '';
         return CATEGORY_EXT_MAP[ext] || 'other';

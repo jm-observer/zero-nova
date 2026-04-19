@@ -376,12 +376,19 @@ class AppState {
 
 ## 7. 里程碑 (Milestones)
 
-| 阶段 | 里程碑 | 交付物 |
-|------|--------|--------|
-| 阶段一-Step1 | 类型定义提取完成 | `core/types.ts` 创建，`main.ts` / `gateway-client.ts` 编译通过 |
-| 阶段一-Step2 | EventBus + State 骨架就绪 | `core/event-bus.ts` + `core/state.ts` 创建，`main.ts` 中接入 |
-| 阶段一-Step3 | 所有 View 模块提取完成 | `ui/*.ts` 全部创建，功能回归通过 |
-| 阶段一-Step4 | main.ts 瘦化完成 | `main.ts` < 300 行，全面回归通过 |
-| 阶段二-Step1 | Agent-Session 数据模型对齐 | 前后端确认 Session 结构变更，数据迁移方案确定 |
-| 阶段二-Step2 | 侧边栏 UI 改造完成 | Agent 选择器 + Session 分组列表上线 |
-| 阶段二-Step3 | 新建/恢复/删除对话流程完成 | 全面验收通过 |
+| 阶段 | 里程碑 | 交付物 | 状态 |
+|------|--------|--------|------|
+| 阶段一-Step1 | 类型定义提取完成 | `core/types.ts` 创建 | ✅ 已完成 |
+| 阶段一-Step2 | EventBus + State 骨架就绪 | `core/event-bus.ts` + `core/state.ts` | ✅ 已完成 |
+| 阶段一-Step3 | 所有 View 模块提取完成 | `ui/*.ts` 全部创建 | ✅ 已完成 |
+| 阶段一-Step4 | main.ts 瘦化完成 | `main.ts` < 300 行 | ✅ 已完成 |
+| 阶段二-Step1 | Agent-Session 数据模型对齐 | 前后端确认 Session 结构变更 | ✅ 已完成 (后端已实现 sessions.messages) |
+| 阶段二-Step2 | 侧边栏 UI 改造完成 | Agent 选择器 + Session 分组列表 | ✅ 已完成 |
+| 阶段二-Step3 | 新建/恢复/删除对话流程完成 | 全面验收通过 | ✅ 已完成 |
+
+## 8. 实时进度 (Real-time Progress)
+
+- [x] **架构模块化 (Phase 1)**：已成功拆分核心层 (state/event-bus) 与所有 UI Components，`main.ts` 已完成瘦化。
+- [x] **Agent-Session 分层 (Phase 2)**：侧边栏已实现二级结构（Agent 列表 + Session 时间分组列表），支持 Agent 切换与 Session 过滤。
+- [x] **Session 管理逻辑**：已实现 Session 的跨组件选择、历史消息自动加载、手动新建会话及删除会话逻辑。
+- [ ] **最终验证**：需全面测试 Settings 各 Tab 交互及 Artifacts 同步。

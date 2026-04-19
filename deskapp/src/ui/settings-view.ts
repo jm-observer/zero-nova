@@ -78,16 +78,29 @@ export class SettingsView {
         this.setInputValue('tts-voice-select', cfg.voice?.ttsVoice);
         this.setCheckboxValue('debug-mode-toggle', cfg.debug);
 
-        // Models
+        // Models - Orchestration
         if (cfg.llm) {
-            this.setInputValue('server-orch-provider', cfg.llm.provider || 'anthropic');
-            this.setInputValue('server-orch-model', cfg.llm.model_config?.model || '');
+            this.setInputValue('server-orch-provider', cfg.llm.orchestration?.provider || 'anthropic');
+            this.setInputValue('server-orch-model', cfg.llm.orchestration?.model || '');
+        }
+
+        // Models - Execution
+        if (cfg.llm?.execution) {
+            this.setInputValue('server-exec-provider', cfg.llm.execution.provider || 'openai');
+            this.setInputValue('server-exec-model', cfg.llm.execution.model || '');
         }
 
         // Search
-        if (cfg.search) {
-            this.setInputValue('server-web-search-provider', cfg.search.backend || 'brave');
-            this.setInputValue('server-web-search-apikey', cfg.search.google_api_key || cfg.search.tavily_api_key || '');
+        if (cfg.web?.search) {
+            this.setInputValue('server-web-search-provider', cfg.web.search.provider || 'brave');
+            this.setInputValue('server-web-search-apikey', cfg.web.search.apiKey || '');
+            this.setInputValue('server-web-search-max-results', cfg.web.search.maxResults || 5);
+        }
+
+        // Fetch
+        if (cfg.web?.fetch) {
+            this.setCheckboxValue('server-web-fetch-readability', cfg.web.fetch.readability);
+            this.setInputValue('server-web-fetch-max-chars', cfg.web.fetch.maxChars || 50000);
         }
     }
 
@@ -127,16 +140,35 @@ export class SettingsView {
 
     private collectUpdates(): any {
         const updates: any = {
-            llm: { model_config: {} },
-            search: {},
-            gateway: {}
+            llm: { 
+                orchestration: {},
+                execution: {}
+            },
+            web: {
+                search: {},
+                fetch: {}
+            }
         };
 
-        updates.llm.provider = this.getInputValue('server-orch-provider');
-        updates.llm.model_config.model = this.getInputValue('server-orch-model');
-        updates.search.backend = this.getInputValue('server-web-search-provider');
+        updates.llm.orchestration.provider = this.getInputValue('server-orch-provider');
+        updates.llm.orchestration.model = this.getInputValue('server-orch-model');
+        
+        updates.llm.execution.provider = this.getInputValue('server-exec-provider');
+        updates.llm.execution.model = this.getInputValue('server-exec-model');
+
+        updates.web.search.provider = this.getInputValue('server-web-search-provider');
+        updates.web.search.apiKey = this.getInputValue('server-web-search-apikey');
+        updates.web.search.maxResults = parseInt(this.getInputValue('server-web-search-max-results')) || 5;
+
+        updates.web.fetch.readability = this.getCheckboxValue('server-web-fetch-readability');
+        updates.web.fetch.maxChars = parseInt(this.getInputValue('server-web-fetch-max-chars')) || 50000;
 
         return updates;
+    }
+
+    private getCheckboxValue(id: string): boolean {
+        const el = document.getElementById(id) as HTMLInputElement;
+        return el ? el.checked : false;
     }
 
     private getInputValue(id: string): string {

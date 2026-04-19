@@ -166,3 +166,14 @@ export interface EvolutionConfirmRequest {
     confirmMessage: string;
     validationStatus: 'PASS' | 'WARN' | 'BLOCK';
 }
+
+export interface SessionArtifactView {
+    id: string;
+    type: 'file' | 'code' | 'output';
+    path?: string;
+    filename?: string;
+    content?: string;
+    language?: string;
+    size?: number;
+    timestamp: number;
+}

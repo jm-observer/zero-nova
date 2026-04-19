@@ -1,5 +1,5 @@
 import { AppState } from '../core/state';
-import { EventBus } from '../core/event-bus';
+import { EventBus, Events } from '../core/event-bus';
 import { GatewayClient } from '../gateway-client';
 
 export class ChatService {
@@ -32,18 +32,43 @@ export class ChatService {
             await this.sendMessage(payload.text);
         });
 
-        this.bus.on('chat:complete', async () => {
+        this.bus.on(Events.SESSION_CHANGED, async () => {
              // Refresh messages to get persistent IDs and updated state
              if (this.state.currentSessionId) {
                  const messages = await this.client.getMessages(this.state.currentSessionId);
                  this.state.setMessages(messages as any);
              }
         });
+
+        // Handle manual session creation from UI
+        this.bus.on(Events.SESSION_CREATE, async (payload: { title?: string }) => {
+            const title = payload?.title || 'New Chat';
+            const agentId = this.state.currentAgentId;
+            try {
+                const session = await this.client.createSession(title, undefined, undefined); 
+                // Note: gateway-client.ts createSession needs update to support agentId if protocol supports it
+                this.state.addSession(session as any);
+                this.state.setCurrentSession(session.id);
+            } catch (err) {
+                this.bus.emit('toast', { message: 'Failed to create session: ' + err });
+            }
+        });
+
+        // Handle session deletion
+        this.bus.on(Events.SESSION_DELETE, async (payload: { id: string }) => {
+            try {
+                await this.client.deleteSession(payload.id);
+                this.state.deleteSession(payload.id);
+            } catch (err) {
+                this.bus.emit('toast', { message: 'Failed to delete session: ' + err });
+            }
+        });
     }
 
     private async sendMessage(text: string) {
         if (!this.state.currentSessionId) {
-             const session = await this.client.createSession('New Chat');
+             const title = text.length > 20 ? text.substring(0, 20) + '...' : text;
+             const session = await this.client.createSession(title);
              this.state.addSession(session as any);
              this.state.setCurrentSession(session.id);
         }

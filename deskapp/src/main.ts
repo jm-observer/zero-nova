@@ -69,27 +69,37 @@ async function init() {
             if (setupWizard) setupWizard.style.display = 'block';
         }
 
+        console.log('[Main] Fetching agents...');
+        const agents = await gatewayClient.getAgents();
+        state.setAgents(agents as any);
+
         console.log('[Main] Fetching sessions...');
         const sessions = await gatewayClient.getSessions();
         state.setSessions(sessions as any);
 
         // Listen for session selection to load messages
         bus.on(Events.SESSION_SELECTED, async (payload: { sessionId: string }) => {
-             if (!payload.sessionId) return;
-             console.log('[Main] Session selected:', payload.sessionId);
-             const messages = await gatewayClient.getMessages(payload.sessionId);
-             state.setMessages(messages as any);
+             if (!payload.sessionId) {
+                 state.setMessages([]);
+                 return;
+             }
+             console.log('[Main] Loading messages for session:', payload.sessionId);
+             try {
+                const messages = await gatewayClient.getMessages(payload.sessionId);
+                state.setMessages(messages as any);
+             } catch (err) {
+                console.error('[Main] Failed to load messages:', err);
+             }
         });
 
-        if (sessions.length > 0) {
-             console.log('[Main] Auto-selecting first session:', sessions[0].id);
+        // Initial session selection
+        if (state.currentAgentId) {
+            const filtered = sessions.filter(s => s.agentId === state.currentAgentId);
+            if (filtered.length > 0) {
+                state.setCurrentSession(filtered[0].id);
+            }
+        } else if (sessions.length > 0) {
              state.setCurrentSession(sessions[0].id);
-        }
-        
-        console.log('[Main] Fetching server config...');
-        const configData = await gatewayClient.getServerConfig();
-        if (configData.agents?.list) {
-            state.setAgents(configData.agents.list);
         }
         
         // 8. Hide Loading Overlay

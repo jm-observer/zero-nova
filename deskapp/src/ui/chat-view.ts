@@ -87,34 +87,41 @@ export class ChatView {
 
     private renderMessage(message: any): string {
         const isAssistant = message.role === 'assistant';
+        const content = message.content;
         let contentHtml = '';
-
-        if (Array.isArray(message.content)) {
+        if (!content) {
+            contentHtml = '<span class="empty-content">...</span>';
+        } else if (Array.isArray(content)) {
             // 处理 Phase 4 的内容块数组
-            contentHtml = message.content.map((block: any) => {
-                if (block.type === 'text') {
-                    return renderMarkdown(block.text);
-                } else if (block.type === 'thinking') {
+            contentHtml = content.map((block: any) => {
+                const type = block.type;
+                if (type === 'text') {
+                    const text = typeof block.text === 'string' ? block.text : (block.content || '');
+                    return renderMarkdown(text);
+                } else if (type === 'thinking') {
                     return `<div class="thinking-block">
                         <div class="thinking-header">${t('chat.thinking')}</div>
-                        <div class="thinking-content">${renderMarkdown(block.thinking)}</div>
+                        <div class="thinking-content">${renderMarkdown(block.thinking || '')}</div>
                     </div>`;
-                } else if (block.type === 'tool_use') {
+                } else if (type === 'tool_use' || type === 'tool_call') {
+                    const name = block.name || block.toolName;
+                    const input = block.input || block.args;
                     return `<div class="tool-use-card">
-                        <div class="tool-name">🛠️ ${block.name}</div>
-                        <pre class="tool-args">${JSON.stringify(block.input, null, 2)}</pre>
+                        <div class="tool-name">🛠️ ${name}</div>
+                        <pre class="tool-args">${JSON.stringify(input, null, 2)}</pre>
                     </div>`;
-                } else if (block.type === 'tool_result') {
-                    return `<div class="tool-result-card ${block.is_error ? 'error' : ''}">
+                } else if (type === 'tool_result') {
+                    return `<div class="tool-result-card ${block.isError ? 'error' : ''}">
                         <div class="tool-result-header">${t('chat.tool_result')}</div>
-                        <div class="tool-result-content">${escapeHtml(block.content)}</div>
+                        <div class="tool-result-content">${escapeHtml(String(block.content || block.result || ''))}</div>
                     </div>`;
                 }
                 return '';
             }).join('');
         } else {
             // 兼容旧的字符串格式
-            contentHtml = isAssistant ? renderMarkdown(message.content) : escapeHtml(message.content);
+            const text = typeof content === 'string' ? content : JSON.stringify(content);
+            contentHtml = isAssistant ? renderMarkdown(text) : escapeHtml(text);
         }
         
         return `

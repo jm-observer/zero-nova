@@ -111,12 +111,12 @@ impl AppConfig {
     pub fn get_default_workspace() -> std::path::PathBuf {
         use std::path::PathBuf;
 
-        // 1. 检查是否在开发环境 (Cargo run)
+        // 1. 开发环境：如果有 CARGO_MANIFEST_DIR，说明在 Cargo 环境下运行
         if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
             return PathBuf::from(manifest_dir);
         }
 
-        // 2. 生产环境默认路径: ~/.nova
+        // 2. 生产环境：~/.nova
         let home = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .map(PathBuf::from)

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -21,7 +22,7 @@ pub struct GatewayConfig {
 pub struct SidecarExecutionContext {
     pub command: String,
     pub args: Vec<String>,
-    pub working_dir: String,
+    pub working_dir: PathBuf,
 }
 
 pub struct GatewaySidecar {
@@ -62,10 +63,8 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     let _name = config.sidecar.name.clone();
     let mut args = config.sidecar.args.clone().unwrap_or_default();
     let working_dir = config
-        .sidecar
-        .working_dir
-        .clone()
-        .unwrap_or_else(|| app.path().app_data_dir().unwrap_or_default());
+        .config_dir
+        .clone();
 
     // 2. 注入端口参数
     if let Some(arg_fmt) = &config.sidecar.port_arg {
@@ -77,10 +76,8 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     }
 
     // 2.2 注入 Workspace 参数
-    if let Some(workspace) = &config.sidecar.workspace {
-        args.push("--workspace".to_string());
-        args.push(workspace.to_string_lossy().to_string());
-    }
+    args.push("--workspace".to_string());
+    args.push(config.config_dir.to_string_lossy().to_string());
 
     // 3. 构建命令路径
     let mut cmd_path = config.sidecar.command.clone();
@@ -102,7 +99,7 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     Ok(SidecarExecutionContext {
         command: cmd_path,
         args,
-        working_dir: working_dir.to_string_lossy().to_string(),
+        working_dir: working_dir,
     })
 }
 

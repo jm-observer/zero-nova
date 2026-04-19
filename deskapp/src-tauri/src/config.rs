@@ -1,6 +1,7 @@
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use anyhow::anyhow;
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub enum SidecarManagementMode {
@@ -20,8 +21,6 @@ pub struct SidecarConfig {
     pub command: String,
     /// 启动参数
     pub args: Option<Vec<String>>,
-    /// 工作目录
-    pub working_dir: Option<PathBuf>,
     /// 端口参数的格式。例如: "--port" 或 "-p"。如果为 None，默认使用 "--port"。
     pub port_arg: Option<String>,
     /// 工作区路径 (Workspace)，传递给 nova-gateway 的 --workspace 参数
@@ -57,41 +56,24 @@ struct RemoteConfig {
 }
 
 /// 加载配置
-pub fn load_config(_app: &tauri::AppHandle) -> Result<AppConfig, Box<dyn std::error::Error>> {
-    // 1. 尝试路径 1：可执行文件同级目录 (生产环境)
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."));
-    let config_path_1 = exe_dir.join("config.toml");
-
-    // 2. 尝试路径 2：项目根目录下的 .nova/ 目录 (开发环境回退)
-    // 假设开发时的结构是 deskapp/src-tauri/target/debug/xxx.exe
-    // 我们向上找几层以寻找 .nova 目录
-    let mut config_path_2 = exe_dir.clone();
-    let mut found_dev_config = false;
-    for _ in 0..5 {
-        let dev_nova_path = config_path_2.join(".nova").join("config.toml");
-        if dev_nova_path.exists() {
-            config_path_2 = dev_nova_path;
-            found_dev_config = true;
-            break;
-        }
-        if let Some(parent) = config_path_2.parent() {
-            config_path_2 = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-
-    let final_config_path = if config_path_1.exists() {
-        config_path_1
-    } else if found_dev_config {
-        info!("Falling back to dev config at: {:?}", config_path_2);
-        config_path_2
+pub fn load_config(_app: &tauri::AppHandle) -> anyhow::Result<AppConfig> {
+    let default_workspace = if let Some(workspace) = custom_utils::args::arg_value("--workspace", "-w") {
+        PathBuf::from(workspace).join(".nova")
     } else {
-        return Err(format!("找不到配置文件 config.toml (已尝试 {:?} 和 .nova 目录)", config_path_1).into());
+        // todo
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+        home.join(".nova")
     };
+
+    // 2. 尝试从工作区加载 config.toml
+    let final_config_path = default_workspace.join("config.toml");
+
+    if !final_config_path.exists() {
+        return Err(anyhow!("找不到配置文件: {:?}", final_config_path).into());
+    }
 
     info!("Loading config from: {:?}", final_config_path);
     let content = std::fs::read_to_string(&final_config_path)?;
@@ -104,7 +86,9 @@ pub fn load_config(_app: &tauri::AppHandle) -> Result<AppConfig, Box<dyn std::er
         host: remote.host.unwrap_or_else(|| "localhost".to_string()),
         port: remote.port.unwrap_or(18801),
         token: remote.token,
-        config_dir: final_config_path.parent().unwrap_or(&exe_dir).to_path_buf(),
+        config_dir: final_config_path
+            .parent()
+            .map(|p| p.to_path_buf()).ok_or(anyhow!("final_config_path todo"))?,
         sidecar,
     })
 }

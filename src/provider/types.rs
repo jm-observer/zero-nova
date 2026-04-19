@@ -55,7 +55,7 @@ pub enum InputContentBlock {
     /// Tool result block, containing the result output and error flag.
     ToolResult {
         tool_use_id: String,
-        #[serde(alias = "content", default)]
+        #[serde(rename = "content")]
         output: String,
         #[serde(default)]
         is_error: bool,

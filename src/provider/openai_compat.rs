@@ -38,58 +38,91 @@ impl LlmClient for OpenAiCompatClient {
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
         let mut input_messages = Vec::new();
+
+        // 3.6.4 System Prompt Adaptation
+        if !system.is_empty() {
+            input_messages.push(json!({
+                "role": "system",
+                "content": system
+            }));
+        }
+
         for msg in messages {
             let role = match msg.role {
                 crate::message::Role::User => "user",
                 crate::message::Role::Assistant => "assistant",
             };
 
-            let mut content_vec = Vec::new();
+            let mut text_parts = Vec::new();
+            let mut tool_calls = Vec::new();
+            let mut tool_results = Vec::new();
+
             for block in &msg.content {
                 match block {
                     crate::message::ContentBlock::Text { text } => {
-                        content_vec.push(json!({ "type": "text", "text": text }));
+                        text_parts.push(text.clone());
                     }
                     crate::message::ContentBlock::Thinking { .. } => {
-                        // OpenAI 兼容层不回传 thinking 内容，直接跳过
+                        // 3.6.2 OpenAI compatibility: Skip thinking for requests
                         continue;
                     }
                     crate::message::ContentBlock::ToolUse { id, name, input } => {
-                        content_vec.push(json!({
-                            "type": "tool_call",
+                        tool_calls.push(json!({
                             "id": id,
-                            "function": { "name": name, "arguments": input }
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": input.to_string()
+                            }
                         }));
                     }
                     crate::message::ContentBlock::ToolResult {
-                        tool_use_id,
-                        output,
-                        is_error,
+                        tool_use_id, output, ..
                     } => {
-                        content_vec.push(json!({
-                            "type": "tool",
+                        tool_results.push(json!({
+                            "role": "tool",
                             "tool_call_id": tool_use_id,
-                            "content": output,
-                            "is_error": *is_error
+                            "content": output
                         }));
                     }
                 }
             }
 
-            input_messages.push(json!({
-                "role": role,
-                "content": content_vec
-            }));
-        }
-
-        if !system.is_empty() {
-            input_messages.insert(
-                0,
-                json!({
-                    "role": "system",
-                    "content": system
-                }),
-            );
+            // 3.6.3 OpenAI Tool Call Adaptation
+            if !tool_results.is_empty() {
+                // OpenAI requires each tool result to be a separate message with role "tool"
+                for tr in tool_results {
+                    input_messages.push(tr);
+                }
+                // If there's also text in this message (rare), add it as a user message
+                if !text_parts.is_empty() {
+                    input_messages.push(json!({
+                        "role": "user",
+                        "content": text_parts.join("\n")
+                    }));
+                }
+            } else if role == "assistant" && !tool_calls.is_empty() {
+                // Assistant message with tool calls
+                let mut assistant_msg = json!({
+                    "role": "assistant"
+                });
+                if !text_parts.is_empty() {
+                    assistant_msg["content"] = json!(text_parts.join("\n"));
+                } else {
+                    assistant_msg["content"] = json!(null);
+                }
+                assistant_msg["tool_calls"] = json!(tool_calls);
+                input_messages.push(assistant_msg);
+            } else {
+                // Regular user or assistant message
+                let content = text_parts.join("\n");
+                if !content.is_empty() || role == "user" {
+                    input_messages.push(json!({
+                        "role": role,
+                        "content": if content.is_empty() { json!(null) } else { json!(content) }
+                    }));
+                }
+            }
         }
 
         let mut body = json!({

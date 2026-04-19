@@ -1,5 +1,5 @@
 use crate::tool::builtin::web_search::types::{SearchBackend, SearchResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use log::{error, info};
 use reqwest::Client;
@@ -50,7 +50,7 @@ impl SearchBackend for TavilyBackend {
 
         if let Some(items) = data["results"].as_array() {
             for item in items {
-                info!("Tavily response: {item:?}");
+                info!("Tavily response: {:.20?}", item["content"]);
                 results.push(SearchResult {
                     title: item["title"].as_str().unwrap_or("No Title").to_string(),
                     url: item["url"].as_str().unwrap_or("No URL").to_string(),

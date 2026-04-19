@@ -1581,6 +1581,18 @@ body.resizing .artifacts-panel {
 .hljs-title,
 .hljs-name,
 .hljs-type,
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link {
+  color: #c792ea;
+}
+
+.hljs-string,
+.hljs-title,
+.hljs-name,
+.hljs-type,
 .hljs-attribute,
 .hljs-symbol,
 .hljs-bullet,
@@ -1731,6 +1743,7 @@ body.resizing .artifacts-panel {
     text-decoration: underline;
 }
 
+.typing-intent {
   display: flex;
   align-items: center;
   gap: 6px;

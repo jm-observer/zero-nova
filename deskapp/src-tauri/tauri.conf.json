@@ -55,7 +55,6 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../config.toml"
     ]
   }
 }

@@ -159,6 +159,10 @@ const zh: Record<string, string> = {
     'chat.retry': '重试',
     'chat.stop': '停止生成',
     'chat.click_to_view_detail': '点击查看详情',
+    'chat.intent_chat': '正在处理对话...',
+    'chat.intent_resolve': '正在处理交互响应...',
+    'chat.intent_address_agent': '正在请求切换到智能体 {0}...',
+    'chat.intent_continue_workflow': '正在继续执行工作流...',
 
     // ========================
     // Settings - Tabs

@@ -157,6 +157,10 @@ const en: Record<string, string> = {
     'chat.retry': 'Retry',
     'chat.stop': 'Stop Generation',
     'chat.click_to_view_detail': 'Click to view detail',
+    'chat.intent_chat': 'Processing chat...',
+    'chat.intent_resolve': 'Processing interaction response...',
+    'chat.intent_address_agent': 'Requesting switch to agent {0}...',
+    'chat.intent_continue_workflow': 'Continuing workflow execution...',
 
     // ========================
     // Settings - Tabs

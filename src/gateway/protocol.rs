@@ -75,6 +75,8 @@ pub enum MessageEnvelope {
     // --- 3.1 Progress & Chat Events ---
     #[serde(rename = "chat.start")]
     ChatStart(SessionIdPayload),
+    #[serde(rename = "chat.intent")]
+    ChatIntent(ChatIntentPayload),
     #[serde(rename = "chat.progress")]
     ChatProgress(ProgressEvent),
     #[serde(rename = "chat.complete")]
@@ -252,6 +254,14 @@ pub struct ProgressEvent {
     pub thinking: Option<String>,
     pub token: Option<String>,
     pub output: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatIntentPayload {
+    pub session_id: String,
+    pub intent: String,
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -23,6 +23,12 @@ export interface ProgressEvent {
     sessionId?: string;
 }
 
+export interface ChatIntentPayload {
+    sessionId: string;
+    intent: 'chat' | 'resolve' | 'address_agent' | 'continue_workflow';
+    agentId?: string;
+}
+
 export interface Session {
     id: string;
     agentId: string;
@@ -41,6 +47,7 @@ export interface GatewayMessage {
 
 type MessageHandler = (message: GatewayMessage) => void;
 type ProgressHandler = (event: ProgressEvent) => void;
+type ChatIntentHandler = (payload: ChatIntentPayload) => void;
 type ConnectionHandler = (status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed') => void;
 
 /**
@@ -56,6 +63,7 @@ export class GatewayClient {
         reject: (error: Error) => void;
     }>();
     private progressHandlers: ProgressHandler[] = [];
+    private chatIntentHandlers: ChatIntentHandler[] = [];
     private messageHandlers: MessageHandler[] = [];
     private connectionHandlers: ConnectionHandler[] = [];
     private reconnectAttempts = 0;
@@ -246,6 +254,12 @@ export class GatewayClient {
                 
                 this.progressHandlers.forEach(handler => handler(event));
             }
+            
+            // 处理聊天意向识别事件
+            if (message.type === 'chat.intent') {
+                const payload = message.payload as ChatIntentPayload;
+                this.chatIntentHandlers.forEach(handler => handler(payload));
+            }
 
             // 处理聊天完成事件
             if (message.type === 'chat.complete') {
@@ -363,6 +377,19 @@ export class GatewayClient {
             const index = this.progressHandlers.indexOf(handler);
             if (index !== -1) {
                 this.progressHandlers.splice(index, 1);
+            }
+        };
+    }
+    
+    /**
+     * 监听聊天意向识别事件
+     */
+    onChatIntent(handler: ChatIntentHandler): () => void {
+        this.chatIntentHandlers.push(handler);
+        return () => {
+            const index = this.chatIntentHandlers.indexOf(handler);
+            if (index !== -1) {
+                this.chatIntentHandlers.splice(index, 1);
             }
         };
     }

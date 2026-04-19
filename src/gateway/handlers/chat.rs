@@ -5,7 +5,7 @@ use crate::gateway::protocol::{
     ChatCompletePayload, ChatPayload, GatewayMessage, InteractionResolvedPayload, MessageEnvelope, SessionIdPayload,
 };
 use crate::provider::LlmClient;
-use log::{debug, error, info};
+use log::{error, info};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -30,6 +30,23 @@ pub async fn handle_chat<C: LlmClient>(
         crate::gateway::control::TurnRouter::classify(&payload.input, &control, Some(&state.agent_registry))
     };
     info!("{} {:?}", payload.input, intent);
+
+    // Send intent to frontend
+    let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatIntent(
+        crate::gateway::protocol::ChatIntentPayload {
+            session_id: payload.session_id.clone().unwrap_or_default(),
+            intent: match &intent {
+                crate::gateway::control::TurnIntent::ResolvePendingInteraction => "resolve".to_string(),
+                crate::gateway::control::TurnIntent::AddressAgent { .. } => "address_agent".to_string(),
+                crate::gateway::control::TurnIntent::ContinueWorkflow => "continue_workflow".to_string(),
+                crate::gateway::control::TurnIntent::ExecuteChat => "chat".to_string(),
+            },
+            agent_id: match &intent {
+                crate::gateway::control::TurnIntent::AddressAgent { agent_id } => Some(agent_id.clone()),
+                _ => None,
+            },
+        },
+    )));
 
     match intent {
         crate::gateway::control::TurnIntent::ResolvePendingInteraction => {

@@ -6,7 +6,7 @@ import { open as tauriDialogOpen, save as tauriDialogSave } from '@tauri-apps/pl
  */
 
 import { createTypingHole, destroyTypingHole, setTypingMode } from './cosmicHole';
-import { GatewayClient, type ProgressEvent as GatewayProgressEvent, type ScheduledTaskView, type TaskRunView, type DebugLogEntry, type McpServerView } from './gateway-client';
+import { GatewayClient, type ProgressEvent as GatewayProgressEvent, type ChatIntentPayload, type ScheduledTaskView, type TaskRunView, type DebugLogEntry, type McpServerView } from './gateway-client';
 import { renderMarkdown, activateMermaid } from './markdown';
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
@@ -817,6 +817,7 @@ async function init(): Promise<void> {
         });
 
         gw.onProgress(handleGatewayProgress);
+        gw.onChatIntent(handleChatIntent);
 
         gw.onRebuildProgress((progress) => {
             if (progress >= 100 || progress < 0) {
@@ -3635,6 +3636,38 @@ function playTaskCompleteSound(): void {
 }
 
 // Gateway 进度事件处理
+
+/** 处理聊天意向识别事件 */
+function handleChatIntent(payload: ChatIntentPayload): void {
+    if (payload.sessionId !== currentSessionId) {
+        console.log('[handleChatIntent] skipping non-current session', payload.sessionId, 'current:', currentSessionId);
+        return;
+    }
+
+    let text = t(`chat.intent_${payload.intent}`);
+    if (payload.intent === 'address_agent' && payload.agentId) {
+        const agent = agentsList.find(a => a.id === payload.agentId);
+        const agentName = agent ? agent.name : payload.agentId;
+        text = t('chat.intent_address_agent', agentName);
+    }
+
+    // 更新底部状态栏
+    setStatus(text, 'running');
+
+    // 记录到调试面板
+    appendDebugLogEntry({
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        module: 'INTENT',
+        message: text
+    });
+    
+    // 如果是切换代理，显示一个 Toast 提醒
+    if (payload.intent === 'address_agent') {
+        showToast(text);
+    }
+}
+
 function handleGatewayProgress(event: GatewayProgressEvent): void {
     // 会话隔离检查（优先级从高到低）：
 

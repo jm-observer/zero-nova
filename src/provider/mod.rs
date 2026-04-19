@@ -47,10 +47,14 @@ pub enum ProviderStreamEvent {
 
 /// Configuration for the LLM model behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Configuration for the LLM model behavior.
 pub struct ModelConfig {
     pub model: String,
     pub max_tokens: u32,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
+    /// Anthropic: 映射为 budget_tokens; 其他 Provider: 仅作为"是否启用"的开关
     pub thinking_budget: Option<u32>,
+    /// OpenAI: 映射为 reasoning_effort 参数 ("low"/"medium"/"high")
+    pub reasoning_effort: Option<String>,
 }

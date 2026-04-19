@@ -219,6 +219,8 @@ mod tests {
                 max_tokens: 10,
                 temperature: None,
                 top_p: None,
+                thinking_budget: None,
+                reasoning_effort: None,
             },
             tool_timeout: Duration::from_secs(1),
         };

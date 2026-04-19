@@ -1,5 +1,5 @@
 use crate::provider::types::StreamEvent;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde_json::from_str;
 
 /// Represents a raw SSE event before JSON parsing.

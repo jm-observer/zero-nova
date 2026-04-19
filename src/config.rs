@@ -39,6 +39,7 @@ impl Default for LlmConfig {
                 temperature: None,
                 top_p: None,
                 thinking_budget: None,
+                reasoning_effort: None,
             },
         }
     }
@@ -102,5 +103,25 @@ impl AppConfig {
         let content = fs::read_to_string(path)?;
         let config: AppConfig = toml::from_str(&content)?;
         Ok(config)
+    }
+
+    /// 获取默认的工作空间路径
+    /// 开发环境：项目根目录
+    /// 生产环境：用户目录下的 .nova 目录
+    pub fn get_default_workspace() -> std::path::PathBuf {
+        use std::path::PathBuf;
+
+        // 1. 检查是否在开发环境 (Cargo run)
+        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            return PathBuf::from(manifest_dir);
+        }
+
+        // 2. 生产环境默认路径: ~/.nova
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+
+        home.join(".nova")
     }
 }

@@ -8,7 +8,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = custom_utils::logger::logger_feature("open-flux", "debug", log::LevelFilter::Info, true).build();
+    let _ = custom_utils::logger::logger_feature("navo-desk", "debug", log::LevelFilter::Info, true).build();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 已有实例运行时，聚焦到已有窗口

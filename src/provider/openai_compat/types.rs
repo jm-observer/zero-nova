@@ -22,6 +22,10 @@ pub struct ChunkDelta {
     #[serde(default)]
     pub content: Option<String>,
     #[serde(default)]
+    pub reasoning_content: Option<String>, // Phase 4b 新增
+    #[serde(default, alias = "reasoning")] // 兼容 Groq 等使用 "reasoning" 的 Provider
+    pub reasoning_alias: Option<String>,
+    #[serde(default)]
     pub tool_calls: Option<Vec<ChunkToolCall>>,
 }
 

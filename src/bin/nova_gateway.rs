@@ -42,24 +42,21 @@ async fn main() -> anyhow::Result<()> {
 
     let _args = Args::parse();
 
-    log::info!(
-        "Current working directory: {:?}",
-        std::env::current_dir().unwrap_or_else(|e| std::path::PathBuf::from(e.to_string()))
-    );
-
-    let config_path = _args
+    let workspace = _args
         .workspace
-        .as_ref()
-        .map(|w| w.join("config.toml"))
-        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"));
+        .clone()
+        .unwrap_or_else(zero_nova::config::AppConfig::get_default_workspace);
 
+    log::info!("Working directory: {:?}", std::env::current_dir().unwrap_or_default());
+    log::info!("Workspace directory: {:?}", workspace);
+
+    let config_path = workspace.join("config.toml");
     log::info!("Attempting to load config from: {:?}", config_path);
 
-    let mut config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
-        .unwrap_or_else(|e| {
-            log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
-            zero_nova::config::AppConfig::default()
-        });
+    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path).unwrap_or_else(|e| {
+        log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
+        zero_nova::config::AppConfig::default()
+    });
 
     config.gateway.host = _args.host;
     config.gateway.port = _args.port;
@@ -72,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
     // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {
         // Task 1: Run the server
-        res = start_server(config, client, _args.workspace) => {
+        res = start_server(config, client, Some(workspace)) => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

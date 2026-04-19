@@ -350,18 +350,33 @@ crate::message::ContentBlock::Thinking { .. } => {
 }
 ```
 
-#### 3.6.3 OpenAI Tool Call 格式适配
+#### 3.6.3 OpenAI Tool Call 格式适配 (修正)
 
-当前 `openai_compat.rs` 中 tool_calls 的请求格式需要调整，OpenAI 使用消息级别的 `tool_calls` 字段而非 content block：
+OpenAI 官方 API 与 Anthropic 不同，Tool Use 不作为 content block，而是独立的顶级字段。必须严格遵循以下转换规则：
+
+- **Assistant 消息包含 Tool Use**：
+  - 必须将 `ContentBlock::ToolUse` 转换为顶级 `tool_calls` 数组。
+  - `content` 字段应保持为 `null` 或空字符串（除非同时包含文本）。
+  - 每个 `tool_call` 必须包含 `id`, `type: "function"`, 和 `function: { name, arguments }`。
+- **Tool Result 消息**：
+  - 必须作为独立消息，`role` 为 `"tool"`。
+  - 必须包含 `tool_call_id` 字段指向对应的原始 ID。
+  - 结果内容直接放入 `content` 字段。
 
 ```rust
-// Assistant 消息中包含 tool_use 时，需要转换为 OpenAI 的格式：
-// { "role": "assistant", "content": "...", "tool_calls": [...] }
-// ToolResult 需要转换为独立的 tool role 消息：
-// { "role": "tool", "tool_call_id": "...", "content": "..." }
+// 示例转换逻辑：
+if role == "assistant" && !tool_calls.is_empty() {
+    body["tool_calls"] = json!(tool_calls);
+    body["content"] = json!(text_content); // 仅包含文本部分
+}
 ```
 
-> 这部分的完整实现细节较多，将在实现时根据 OpenAI API 文档细化。此处仅标注方向。
+#### 3.6.4 System Prompt 适配 (新增)
+
+OpenAI 兼容层不应使用顶级的 `"system": "..."` 字段（这是 Anthropic 的特有格式）。
+
+- **策略**：将 `system` 字符串封装为 `role: "system"` 的消息，并插入到 `messages` 数组的最前端。
+- **注意**：部分 Provider（如某些 O1 模型）不支持系统消息或对系统消息有特殊限制，此处需根据具体模型类型做进一步适配。
 
 ### 3.7 错误处理
 
@@ -522,7 +537,9 @@ if let Some(effort) = &config.reasoning_effort {
 
 1. **空值过滤**：Provider 层必须过滤掉所有内容为空字符串的 delta，避免向上层发送空事件。
 2. **混合 chunk**：单个 chunk 同时包含 `reasoning_content` 和 `content` 时，使用 `event_queue` 模式依次发射，不丢弃任何内容。
-3. **Provider 特定字段**：使用 `#[serde(alias)]` 作为初始简化方案。已知风险：alias 全局生效，无法按 Provider 动态切换。如果将来出现字段名冲突，需退回到 `serde_json::Value` 手动提取。
+3. **Provider 特定字段风险**：当前使用 `#[serde(alias)]` 获取 `reasoning_content` 是简化方案。
+   - **风险**：如果 Provider 使用相同的字段名但数据类型不同（如 object vs string），反序列化会失败。
+   - **演进方向**：当接入更多非标 Provider 时，应改为先反序列化为 `serde_json::Value`，根据 `ModelConfig` 中的 `provider_type` 动态决定提取逻辑。
 4. **Usage 格式差异**：OpenAI 使用 `prompt_tokens` / `completion_tokens`，Anthropic 使用 `input_tokens` / `output_tokens`。在 OpenAI 层反序列化后映射为统一的 `Usage` 结构体，缺失字段（`cache_*`）填 0。
 5. **`[DONE]` vs `message_stop`**：OpenAI 流式以 `data: [DONE]` 结束，Anthropic 以 `message_stop` 事件结束。`SseParser` 已处理 `[DONE]`，各 Provider 的 `next_event()` 分别处理各自的结束信号。
 

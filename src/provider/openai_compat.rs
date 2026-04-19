@@ -2,9 +2,9 @@ use crate::provider::openai_compat::types::ChatCompletionChunk;
 use crate::provider::sse::{RawSseEvent, SseParser};
 use crate::provider::types::{StopReason, ToolDefinition};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use reqwest::{Client, header};
+use reqwest::{header, Client};
 use serde_json::json;
 use std::collections::VecDeque;
 
@@ -93,21 +93,19 @@ impl LlmClient for OpenAiCompatClient {
         }
 
         if !tools.is_empty() {
-            body["tools"] = json!(
-                tools
-                    .iter()
-                    .map(|t| {
-                        json!({
-                            "type": "function",
-                            "function": {
-                                "name": t.name,
-                                "description": t.description,
-                                "parameters": t.input_schema
-                            }
-                        })
+            body["tools"] = json!(tools
+                .iter()
+                .map(|t| {
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.input_schema
+                        }
                     })
-                    .collect::<Vec<_>>()
-            );
+                })
+                .collect::<Vec<_>>());
         }
 
         if let Some(temp) = config.temperature {
@@ -120,6 +118,10 @@ impl LlmClient for OpenAiCompatClient {
 
         // Phase 4a: stream_options to get usage
         body["stream_options"] = json!({ "include_usage": true });
+
+        if let Some(effort) = &config.reasoning_effort {
+            body["reasoning_effort"] = json!(effort);
+        }
 
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self
@@ -235,6 +237,15 @@ impl OpenAiCompatStreamReceiver {
         }
 
         let delta = &choice.delta;
+
+        // --- Reasoning content（优先于普通 text）---
+        let reasoning = delta.reasoning_content.as_ref().or(delta.reasoning_alias.as_ref()); // fallback 到 alias
+        if let Some(reasoning) = reasoning {
+            if !reasoning.is_empty() {
+                self.event_queue
+                    .push_back(ProviderStreamEvent::ThinkingDelta(reasoning.clone()));
+            }
+        }
 
         // --- Text content ---
         if let Some(content) = &delta.content {

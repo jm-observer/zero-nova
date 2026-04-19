@@ -1,5 +1,5 @@
 use crate::tool::builtin::web_search::types::{SearchBackend, SearchResult};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::{error, info};
 use reqwest::Client;

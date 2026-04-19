@@ -6415,7 +6415,6 @@ const openfluxModalClose = document.getElementById('openflux-login-modal-close')
 // ---- 侧边栏模式切换元素 ----
 const sidebarModeToggle = document.getElementById('sidebar-mode-toggle') as HTMLDivElement;
 const modeChatBtn = document.getElementById('mode-chat-btn') as HTMLButtonElement;
-const modeAgentBtn = document.getElementById('mode-agent-btn') as HTMLButtonElement;
 const sidebarAgentList = document.getElementById('sidebar-agent-list') as HTMLDivElement;
 
 // ---- 登录弹窗逻辑 ----
@@ -6581,11 +6580,9 @@ async function checkOpenFluxLoginStatus(): Promise<void> {
 // ---- Agent / NexusAi 侧边栏切换 ----
 
 modeChatBtn.addEventListener('click', () => switchSidebarMode('agent'));
-modeAgentBtn.addEventListener('click', () => switchSidebarMode('nexusai'));
 
 function switchSidebarMode(mode: 'agent' | 'nexusai'): void {
     modeChatBtn.classList.toggle('active', mode === 'agent');
-    modeAgentBtn.classList.toggle('active', mode === 'nexusai');
     sessionList.classList.toggle('hidden', mode !== 'agent');
     sidebarAgentList.classList.toggle('hidden', mode !== 'nexusai');
     // 切到 NexusAi 模式时加载云端 Agent

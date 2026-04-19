@@ -12,6 +12,10 @@ max_tokens = 8192
 temperature = 0.7
 # 核采样参数 (0.0 到 1.0)
 top_p = 1.0
+# 开启 Thinking/Reasoning 模式 (Gemma 4, DeepSeek R1 等)
+thinking_budget = 4096
+# Anthropic 系：thinking_budget = 4000
+# OpenAI 系：reasoning_effort = "medium"
 
 [search]
 backend = "tavily"

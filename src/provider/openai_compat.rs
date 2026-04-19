@@ -162,6 +162,12 @@ impl LlmClient for OpenAiCompatClient {
             body["reasoning_effort"] = json!(effort);
         }
 
+        // Phase 4b: Support generic reasoning toggle for models like Gemma 4 or DeepSeek R1
+        if config.thinking_budget.is_some() {
+            body["enable_thinking"] = json!(true);
+            body["include_reasoning"] = json!(true);
+        }
+
         let url = format!("{}/chat/completions", self.base_url);
         let resp = self
             .http

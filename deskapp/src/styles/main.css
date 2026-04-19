@@ -1708,8 +1708,29 @@ body.resizing .artifacts-panel {
   }
 }
 
-/* 意图文本样式（LLM 思考时显示） */
-.typing-intent {
+/* 进度卡片中的思考内容样式 */
+.progress-item.thinking .progress-text {
+    font-style: italic;
+    color: var(--color-text-secondary);
+    opacity: 0.8;
+}
+
+.expand-thinking-btn {
+    background: none;
+    border: none;
+    color: var(--color-primary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    margin-left: 8px;
+    padding: 0 4px;
+    opacity: 0.7;
+}
+
+.expand-thinking-btn:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
+
   display: flex;
   align-items: center;
   gap: 6px;

@@ -110,7 +110,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             let mut current_text = String::new();
             let mut current_thinking = String::new();
-            let mut tool_calls = Vec::new(); // (id, name, input_json)
+            let mut tool_calls: Vec<(String, String, String)> = Vec::new();
             let mut iter_usage = crate::provider::types::Usage::default();
             let mut last_stop_reason: Option<crate::provider::types::StopReason> = None;
 
@@ -169,18 +169,26 @@ impl<C: LlmClient> AgentRuntime<C> {
                 current_blocks.push(ContentBlock::Text { text: current_text });
             }
 
-            for (id, name, input_json) in &tool_calls {
-                let input_val: serde_json::Value = match serde_json::from_str(input_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
-                        serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
-                    }
-                };
+            // Parse tool call JSON once and store the parsed values for reuse
+            let parsed_tool_calls: Vec<(String, String, serde_json::Value)> = tool_calls
+                .into_iter()
+                .map(|(id, name, input_json)| {
+                    let input_val: serde_json::Value = match serde_json::from_str(&input_json) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
+                            serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
+                        }
+                    };
+                    (id, name, input_val)
+                })
+                .collect();
+
+            for (id, name, input_val) in &parsed_tool_calls {
                 current_blocks.push(ContentBlock::ToolUse {
                     id: id.clone(),
                     name: name.clone(),
-                    input: input_val,
+                    input: input_val.clone(),
                 });
             }
 
@@ -193,13 +201,12 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             // 3.4 MaxTokens 自动续写
             if last_stop_reason == Some(crate::provider::types::StopReason::MaxTokens) {
-                let is_truncated = if tool_calls.is_empty() {
+                let is_truncated = if parsed_tool_calls.is_empty() {
                     true
                 } else {
-                    // 检查最后一个 tool call 是否结束
-                    let (_, _, last_json) = tool_calls.last().unwrap();
-                    let trimmed = last_json.trim();
-                    trimmed.is_empty() || !trimmed.ends_with('}')
+                    // 检查最后一个 tool call 的 input 是否为有效 JSON 对象
+                    let (_, _, last_val) = parsed_tool_calls.last().unwrap();
+                    last_val.get("__error").is_some()
                 };
 
                 if is_truncated {
@@ -213,7 +220,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 }
             }
 
-            if tool_calls.is_empty() {
+            if parsed_tool_calls.is_empty() {
                 completed_naturally = true;
                 let _ = event_tx
                     .send(crate::event::AgentEvent::TextDelta("".to_string())) // No-op to maintain stream if needed, but we removed TurnComplete
@@ -224,16 +231,9 @@ impl<C: LlmClient> AgentRuntime<C> {
             // 3.6 Tool 执行超时 & 3.1 Tool 结果顺序保持
             let mut tool_results_fut = FuturesUnordered::new();
 
-            for (call_idx, (id, name, input_json)) in tool_calls.into_iter().enumerate() {
+            for (call_idx, (id, name, input_val)) in parsed_tool_calls.into_iter().enumerate() {
                 let tool_registry = &self.tools;
                 let tx = event_tx.clone();
-                let input_val: serde_json::Value = match serde_json::from_str(&input_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
-                        serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
-                    }
-                };
                 let tool_timeout_duration = self.config.tool_timeout;
 
                 tool_results_fut.push(async move {

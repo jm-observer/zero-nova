@@ -143,6 +143,8 @@ const en: Record<string, string> = {
     'chat.voice_mode': 'Live Voice Chat',
     'chat.recording': 'Recording...',
     'chat.thinking': 'Thinking',
+    'chat.thinking_expand': 'Expand',
+    'chat.thinking_collapse': 'Collapse',
     'chat.reasoning': 'Reasoning',
     'chat.tool_calling': 'Calling tools',
     'chat.generating': 'Generating...',

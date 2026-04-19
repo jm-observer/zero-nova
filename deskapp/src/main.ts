@@ -3690,7 +3690,48 @@ function handleGatewayProgress(event: GatewayProgressEvent): void {
 
     if (progressEvent.type === 'thinking' && progressEvent.thinking) {
         updateTypingText(progressEvent.thinking);
-        addProgressToChat('·', progressEvent.thinking, true);
+        
+        // 优化：实现同质追加，避免频繁创建新行
+        const progressItemsList = document.querySelectorAll('.progress-item.thinking');
+        const lastItem = progressItemsList[progressItemsList.length - 1] as HTMLElement | null;
+        
+        if (lastItem) {
+            // 追加到已有的 thinking 行
+            const textEl = lastItem.querySelector('.progress-text');
+            if (textEl) {
+                textEl.textContent += progressEvent.thinking;
+                
+                // 实现截断逻辑：如果内容过长，显示“...”并添加展开按钮
+                const MAX_VISIBLE_CHARS = 200;
+                const fullText = textEl.textContent || '';
+                if (fullText.length > MAX_VISIBLE_CHARS) {
+                    if (!lastItem.classList.contains('is-truncated')) {
+                        textEl.textContent = fullText.slice(0, MAX_VISIBLE_CHARS) + '...';
+                        lastItem.classList.add('is-truncated');
+                        
+                        const expandBtn = document.createElement('button');
+                        expandBtn.className = 'expand-thinking-btn';
+                        expandBtn.textContent = t('chat.thinking_expand');
+                        expandBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            if (lastItem.classList.contains('is-truncated')) {
+                                textEl.textContent = fullText;
+                                lastItem.classList.remove('is-truncated');
+                                expandBtn.textContent = t('chat.thinking_collapse');
+                            } else {
+                                textEl.textContent = fullText.slice(0, MAX_VISIBLE_CHARS) + '...';
+                                lastItem.classList.add('is-truncated');
+                                expandBtn.textContent = t('chat.thinking_expand');
+                            }
+                        };
+                        lastItem.appendChild(expandBtn);
+                    }
+                }
+            }
+        } else {
+            // 第一次收到 thinking，创建新行
+            addProgressToChat('·', progressEvent.thinking, true);
+        }
     } else if (progressEvent.type === 'tool_start' && event.description) {
         // LLM 返回工具调用请求时附带的描述文字 → 更新 typing 指示器 + 进度卡片标题
         updateTypingText(event.description);

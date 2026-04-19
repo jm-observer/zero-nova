@@ -1,11 +1,14 @@
 use crate::provider::types::{ToolDefinition, Usage};
 
 pub mod anthropic;
+pub mod openai_compat;
 pub mod sse;
 pub mod types;
+
 use crate::provider::types::StopReason;
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 #[async_trait]
 /// Trait for language model clients that can stream responses.
@@ -25,7 +28,7 @@ pub trait StreamReceiver: Send {
     async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 /// Events emitted by the provider during streaming.
 pub enum ProviderStreamEvent {
     TextDelta(String),
@@ -41,8 +44,6 @@ pub enum ProviderStreamEvent {
         stop_reason: Option<crate::provider::types::StopReason>,
     },
 }
-
-use serde::{Deserialize, Serialize};
 
 /// Configuration for the LLM model behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -145,6 +145,8 @@ const zh: Record<string, string> = {
     'chat.voice_mode': '实时语音对话',
     'chat.recording': '录音中...',
     'chat.thinking': '思考中',
+    'chat.thinking_expand': '展开',
+    'chat.thinking_collapse': '收起',
     'chat.reasoning': '推理中',
     'chat.tool_calling': '正在调用工具',
     'chat.generating': '生成中...',

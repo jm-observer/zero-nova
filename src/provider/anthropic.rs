@@ -1,9 +1,9 @@
 use crate::provider::sse::SseParser;
 use crate::provider::types::{MessageRequest, ToolDefinition};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StopReason, StreamReceiver};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use reqwest::{header, Client};
+use reqwest::{Client, header};
 
 /// Client for interacting with the Anthropic API.
 pub struct AnthropicClient {
@@ -38,14 +38,14 @@ impl LlmClient for AnthropicClient {
     /// Streams responses from the Anthropic API based on the provided messages and configuration.
     async fn stream(
         &self,
-        _messages: &[crate::message::Message],
-        _system: &str,
-        _tools: &[ToolDefinition],
+        messages: &[crate::message::Message],
+        system: &str,
+        tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
         // Build request body
         let mut input_messages = Vec::new();
-        for msg in _messages {
+        for msg in messages {
             let role = match msg.role {
                 crate::message::Role::User => "user",
                 crate::message::Role::Assistant => "assistant",
@@ -93,15 +93,15 @@ impl LlmClient for AnthropicClient {
             top_p: config.top_p,
             stream: true,
             messages: input_messages,
-            system: Some(_system.to_string()),
-            tools: if _tools.is_empty() { None } else { Some(_tools.to_vec()) },
+            system: Some(system.to_string()),
+            tools: if tools.is_empty() { None } else { Some(tools.to_vec()) },
             thinking: None,
         };
 
         // Constraints: if thinking is enabled, temperature must be 1.0
         if let Some(budget) = config.thinking_budget {
             body.thinking = Some(crate::provider::types::ThinkingConfig {
-                kind: "enabled".to_string(),
+                kind: crate::provider::types::ThinkingMode::Enabled,
                 budget_tokens: budget,
             });
             body.temperature = Some(1.0);
@@ -223,6 +223,8 @@ impl StreamReceiver for AnthropicStreamReceiver {
                             self.current_tool_name = None;
                             ProviderStreamEvent::ToolUseEnd
                         } else {
+                            // Text and Thinking blocks don't need a stop event;
+                            // their content is fully delivered via TextDelta/ThinkingDelta.
                             continue;
                         }
                     }

@@ -21,8 +21,14 @@ pub struct MessageRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThinkingConfig {
     #[serde(rename = "type")]
-    pub kind: String, // "enabled"
+    pub kind: ThinkingMode,
     pub budget_tokens: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingMode {
+    Enabled,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

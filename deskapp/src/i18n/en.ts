@@ -151,6 +151,7 @@ const en: Record<string, string> = {
     'chat.tool_calling': 'Calling tools',
     'chat.running_tool': 'Running',
     'chat.tool_executing': 'Calling tools',
+    'chat.tool_result': 'Tool Result',
     'chat.generating': 'Generating...',
     'chat.copy_code': 'Copy Code',
     'chat.copy_message': 'Copy Message',

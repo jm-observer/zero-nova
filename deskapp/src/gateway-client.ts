@@ -1,43 +1,45 @@
+import type { 
+    ProgressEvent, 
+    ChatIntentPayload, 
+    Session, 
+    DebugLogEntry, 
+    ScheduledTaskView, 
+    TaskRunView, 
+    SessionArtifactView, 
+    McpServerView, 
+    ServerConfigView, 
+    ServerConfigUpdate, 
+    RouterConfigView, 
+    RouterInboundView, 
+    RouterOutboundView, 
+    EvolutionConfirmRequest,
+    OpenFluxAgentInfo,
+    OpenFluxChatMessage
+} from './core/types';
+
+export type {
+    ProgressEvent, 
+    ChatIntentPayload, 
+    Session, 
+    DebugLogEntry, 
+    ScheduledTaskView, 
+    TaskRunView, 
+    SessionArtifactView, 
+    McpServerView, 
+    ServerConfigView, 
+    ServerConfigUpdate, 
+    RouterConfigView, 
+    RouterInboundView, 
+    RouterOutboundView, 
+    EvolutionConfirmRequest,
+    OpenFluxAgentInfo,
+    OpenFluxChatMessage
+};
+
 /**
  * WebSocket 客户端封装
  * 用于渲染进程连接 Gateway Server
  */
-
-export interface ProgressEvent {
-    type: 'iteration' | 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'turn_complete' | 'iteration_limit';
-    iteration?: number;
-    /** @deprecated Use toolName */
-    tool?: string;
-    toolName?: string;
-    toolUseId?: string;
-    args?: Record<string, unknown>;
-    result?: unknown;
-    thinking?: string;
-    token?: string;
-    output?: string;
-    description?: string;
-    isError?: boolean;
-    /** LLM 原始描述文字（仅 tool_start 事件，来自 LLM 的 content） */
-    llmDescription?: string;
-    /** 关联的会话 ID（用于跨会话隔离，Router 消息广播时携带） */
-    sessionId?: string;
-}
-
-export interface ChatIntentPayload {
-    sessionId: string;
-    intent: 'chat' | 'resolve' | 'address_agent' | 'continue_workflow';
-    agentId?: string;
-}
-
-export interface Session {
-    id: string;
-    agentId: string;
-    title?: string;
-    createdAt: number;
-    updatedAt: number;
-    cloudChatroomId?: number;
-    cloudAgentName?: string;
-}
 
 export interface GatewayMessage {
     type: string;
@@ -54,6 +56,7 @@ type ConnectionHandler = (status: 'connecting' | 'connected' | 'disconnected' | 
  * Gateway WebSocket 客户端
  */
 export class GatewayClient {
+
     private ws: WebSocket | null = null;
     private url: string;
     private token?: string;

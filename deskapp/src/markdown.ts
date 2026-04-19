@@ -77,20 +77,21 @@ marked.setOptions({
 // 渲染函数
 // ========================
 
-/**
- * 将 Markdown 文本渲染为 HTML
- */
 export function renderMarkdown(text: string): string {
-    if (!text) return '';
+    if (typeof text !== 'string' || !text) return '';
     try {
         let html = marked.parse(text) as string;
         // 后处理：为表格添加响应式滚动容器
         html = html.replace(/<table>/g, '<div class="table-wrapper"><table>');
         html = html.replace(/<\/table>/g, '</table></div>');
         return html;
-    } catch {
+    } catch (e) {
+        console.error('Markdown parse error:', e);
         // 降级：简单转义
-        return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+        return String(text)
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>');
     }
 }
 

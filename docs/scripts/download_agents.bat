@@ -6,6 +6,7 @@ rem Download to target file in parent directory
 powershell -Command "Invoke-WebRequest -Uri \"%URL%\" -OutFile \"%TARGET%\" -ErrorAction Stop"
 if errorlevel 1 (
   echo Download failed
+  pause
   exit /b 1
 )
 

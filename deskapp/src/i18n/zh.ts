@@ -153,6 +153,7 @@ const zh: Record<string, string> = {
     'chat.tool_calling': '正在调用工具',
     'chat.running_tool': '正在执行',
     'chat.tool_executing': '正在调用工具',
+    'chat.tool_result': '工具执行结果',
     'chat.generating': '生成中...',
     'chat.copy_code': '复制代码',
     'chat.copy_message': '复制消息',

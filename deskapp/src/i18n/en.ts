@@ -24,6 +24,8 @@ const en: Record<string, string> = {
     'common.copied': 'Copied',
     'common.error': 'Error',
     'common.success': 'Success',
+    'common.results': 'results',
+    'common.links': 'links',
     'common.save_config': 'Save Config',
     'common.save_success': '✅ Saved',
     'common.save_failed': 'Save failed',
@@ -147,11 +149,14 @@ const en: Record<string, string> = {
     'chat.thinking_collapse': 'Collapse',
     'chat.reasoning': 'Reasoning',
     'chat.tool_calling': 'Calling tools',
+    'chat.running_tool': 'Running',
+    'chat.tool_executing': 'Calling tools',
     'chat.generating': 'Generating...',
     'chat.copy_code': 'Copy Code',
     'chat.copy_message': 'Copy Message',
     'chat.retry': 'Retry',
     'chat.stop': 'Stop Generation',
+    'chat.click_to_view_detail': 'Click to view detail',
 
     // ========================
     // Settings - Tabs

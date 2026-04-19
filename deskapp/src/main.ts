@@ -386,6 +386,26 @@ const filePreviewOpen = document.getElementById('file-preview-open') as HTMLButt
 const filePreviewReveal = document.getElementById('file-preview-reveal') as HTMLButtonElement;
 const filePreviewCopy = document.getElementById('file-preview-copy') as HTMLButtonElement;
 
+const toolDetailModal = document.getElementById('tool-detail-modal') as HTMLDivElement;
+const toolDetailTitle = document.getElementById('tool-detail-title') as HTMLHeadingElement;
+const toolDetailContent = document.getElementById('tool-detail-content') as HTMLPreElement;
+const toolDetailClose = document.getElementById('tool-detail-close') as HTMLButtonElement;
+const toolDetailOk = document.getElementById('tool-detail-ok') as HTMLButtonElement;
+const toolDetailCopy = document.getElementById('tool-detail-copy') as HTMLButtonElement;
+
+toolDetailClose.onclick = () => toolDetailModal.classList.add('hidden');
+toolDetailOk.onclick = () => toolDetailModal.classList.add('hidden');
+toolDetailCopy.onclick = () => {
+    const text = toolDetailContent.textContent || '';
+    if (text) {
+        navigator.clipboard.writeText(text);
+        showToast('✓ ' + t('common.copied'));
+    }
+};
+toolDetailModal.onclick = (e) => {
+    if (e.target === toolDetailModal) toolDetailModal.classList.add('hidden');
+};
+
 // 状态
 let currentSessionId: string | null = null;
 let currentAgentId: string | null = null; // 多 Agent 支持：当前选中的 Agent ID
@@ -3732,10 +3752,11 @@ function handleGatewayProgress(event: GatewayProgressEvent): void {
             // 第一次收到 thinking，创建新行
             addProgressToChat('·', progressEvent.thinking, true);
         }
-    } else if (progressEvent.type === 'tool_start' && event.description) {
-        // LLM 返回工具调用请求时附带的描述文字 → 更新 typing 指示器 + 进度卡片标题
-        updateTypingText(event.description);
-        updateProgressCardTitle(event.description);
+    } else if (progressEvent.type === 'tool_start') {
+        // LLM 返回工具调用请求时附带的描述文字 或 工具名称
+        const desc = event.description || event.llmDescription || (event.tool ? `${t('chat.running_tool')}: ${event.tool}` : t('chat.tool_executing'));
+        updateTypingText(desc);
+        updateProgressCardTitle(desc);
     } else if (progressEvent.type === 'tool_result' && event.tool) {
         const log = getToolLog(event.tool, event.args);
         const detail = getToolResultSummary(event.tool, event.args, (event as unknown as Record<string, unknown>).result);
@@ -4353,12 +4374,21 @@ function addProgressToChat(icon: string, text: string, isThinking: boolean = fal
     countEl.textContent = String(progressItems.length);
 
     const item = document.createElement('div');
-    item.className = `progress-item${isThinking ? ' thinking' : ''}`;
+    item.className = `progress-item${isThinking ? ' thinking' : ''}${detail ? ' has-detail' : ''}`;
     item.innerHTML = `
         <span class="progress-icon">${icon}</span>
         <span class="progress-text">${escapeHtml(text)}</span>
         ${detail ? `<span class="progress-detail">${escapeHtml(detail)}</span>` : ''}
     `;
+    
+    if (detail) {
+        item.title = t('chat.click_to_view_detail');
+        item.addEventListener('click', () => {
+            // 使用简易弹窗显示详情
+            showToolDetailModal(text, detail);
+        });
+    }
+
     body.appendChild(item);
 
     // 字幕效果：平滑滚动 body 到底部，旧条目自然上移并被顶部遮罩渐隐
@@ -4369,6 +4399,13 @@ function addProgressToChat(icon: string, text: string, isThinking: boolean = fal
     titleEl.textContent = isThinking ? t('app.thinking') : text.slice(0, 80) + (text.length > 80 ? '...' : '');
 
     scrollToBottom();
+}
+
+// 显示工具执行详情弹窗
+function showToolDetailModal(title: string, content: string): void {
+    toolDetailTitle.textContent = title;
+    toolDetailContent.textContent = content; // 使用 textContent 避免 HTML 注入
+    toolDetailModal.classList.remove('hidden');
 }
 
 // 完成当前运行过程卡片
@@ -4582,7 +4619,22 @@ function getToolLog(tool: string, args?: Record<string, unknown>): { icon: strin
 
 /** 从工具执行结果中提取关键信息摘要 */
 function getToolResultSummary(tool: string, args?: Record<string, unknown>, result?: unknown): string {
-    if (!result || typeof result !== 'object') return '';
+    if (!result) return '';
+    
+    // 如果 result 是字符串，尝试简单处理
+    if (typeof result === 'string') {
+        if (tool === 'web_search') {
+            // 统计结果中的链接数量或条目数量
+            const links = (result.match(/https?:\/\/[^\s)]+/g) || []).length;
+            const items = (result.match(/^\d+\./gm) || []).length;
+            if (items > 0) return `${items} ${t('common.results')}`;
+            if (links > 0) return `${links} ${t('common.links')}`;
+            return result.slice(0, 100).replace(/\n/g, ' ');
+        }
+        return result.slice(0, 100).replace(/\n/g, ' ');
+    }
+
+    if (typeof result !== 'object') return '';
     const r = result as Record<string, unknown>;
 
     // Error check — keep error info but without emoji
@@ -4602,7 +4654,8 @@ function getToolResultSummary(tool: string, args?: Record<string, unknown>, resu
         }
         case 'web_search': {
             const results = r.results as unknown[];
-            return results ? `${results.length} results` : '';
+            if (results) return `${results.length} ${t('common.results')}`;
+            return '';
         }
         case 'web_fetch': {
             const content = r.content as string || r.text as string;

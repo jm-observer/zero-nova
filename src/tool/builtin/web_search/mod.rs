@@ -179,7 +179,10 @@ impl Tool for WebSearchTool {
                     e,
                     duration
                 );
-                Err(e)
+                Ok(ToolOutput {
+                    content: format!("Web search failed ({}): {}", self.backend.name(), e),
+                    is_error: true,
+                })
             }
         }
     }

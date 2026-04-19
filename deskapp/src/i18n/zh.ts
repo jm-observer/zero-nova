@@ -25,6 +25,8 @@ const zh: Record<string, string> = {
     'common.copied': '已复制',
     'common.error': '错误',
     'common.success': '成功',
+    'common.results': '项结果',
+    'common.links': '个链接',
     'common.save_config': '保存配置',
     'common.save_success': '✅ 已保存',
     'common.save_failed': '保存失败',
@@ -149,11 +151,14 @@ const zh: Record<string, string> = {
     'chat.thinking_collapse': '收起',
     'chat.reasoning': '推理中',
     'chat.tool_calling': '正在调用工具',
+    'chat.running_tool': '正在执行',
+    'chat.tool_executing': '正在调用工具',
     'chat.generating': '生成中...',
     'chat.copy_code': '复制代码',
     'chat.copy_message': '复制消息',
     'chat.retry': '重试',
     'chat.stop': '停止生成',
+    'chat.click_to_view_detail': '点击查看详情',
 
     // ========================
     // Settings - Tabs

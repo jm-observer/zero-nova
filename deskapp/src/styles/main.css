@@ -2121,8 +2121,67 @@ body.resizing .artifacts-panel {
   margin: var(--spacing-sm) 0;
 }
 
+.progress-item.has-detail {
+    cursor: pointer;
+    transition: background 0.1s;
+    user-select: none;
+}
+
+.progress-item.has-detail:hover {
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.progress-item.has-detail:active {
+    background: rgba(99, 102, 241, 0.2);
+}
+
+/* 工具详情弹窗特化 */
+.tool-detail-modal-content {
+    max-width: 800px;
+    width: 90%;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.tool-detail-modal-body {
+    flex: 1;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+#tool-detail-content {
+    margin: 0;
+    padding: var(--spacing-md);
+    background: rgba(15, 23, 42, 0.4);
+    color: #e2e8f0;
+    font-family: var(--font-mono);
+    font-size: 0.825rem;
+    line-height: 1.6;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 60vh;
+}
+
+/* 滚动条美化 */
+#tool-detail-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+#tool-detail-content::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.3);
+    border-radius: 3px;
+}
+
+#tool-detail-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.5);
+}
+
 .progress-card-header {
-  display: flex;
+    display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;

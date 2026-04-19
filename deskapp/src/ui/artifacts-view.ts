@@ -99,12 +99,18 @@ export class ArtifactsView {
         if (!this.state.gatewayClient) return;
         this.clear();
         try {
-            const artifacts = await this.state.gatewayClient.getArtifacts(sessionId);
+            // 使用较短的超时时间，如果后端没实现或没准备好，不阻塞 UI 
+            const artifacts = await this.state.gatewayClient.getArtifacts(sessionId).catch(e => {
+                console.warn('[Artifacts] Historical artifacts not available or timeout:', e);
+                return [] as SessionArtifactView[];
+            });
+            
             for (const art of artifacts) {
                 this.addArtifact(art, false);
             }
         } catch (err) {
-            console.error('[Artifacts] Load failed:', err);
+            // 彻底捕获，保证不向上传播
+            console.error('[Artifacts] Unexpected load error:', err);
         }
     }
 

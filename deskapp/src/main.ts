@@ -35,6 +35,11 @@ async function init() {
         const gatewayClient = new GatewayClient(config.url, config.token);
         state.setGatewayClient(gatewayClient);
 
+        // Forward connection status to EventBus
+        gatewayClient.onConnectionChange((status) => {
+            bus.emit(Events.GATEWAY_STATUS, { status });
+        });
+
         // 4. UI Components Registration
         console.log('[Main] Registering UI components...');
         const ui = {

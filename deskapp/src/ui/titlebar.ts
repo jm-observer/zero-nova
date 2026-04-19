@@ -36,6 +36,30 @@ export class TitleBarView {
         this.bus.on('browser:status_changed', (payload: { connected: boolean }) => {
             this.updateBrowserStatusIndicator(payload.connected);
         });
+
+        this.bus.on(Events.GATEWAY_STATUS, (payload: { status: string }) => {
+            this.handleGatewayStatusChange(payload.status);
+        });
+    }
+
+    private handleGatewayStatusChange(status: string) {
+        switch (status) {
+            case 'connected':
+                this.setStatus(t('status.connected'), 'ready');
+                break;
+            case 'connecting':
+                this.setStatus(t('status.connecting'), 'running');
+                break;
+            case 'reconnecting':
+                this.setStatus(t('status.reconnecting'), 'running');
+                break;
+            case 'disconnected':
+                this.setStatus(t('status.disconnected'), 'error');
+                break;
+            case 'failed':
+                this.setStatus(t('status.error'), 'error');
+                break;
+        }
     }
 
     private bindEvents() {

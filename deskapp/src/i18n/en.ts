@@ -128,7 +128,7 @@ const en: Record<string, string> = {
     'sidebar.search': 'Search Sessions',
     'sidebar.search_placeholder': 'Search sessions...',
     'sidebar.new_chat': 'New Chat',
-    'sidebar.new_agent': 'New Agent',
+    'sidebar.new_agent': 'New Chat',
     'sidebar.scheduler': 'Scheduled Tasks',
     'sidebar.settings': 'Settings',
     'sidebar.agent_login_text': 'Sign in to Nexus AI Cloud<br />Access team-level Agents and standard workflows',

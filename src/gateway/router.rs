@@ -1,5 +1,5 @@
 use crate::gateway::agents::AgentRegistry;
-use crate::gateway::handlers::{agents, chat, sessions, system, config};
+use crate::gateway::handlers::{agents, chat, config, scheduler, sessions, system};
 use crate::gateway::protocol::{AuthRequest, GatewayMessage, MessageEnvelope};
 use crate::provider::LlmClient;
 use log::warn;
@@ -67,6 +67,9 @@ pub async fn handle_message<C: LlmClient>(
         }
         MessageEnvelope::ConfigUpdate(payload) => {
             config::handle_config_update(payload, state, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SchedulerList => {
+            scheduler::handle_scheduler_list(outbound_tx, msg_id).await;
         }
         MessageEnvelope::BrowserStatus
         | MessageEnvelope::ConfigGetLlmSource

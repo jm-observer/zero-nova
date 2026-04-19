@@ -1,7 +1,7 @@
 import { t } from '../i18n/index';
 import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
-import { formatTime, escapeHtml } from '../utils/html';
+import { escapeHtml } from '../utils/html';
 
 export class SidebarView {
     private sessionList: HTMLElement;
@@ -112,7 +112,7 @@ export class SidebarView {
         this.agentList.innerHTML = agents.map(agent => `
             <div class="agent-item${agent.id === this.state.currentAgentId ? ' active' : ''}" 
                  data-agent-id="${agent.id}" title="${escapeHtml(agent.name)}">
-                <div class="agent-avatar" style="background-color: ${agent.color || 'var(--accent)'}">
+                <div class="agent-avatar" style="background-color: ${agent.color || 'var(--color-primary)'}">
                     ${agent.icon ? agent.icon : agent.name.charAt(0)}
                 </div>
             </div>

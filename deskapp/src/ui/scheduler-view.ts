@@ -82,7 +82,7 @@ export class SchedulerView {
     }
 
     private renderTasks(tasks: any[]) {
-        if (tasks.length === 0) {
+        if (!tasks || tasks.length === 0) {
             this.schedulerTasks.innerHTML = `<div class="scheduler-empty"><p>${t('scheduler.empty')}</p></div>`;
             return;
         }

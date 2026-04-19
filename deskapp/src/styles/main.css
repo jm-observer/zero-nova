@@ -838,6 +838,81 @@ body.resizing .artifacts-panel {
   display: none;
 }
 
+/* Agent 列表 (两级结构的第一级) */
+.agent-list {
+  display: flex;
+  padding: var(--spacing-sm);
+  gap: var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox */
+}
+
+.agent-list::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.agent-item {
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.2s, filter 0.2s;
+  padding: 2px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+}
+
+.agent-item:hover {
+  transform: translateY(-2px);
+}
+
+.agent-item.active {
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.agent-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.125rem;
+  color: white;
+  background: var(--color-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.sidebar.collapsed .agent-list {
+  flex-direction: column;
+  align-items: center;
+  border-bottom: none;
+}
+
+.sidebar-top-title {
+  flex: 1;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 var(--spacing-xs);
+}
+
+.sidebar.collapsed .sidebar-top-title {
+  display: none;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-sm);
+  gap: var(--spacing-xs);
+}
+
 /* 侧边栏操作项（发起对话等） */
 .sidebar-action {
   display: flex;
@@ -877,6 +952,24 @@ body.resizing .artifacts-panel {
 
 .sidebar.collapsed .session-list {
   display: none;
+}
+
+.session-group-label {
+  padding: var(--spacing-md) var(--spacing-md) var(--spacing-xs);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary, #a09585);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.empty-state {
+  padding: var(--spacing-xl) var(--spacing-md);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-style: italic;
+  opacity: 0.6;
 }
 
 .session-item {
@@ -999,6 +1092,40 @@ body.resizing .artifacts-panel {
 .session-item .session-time {
   font-size: 0.75rem;
   color: var(--color-text-secondary);
+}
+
+.session-delete-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 1.125rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s;
+  border-radius: 4px;
+}
+
+.session-item:hover .session-delete-btn {
+  opacity: 1;
+}
+
+.session-delete-btn:hover {
+  background: var(--color-error);
+  color: white;
+}
+
+.session-item.active .session-delete-btn {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.session-item.active .session-delete-btn:hover {
+  background: rgba(0, 0, 0, 0.2);
+  color: white;
 }
 
 .sidebar.collapsed .session-time {

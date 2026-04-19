@@ -43,10 +43,9 @@ export class ChatService {
         // Handle manual session creation from UI
         this.bus.on(Events.SESSION_CREATE, async (payload: { title?: string }) => {
             const title = payload?.title || 'New Chat';
-            const agentId = this.state.currentAgentId;
+            const agentId = this.state.currentAgentId || 'default';
             try {
-                const session = await this.client.createSession(title, undefined, undefined); 
-                // Note: gateway-client.ts createSession needs update to support agentId if protocol supports it
+                const session = await this.client.createSession({ title, agentId }); 
                 this.state.addSession(session as any);
                 this.state.setCurrentSession(session.id);
             } catch (err) {
@@ -68,7 +67,8 @@ export class ChatService {
     private async sendMessage(text: string) {
         if (!this.state.currentSessionId) {
              const title = text.length > 20 ? text.substring(0, 20) + '...' : text;
-             const session = await this.client.createSession(title);
+             const agentId = this.state.currentAgentId || 'default';
+             const session = await this.client.createSession({ title, agentId });
              this.state.addSession(session as any);
              this.state.setCurrentSession(session.id);
         }

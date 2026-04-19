@@ -83,7 +83,9 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     let agent = AgentRuntime::new(client, tools, prompt, agent_config);
 
     let config_arc = Arc::new(std::sync::RwLock::new(config.clone()));
-    let workspace_path = workspace.clone().unwrap_or_else(crate::config::AppConfig::get_default_workspace);
+    let workspace_path = workspace
+        .clone()
+        .unwrap_or_else(crate::config::AppConfig::get_default_workspace);
     let config_path = workspace_path.join("config.toml");
 
     let state = Arc::new(AppState {

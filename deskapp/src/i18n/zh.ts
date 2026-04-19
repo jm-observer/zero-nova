@@ -129,7 +129,7 @@ const zh: Record<string, string> = {
     'sidebar.search': '搜索会话',
     'sidebar.search_placeholder': '搜索会话...',
     'sidebar.new_chat': '发起新对话',
-    'sidebar.new_agent': '新建 Agent',
+    'sidebar.new_agent': '新建对话',
     'sidebar.scheduler': '定时任务',
     'sidebar.settings': '设置',
     'sidebar.agent_login_text': '登录云端<br />获取团队级 Agent 和标准业务流程',

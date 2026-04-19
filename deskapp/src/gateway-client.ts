@@ -12,7 +12,7 @@ import type {
     RouterConfigView, 
     RouterInboundView, 
     RouterOutboundView, 
-    EvolutionConfirmRequest,
+    EvolutionConfirmRequest,    
     OpenFluxAgentInfo,
     OpenFluxChatMessage
 } from './core/types';
@@ -291,7 +291,7 @@ export class GatewayClient {
                 const { resolve, reject } = this.pendingRequests.get(message.id)!;
                 this.pendingRequests.delete(message.id);
 
-                if (message.type.endsWith('.error')) {
+                if (message.type === 'error' || message.type.endsWith('.error')) {
                     const payload = message.payload as { message?: string };
                     reject(new Error(payload.message || '请求失败'));
                 } else {
@@ -489,8 +489,8 @@ export class GatewayClient {
     /**
      * 创建会话
      */
-    async createSession(title?: string, cloudChatroomId?: number, cloudAgentName?: string): Promise<Session> {
-        const result = await this.request<{ session: Session }>('sessions.create', { title, cloudChatroomId, cloudAgentName });
+    async createSession(options: { title?: string; agentId?: string; cloudChatroomId?: number; cloudAgentName?: string }): Promise<Session> {
+        const result = await this.request<{ session: Session }>('sessions.create', options);
         return result.session;
     }
 

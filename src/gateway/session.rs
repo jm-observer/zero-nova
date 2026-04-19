@@ -137,25 +137,26 @@ impl SessionStore {
                 return session;
             }
             // 如果提供了 ID 但不存在，则按此 ID 创建
-            self.create_with_id(id_str, None).await
+            self.create_with_id(id_str, None, None).await
         } else {
-            self.create(None).await
+            self.create(None, None).await
         }
     }
 
     /// 创建一个新会话
-    pub async fn create(&self, name: Option<String>) -> Arc<Session> {
+    pub async fn create(&self, name: Option<String>, agent_id: Option<String>) -> Arc<Session> {
         let id = Uuid::new_v4().to_string();
-        self.create_with_id(id, name).await
+        self.create_with_id(id, name, agent_id).await
     }
 
-    pub async fn create_with_id(&self, id: String, name: Option<String>) -> Arc<Session> {
+    pub async fn create_with_id(&self, id: String, name: Option<String>, agent_id: Option<String>) -> Arc<Session> {
         let length = if id.len() > 8 { 8 } else { id.len() };
         let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..length]));
         let now = Utc::now().timestamp_millis();
+        let agent_id = agent_id.unwrap_or_else(|| "default".to_string());
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(crate::gateway::control::ControlState::new("default")),
+            control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
             id: id.clone(),
             name: session_name,
             history: RwLock::new(Vec::new()),
@@ -191,7 +192,7 @@ impl SessionStore {
             .map(|s| SessionProtocol {
                 id: s.id.clone(),
                 title: Some(s.name.clone()),
-                agent_id: "default".to_string(), // TODO: 支持多 agent
+                agent_id: s.control.read().unwrap().active_agent.clone(),
                 created_at: s.created_at,
                 updated_at: s.updated_at.load(Ordering::SeqCst),
                 message_count: s.history.read().unwrap().len(),

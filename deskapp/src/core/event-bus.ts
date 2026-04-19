@@ -69,4 +69,5 @@
    NOTIFICATION: 'notification',           // { type: 'success'|'error', message: string }
    VOICE_MODE_TOGGLE: 'voice:toggle',      // { active: boolean }
    PROGRESS_UPDATE: 'progress:update',     // { event: any }
+   GATEWAY_STATUS: 'gateway:status',       // { status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
  } as const;

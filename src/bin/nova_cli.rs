@@ -268,6 +268,10 @@ fn render_event(event: &AgentEvent, verbose: bool) {
         AgentEvent::Error(e) => {
             eprintln!("\n{}", format!("[error] {e}").red().bold());
         }
+        AgentEvent::ThinkingDelta(text) => {
+            print!("{text}");
+            let _ = std::io::stdout().flush();
+        }
     }
 }
 

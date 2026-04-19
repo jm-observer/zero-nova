@@ -393,6 +393,8 @@ pub enum ContentBlockDTO {
         content: String,
         is_error: bool,
     },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -63,6 +63,9 @@ impl Session {
                     .iter()
                     .map(|c| match c {
                         ContentBlock::Text { text } => ContentBlockDTO::Text { text: text.clone() },
+                        ContentBlock::Thinking { thinking } => ContentBlockDTO::Thinking {
+                            thinking: thinking.clone(),
+                        },
                         ContentBlock::ToolUse { id, name, input } => ContentBlockDTO::ToolUse {
                             id: id.clone(),
                             name: name.clone(),

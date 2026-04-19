@@ -29,6 +29,7 @@ pub trait StreamReceiver: Send {
 /// Events emitted by the provider during streaming.
 pub enum ProviderStreamEvent {
     TextDelta(String),
+    ThinkingDelta(String),
     ToolUseStart {
         id: String,
         name: String,
@@ -50,4 +51,5 @@ pub struct ModelConfig {
     pub max_tokens: u32,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
+    pub thinking_budget: Option<u32>,
 }

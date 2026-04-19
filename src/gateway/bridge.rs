@@ -11,6 +11,12 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
             token: Some(text),
             ..Default::default()
         }),
+        AgentEvent::ThinkingDelta(text) => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "thinking".to_string(),
+            session_id: Some(session_id.to_string()),
+            thinking: Some(text),
+            ..Default::default()
+        }),
         AgentEvent::ToolStart { id, name, input } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "tool_start".to_string(),
             session_id: Some(session_id.to_string()),

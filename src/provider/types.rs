@@ -14,6 +14,15 @@ pub struct MessageRequest {
     pub system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub kind: String, // "enabled"
+    pub budget_tokens: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,6 +36,9 @@ pub struct InputMessage {
 pub enum InputContentBlock {
     Text {
         text: String,
+    },
+    Thinking {
+        thinking: String,
     },
     /// Tool usage block, containing tool ID, name, and input.
     ToolUse {

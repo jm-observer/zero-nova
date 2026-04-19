@@ -13,6 +13,8 @@ pub enum Role {
 pub enum ContentBlock {
     /// Text block.
     Text { text: String },
+    /// Thinking block, containing the reasoning process.
+    Thinking { thinking: String },
     /// Tool usage block, containing tool ID, name, and input.
     ToolUse {
         id: String,

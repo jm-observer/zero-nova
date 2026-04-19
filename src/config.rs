@@ -38,6 +38,7 @@ impl Default for LlmConfig {
                 max_tokens: 8192,
                 temperature: None,
                 top_p: None,
+                thinking_budget: None,
             },
         }
     }

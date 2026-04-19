@@ -109,6 +109,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .inspect_err(|e| log::error!("Failed to start stream: {}", e))?;
 
             let mut current_text = String::new();
+            let mut current_thinking = String::new();
             let mut tool_calls = Vec::new(); // (id, name, input_json)
             let mut iter_usage = crate::provider::types::Usage::default();
             let mut last_stop_reason: Option<crate::provider::types::StopReason> = None;
@@ -128,6 +129,10 @@ impl<C: LlmClient> AgentRuntime<C> {
                 }
 
                 match event {
+                    ProviderStreamEvent::ThinkingDelta(delta) => {
+                        current_thinking.push_str(&delta);
+                        let _ = event_tx.send(crate::event::AgentEvent::ThinkingDelta(delta)).await;
+                    }
                     ProviderStreamEvent::TextDelta(delta) => {
                         current_text.push_str(&delta);
                         let _ = event_tx.send(crate::event::AgentEvent::TextDelta(delta)).await;
@@ -155,6 +160,11 @@ impl<C: LlmClient> AgentRuntime<C> {
             cumulative_usage.cache_read_input_tokens += iter_usage.cache_read_input_tokens;
 
             let mut current_blocks = Vec::new();
+            if !current_thinking.is_empty() {
+                current_blocks.push(ContentBlock::Thinking {
+                    thinking: current_thinking,
+                });
+            }
             if !current_text.is_empty() {
                 current_blocks.push(ContentBlock::Text { text: current_text });
             }

@@ -6,6 +6,8 @@ use crate::provider::types::Usage;
 pub enum AgentEvent {
     /// Text delta emitted by the LLM.
     TextDelta(String),
+    /// Thinking delta emitted by the LLM.
+    ThinkingDelta(String),
     /// Tool invocation start event.
     ToolStart {
         id: String,

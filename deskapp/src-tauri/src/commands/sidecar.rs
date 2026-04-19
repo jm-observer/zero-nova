@@ -62,9 +62,7 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     // 1. 获取基础命令
     let _name = config.sidecar.name.clone();
     let mut args = config.sidecar.args.clone().unwrap_or_default();
-    let working_dir = config
-        .config_dir
-        .clone();
+    let working_dir = config.config_dir.clone();
 
     // 2. 注入端口参数
     if let Some(arg_fmt) = &config.sidecar.port_arg {
@@ -99,7 +97,7 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     Ok(SidecarExecutionContext {
         command: cmd_path,
         args,
-        working_dir: working_dir,
+        working_dir,
     })
 }
 

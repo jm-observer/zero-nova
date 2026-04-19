@@ -2,7 +2,7 @@
 use clap::Parser;
 use sysinfo::{Pid, System};
 use zero_nova::gateway::start_server;
-use zero_nova::provider::anthropic::AnthropicClient;
+use zero_nova::provider::openai_compat::OpenAiCompatClient;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -64,7 +64,8 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Starting Nova Gateway {config:?}...");
 
     // Initialize client (using Anthropic as default for now)
-    let client = AnthropicClient::from_config(&config.llm);
+    // let client = OpenAiCompatClient::from_config(&config.llm);
+    let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
 
     // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {

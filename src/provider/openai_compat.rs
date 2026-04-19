@@ -82,15 +82,21 @@ impl LlmClient for OpenAiCompatClient {
             }));
         }
 
+        if !system.is_empty() {
+            input_messages.insert(
+                0,
+                json!({
+                    "role": "system",
+                    "content": system
+                }),
+            );
+        }
+
         let mut body = json!({
             "model": config.model,
             "messages": input_messages,
             "stream": true,
         });
-
-        if !system.is_empty() {
-            body["system"] = json!(system);
-        }
 
         if !tools.is_empty() {
             body["tools"] = json!(tools

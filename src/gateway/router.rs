@@ -66,6 +66,8 @@ pub async fn handle_message<C: LlmClient>(
         | MessageEnvelope::WeixinConfigGet
         | MessageEnvelope::SessionsArtifacts(_)
         | MessageEnvelope::SessionsLogs(_)
+        | MessageEnvelope::LanguageUpdate(_)
+        | MessageEnvelope::OpenFluxStatus
         | MessageEnvelope::VoiceGetStatus => {}
 
         // Stub / Not implemented handling

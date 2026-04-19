@@ -1,7 +1,7 @@
+use anyhow::anyhow;
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use anyhow::anyhow;
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub enum SidecarManagementMode {
@@ -72,7 +72,7 @@ pub fn load_config(_app: &tauri::AppHandle) -> anyhow::Result<AppConfig> {
     let final_config_path = default_workspace.join("config.toml");
 
     if !final_config_path.exists() {
-        return Err(anyhow!("找不到配置文件: {:?}", final_config_path).into());
+        return Err(anyhow!("找不到配置文件: {:?}", final_config_path));
     }
 
     info!("Loading config from: {:?}", final_config_path);
@@ -88,7 +88,8 @@ pub fn load_config(_app: &tauri::AppHandle) -> anyhow::Result<AppConfig> {
         token: remote.token,
         config_dir: final_config_path
             .parent()
-            .map(|p| p.to_path_buf()).ok_or(anyhow!("final_config_path todo"))?,
+            .map(|p| p.to_path_buf())
+            .ok_or(anyhow!("final_config_path todo"))?,
         sidecar,
     })
 }

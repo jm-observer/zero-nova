@@ -2,8 +2,8 @@
 # LLM 服务的 API Key
 api_key = "your-anthropic-key"
 # 模型服务的 Base URL，默认为 Anthropic 官方地址
-#base_url = "http://192.168.0.68:12340"
-base_url = "http://127.0.0.1:8082"
+#base_url = "http://192.168.0.68:12340/v1"
+base_url = "http://127.0.0.1:8082/v1"
 # 使用的模型名称
 model = "google/gemma-4-26B-A4B-it"
 # 最大输出 Token 数
@@ -100,7 +100,8 @@ port = 18801
 # Sidecar 配置 (AI Engine)
 # ========================
 [sidecar]
-mode = "auto"
+#mode = "auto"
+mode = "manual"
 name = "Built-in Gateway"
 command = "D:\\git\\zero-nova\\target\\debug\\nova_gateway.exe"
 args = []

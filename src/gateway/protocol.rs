@@ -120,7 +120,11 @@ pub enum MessageEnvelope {
     #[serde(rename = "config.get")]
     ConfigGet,
     #[serde(rename = "config.get.response")]
-    ConfigGetResponse(Value),
+    ConfigGetResponse(serde_json::Value),
+    #[serde(rename = "config.update")]
+    ConfigUpdate(serde_json::Value),
+    #[serde(rename = "config.update.response")]
+    ConfigUpdateResponse(SuccessResponse),
     #[serde(rename = "config.get-llm-source")]
     ConfigGetLlmSource,
     #[serde(rename = "config.get-llm-source.response")]

@@ -791,9 +791,17 @@ export class GatewayClient {
     /**
      * 更新服务端配置
      */
+    async updateServerConfig(updates: any): Promise<{ success: boolean; message?: string }> {
+        return this.request('config.update', updates);
+    }
+
     /**
-     * 是否需要首次设置
+     * 更新设置
      */
+    async updateSettings(settings: any): Promise<{ success: boolean; message?: string }> {
+        return this.request('settings.update', settings);
+    }
+
     isSetupRequired(): boolean {
         return !!(this as any)._setupRequired;
     }

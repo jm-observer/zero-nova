@@ -86,6 +86,8 @@ pub struct GatewayConfig {
     pub max_iterations: usize,
     #[serde(default)]
     pub tool_timeout_secs: Option<u64>,
+    #[serde(default = "default_subagent_timeout")]
+    pub subagent_timeout_secs: u64,
     #[serde(default)]
     pub agents: Vec<AgentConfig>,
 }
@@ -99,6 +101,9 @@ fn default_port() -> u16 {
 fn default_max_iterations() -> usize {
     10
 }
+fn default_subagent_timeout() -> u64 {
+    300
+}
 
 impl Default for GatewayConfig {
     fn default() -> Self {
@@ -107,6 +112,7 @@ impl Default for GatewayConfig {
             port: default_port(),
             max_iterations: default_max_iterations(),
             tool_timeout_secs: None,
+            subagent_timeout_secs: default_subagent_timeout(),
             agents: Vec::new(),
         }
     }

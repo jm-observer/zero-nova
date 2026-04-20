@@ -9,6 +9,7 @@ export class SidebarView {
     private newSessionBtn: HTMLElement;
     private sidebarToggle: HTMLElement;
     private sidebar: HTMLElement;
+    private settingsBtn: HTMLElement;
 
     constructor(private state: AppState, private bus: EventBus) {
         this.sessionList = document.getElementById('session-list') as HTMLElement;
@@ -16,11 +17,17 @@ export class SidebarView {
         this.newSessionBtn = document.getElementById('new-session-btn') as HTMLElement;
         this.sidebarToggle = document.getElementById('sidebar-toggle') as HTMLElement;
         this.sidebar = document.getElementById('sidebar') as HTMLElement;
+        this.settingsBtn = document.getElementById('settings-btn') as HTMLElement;
     }
 
     init() {
         console.log('[SidebarView] Initializing...');
         this.newSessionBtn.addEventListener('click', () => this.bus.emit('session:create'));
+        
+        this.settingsBtn.addEventListener('click', () => {
+            const isActive = this.settingsBtn.classList.contains('active');
+            this.bus.emit('view:toggle', { name: 'settings', active: !isActive });
+        });
         
         this.sidebarToggle.addEventListener('click', () => {
             this.sidebar.classList.toggle('collapsed');
@@ -60,6 +67,14 @@ export class SidebarView {
         this.bus.on(Events.SESSION_SELECTED, (payload: { sessionId: string }) => {
             console.log('[SidebarView] Session selected:', payload.sessionId);
             this.updateActiveItem(payload.sessionId);
+        });
+        
+        this.bus.on('view:toggle', (payload: { name: string, active: boolean }) => {
+            if (payload.name === 'settings') {
+                this.settingsBtn.classList.toggle('active', payload.active);
+            } else if (payload.active) {
+                this.settingsBtn.classList.remove('active');
+            }
         });
 
         this.initResize();

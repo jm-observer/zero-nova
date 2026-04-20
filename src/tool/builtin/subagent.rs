@@ -40,6 +40,10 @@ impl Tool for SpawnSubagentTool {
                     "workspace": {
                         "type": "string",
                         "description": "Absolute path to an isolated workspace directory"
+                    },
+                    "timeout_secs": {
+                        "type": "integer",
+                        "description": "Optional timeout for the entire subagent task in seconds"
                     }
                 },
                 "required": ["task"]
@@ -53,6 +57,16 @@ impl Tool for SpawnSubagentTool {
             .ok_or_else(|| anyhow::anyhow!("Missing 'task'"))?;
         let system_prompt_patch = input["system_prompt_patch"].as_str().unwrap_or("");
         let workspace_str = input["workspace"].as_str();
+        let custom_timeout = input["timeout_secs"].as_u64();
+
+        let timeout_secs = custom_timeout.unwrap_or(self.config.gateway.subagent_timeout_secs);
+
+        log::info!(
+            "[Subagent] Starting task. Timeout: {}s | Workspace: {:?} | Model Override: {:?}",
+            timeout_secs,
+            workspace_str,
+            input["model"].as_str()
+        );
 
         // 1. Setup workspace
         let workspace = if let Some(ws) = workspace_str {
@@ -93,7 +107,7 @@ impl Tool for SpawnSubagentTool {
         let agent_config = AgentConfig {
             max_iterations: input["max_iterations"].as_u64().unwrap_or(10) as usize,
             model_config,
-            tool_timeout: std::time::Duration::from_secs(300),
+            tool_timeout: std::time::Duration::from_secs(timeout_secs),
         };
 
         let runtime = AgentRuntime::new(client, sub_registry, agent_config);
@@ -128,7 +142,7 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
         let logs_collector = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
         let logs_collector_cloned = logs_collector.clone();
 
-        let forwarding_handle = if let Some(ctx) = _context {
+        let forwarding_handle = if let Some(ref ctx) = _context {
             let parent_tx = ctx.event_tx.clone();
             let parent_tool_id = ctx.tool_use_id.clone();
 
@@ -205,7 +219,29 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
             None
         };
 
-        let result = runtime.run_turn(&history, task, tx, None).await?;
+        let result_fut = runtime.run_turn(&history, task, tx, None);
+
+        let result = match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), result_fut).await {
+            Ok(res) => res?,
+            Err(_) => {
+                log::warn!("[Subagent] Task timed out after {} seconds.", timeout_secs);
+                if let Some(ctx) = &_context {
+                    let _ = ctx.event_tx.try_send(crate::event::AgentEvent::LogDelta {
+                        id: ctx.tool_use_id.clone(),
+                        name: "subagent".to_string(),
+                        log: format!("\n⚠️ [Timeout] 子代理执行超过 {} 秒，正在强制结束...\n", timeout_secs),
+                        stream: "stderr".to_string(),
+                    });
+                }
+                anyhow::bail!("Subagent task timed out after {} seconds", timeout_secs);
+            }
+        };
+
+        log::info!(
+            "[Subagent] Task completed in {}ms. Iterations: {}",
+            start_time.elapsed().as_millis(),
+            result.messages.len() / 2
+        );
 
         if let Some(handle) = forwarding_handle {
             // Wait a bit for remaining logs to be processed if any

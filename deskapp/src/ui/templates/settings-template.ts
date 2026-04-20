@@ -21,13 +21,6 @@ export const SETTINGS_TEMPLATE = `
                     <div class="mode-card-desc" data-i18n="mode.router_desc">Router 共享配置</div>
                   </div>
                 </div>
-                <div class="working-mode-card" data-mode="managed">
-                  <div class="mode-card-icon">🛡️</div>
-                  <div class="mode-card-info">
-                    <div class="mode-card-name" data-i18n="mode.managed">NexusAI 托管</div>
-                    <div class="mode-card-desc" data-i18n="mode.managed_desc">NexusAI 全托管</div>
-                  </div>
-                </div>
               </div>
             </div>
             <!-- Tab 切换栏 -->

@@ -84,8 +84,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 }
             }
 
-            log::debug!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
-            log::info!("Starting stream for iteration {}", iteration + 1);
+            log::info!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
             let tool_defs = self.tools.tool_definitions();
 
             let mut receiver = self

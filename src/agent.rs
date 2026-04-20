@@ -20,7 +20,6 @@ pub struct TurnResult {
 pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
-    system_prompt: String,
     config: AgentConfig,
 }
 
@@ -33,11 +32,10 @@ pub struct AgentConfig {
 
 impl<C: LlmClient> AgentRuntime<C> {
     /// Creates a new `AgentRuntime` instance.
-    pub fn new(client: C, tools: ToolRegistry, system_prompt: String, config: AgentConfig) -> Self {
+    pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
         Self {
             client,
             tools,
-            system_prompt,
             config,
         }
     }
@@ -50,11 +48,6 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// Registers a new tool with the registry.
     pub fn register_tool(&mut self, tool: Box<dyn crate::tool::Tool>) {
         self.tools.register(tool);
-    }
-
-    /// Returns a reference to the system prompt string.
-    pub fn system_prompt(&self) -> &str {
-        &self.system_prompt
     }
 
     /// Returns a reference to the tool registry.
@@ -71,6 +64,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
         let mut all_messages = history.to_vec();
+
         // Append initial user message
         all_messages.push(Message {
             role: Role::User,
@@ -101,7 +95,6 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .client
                 .stream(
                     &all_messages,
-                    &self.system_prompt,
                     &tool_defs[..],
                     &self.config.model_config,
                 )

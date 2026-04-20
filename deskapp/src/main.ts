@@ -97,14 +97,30 @@ async function init() {
              }
         });
 
+        // Agent 切换时，对应切换 Session
+        bus.on(Events.AGENT_SWITCHED, (payload: { agentId: string }) => {
+            console.log('[Main] Agent switched, selecting latest session for:', payload.agentId);
+            const filtered = state.sessions.filter(s => s.agentId === payload.agentId);
+            if (filtered.length > 0) {
+                // 按日期降序排列
+                const sorted = [...filtered].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                state.setCurrentSession(sorted[0].id);
+            } else {
+                state.setCurrentSession(null);
+            }
+        });
+
         // Initial session selection
         if (state.currentAgentId) {
-            const filtered = sessions.filter(s => s.agentId === state.currentAgentId);
+            const filtered = state.sessions.filter(s => s.agentId === state.currentAgentId);
             if (filtered.length > 0) {
-                state.setCurrentSession(filtered[0].id);
+                const sorted = [...filtered].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                state.setCurrentSession(sorted[0].id);
+            } else {
+                state.setCurrentSession(null);
             }
-        } else if (sessions.length > 0) {
-             state.setCurrentSession(sessions[0].id);
+        } else if (state.sessions.length > 0) {
+             state.setCurrentSession(state.sessions[0].id);
         }
         
         // 8. Hide Loading Overlay

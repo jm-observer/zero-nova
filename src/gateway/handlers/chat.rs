@@ -1,16 +1,18 @@
 // Chat handler with turn routing (Phase 4)
 
+use crate::gateway::control::{
+    InteractionKind, InteractionResolver, PendingInteraction, ResolutionIntent, RiskLevel, TurnIntent,
+};
 use crate::gateway::handlers::system::send_general_error;
 use crate::gateway::protocol::{
     ChatCompletePayload, ChatPayload, GatewayMessage, InteractionResolvedPayload, MessageEnvelope, SessionIdPayload,
 };
+use crate::gateway::router::AppState;
 use crate::provider::LlmClient;
-use log::{error, info};
+use log::error;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use crate::gateway::control::{InteractionKind, InteractionResolver, PendingInteraction, ResolutionIntent, RiskLevel, TurnIntent};
-use crate::gateway::router::AppState;
 
 pub async fn handle_chat<C: LlmClient>(
     payload: ChatPayload,
@@ -140,9 +142,7 @@ async fn handle_resolve_interaction<C: LlmClient>(
         let result_str = match result.intent {
             ResolutionIntent::Approve => {
                 // If it was a ConfirmSwitch, actually perform the switch
-                if pending.kind == InteractionKind::Approve
-                    && pending.id.starts_with("switch:")
-                {
+                if pending.kind == InteractionKind::Approve && pending.id.starts_with("switch:") {
                     let target_id = &pending.id[7..];
                     control.active_agent = target_id.to_string();
                 }
@@ -324,13 +324,8 @@ async fn handle_start_new_task<C: LlmClient>(
     });
 
     // Run the first advance to kick off GatherRequirements
-    let result = crate::gateway::workflow::WorkflowEngine::advance(
-        &mut workflow,
-        user_input,
-        &state.agent,
-        event_tx,
-    )
-    .await;
+    let result =
+        crate::gateway::workflow::WorkflowEngine::advance(&mut workflow, user_input, &state.agent, event_tx).await;
 
     // Persist workflow state regardless of advance result
     {

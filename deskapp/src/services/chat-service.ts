@@ -42,6 +42,9 @@ export class ChatService {
 
         // Handle manual session creation from UI
         this.bus.on(Events.SESSION_CREATE, async (payload: { title?: string }) => {
+            // 立即清空当前工作区，提升响应感
+            this.state.setCurrentSession(null);
+            
             const title = payload?.title || 'New Chat';
             const agentId = this.state.currentAgentId || 'default';
             try {

@@ -21,6 +21,7 @@ use crate::prompt::SystemPromptBuilder;
 use crate::tool::ToolRegistry;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use anyhow::bail;
 
 /// 启动 WebSocket Server 的主入口
 pub async fn start_server<C: crate::provider::LlmClient + 'static>(
@@ -28,12 +29,11 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     client: C,
     workspace: std::path::PathBuf,
 ) -> anyhow::Result<()> {
-    let session_store = SessionStore::new();
     let mut tools = ToolRegistry::new();
     crate::tool::builtin::register_builtin_tools(&mut tools, &config);
 
-    let prompt_builder = SystemPromptBuilder::new_from_path(&workspace);
-    let prompt = prompt_builder.with_tools(&tools).build();
+    // let prompt_builder = SystemPromptBuilder::new_from_path(&workspace);
+    // let prompt = prompt_builder.with_tools(&tools).build();
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -63,22 +63,14 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
                         }
                     }
                 })
-                .unwrap_or_else(|| "You are an AI assistant.".to_string()),
+                .unwrap(),
             tool_whitelist: a.tool_whitelist.clone(),
             model_config: a.model_config.clone(),
         })
         .collect::<Vec<_>>();
 
     if agents.is_empty() {
-        agents.push(AgentDescriptor {
-            id: "openclaw".to_string(),
-            display_name: "OpenClaw".to_string(),
-            description: "Default agent".to_string(),
-            aliases: vec!["oc".to_string(), "open-claw".to_string()],
-            system_prompt_template: "You are OpenClaw".to_string(),
-            tool_whitelist: None,
-            model_config: None,
-        });
+        bail!("todo");
     }
 
     let mut agent_registry = AgentRegistry::new(agents.remove(0));
@@ -86,11 +78,11 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
         agent_registry.register(agent);
     }
 
-    let agent = AgentRuntime::new(client, tools, prompt, agent_config);
+    let agent = AgentRuntime::new(client, tools, agent_config);
 
     let config_arc = Arc::new(std::sync::RwLock::new(config.clone()));
     let config_path = workspace.join("config.toml");
-
+    let session_store = SessionStore::new();
     let state = Arc::new(AppState {
         agent,
         agent_registry,

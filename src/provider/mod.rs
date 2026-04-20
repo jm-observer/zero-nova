@@ -16,7 +16,6 @@ pub trait LlmClient: Send + Sync {
     async fn stream(
         &self,
         messages: &[crate::message::Message],
-        system: &str,
         tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>>;

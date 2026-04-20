@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 /// Role of a message sender (User or Assistant).
 pub enum Role {
+    System,
     User,
     Assistant,
 }

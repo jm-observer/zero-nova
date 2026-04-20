@@ -162,6 +162,7 @@ const en: Record<string, string> = {
     'chat.intent_resolve': 'Processing interaction response...',
     'chat.intent_address_agent': 'Requesting switch to agent {0}...',
     'chat.intent_continue_workflow': 'Continuing workflow execution...',
+    'chat.clone_session': 'Clone Session (Branch)',
 
     // ========================
     // Settings - Tabs

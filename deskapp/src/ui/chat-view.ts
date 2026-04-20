@@ -26,9 +26,14 @@ export class ChatView {
         this.bindEvents();
         
         this.bus.on(Events.SESSION_CHANGED, () => {
-             console.log('[ChatView] Session changed, clearing and rendering...');
+             console.log('[ChatView] Session changed, clearing...');
              this.clear();
-             this.renderMessages(this.state.messages);
+             // Don't render yet as state.messages might be stale
+        });
+
+        this.bus.on(Events.MESSAGES_UPDATED, (payload: any) => {
+             console.log('[ChatView] Messages updated, rendering...', payload.messages.length);
+             this.renderMessages(payload.messages);
         });
 
         this.bus.on(Events.MESSAGE_ADDED, (payload: any) => {
@@ -63,6 +68,44 @@ export class ChatView {
                 this.sendMessage();
             }
         });
+
+        this.messagesContainer.addEventListener('contextmenu', (e) => this.handleContextMenu(e));
+        document.addEventListener('click', () => this.hideContextMenu());
+    }
+
+    private hideContextMenu() {
+        const menu = document.getElementById('chat-context-menu');
+        if (menu) menu.remove();
+    }
+
+    private handleContextMenu(e: MouseEvent) {
+        const messageEl = (e.target as HTMLElement).closest('.message');
+        if (!messageEl) return;
+
+        e.preventDefault();
+        this.hideContextMenu();
+
+        const index = parseInt(messageEl.getAttribute('data-index') || '-1');
+        if (index === -1) return;
+
+        const menu = document.createElement('div');
+        menu.id = 'chat-context-menu';
+        menu.className = 'context-menu';
+        menu.style.position = 'fixed';
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.style.zIndex = '1000';
+
+        const item = document.createElement('div');
+        item.className = 'context-menu-item';
+        item.innerHTML = `<span class="icon">content_copy</span> ${t('chat.clone_session')}`;
+        item.onclick = () => {
+             this.bus.emit(Events.SESSION_COPY, { id: this.state.currentSessionId, index });
+             this.hideContextMenu();
+        };
+
+        menu.appendChild(item);
+        document.body.appendChild(menu);
     }
 
     private sendMessage() {
@@ -92,7 +135,7 @@ export class ChatView {
             this.showWelcome();
             return;
         }
-        this.messagesContainer.innerHTML = messages.map(m => this.renderMessage(m)).join('');
+        this.messagesContainer.innerHTML = messages.map((m, i) => this.renderMessage(m, i)).join('');
         this.scrollToBottom();
     }
 
@@ -106,12 +149,13 @@ export class ChatView {
     }
 
     private addMessage(message: any) {
-        const html = this.renderMessage(message);
+        const index = this.messagesContainer.querySelectorAll('.message').length;
+        const html = this.renderMessage(message, index);
         this.messagesContainer.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();
     }
 
-    private renderMessage(message: any): string {
+    private renderMessage(message: any, index: number): string {
         const isAssistant = message.role === 'assistant';
         const content = message.content;
         let contentHtml = '';
@@ -156,7 +200,7 @@ export class ChatView {
         const intentHtml = intentText ? `<div class="message-intent">${escapeHtml(intentText)}</div>` : '';
 
         return `
-            <div class="message ${message.role}">
+            <div class="message ${message.role}" data-index="${index}">
                 <div class="message-bubble">
                     ${intentHtml}
                     <div class="markdown-body">${contentHtml}</div>

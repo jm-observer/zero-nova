@@ -206,4 +206,39 @@ impl SessionStore {
         let mut sessions = self.sessions.write().unwrap();
         sessions.remove(id).is_some()
     }
+
+    /// 复制并可选截断会话
+    pub async fn copy_session(&self, source_id: &str, truncate_index: Option<usize>) -> Option<Arc<Session>> {
+        let source = self.get(source_id).await?;
+        let history = source.get_history();
+        let new_history = if let Some(idx) = truncate_index {
+            if idx < history.len() {
+                history[..=idx].to_vec()
+            } else {
+                history
+            }
+        } else {
+            history
+        };
+
+        let new_id = Uuid::new_v4().to_string();
+        let now = Utc::now().timestamp_millis();
+        let agent_id = source.control.read().unwrap().active_agent.clone();
+        let new_name = format!("{} (Copy)", source.name);
+
+        let session = Arc::new(Session {
+            control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
+            id: new_id.clone(),
+            name: new_name,
+            history: RwLock::new(new_history),
+            created_at: now,
+            updated_at: AtomicI64::new(now),
+            chat_lock: Mutex::new(()),
+            cancellation_token: RwLock::new(None),
+        });
+
+        let mut sessions = self.sessions.write().unwrap();
+        sessions.insert(new_id, session.clone());
+        Some(session)
+    }
 }

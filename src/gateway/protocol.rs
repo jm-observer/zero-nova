@@ -71,6 +71,10 @@ pub enum MessageEnvelope {
     SessionsArtifacts(SessionIdPayload),
     #[serde(rename = "sessions.artifacts.response")]
     SessionsArtifactsResponse(ArtifactListResponse),
+    #[serde(rename = "sessions.copy")]
+    SessionsCopy(SessionCopyRequest),
+    #[serde(rename = "sessions.copy.response")]
+    SessionsCopyResponse(SessionCreateResponse),
 
     // --- 3.1 Progress & Chat Events ---
     #[serde(rename = "chat.start")]
@@ -311,6 +315,13 @@ pub struct AgentCreateRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SessionIdPayload {
     pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCopyRequest {
+    pub session_id: String,
+    pub index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

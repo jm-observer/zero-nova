@@ -65,6 +65,16 @@ export class ChatService {
                 this.bus.emit('toast', { message: 'Failed to delete session: ' + err });
             }
         });
+
+        this.bus.on(Events.SESSION_COPY, async (payload: { id: string, index?: number }) => {
+            try {
+                const session = await this.client.copySession(payload.id, payload.index);
+                this.state.addSession(session as any);
+                this.state.setCurrentSession(session.id);
+            } catch (err) {
+                this.bus.emit('toast', { message: 'Failed to clone session: ' + err });
+            }
+        });
     }
 
     private async sendMessage(text: string) {

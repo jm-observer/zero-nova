@@ -1,8 +1,8 @@
 use crate::gateway::handlers::system::send_general_error;
 use crate::gateway::protocol::GatewayMessage;
 use crate::gateway::protocol::{
-    MessageEnvelope, Session, SessionCreateRequest, SessionCreateResponse, SessionIdPayload, SessionsListResponse,
-    SessionsMessagesResponse, SuccessResponse,
+    MessageEnvelope, Session, SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload,
+    SessionsListResponse, SessionsMessagesResponse, SuccessResponse,
 };
 use crate::gateway::router::AppState;
 use std::sync::Arc;
@@ -97,6 +97,36 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient>(
         let _ = outbound_tx.send(GatewayMessage::new(
             request_id,
             MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success: true }),
+        ));
+    } else {
+        send_general_error(
+            &outbound_tx,
+            &request_id,
+            "Session not found".to_string(),
+            Some("SESSION_NOT_FOUND".to_string()),
+        );
+    }
+}
+
+pub async fn handle_session_copy<C: crate::provider::LlmClient>(
+    payload: SessionCopyRequest,
+    state: Arc<AppState<C>>,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
+    if let Some(internal_session) = state.sessions.copy_session(&payload.session_id, payload.index).await {
+        let session = Session {
+            id: internal_session.id.clone(),
+            title: Some(internal_session.name.clone()),
+            agent_id: internal_session.control.read().unwrap().active_agent.clone(),
+            created_at: internal_session.created_at,
+            updated_at: internal_session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
+            message_count: internal_session.history.read().unwrap().len(),
+        };
+
+        let _ = outbound_tx.send(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
         ));
     } else {
         send_general_error(

@@ -56,6 +56,9 @@ pub async fn handle_message<C: LlmClient>(
         MessageEnvelope::SessionsDelete(payload) => {
             sessions::handle_session_delete(payload, state, outbound_tx, msg_id).await;
         }
+        MessageEnvelope::SessionsCopy(payload) => {
+            sessions::handle_session_copy(payload, state, outbound_tx, msg_id).await;
+        }
         MessageEnvelope::AgentsList => {
             agents::handle_agents_list::<C>(state, outbound_tx, msg_id).await;
         }

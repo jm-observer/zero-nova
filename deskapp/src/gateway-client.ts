@@ -504,6 +504,14 @@ export class GatewayClient {
     }
 
     /**
+     * 复制会话
+     */
+    async copySession(sessionId: string, index?: number): Promise<Session> {
+        const result = await this.request<{ session: Session }>('sessions.copy', { sessionId, index });
+        return result.session;
+    }
+
+    /**
      * 获取会话成果物
      */
     async getArtifacts(sessionId: string): Promise<SessionArtifactView[]> {

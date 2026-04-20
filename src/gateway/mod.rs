@@ -18,10 +18,11 @@ use crate::gateway::agents::{AgentDescriptor, AgentRegistry};
 use crate::gateway::router::AppState;
 use crate::gateway::session::SessionStore;
 
+use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
+use anyhow::bail;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use anyhow::bail;
 
 /// 启动 WebSocket Server 的主入口
 pub async fn start_server<C: crate::provider::LlmClient + 'static>(
@@ -32,8 +33,12 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     let mut tools = ToolRegistry::new();
     crate::tool::builtin::register_builtin_tools(&mut tools, &config);
 
-    // let prompt_builder = SystemPromptBuilder::new_from_path(&workspace);
-    // let prompt = prompt_builder.with_tools(&tools).build();
+    let mut skill_registry = SkillRegistry::new();
+    let skill_dir = workspace.join("skills");
+    if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
+        log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+    }
+    let skill_prompt = skill_registry.generate_system_prompt();
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -45,12 +50,8 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
         .gateway
         .agents
         .iter()
-        .map(|a| AgentDescriptor {
-            id: a.id.clone(),
-            display_name: a.display_name.clone(),
-            description: a.description.clone(),
-            aliases: a.aliases.clone(),
-            system_prompt_template: a
+        .map(|a| {
+            let agent_prompt = a
                 .system_prompt_template
                 .clone()
                 .or_else(|| {
@@ -63,9 +64,20 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
                         }
                     }
                 })
-                .unwrap(),
-            tool_whitelist: a.tool_whitelist.clone(),
-            model_config: a.model_config.clone(),
+                .unwrap_or_default();
+
+            // Append skill instructions to system prompt
+            let full_system_prompt = format!("{}\n\n{}", agent_prompt, skill_prompt);
+
+            AgentDescriptor {
+                id: a.id.clone(),
+                display_name: a.display_name.clone(),
+                description: a.description.clone(),
+                aliases: a.aliases.clone(),
+                system_prompt_template: full_system_prompt,
+                tool_whitelist: a.tool_whitelist.clone(),
+                model_config: a.model_config.clone(),
+            }
         })
         .collect::<Vec<_>>();
 

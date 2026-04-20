@@ -1,7 +1,6 @@
 //! CLI for zero-nova library
 
 use anyhow::Result;
-use chrono::Local;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use rustyline::history::FileHistory;
@@ -104,11 +103,7 @@ async fn main() -> Result<()> {
 }
 
 /// Runs the REPL loop for interactive chat.
-async fn run_repl(
-    agent: &mut AgentRuntime<impl LlmClient>,
-    system_prompt: &str,
-    verbose: bool,
-) -> Result<()> {
+async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, system_prompt: &str, verbose: bool) -> Result<()> {
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
 
@@ -145,7 +140,10 @@ async fn run_repl(
             }
             "/clear" => {
                 // Keep the first system message if it exists
-                let system_msg = history.first().cloned().filter(|m| m.role == zero_nova::message::Role::System);
+                let system_msg = history
+                    .first()
+                    .cloned()
+                    .filter(|m| m.role == zero_nova::message::Role::System);
                 history.clear();
                 if let Some(msg) = system_msg {
                     history.push(msg);
@@ -311,6 +309,3 @@ fn render_event(event: &AgentEvent, verbose: bool) {
     }
 }
 
-fn current_date() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
-}

@@ -1,10 +1,10 @@
+use crate::message::Role;
 use crate::provider::sse::SseParser;
 use crate::provider::types::{MessageRequest, ToolDefinition};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StopReason, StreamReceiver};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::{header, Client};
-use crate::message::Role;
 
 /// Client for interacting with the Anthropic API.
 pub struct AnthropicClient {

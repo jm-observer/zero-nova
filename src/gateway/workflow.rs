@@ -202,7 +202,6 @@ mod tests {
             async fn stream(
                 &self,
                 _msgs: &[crate::message::Message],
-                _sys: &str,
                 _tools: &[crate::provider::types::ToolDefinition],
                 _conf: &ModelConfig,
             ) -> anyhow::Result<Box<dyn StreamReceiver>> {
@@ -224,7 +223,7 @@ mod tests {
             },
             tool_timeout: Duration::from_secs(1),
         };
-        let agent = AgentRuntime::new(client, tools, "prompt".to_string(), agent_config);
+        let agent = AgentRuntime::new(client, tools, agent_config);
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
 
         let mut wf = WorkflowState::new("TTS".to_string());

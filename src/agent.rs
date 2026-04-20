@@ -33,11 +33,7 @@ pub struct AgentConfig {
 impl<C: LlmClient> AgentRuntime<C> {
     /// Creates a new `AgentRuntime` instance.
     pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
-        Self {
-            client,
-            tools,
-            config,
-        }
+        Self { client, tools, config }
     }
 
     /// Sets the tool registry for this runtime.
@@ -93,11 +89,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             let mut receiver = self
                 .client
-                .stream(
-                    &all_messages,
-                    &tool_defs[..],
-                    &self.config.model_config,
-                )
+                .stream(&all_messages, &tool_defs[..], &self.config.model_config)
                 .await
                 .inspect_err(|e| log::error!("Failed to start stream: {}", e))?;
 

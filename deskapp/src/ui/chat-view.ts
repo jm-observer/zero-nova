@@ -66,6 +66,12 @@ export class ChatView {
         this.bus.on('tool:log', (event: any) => {
             this.handleToolLog(event);
         });
+        
+        this.bus.on('chat:error', (payload: any) => {
+            if (payload.sessionId === this.state.currentSessionId) {
+                this.handleChatError(payload);
+            }
+        });
     }
 
     private bindEvents() {
@@ -321,6 +327,26 @@ export class ChatView {
         streamer.scrollTop = streamer.scrollHeight;
         
         // 同时滚动整个消息区域
+        this.scrollToBottom();
+    }
+
+    private handleChatError(payload: any) {
+        let text = '';
+        if (payload.type === 'iteration_limit') {
+            text = t('chat.error_iteration_limit').replace('{0}', String(payload.iteration || 10));
+        } else {
+            text = payload.message || t('common.unknown_error');
+        }
+
+        const html = `
+            <div class="message system error">
+                <div class="message-bubble">
+                    <div class="error-header">⚠️ ${t('common.error')}</div>
+                    <div class="error-content">${escapeHtml(text)}</div>
+                </div>
+            </div>
+        `;
+        this.messagesContainer.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();
     }
 

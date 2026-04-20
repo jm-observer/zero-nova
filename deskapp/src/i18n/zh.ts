@@ -678,6 +678,7 @@ const zh: Record<string, string> = {
     'artifact.cat_data': '数据',
     'artifact.cat_media': '媒体',
     'artifact.cat_other': '其他',
+    'chat.error_iteration_limit': '由于超过最大迭代次数（{0}次），对话已中止。这通常是因为 Agent 陷入了无限循环。',
 };
 
 export default zh;

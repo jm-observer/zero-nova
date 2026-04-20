@@ -96,13 +96,8 @@ async function init() {
                         state.setCurrentSession(state.sessions[0].id);
                     }
                 } else {
-                    // Refresh messages for current session to ensure sync
-                    try {
-                        const messages = await gatewayClient.getMessages(state.currentSessionId);
-                        state.setMessages(messages as any);
-                    } catch (mErr) {
-                        console.warn('[Main] Failed to refresh messages for session:', state.currentSessionId);
-                    }
+                    // 已经在会话中，主动触发一次消息刷新以同步状态
+                    bus.emit(Events.SESSION_SELECTED, { sessionId: state.currentSessionId });
                 }
 
                 dataLoaded = true;

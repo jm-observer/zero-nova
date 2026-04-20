@@ -31,7 +31,7 @@ host = "127.0.0.1"
 # 网关监听端口
 port = 9090
 # 代理最大思考轮数 (防止死循环)
-max_iterations = 10
+max_iterations = 30
 # 工具执行超时时间 (秒)
 tool_timeout_secs = 120
 

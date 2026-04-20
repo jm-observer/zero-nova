@@ -105,6 +105,12 @@ export class ChatService {
             this.bus.emit('tool:start', event);
         } else if (event.type === 'tool_log') {
             this.bus.emit('tool:log', event);
+        } else if (event.type === 'iteration_limit') {
+            this.bus.emit('chat:error', {
+                type: 'iteration_limit',
+                sessionId: event.sessionId,
+                iteration: event.iteration
+            });
         }
     }
 }

@@ -227,8 +227,34 @@ async fn handle_continue_workflow<C: LlmClient>(
 
     match result {
         Ok(result) => {
-            // Send messages
+            // 写入 User Message 并持久化
+            if let Err(e) = state
+                .sessions
+                .append_message(
+                    &session.id,
+                    crate::message::Role::User,
+                    vec![crate::message::ContentBlock::Text {
+                        text: user_input.to_string(),
+                    }],
+                )
+                .await
+            {
+                error!("Failed to persist workflow user message for session {}: {}", session.id, e);
+            }
+
+            // Send and persist messages
             for msg in result.messages {
+                if let Err(e) = state
+                    .sessions
+                    .append_message(
+                        &session.id,
+                        crate::message::Role::Assistant,
+                        vec![crate::message::ContentBlock::Text { text: msg.clone() }],
+                    )
+                    .await
+                {
+                    error!("Failed to persist workflow assistant message for session {}: {}", session.id, e);
+                }
                 // Simple text message event for now
                 let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatProgress(
                     crate::gateway::protocol::ProgressEvent {
@@ -330,7 +356,33 @@ async fn handle_start_new_task<C: LlmClient>(
 
     match result {
         Ok(result) => {
+            // 写入 User Message 并持久化
+            if let Err(e) = state
+                .sessions
+                .append_message(
+                    &session.id,
+                    crate::message::Role::User,
+                    vec![crate::message::ContentBlock::Text {
+                        text: user_input.to_string(),
+                    }],
+                )
+                .await
+            {
+                error!("Failed to persist task user message for session {}: {}", session.id, e);
+            }
+
             for msg in result.messages {
+                if let Err(e) = state
+                    .sessions
+                    .append_message(
+                        &session.id,
+                        crate::message::Role::Assistant,
+                        vec![crate::message::ContentBlock::Text { text: msg.clone() }],
+                    )
+                    .await
+                {
+                    error!("Failed to persist task assistant message for session {}: {}", session.id, e);
+                }
                 let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatProgress(
                     crate::gateway::protocol::ProgressEvent {
                         kind: "token".to_string(),
@@ -457,8 +509,20 @@ async fn execute_chat_turn<C: LlmClient>(
         }),
     ));
 
-    // 2. 写入 User Message (预写入防止失败丢失)
-    session.append_user_message(&payload.input);
+    // 2. 写入 User Message 并持久化
+    if let Err(e) = state
+        .sessions
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: payload.input.clone(),
+            }],
+        )
+        .await
+    {
+        error!("Failed to persist user message for session {}: {}", session.id, e);
+    }
 
     // 3. 创建并注册 CancellationToken
     let token = CancellationToken::new();
@@ -492,7 +556,12 @@ async fn execute_chat_turn<C: LlmClient>(
         .await
     {
         Ok(turn_result) => {
-            session.append_assistant_messages(turn_result.messages);
+            // 将所有产生的新消息持久化
+            for msg in turn_result.messages {
+                if let Err(e) = state.sessions.append_message(&session.id, msg.role, msg.content).await {
+                    error!("Failed to persist assistant message for session {}: {}", session.id, e);
+                }
+            }
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id.clone(),
                 MessageEnvelope::ChatComplete(ChatCompletePayload {

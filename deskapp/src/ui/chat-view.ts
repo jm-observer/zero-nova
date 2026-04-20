@@ -41,14 +41,18 @@ export class ChatView {
              this.addMessage(payload.message);
         });
 
-        this.bus.on('token', (token: string) => {
-             this.appendToken(token);
+        this.bus.on('token', (payload: { sessionId: string, token: string }) => {
+             if (payload.sessionId === this.state.currentSessionId) {
+                 this.appendToken(payload.token);
+             }
         });
 
-        this.bus.on('chat:complete', () => {
-             console.log('[ChatView] Chat complete, resetting streaming state');
-             this.streamingMessageEl = null;
-             this.streamingContent = '';
+        this.bus.on('chat:complete', (payload: any) => {
+             if (payload.sessionId === this.state.currentSessionId) {
+                 console.log('[ChatView] Chat complete, resetting streaming state');
+                 this.streamingMessageEl = null;
+                 this.streamingContent = '';
+             }
         });
 
         this.bus.on(Events.CHAT_INTENT, (payload: any) => {
@@ -270,7 +274,10 @@ export class ChatView {
     }
 
     private handleToolLog(event: any) {
-        const { toolUseId, log, stream } = event;
+        const { toolUseId, log, stream, sessionId } = event;
+        // 隔离非当前会话的工具日志
+        if (sessionId && sessionId !== this.state.currentSessionId) return;
+
         // 查找对应的 tool-use-card
         const card = this.messagesContainer.querySelector(`.tool-use-card[data-tool-use-id="${toolUseId}"]`);
         if (!card) return;

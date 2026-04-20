@@ -98,11 +98,13 @@ export class ChatService {
 
     private handleProgress(event: any) {
         if (event.type === 'token') {
-            this.bus.emit('token', event.token);
+            this.bus.emit('token', { sessionId: event.sessionId, token: event.token });
         } else if (event.type === 'complete') {
             this.bus.emit('chat:complete', event);
         } else if (event.type === 'tool_start') {
             this.bus.emit('tool:start', event);
+        } else if (event.type === 'tool_log') {
+            this.bus.emit('tool:log', event);
         }
     }
 }

@@ -99,6 +99,7 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient>(
             MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success: true }),
         ));
     } else {
+        log::warn!("Delete failed: Session {} not found. Current sessions: {:?}", payload.session_id, state.sessions.list_ids().await);
         send_general_error(
             &outbound_tx,
             &request_id,

@@ -207,6 +207,11 @@ impl SessionStore {
         sessions.remove(id).is_some()
     }
 
+    pub async fn list_ids(&self) -> Vec<String> {
+        let sessions = self.sessions.read().unwrap();
+        sessions.keys().cloned().collect()
+    }
+
     /// 复制并可选截断会话
     pub async fn copy_session(&self, source_id: &str, truncate_index: Option<usize>) -> Option<Arc<Session>> {
         let source = self.get(source_id).await?;

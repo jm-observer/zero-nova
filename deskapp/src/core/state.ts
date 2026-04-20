@@ -62,10 +62,9 @@ export class AppState {
     setCurrentSession(id: string | null) {
         if (this.currentSessionId !== id) {
             this.currentSessionId = id;
-            // 如果切换到空会话（如新建或 Agent 下无会话），立即清空当前消息
-            if (id === null) {
-                this.messages = [];
-            }
+            // 切换会话时，立即清空内存中的当前消息列表，防止渲染旧消息
+            this.messages = [];
+            
             this.bus.emit(Events.SESSION_SELECTED, { sessionId: id });
             this.bus.emit(Events.SESSION_CHANGED, { sessionId: id, messages: this.messages });
         }

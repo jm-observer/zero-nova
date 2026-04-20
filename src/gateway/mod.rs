@@ -66,8 +66,17 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
                 })
                 .unwrap_or_default();
 
-            // Append skill instructions to system prompt
-            let full_system_prompt = format!("{}\n\n{}", agent_prompt, skill_prompt);
+            // Internal behavior guards to force tool execution consistency
+            let behavior_guards = r#"
+## CRITICAL: Action Consistency
+- You are a physical entity with real-world capabilities.
+- If you state that you are going to perform an action (e.g., "running a command", "writing a file", "searching the web"), you MUST generate the corresponding tool_use block in the SAME response.
+- NEVER claim you are doing something "in the background" or "internally" without an actual tool call.
+- Textual confirmation of an action is only valid AFTER the tool has been invoked.
+"#;
+
+            // Append skill instructions and guards to system prompt
+            let full_system_prompt = format!("{}\n\n{}\n\n{}", agent_prompt, skill_prompt, behavior_guards);
 
             AgentDescriptor {
                 id: a.id.clone(),

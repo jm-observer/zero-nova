@@ -27,7 +27,7 @@ pub async fn handle_session_get<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    if let Some(session) = state.sessions.get(&session_id).await {
+    if let Ok(Some(session)) = state.sessions.get(&session_id).await {
         let messages = session.get_messages_dto();
 
         let _ = outbound_tx.send(GatewayMessage::new(
@@ -66,10 +66,22 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
         .with_tools(state.agent.tools())
         .build();
 
-    let internal_session = state
+    let internal_session = match state
         .sessions
         .create(payload.title.clone(), payload.agent_id.clone(), system_prompt)
-        .await;
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            send_general_error(
+                &outbound_tx,
+                &request_id,
+                format!("Failed to create session: {}", e),
+                Some("SESSION_CREATE_ERROR".to_string()),
+            );
+            return;
+        }
+    };
     let session = Session {
         id: internal_session.id.clone(),
         title: Some(internal_session.name.clone()),
@@ -91,7 +103,7 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let success = state.sessions.delete(&payload.session_id).await;
+    let success = state.sessions.delete(&payload.session_id).await.unwrap_or(false);
 
     if success {
         let _ = outbound_tx.send(GatewayMessage::new(
@@ -99,7 +111,11 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient>(
             MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success: true }),
         ));
     } else {
-        log::warn!("Delete failed: Session {} not found. Current sessions: {:?}", payload.session_id, state.sessions.list_ids().await);
+        log::warn!(
+            "Delete failed: Session {} not found. Current sessions: {:?}",
+            payload.session_id,
+            state.sessions.list_ids().await
+        );
         send_general_error(
             &outbound_tx,
             &request_id,
@@ -115,7 +131,7 @@ pub async fn handle_session_copy<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    if let Some(internal_session) = state.sessions.copy_session(&payload.session_id, payload.index).await {
+    if let Ok(Some(internal_session)) = state.sessions.copy_session(&payload.session_id, payload.index).await {
         let session = Session {
             id: internal_session.id.clone(),
             title: Some(internal_session.name.clone()),

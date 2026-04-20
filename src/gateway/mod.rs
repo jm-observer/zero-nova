@@ -6,6 +6,8 @@ pub mod protocol;
 pub mod router;
 pub mod server;
 pub mod session;
+pub mod sqlite_manager;
+pub mod sqlite_session_repository;
 pub mod workflow;
 
 pub use protocol::GatewayMessage;
@@ -17,6 +19,8 @@ use crate::agent::{AgentConfig, AgentRuntime};
 use crate::gateway::agents::{AgentDescriptor, AgentRegistry};
 use crate::gateway::router::AppState;
 use crate::gateway::session::SessionStore;
+use crate::gateway::sqlite_manager::SqliteManager;
+use crate::gateway::sqlite_session_repository::SqliteSessionRepository;
 
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
@@ -91,7 +95,7 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
         .collect::<Vec<_>>();
 
     if agents.is_empty() {
-        bail!("todo");
+        bail!("No agents configured");
     }
 
     let mut agent_registry = AgentRegistry::new(agents.remove(0));
@@ -103,7 +107,14 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
 
     let config_arc = Arc::new(std::sync::RwLock::new(config.clone()));
     let config_path = workspace.join("config.toml");
-    let session_store = SessionStore::new();
+
+    // Initialize SQLite and SessionStore
+    let data_dir = workspace.join(".nova").join("data");
+    let sqlite_manager = SqliteManager::new(data_dir.to_str().unwrap()).await?;
+    let repository = SqliteSessionRepository::new(sqlite_manager.pool);
+    let session_store = SessionStore::new(repository);
+    session_store.load_all().await?;
+
     let state = Arc::new(AppState {
         agent,
         agent_registry,

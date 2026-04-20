@@ -32,7 +32,7 @@ pub async fn handle_chat<C: LlmClient>(
     };
 
     // Retrieve the session.
-    let Some(session) = state.sessions.get(&session_id_val).await else {
+    let Ok(Some(session)) = state.sessions.get(&session_id_val).await else {
         send_general_error(
             &outbound_tx,
             &request_id,
@@ -103,7 +103,7 @@ pub async fn handle_chat_stop<C: LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    if let Some(session) = state.sessions.get(&payload.session_id).await {
+    if let Ok(Some(session)) = state.sessions.get(&payload.session_id).await {
         if let Some(token) = session.take_cancellation_token() {
             token.cancel();
         }

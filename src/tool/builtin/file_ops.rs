@@ -56,7 +56,7 @@ impl Tool for ReadFileTool {
             let full_path = std::fs::canonicalize(path_str).unwrap_or_else(|_| std::path::PathBuf::from(path_str));
             if !full_path.starts_with(root) {
                 return Ok(ToolOutput {
-                    content: format!("Access denied: path is outside of allowed workspace"),
+                    content: "Access denied: path is outside of allowed workspace".to_string(),
                     is_error: true,
                 });
             }
@@ -140,13 +140,13 @@ impl Tool for WriteFileTool {
             if p.is_absolute() {
                 if !p.starts_with(root) {
                     return Ok(ToolOutput {
-                        content: format!("Access denied: absolute path is outside of allowed workspace"),
+                        content: "Access denied: absolute path is outside of allowed workspace".to_string(),
                         is_error: true,
                     });
                 }
             } else {
                 // For relative paths, we ensure it's within root by joining
-                let full_path = root.join(p);
+                let _full_path = root.join(p);
                 // Basic directory traversal protection
                 if p.to_string_lossy().contains("..") {
                     return Ok(ToolOutput {

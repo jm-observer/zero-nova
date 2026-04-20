@@ -163,6 +163,8 @@ const en: Record<string, string> = {
     'chat.intent_address_agent': 'Requesting switch to agent {0}...',
     'chat.intent_continue_workflow': 'Continuing workflow execution...',
     'chat.clone_session': 'Clone Session (Branch)',
+    'chat.subagent_logs': 'Subagent Logs',
+    'chat.files_created': '{0} files created',
 
     // ========================
     // Settings - Tabs

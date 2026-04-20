@@ -6,7 +6,6 @@ use crate::tool::{Tool, ToolDefinition, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -49,7 +48,9 @@ impl Tool for SpawnSubagentTool {
     }
 
     async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
-        let task = input["task"].as_str().ok_or_else(|| anyhow::anyhow!("Missing 'task'"))?;
+        let task = input["task"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing 'task'"))?;
         let system_prompt_patch = input["system_prompt_patch"].as_str().unwrap_or("");
         let workspace_str = input["workspace"].as_str();
 
@@ -59,28 +60,29 @@ impl Tool for SpawnSubagentTool {
             if !path.exists() {
                 tokio::fs::create_dir_all(&path).await?;
             }
-            // Use canonicalize to avoid path ambiguity (especially on Windows)
             Some(std::fs::canonicalize(path)?)
         } else {
             None
         };
 
         // 2. Setup Client
-        let client = OpenAiCompatClient::new(
-            self.config.llm.api_key.clone(),
-            self.config.llm.base_url.clone(),
-        );
+        let client = OpenAiCompatClient::new(self.config.llm.api_key.clone(), self.config.llm.base_url.clone());
 
         // 3. Setup Tool Registry for subagent (Isolation)
         let mut sub_registry = ToolRegistry::new();
-        
-        // Add basic tools with workspace restriction if applicable
+
         sub_registry.register(Box::new(crate::tool::builtin::bash::BashTool::with_workspace(
             &self.config.tool.bash,
-            workspace.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
+            workspace
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
         )));
-        sub_registry.register(Box::new(crate::tool::builtin::file_ops::ReadFileTool::new(workspace.clone())));
-        sub_registry.register(Box::new(crate::tool::builtin::file_ops::WriteFileTool::new(workspace.clone())));
+        sub_registry.register(Box::new(crate::tool::builtin::file_ops::ReadFileTool::new(
+            workspace.clone(),
+        )));
+        sub_registry.register(Box::new(crate::tool::builtin::file_ops::WriteFileTool::new(
+            workspace.clone(),
+        )));
 
         // 4. Setup Runtime
         let mut model_config = self.config.llm.model_config.clone();
@@ -108,7 +110,7 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
   - Use `python` as the command unless specifically told otherwise.
   - If a command fails, interpret the error and try the alternative platform's equivalent.
 "#;
-        
+
         let full_system = if system_prompt_patch.is_empty() {
             base_system.to_string()
         } else {
@@ -120,34 +122,80 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
             content: vec![ContentBlock::Text { text: full_system }],
         }];
 
-        // 6. Execute
+        // 6. Execute (with ID Tunneling Forwarding)
         let start_time = Instant::now();
-        let (tx, mut rx) = mpsc::channel(100); // Shared channel for subagent events
-        
-        // Setup event forwarding if context is available
+        let (tx, mut rx) = mpsc::channel(100);
+        let logs_collector = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let logs_collector_cloned = logs_collector.clone();
+
         let forwarding_handle = if let Some(ctx) = _context {
             let parent_tx = ctx.event_tx.clone();
-            let tool_id = ctx.tool_use_id.clone();
-            
+            let parent_tool_id = ctx.tool_use_id.clone();
+
+            // Initial log: Confirming Skill loading to the user
+            if !system_prompt_patch.is_empty() {
+                let log = format!(
+                    "\n[System] 🧠 技能已装载 | 指令长度: {} 字符\n",
+                    system_prompt_patch.len()
+                );
+                let _ = parent_tx.try_send(crate::event::AgentEvent::LogDelta {
+                    id: parent_tool_id.clone(),
+                    name: "subagent".to_string(),
+                    log: log.clone(),
+                    stream: "stderr".to_string(),
+                });
+                let logs = logs_collector_cloned.clone();
+                tokio::spawn(async move {
+                    logs.lock().await.push(log);
+                });
+            }
+
+            let logs_collector_for_loop = logs_collector_cloned.clone();
             Some(tokio::spawn(async move {
                 while let Some(event) = rx.recv().await {
                     match event {
                         crate::event::AgentEvent::TextDelta(text) => {
-                            // Forward subagent text as logs to the parent tool output
-                            let _ = parent_tx.send(crate::event::AgentEvent::LogDelta {
-                                id: tool_id.clone(),
-                                name: "subagent".to_string(),
-                                log: text,
-                                stream: "stdout".to_string(),
-                            }).await;
+                            let _ = parent_tx
+                                .send(crate::event::AgentEvent::LogDelta {
+                                    id: parent_tool_id.clone(),
+                                    name: "subagent".to_string(),
+                                    log: text.clone(),
+                                    stream: "stdout".to_string(),
+                                })
+                                .await;
+                            logs_collector_for_loop.lock().await.push(text);
                         }
-                        crate::event::AgentEvent::ToolStart { name, .. } => {
-                             let _ = parent_tx.send(crate::event::AgentEvent::LogDelta {
-                                id: tool_id.clone(),
-                                name: "subagent".to_string(),
-                                log: format!("\n[Subagent using tool: {}]\n", name),
-                                stream: "stderr".to_string(),
-                            }).await;
+                        crate::event::AgentEvent::ToolStart { name, input, .. } => {
+                            let log = format!("\n[Subagent] 🚀 正在执行: {} (参数: {})\n", name, input);
+                            let _ = parent_tx
+                                .send(crate::event::AgentEvent::LogDelta {
+                                    id: parent_tool_id.clone(),
+                                    name: "subagent".to_string(),
+                                    log: log.clone(),
+                                    stream: "stderr".to_string(),
+                                })
+                                .await;
+                            logs_collector_for_loop.lock().await.push(log);
+                        }
+                        crate::event::AgentEvent::ToolEnd {
+                            name, output, is_error, ..
+                        } => {
+                            let status = if is_error { "❌ 失败" } else { "✅ 成功" };
+                            let log = format!(
+                                "[Subagent] {} 执行完成: {} | 输出: {}\n",
+                                name,
+                                status,
+                                truncate_output(&output, 60)
+                            );
+                            let _ = parent_tx
+                                .send(crate::event::AgentEvent::LogDelta {
+                                    id: parent_tool_id.clone(),
+                                    name: "subagent".to_string(),
+                                    log: log.clone(),
+                                    stream: "stderr".to_string(),
+                                })
+                                .await;
+                            logs_collector_for_loop.lock().await.push(log);
                         }
                         _ => {}
                     }
@@ -158,14 +206,17 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
         };
 
         let result = runtime.run_turn(&history, task, tx, None).await?;
-        
-        if let Some(handle) = forwarding_handle {
-            handle.abort(); // Subagent finished, stop forwarding
-        }
-        
-        let duration = start_time.elapsed();
 
-        // 7. Scan workspace for created files
+        if let Some(handle) = forwarding_handle {
+            // Wait a bit for remaining logs to be processed if any
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            handle.abort();
+        }
+
+        let duration = start_time.elapsed();
+        let logs = logs_collector.lock().await.clone();
+
+        // 7. Scan workspace
         let mut files_created = Vec::new();
         if let Some(ws) = &workspace {
             let mut entries = tokio::fs::read_dir(ws).await?;
@@ -176,15 +227,26 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
             }
         }
 
-        // 8. Aggregate results
-        let final_assistant_msg = result.messages.iter()
+        // 8. Result
+        let final_assistant_msg = result
+            .messages
+            .iter()
             .rev()
             .find(|m| m.role == Role::Assistant)
-            .and_then(|m| m.content.iter().find_map(|b| if let ContentBlock::Text{text} = b { Some(text.clone()) } else { None }))
+            .and_then(|m| {
+                m.content.iter().find_map(|b| {
+                    if let ContentBlock::Text { text } = b {
+                        Some(text.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
             .unwrap_or_default();
 
         let output_json = json!({
             "output_summary": final_assistant_msg,
+            "logs": logs,
             "usage": {
                 "total_tokens": result.usage.input_tokens + result.usage.output_tokens,
                 "input_tokens": result.usage.input_tokens,
@@ -200,5 +262,13 @@ Your goal is to complete the assigned task by directly AGENTICALLY using the pro
             content: serde_json::to_string_pretty(&output_json)?,
             is_error: false,
         })
+    }
+}
+
+fn truncate_output(s: &str, max_len: usize) -> String {
+    if s.len() > max_len {
+        format!("{}...", &s.chars().take(max_len).collect::<String>())
+    } else {
+        s.to_string()
     }
 }

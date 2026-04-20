@@ -66,6 +66,18 @@ export class ChatView {
         this.bus.on('tool:log', (event: any) => {
             this.handleToolLog(event);
         });
+
+        this.bus.on('tool:start', (event: any) => {
+            if (event.sessionId === this.state.currentSessionId) {
+                this.handleToolStart(event);
+            }
+        });
+
+        this.bus.on('tool:result', (event: any) => {
+            if (event.sessionId === this.state.currentSessionId) {
+                this.handleToolResult(event);
+            }
+        });
         
         this.bus.on('chat:error', (payload: any) => {
             if (payload.sessionId === this.state.currentSessionId) {
@@ -85,6 +97,18 @@ export class ChatView {
 
         this.messagesContainer.addEventListener('contextmenu', (e) => this.handleContextMenu(e));
         document.addEventListener('click', () => this.hideContextMenu());
+
+        // 工具卡片折叠监听
+        this.messagesContainer.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement;
+            const header = target.closest('.tool-name, .tool-result-header');
+            if (header) {
+                const card = header.closest('.tool-use-card, .tool-result-card');
+                if (card) {
+                    card.classList.toggle('collapsed');
+                }
+            }
+        });
     }
 
     private hideContextMenu() {
@@ -213,15 +237,56 @@ export class ChatView {
                     const name = block.name || block.toolName;
                     const input = block.input || block.args;
                     const toolUseId = block.id || block.toolUseId;
-                    return `<div class="tool-use-card" data-tool-use-id="${toolUseId}">
-                        <div class="tool-name">🛠️ ${name}</div>
+                    return `<div class="tool-use-card collapsible collapsed" data-tool-use-id="${toolUseId}">
+                        <div class="tool-name">🛠️ ${name} <span class="collapse-icon">⌄</span></div>
                         <pre class="tool-args">${JSON.stringify(input, null, 2)}</pre>
                         <div class="tool-log-streamer hidden"></div>
                     </div>`;
                 } else if (type === 'tool_result') {
-                    return `<div class="tool-result-card ${block.isError ? 'error' : ''}">
-                        <div class="tool-result-header">${t('chat.tool_result')}</div>
-                        <div class="tool-result-content">${escapeHtml(String(block.content || block.result || ''))}</div>
+                    const originalContent = block.content || block.result || block.output || '';
+                    let displayContent = '';
+                    
+                    try {
+                        // Try to parse as JSON for specialized rendering (e.g. subagent)
+                        const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
+                        
+                        if (parsed && typeof parsed === 'object') {
+                            if (parsed.output_summary) {
+                                // Subagent summary rendering
+                                displayContent = renderMarkdown(parsed.output_summary);
+                                
+                                if (parsed.logs && Array.isArray(parsed.logs) && parsed.logs.length > 0) {
+                                    displayContent += `
+                                        <details class="subagent-logs-detail" style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden;">
+                                            <summary style="padding: 8px 12px; background: var(--bg-secondary); cursor: pointer; font-size: 0.85em; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                                                <span class="icon">📜</span> ${t('chat.subagent_logs')}
+                                            </summary>
+                                            <div style="padding: 0; background: #000; color: #fff; font-family: var(--font-code); font-size: 0.8em; max-height: 300px; overflow-y: auto;">
+                                                <pre style="margin: 0; padding: 12px; white-space: pre-wrap; line-height: 1.4;">${escapeHtml(parsed.logs.join(''))}</pre>
+                                            </div>
+                                        </details>`;
+                                }
+
+                                if (parsed.workspace_files && Array.isArray(parsed.workspace_files) && parsed.workspace_files.length > 0) {
+                                    displayContent += `<div class="tool-result-files" style="margin-top: 10px; font-size: 0.9em; color: var(--text-secondary);">
+                                        📁 ${t('chat.files_created', parsed.workspace_files.length)}: ${parsed.workspace_files.join(', ')}
+                                    </div>`;
+                                }
+                            } else {
+                                // Other JSON tools
+                                displayContent = `<pre class="json-result"><code>${escapeHtml(JSON.stringify(parsed, null, 2))}</code></pre>`;
+                            }
+                        } else {
+                            displayContent = escapeHtml(String(originalContent));
+                        }
+                    } catch (e) {
+                        // Not JSON, render as plain text
+                        displayContent = escapeHtml(String(originalContent));
+                    }
+
+                    return `<div class="tool-result-card collapsible collapsed ${block.isError ? 'error' : ''}">
+                        <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
+                        <div class="tool-result-content">${displayContent}</div>
                     </div>`;
                 }
                 return '';
@@ -232,11 +297,14 @@ export class ChatView {
             contentHtml = isAssistant ? renderMarkdown(text) : escapeHtml(text);
         }
         
+        const isTool = Array.isArray(message.content) && message.content.some((b: any) => b.type === 'tool_result');
+        const roleClass = isTool ? 'tool' : message.role;
+        
         const intentText = message.metadata?.intentText || (isAssistant && this.currentIntentText ? this.currentIntentText : '');
         const intentHtml = intentText ? `<div class="message-intent">${escapeHtml(intentText)}</div>` : '';
 
         return `
-            <div class="message ${message.role}" data-index="${index}">
+            <div class="message ${roleClass}" data-index="${index}">
                 <div class="message-bubble">
                     ${intentHtml}
                     <div class="markdown-body">${contentHtml}</div>
@@ -348,6 +416,67 @@ export class ChatView {
         `;
         this.messagesContainer.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();
+    }
+
+    private handleToolStart(event: any) {
+        const { toolName, args, toolUseId } = event;
+        if (!this.streamingMessageEl) {
+            this.streamingMessageEl = this.createStreamingMessage();
+            this.messagesContainer.appendChild(this.streamingMessageEl);
+        }
+
+        const markdownBody = this.streamingMessageEl.querySelector('.markdown-body');
+        if (markdownBody) {
+            const html = `
+                <div class="tool-use-card collapsible" data-tool-use-id="${toolUseId}">
+                    <div class="tool-name">🛠️ ${toolName} <span class="collapse-icon">⌄</span></div>
+                    <pre class="tool-args">${JSON.stringify(args || {}, null, 2)}</pre>
+                    <div class="tool-log-streamer hidden"></div>
+                </div>
+            `;
+            markdownBody.insertAdjacentHTML('beforeend', html);
+            this.scrollToBottom();
+        }
+    }
+
+    private handleToolResult(event: any) {
+        const { toolUseId, result, isError } = event;
+        
+        // 我们需要找到对应的 tool-use-card 并在其后插入结果，或者直接在 streaming message 中寻找
+        if (!this.streamingMessageEl) return;
+
+        const markdownBody = this.streamingMessageEl.querySelector('.markdown-body');
+        if (markdownBody) {
+            const originalContent = result || '';
+            let displayContent = '';
+            try {
+                const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
+                if (parsed && typeof parsed === 'object' && parsed.output_summary) {
+                    displayContent = renderMarkdown(parsed.output_summary);
+                } else {
+                    displayContent = `<pre class="json-result"><code>${escapeHtml(JSON.stringify(parsed, null, 2))}</code></pre>`;
+                }
+            } catch (e) {
+                displayContent = escapeHtml(String(originalContent));
+            }
+
+            const html = `
+                <div class="tool-result-card collapsible ${isError ? 'error' : ''}" data-rel-id="${toolUseId}">
+                    <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
+                    <div class="tool-result-content">${displayContent}</div>
+                </div>
+            `;
+            markdownBody.insertAdjacentHTML('beforeend', html);
+            this.scrollToBottom();
+
+            // 5s 后自动折叠工具调用和结果
+            setTimeout(() => {
+                const toolCard = markdownBody.querySelector(`.tool-use-card[data-tool-use-id="${toolUseId}"]`);
+                const resultCard = markdownBody.querySelector(`.tool-result-card[data-rel-id="${toolUseId}"]`);
+                if (toolCard) toolCard.classList.add('collapsed');
+                if (resultCard) resultCard.classList.add('collapsed');
+            }, 5000);
+        }
     }
 
     private scrollToBottom() {

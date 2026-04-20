@@ -137,10 +137,7 @@ impl BashTool {
     pub fn new(config: &crate::config::BashConfig) -> Self {
         let shell = select_shell(config);
         info!("BashTool initialized using shell: {}", shell.name());
-        Self {
-            shell,
-            workspace: None,
-        }
+        Self { shell, workspace: None }
     }
 
     /// Creates a new `BashTool` with a specific workspace directory.

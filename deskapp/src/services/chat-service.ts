@@ -96,13 +96,22 @@ export class ChatService {
         }
     }
 
-    private handleProgress(event: any) {
+    private async handleProgress(event: any) {
         if (event.type === 'token') {
             this.bus.emit('token', { sessionId: event.sessionId, token: event.token });
         } else if (event.type === 'complete') {
             this.bus.emit('chat:complete', event);
+            // Refresh messages after completion to sync persistent state
+            if (event.sessionId) {
+                const messages = await this.client.getMessages(event.sessionId);
+                if (event.sessionId === this.state.currentSessionId) {
+                    this.state.setMessages(messages as any);
+                }
+            }
         } else if (event.type === 'tool_start') {
             this.bus.emit('tool:start', event);
+        } else if (event.type === 'tool_result') {
+            this.bus.emit('tool:result', event);
         } else if (event.type === 'tool_log') {
             this.bus.emit('tool:log', event);
         } else if (event.type === 'iteration_limit') {

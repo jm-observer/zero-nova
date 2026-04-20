@@ -239,7 +239,10 @@ async fn handle_continue_workflow<C: LlmClient>(
                 )
                 .await
             {
-                error!("Failed to persist workflow user message for session {}: {}", session.id, e);
+                error!(
+                    "Failed to persist workflow user message for session {}: {}",
+                    session.id, e
+                );
             }
 
             // Send and persist messages
@@ -253,7 +256,10 @@ async fn handle_continue_workflow<C: LlmClient>(
                     )
                     .await
                 {
-                    error!("Failed to persist workflow assistant message for session {}: {}", session.id, e);
+                    error!(
+                        "Failed to persist workflow assistant message for session {}: {}",
+                        session.id, e
+                    );
                 }
                 // Simple text message event for now
                 let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatProgress(
@@ -381,7 +387,10 @@ async fn handle_start_new_task<C: LlmClient>(
                     )
                     .await
                 {
-                    error!("Failed to persist task assistant message for session {}: {}", session.id, e);
+                    error!(
+                        "Failed to persist task assistant message for session {}: {}",
+                        session.id, e
+                    );
                 }
                 let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatProgress(
                     crate::gateway::protocol::ProgressEvent {

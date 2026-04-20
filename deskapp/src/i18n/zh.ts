@@ -165,6 +165,8 @@ const zh: Record<string, string> = {
     'chat.intent_address_agent': '正在请求切换到智能体 {0}...',
     'chat.intent_continue_workflow': '正在继续执行工作流...',
     'chat.clone_session': '克隆此会话 (分支)',
+    'chat.subagent_logs': '子任务日志',
+    'chat.files_created': '{0} 个生成文件',
 
     // ========================
     // Settings - Tabs

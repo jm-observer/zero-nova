@@ -8883,44 +8883,9 @@ body.router-active .input-area {
   stroke: #b45309;
 }
 
-/* ========== æ„å›¾çŠ¶æ€æç¤º (Intent Tip) ========== */
-.message.assistant.intent-tip {
-  margin: 12px 0;
-  display: flex;
-  justify-content: center;
-  animation: intent-fadeIn 0.3s ease-out;
-}
 
-.message.assistant.intent-tip .message-bubble {
-  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.05));
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
-  padding: 6px 16px;
-  border-radius: 20px;
-  box-shadow: none;
-  width: auto;
-  max-width: 90%;
-}
 
-.intent-text {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  font-style: italic;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
-.intent-text::before {
-  content: 'âœ¦';
-  color: var(--color-primary);
-  animation: intent-pulse 1.5s infinite;
-}
-
-.intent-tip.fade-out {
-  opacity: 0;
-  transform: translateY(-10px);
-  transition: all 0.5s ease-in;
-}
 
 @keyframes intent-fadeIn {
   from { opacity: 0; transform: translateY(5px); }
@@ -8931,3 +8896,40 @@ body.router-active .input-area {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(0.8); }
 }
+/* ========== ÏûÏ¢ÒâÍ¼±êÇ© (Message Intent) ========== */
+.message-intent {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  user-select: none;
+}
+
+.message-intent::before {
+  content: '?';
+  animation: intent-pulse 1.5s infinite;
+}
+
+.message.assistant.streaming .message-intent {
+  opacity: 0.8;
+}
+
+@keyframes intent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.9); }
+}
+
+[data-theme='light'] .message-intent {
+  background: rgba(160, 132, 92, 0.1);
+  color: #a0845c;
+  border-color: rgba(160, 132, 92, 0.2);
+}

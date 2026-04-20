@@ -9,7 +9,7 @@ use log::{error, info};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-
+use crate::gateway::control::{InteractionKind, InteractionResolver, PendingInteraction, ResolutionIntent, RiskLevel, TurnIntent};
 use crate::gateway::router::AppState;
 
 pub async fn handle_chat<C: LlmClient>(
@@ -24,32 +24,34 @@ pub async fn handle_chat<C: LlmClient>(
     // Serialize access to the session's chat state.
     let _lock = session.chat_lock.lock().await;
 
+    let intent = TurnIntent::ExecuteChat;
     // Determine the turn intent.
-    let intent = {
-        let control = session.control.read().unwrap();
-        crate::gateway::control::TurnRouter::classify(&payload.input, &control, Some(&state.agent_registry))
-    };
-    info!("{} {:?}", payload.input, intent);
+    // let intent = {
+    //     let control = session.control.read().unwrap();
+    //     TurnRouter::classify(&payload.input, &control, Some(&state.agent_registry))
+    // };
+    // info!("intent {:?} {} ", intent, payload.input);
 
     // Send intent to frontend
-    let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatIntent(
-        crate::gateway::protocol::ChatIntentPayload {
-            session_id: payload.session_id.clone().unwrap_or_default(),
-            intent: match &intent {
-                crate::gateway::control::TurnIntent::ResolvePendingInteraction => "resolve".to_string(),
-                crate::gateway::control::TurnIntent::AddressAgent { .. } => "address_agent".to_string(),
-                crate::gateway::control::TurnIntent::ContinueWorkflow => "continue_workflow".to_string(),
-                crate::gateway::control::TurnIntent::ExecuteChat => "chat".to_string(),
-            },
-            agent_id: match &intent {
-                crate::gateway::control::TurnIntent::AddressAgent { agent_id } => Some(agent_id.clone()),
-                _ => None,
-            },
-        },
-    )));
+    // let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatIntent(
+    //     crate::gateway::protocol::ChatIntentPayload {
+    //         session_id: payload.session_id.clone().unwrap_or_default(),
+    //         intent: match &intent {
+    //             TurnIntent::ResolvePendingInteraction => "resolve".to_string(),
+    //             TurnIntent::AddressAgent { .. } => "address_agent".to_string(),
+    //             TurnIntent::ContinueWorkflow => "continue_workflow".to_string(),
+    //             TurnIntent::StartNewTask { .. } => "start_new_task".to_string(),
+    //             TurnIntent::ExecuteChat => "chat".to_string(),
+    //         },
+    //         agent_id: match &intent {
+    //             TurnIntent::AddressAgent { agent_id } => Some(agent_id.clone()),
+    //             _ => None,
+    //         },
+    //     },
+    // )));
 
     match intent {
-        crate::gateway::control::TurnIntent::ResolvePendingInteraction => {
+        TurnIntent::ResolvePendingInteraction => {
             handle_resolve_interaction::<C>(
                 session.clone(),
                 &payload.input,
@@ -59,7 +61,7 @@ pub async fn handle_chat<C: LlmClient>(
             )
             .await;
         }
-        crate::gateway::control::TurnIntent::AddressAgent { agent_id } => {
+        TurnIntent::AddressAgent { agent_id } => {
             handle_address_agent(
                 session.clone(),
                 agent_id,
@@ -69,7 +71,7 @@ pub async fn handle_chat<C: LlmClient>(
             )
             .await;
         }
-        crate::gateway::control::TurnIntent::ContinueWorkflow => {
+        TurnIntent::ContinueWorkflow => {
             handle_continue_workflow::<C>(
                 session.clone(),
                 &payload.input,
@@ -79,7 +81,18 @@ pub async fn handle_chat<C: LlmClient>(
             )
             .await;
         }
-        crate::gateway::control::TurnIntent::ExecuteChat => {
+        TurnIntent::StartNewTask { topic } => {
+            handle_start_new_task::<C>(
+                session.clone(),
+                topic,
+                &payload.input,
+                state.clone(),
+                outbound_tx.clone(),
+                request_id.clone(),
+            )
+            .await;
+        }
+        TurnIntent::ExecuteChat => {
             // Normal chat flow.
             execute_chat_turn(session.clone(), &payload, state.clone(), outbound_tx, request_id).await;
         }
@@ -123,11 +136,11 @@ async fn handle_resolve_interaction<C: LlmClient>(
 ) {
     let mut control = session.control.write().unwrap();
     if let Some(pending) = control.pending_interaction.take() {
-        let result = crate::gateway::control::InteractionResolver::resolve(user_input, &pending);
+        let result = InteractionResolver::resolve(user_input, &pending);
         let result_str = match result.intent {
-            crate::gateway::control::ResolutionIntent::Approve => {
+            ResolutionIntent::Approve => {
                 // If it was a ConfirmSwitch, actually perform the switch
-                if pending.kind == crate::gateway::control::InteractionKind::Approve
+                if pending.kind == InteractionKind::Approve
                     && pending.id.starts_with("switch:")
                 {
                     let target_id = &pending.id[7..];
@@ -135,10 +148,10 @@ async fn handle_resolve_interaction<C: LlmClient>(
                 }
                 "approved"
             }
-            crate::gateway::control::ResolutionIntent::Reject => "rejected",
-            crate::gateway::control::ResolutionIntent::Select => "selected",
-            crate::gateway::control::ResolutionIntent::ProvideInput => "input",
-            crate::gateway::control::ResolutionIntent::Unclear => "unclear",
+            ResolutionIntent::Reject => "rejected",
+            ResolutionIntent::Select => "selected",
+            ResolutionIntent::ProvideInput => "input",
+            ResolutionIntent::Unclear => "unclear",
         };
         let payload = InteractionResolvedPayload {
             session_id: session.id.clone(),
@@ -239,9 +252,9 @@ async fn handle_continue_workflow<C: LlmClient>(
                     session_id: session.id.clone(),
                     interaction_id: pending.id.clone(),
                     kind: match pending.kind {
-                        crate::gateway::control::InteractionKind::Approve => "approve".to_string(),
-                        crate::gateway::control::InteractionKind::Select => "select".to_string(),
-                        crate::gateway::control::InteractionKind::Input => "input".to_string(),
+                        InteractionKind::Approve => "approve".to_string(),
+                        InteractionKind::Select => "select".to_string(),
+                        InteractionKind::Input => "input".to_string(),
                     },
                     subject: pending.subject.clone(),
                     prompt: pending.prompt.clone(),
@@ -251,9 +264,9 @@ async fn handle_continue_workflow<C: LlmClient>(
                         .map(crate::gateway::protocol::InteractionOptionDTO::from)
                         .collect(),
                     risk_level: match pending.risk_level {
-                        crate::gateway::control::RiskLevel::Low => "low".to_string(),
-                        crate::gateway::control::RiskLevel::Medium => "medium".to_string(),
-                        crate::gateway::control::RiskLevel::High => "high".to_string(),
+                        RiskLevel::Low => "low".to_string(),
+                        RiskLevel::Medium => "medium".to_string(),
+                        RiskLevel::High => "high".to_string(),
                     },
                 };
                 control.pending_interaction = Some(pending);
@@ -282,6 +295,111 @@ async fn handle_continue_workflow<C: LlmClient>(
     }
 }
 
+/// Handle a new task: create a workflow and run the first advance (GatherRequirements).
+async fn handle_start_new_task<C: LlmClient>(
+    session: Arc<crate::gateway::session::Session>,
+    topic: String,
+    user_input: &str,
+    state: Arc<AppState<C>>,
+    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    request_id: String,
+) {
+    // Create a new workflow for this topic
+    let mut workflow = crate::gateway::workflow::WorkflowState::new(topic);
+
+    // Set up event forwarding
+    let (event_tx, mut event_rx) = mpsc::channel(100);
+    let outbound_tx_clone = outbound_tx.clone();
+    let request_id_clone = request_id.clone();
+    let session_id_clone = session.id.clone();
+
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            let gateway_msg =
+                crate::gateway::bridge::agent_event_to_gateway(event, &request_id_clone, &session_id_clone);
+            if outbound_tx_clone.send(gateway_msg).is_err() {
+                break;
+            }
+        }
+    });
+
+    // Run the first advance to kick off GatherRequirements
+    let result = crate::gateway::workflow::WorkflowEngine::advance(
+        &mut workflow,
+        user_input,
+        &state.agent,
+        event_tx,
+    )
+    .await;
+
+    // Persist workflow state regardless of advance result
+    {
+        let mut control = session.control.write().unwrap();
+        control.workflow = Some(workflow);
+    }
+
+    match result {
+        Ok(result) => {
+            for msg in result.messages {
+                let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatProgress(
+                    crate::gateway::protocol::ProgressEvent {
+                        kind: "token".to_string(),
+                        token: Some(msg),
+                        session_id: Some(session.id.clone()),
+                        ..Default::default()
+                    },
+                )));
+            }
+
+            // If the first stage produces a pending interaction, save and send it
+            if let Some(pending) = result.new_pending {
+                let mut control = session.control.write().unwrap();
+                let payload = crate::gateway::protocol::InteractionRequestPayload {
+                    session_id: session.id.clone(),
+                    interaction_id: pending.id.clone(),
+                    kind: match pending.kind {
+                        InteractionKind::Approve => "approve".to_string(),
+                        InteractionKind::Select => "select".to_string(),
+                        InteractionKind::Input => "input".to_string(),
+                    },
+                    subject: pending.subject.clone(),
+                    prompt: pending.prompt.clone(),
+                    options: pending
+                        .options
+                        .iter()
+                        .map(crate::gateway::protocol::InteractionOptionDTO::from)
+                        .collect(),
+                    risk_level: match pending.risk_level {
+                        RiskLevel::Low => "low".to_string(),
+                        RiskLevel::Medium => "medium".to_string(),
+                        RiskLevel::High => "high".to_string(),
+                    },
+                };
+                control.pending_interaction = Some(pending);
+                let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::InteractionRequest(payload)));
+            }
+
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                MessageEnvelope::ChatComplete(ChatCompletePayload {
+                    session_id: session.id.clone(),
+                    output: None,
+                    usage: None,
+                }),
+            ));
+        }
+        Err(e) => {
+            error!("Start new task error: {}", e);
+            send_general_error(
+                &outbound_tx,
+                &request_id,
+                format!("Failed to start task: {}", e),
+                Some("WORKFLOW_ERROR".to_string()),
+            );
+        }
+    }
+}
+
 /// Handle an explicit agent addressing request (triggering a switch confirmation).
 async fn handle_address_agent<C: LlmClient>(
     session: Arc<crate::gateway::session::Session>,
@@ -294,13 +412,13 @@ async fn handle_address_agent<C: LlmClient>(
         let mut control = session.control.write().unwrap();
         let interaction_id = format!("switch:{}", agent_id);
 
-        let pending = crate::gateway::control::PendingInteraction {
+        let pending = PendingInteraction {
             id: interaction_id.clone(),
-            kind: crate::gateway::control::InteractionKind::Approve,
+            kind: InteractionKind::Approve,
             subject: "Agent Switch".to_string(),
             prompt: format!("您是否要切换到 {}？", agent.display_name),
             options: vec![],
-            risk_level: crate::gateway::control::RiskLevel::Low,
+            risk_level: RiskLevel::Low,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

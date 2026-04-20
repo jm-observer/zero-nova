@@ -159,6 +159,7 @@ pub enum TurnIntent {
     ResolvePendingInteraction,
     AddressAgent { agent_id: String },
     ContinueWorkflow,
+    StartNewTask { topic: String },
     ExecuteChat,
 }
 
@@ -193,8 +194,38 @@ impl TurnRouter {
             }
         }
 
+        // 4️⃣ new task detection – does this input look like a task that should start a workflow?
+        if let Some(topic) = Self::detect_new_task(input) {
+            return TurnIntent::StartNewTask { topic };
+        }
+
         // Default path – normal chat
         TurnIntent::ExecuteChat
+    }
+
+    /// Detect whether user input is requesting a new task (solution search, deployment, etc.).
+    /// Returns the extracted topic if matched.
+    fn detect_new_task(input: &str) -> Option<String> {
+        // Pattern groups: "帮我找/推荐/搜索一个 X 方案" or "我想要/需要一个 X" or "部署一个 X"
+        let task_patterns: &[&[&str]] = &[
+            &["找", "方案"],
+            &["推荐", "方案"],
+            &["搜索", "方案"],
+            &["选型"],
+            &["部署"],
+            &["我想要一个"],
+            &["我需要一个"],
+            &["帮我搭建"],
+            &["帮我部署"],
+        ];
+
+        for pattern in task_patterns {
+            if pattern.iter().all(|kw| input.contains(kw)) {
+                // Extract topic: take the input as-is for now, let workflow refine it
+                return Some(input.to_string());
+            }
+        }
+        None
     }
 }
 

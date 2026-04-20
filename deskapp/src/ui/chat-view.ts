@@ -12,6 +12,7 @@ export class ChatView {
     
     private streamingMessageEl: HTMLElement | null = null;
     private streamingContent = '';
+    private currentIntentText: string | null = null;
 
     constructor(private state: AppState, private bus: EventBus) {
         this.messagesContainer = document.getElementById('messages') as HTMLElement;
@@ -68,6 +69,7 @@ export class ChatView {
         this.streamingMessageEl = null;
         this.streamingContent = '';
         
+        this.currentIntentText = null;
         this.bus.emit('message:send', { text });
         this.messageInput.value = '';
     }
@@ -144,9 +146,13 @@ export class ChatView {
             contentHtml = isAssistant ? renderMarkdown(text) : escapeHtml(text);
         }
         
+        const intentText = message.metadata?.intentText || (isAssistant && this.currentIntentText ? this.currentIntentText : '');
+        const intentHtml = intentText ? `<div class="message-intent">${escapeHtml(intentText)}</div>` : '';
+
         return `
             <div class="message ${message.role}">
                 <div class="message-bubble">
+                    ${intentHtml}
                     <div class="markdown-body">${contentHtml}</div>
                 </div>
                 <div class="message-time">${formatTime(message.timestamp || message.createdAt)}</div>
@@ -170,7 +176,17 @@ export class ChatView {
     private createStreamingMessage(): HTMLElement {
         const div = document.createElement('div');
         div.className = 'message assistant streaming';
-        div.innerHTML = '<div class="message-bubble"><div class="markdown-body"></div></div>';
+        
+        const intentHtml = this.currentIntentText 
+            ? `<div class="message-intent">${escapeHtml(this.currentIntentText)}</div>` 
+            : '';
+
+        div.innerHTML = `
+            <div class="message-bubble">
+                ${intentHtml}
+                <div class="markdown-body"></div>
+            </div>
+        `;
         return div;
     }
 
@@ -189,33 +205,18 @@ export class ChatView {
         }
         
         if (text) {
-            this.showStatusTip(text);
-        }
-    }
-
-    private showStatusTip(text: string) {
-        // 如果已经有 streaming message，说明已经开始生成了，就不再显示引导性的意图了
-        if (this.streamingMessageEl) return;
-
-        const html = `
-            <div class="message assistant intent-tip">
-                <div class="message-bubble">
-                    <div class="intent-text">${escapeHtml(text)}</div>
-                </div>
-            </div>
-        `;
-        this.messagesContainer.insertAdjacentHTML('beforeend', html);
-        this.scrollToBottom();
-
-        // 5秒后自动淡出（如果还没被开始生成的 token 覆盖/跟随）
-        const tips = this.messagesContainer.querySelectorAll('.intent-tip');
-        const lastTip = tips[tips.length - 1] as HTMLElement;
-        setTimeout(() => {
-            if (lastTip && lastTip.parentElement) {
-                lastTip.classList.add('fade-out');
-                setTimeout(() => lastTip.remove(), 500);
+            this.currentIntentText = text;
+            // 如果已经正在流式输出，动态更新当前的 header
+            if (this.streamingMessageEl) {
+                const intentEl = this.streamingMessageEl.querySelector('.message-intent');
+                if (intentEl) {
+                    intentEl.textContent = text;
+                } else {
+                    const bubble = this.streamingMessageEl.querySelector('.message-bubble');
+                    bubble?.insertAdjacentHTML('afterbegin', `<div class="message-intent">${escapeHtml(text)}</div>`);
+                }
             }
-        }, 5000);
+        }
     }
 
     private scrollToBottom() {

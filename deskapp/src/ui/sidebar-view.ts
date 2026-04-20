@@ -37,6 +37,16 @@ export class SidebarView {
             this.renderSessions();
         });
 
+        this.bus.on(Events.SESSION_CREATED, () => {
+            console.log('[SidebarView] Session created, rendering...');
+            this.renderSessions();
+        });
+
+        this.bus.on(Events.SESSION_DELETED, () => {
+            console.log('[SidebarView] Session deleted, rendering...');
+            this.renderSessions();
+        });
+
         this.bus.on('agents:updated', () => {
             console.log('[SidebarView] Agents updated, rendering...');
             this.renderAgents();

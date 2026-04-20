@@ -25,10 +25,14 @@ export class ChatView {
         console.log('[ChatView] Initializing...');
         this.bindEvents();
         
-        this.bus.on(Events.SESSION_CHANGED, () => {
-             console.log('[ChatView] Session changed, clearing...');
+        this.bus.on(Events.SESSION_CHANGED, (payload: any) => {
+             console.log('[ChatView] Session changed:', payload.previousSessionId, '->', payload.sessionId);
+             // 如果是从初始状态 (null) 切换到第一个会话，说明正在通过首条消息建立会话，
+             // 此时应保留当前显示的乐观消息（用户刚发出的那一条），不执行清空。
+             if (payload.previousSessionId === null && payload.sessionId !== null) {
+                 return;
+             }
              this.clear();
-             // Don't render yet as state.messages might be stale
         });
 
         this.bus.on(Events.MESSAGES_UPDATED, (payload: any) => {
@@ -132,14 +136,34 @@ export class ChatView {
     }
 
     renderMessages(messages: any[]) {
+        // 保存当前的流式状态，避免在渲染历史消息时冲掉正在产生的回复
+        const prevStreamingEl = this.streamingMessageEl;
+        const prevStreamingContent = this.streamingContent;
+        const isStreaming = !!prevStreamingEl;
+
         this.streamingMessageEl = null;
         this.streamingContent = '';
         
-        if (messages.length === 0) {
+        // 过滤掉 system 角色的消息，避免工作区显得杂乱
+        // 同时保留原始索引，以便后续操作（如克隆会话）能对应上正确的后端索引
+        const displayMessages = messages
+            .map((m, i) => ({ ...m, originalIndex: i }))
+            .filter(m => m.role !== 'system');
+        
+        if (displayMessages.length === 0 && !isStreaming) {
             this.showWelcome();
             return;
         }
-        this.messagesContainer.innerHTML = messages.map((m, i) => this.renderMessage(m, i)).join('');
+        
+        this.messagesContainer.innerHTML = displayMessages.map((m) => this.renderMessage(m, m.originalIndex)).join('');
+        
+        // 如果之前正在流式输出，将其重新追加到容器末尾
+        if (isStreaming) {
+            this.streamingMessageEl = prevStreamingEl;
+            this.streamingContent = prevStreamingContent;
+            this.messagesContainer.appendChild(this.streamingMessageEl);
+        }
+
         this.scrollToBottom();
     }
 
@@ -153,7 +177,9 @@ export class ChatView {
     }
 
     private addMessage(message: any) {
-        const index = this.messagesContainer.querySelectorAll('.message').length;
+        if (message.role === 'system') return;
+        // 使用 state 中的消息总数减 1 作为原始索引
+        const index = this.state.messages.length - 1;
         const html = this.renderMessage(message, index);
         this.messagesContainer.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();

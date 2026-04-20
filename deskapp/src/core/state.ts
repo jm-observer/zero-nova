@@ -61,12 +61,22 @@ export class AppState {
 
     setCurrentSession(id: string | null) {
         if (this.currentSessionId !== id) {
+            const previousSessionId = this.currentSessionId;
             this.currentSessionId = id;
-            // 切换会话时，立即清空内存中的当前消息列表，防止渲染旧消息
-            this.messages = [];
+
+            // 切换会话时处理消息清理
+            // 如果是从 null (初始状态) 切换到某个会话，保留当前的乐观消息
+            // 只有在不同会话之间切换，或者关闭会话时，才真正清空消息列表
+            if (previousSessionId !== null) {
+                this.messages = [];
+            }
             
             this.bus.emit(Events.SESSION_SELECTED, { sessionId: id });
-            this.bus.emit(Events.SESSION_CHANGED, { sessionId: id, messages: this.messages });
+            this.bus.emit(Events.SESSION_CHANGED, { 
+                sessionId: id, 
+                previousSessionId,
+                messages: this.messages 
+            });
         }
     }
 

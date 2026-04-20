@@ -8,3 +8,5 @@ Thumbs.db
 Cargo.lock
 node_modules
 *.db
+open-source*
+evals

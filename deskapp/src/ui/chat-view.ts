@@ -49,6 +49,10 @@ export class ChatView {
         this.bus.on(Events.CHAT_INTENT, (payload: any) => {
             this.handleIntent(payload);
         });
+        
+        this.bus.on('tool:log', (event: any) => {
+            this.handleToolLog(event);
+        });
     }
 
     private bindEvents() {
@@ -128,9 +132,11 @@ export class ChatView {
                 } else if (type === 'tool_use' || type === 'tool_call') {
                     const name = block.name || block.toolName;
                     const input = block.input || block.args;
-                    return `<div class="tool-use-card">
+                    const toolUseId = block.id || block.toolUseId;
+                    return `<div class="tool-use-card" data-tool-use-id="${toolUseId}">
                         <div class="tool-name">🛠️ ${name}</div>
                         <pre class="tool-args">${JSON.stringify(input, null, 2)}</pre>
+                        <div class="tool-log-streamer hidden"></div>
                     </div>`;
                 } else if (type === 'tool_result') {
                     return `<div class="tool-result-card ${block.isError ? 'error' : ''}">
@@ -217,6 +223,28 @@ export class ChatView {
                 }
             }
         }
+    }
+
+    private handleToolLog(event: any) {
+        const { toolUseId, log, stream } = event;
+        // 查找对应的 tool-use-card
+        const card = this.messagesContainer.querySelector(`.tool-use-card[data-tool-use-id="${toolUseId}"]`);
+        if (!card) return;
+
+        const streamer = card.querySelector('.tool-log-streamer');
+        if (!streamer) return;
+
+        streamer.classList.remove('hidden');
+        const line = document.createElement('div');
+        line.className = `log-line ${stream || 'stdout'}`;
+        line.textContent = log;
+        streamer.appendChild(line);
+
+        // 自动滚动日志区域
+        streamer.scrollTop = streamer.scrollHeight;
+        
+        // 同时滚动整个消息区域
+        this.scrollToBottom();
     }
 
     private scrollToBottom() {

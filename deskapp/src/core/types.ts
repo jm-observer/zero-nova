@@ -64,7 +64,7 @@ export type WorkingMode = 'standalone' | 'router' | 'managed';
 // 注意：为了避免循环依赖，这里只放纯 Interface/Type，不放 Class 实现
 
 export interface ProgressEvent {
-    type: 'iteration' | 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'turn_complete' | 'iteration_limit';
+    type: 'iteration' | 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'turn_complete' | 'iteration_limit' | 'tool_log';
     iteration?: number;
     tool?: string;
     toolName?: string;
@@ -78,6 +78,8 @@ export interface ProgressEvent {
     isError?: boolean;
     llmDescription?: string;
     sessionId?: string;
+    log?: string;
+    stream?: string;
 }
 
 export interface ChatIntentPayload {

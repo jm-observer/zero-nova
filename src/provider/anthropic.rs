@@ -4,6 +4,7 @@ use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StopReason, S
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::{header, Client};
+use crate::message::Role;
 
 /// Client for interacting with the Anthropic API.
 pub struct AnthropicClient {
@@ -39,17 +40,29 @@ impl LlmClient for AnthropicClient {
     async fn stream(
         &self,
         messages: &[crate::message::Message],
-        system: &str,
         tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
         // Build request body
         let mut input_messages = Vec::new();
+        let mut system_prompts = Vec::new();
+
         for msg in messages {
+            if msg.role == Role::System {
+                for block in &msg.content {
+                    if let crate::message::ContentBlock::Text { text } = block {
+                        system_prompts.push(text.clone());
+                    }
+                }
+                continue;
+            }
+
             let role = match msg.role {
                 crate::message::Role::User => "user",
                 crate::message::Role::Assistant => "assistant",
+                _ => unreachable!(), // System handled above
             };
+
             let content_vec: Vec<crate::provider::types::InputContentBlock> = msg
                 .content
                 .iter()
@@ -86,6 +99,13 @@ impl LlmClient for AnthropicClient {
                 content: content_vec,
             });
         }
+
+        let system_prompt = if system_prompts.is_empty() {
+            None
+        } else {
+            Some(system_prompts.join("\n\n"))
+        };
+
         let mut body = MessageRequest {
             model: config.model.clone(),
             max_tokens: config.max_tokens,
@@ -93,7 +113,7 @@ impl LlmClient for AnthropicClient {
             top_p: config.top_p,
             stream: true,
             messages: input_messages,
-            system: Some(system.to_string()),
+            system: system_prompt,
             tools: if tools.is_empty() { None } else { Some(tools.to_vec()) },
             thinking: None,
         };

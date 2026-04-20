@@ -80,17 +80,9 @@ async fn main() -> Result<()> {
     register_builtin_tools(&mut tools, &config);
 
     // Build system prompt including loaded tools and environment information
-    let prompt_builder = if let Some(ref workspace) = cli.workspace {
-        SystemPromptBuilder::new_from_path(workspace)
-    } else {
-        SystemPromptBuilder::new()
-    };
+    let prompt_builder = SystemPromptBuilder::new();
 
-    let prompt = prompt_builder
-        .with_tools(&tools)
-        .environment("date", current_date())
-        .environment("platform", std::env::consts::OS)
-        .build();
+    let system_prompt_str = prompt_builder.with_tools(&tools).build();
 
     let agent_config = AgentConfig {
         max_iterations: 5,
@@ -98,11 +90,11 @@ async fn main() -> Result<()> {
         tool_timeout: std::time::Duration::from_secs(120),
     };
 
-    let mut agent = AgentRuntime::new(client, tools, prompt, agent_config);
+    let mut agent = AgentRuntime::new(client, tools, agent_config);
 
     match cli.command {
-        Command::Chat => run_repl(&mut agent, cli.verbose).await?,
-        Command::Run { prompt } => run_oneshot(&agent, &prompt, cli.verbose).await?,
+        Command::Chat => run_repl(&mut agent, &system_prompt_str, cli.verbose).await?,
+        Command::Run { prompt } => run_oneshot(&agent, &system_prompt_str, &prompt, cli.verbose).await?,
         Command::Tools => {
             print_tools(&agent);
         }
@@ -112,9 +104,24 @@ async fn main() -> Result<()> {
 }
 
 /// Runs the REPL loop for interactive chat.
-async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Result<()> {
+async fn run_repl(
+    agent: &mut AgentRuntime<impl LlmClient>,
+    system_prompt: &str,
+    verbose: bool,
+) -> Result<()> {
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
+
+    // Initialize history with system prompt
+    if !system_prompt.is_empty() {
+        history.push(Message {
+            role: zero_nova::message::Role::System,
+            content: vec![zero_nova::message::ContentBlock::Text {
+                text: system_prompt.to_string(),
+            }],
+        });
+    }
+
     while let Ok(line) = rl.readline("you> ") {
         let input = line.trim();
         if input.is_empty() {
@@ -127,7 +134,7 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                 println!("  /quit     - Exit the CLI");
                 println!("  /help     - Show this help message");
                 println!("  /tools    - List all registered tools");
-                println!("  /clear    - Clear conversation history");
+                println!("  /clear    - Clear conversation history (keeps system prompt)");
                 println!("  /history  - Show conversation history stats");
                 println!("  /prompt   - Show current system prompt");
                 continue;
@@ -137,8 +144,13 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                 continue;
             }
             "/clear" => {
+                // Keep the first system message if it exists
+                let system_msg = history.first().cloned().filter(|m| m.role == zero_nova::message::Role::System);
                 history.clear();
-                println!("{}", "Conversation history cleared.".green());
+                if let Some(msg) = system_msg {
+                    history.push(msg);
+                }
+                println!("{}", "Conversation history cleared (system prompt preserved).".green());
                 continue;
             }
             "/history" => {
@@ -150,7 +162,15 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
             }
             "/prompt" => {
                 println!("{}", "--- System Prompt ---".bright_black());
-                println!("{}", agent.system_prompt());
+                if let Some(msg) = history.first().filter(|m| m.role == zero_nova::message::Role::System) {
+                    for block in &msg.content {
+                        if let zero_nova::message::ContentBlock::Text { text } = block {
+                            println!("{}", text);
+                        }
+                    }
+                } else {
+                    println!("(No system prompt set)");
+                }
                 println!("{}", "---------------------".bright_black());
                 continue;
             }
@@ -190,14 +210,30 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
 }
 
 /// Executes a one-shot interaction with the given prompt.
-async fn run_oneshot(agent: &AgentRuntime<impl LlmClient>, prompt: &str, verbose: bool) -> Result<()> {
+async fn run_oneshot(
+    agent: &AgentRuntime<impl LlmClient>,
+    system_prompt: &str,
+    user_input: &str,
+    verbose: bool,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             render_event(&event, verbose);
         }
     });
-    let _ = agent.run_turn(&[], prompt, tx.clone(), None).await?;
+
+    let mut history = Vec::new();
+    if !system_prompt.is_empty() {
+        history.push(Message {
+            role: zero_nova::message::Role::System,
+            content: vec![zero_nova::message::ContentBlock::Text {
+                text: system_prompt.to_string(),
+            }],
+        });
+    }
+
+    let _ = agent.run_turn(&history, user_input, tx.clone(), None).await?;
     drop(tx);
     printer.await.ok();
     Ok(())

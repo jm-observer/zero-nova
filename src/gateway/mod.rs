@@ -17,7 +17,7 @@ use crate::agent::{AgentConfig, AgentRuntime};
 use crate::gateway::agents::{AgentDescriptor, AgentRegistry};
 use crate::gateway::router::AppState;
 use crate::gateway::session::SessionStore;
-use crate::prompt::SystemPromptBuilder;
+
 use crate::tool::ToolRegistry;
 use std::net::SocketAddr;
 use std::sync::Arc;

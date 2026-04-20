@@ -1,13 +1,16 @@
 use crate::tool::ToolRegistry;
-use std::fs;
-use std::path::Path;
 
+#[derive(Default)]
 /// Builder for constructing system prompts with optional sections.
 pub struct SystemPromptBuilder {
     sections: Vec<String>,
 }
 
 impl SystemPromptBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
 
     /// Adds a role section to the prompt.
     pub fn role(mut self, role: impl Into<String>) -> Self {
@@ -62,10 +65,4 @@ impl SystemPromptBuilder {
     }
 }
 
-impl Default for SystemPromptBuilder {
-    fn default() -> Self {
-        Self {
-            sections: vec![],
-        }
-    }
-}
+

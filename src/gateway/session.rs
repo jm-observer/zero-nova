@@ -15,7 +15,6 @@ pub struct Session {
     pub control: std::sync::RwLock<crate::gateway::control::ControlState>,
     pub id: String,
     pub name: String,
-    pub system_prompt: String,
     pub history: RwLock<Vec<Message>>,
     pub created_at: i64,       // unix timestamp in milliseconds
     pub updated_at: AtomicI64, // 支持按活跃度排序
@@ -161,7 +160,6 @@ impl SessionStore {
             control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
             id: id.clone(),
             name: session_name,
-            system_prompt,
             history: RwLock::new(initial_history),
             created_at: now,
             updated_at: AtomicI64::new(now),

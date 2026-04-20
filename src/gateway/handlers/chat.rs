@@ -20,37 +20,32 @@ pub async fn handle_chat<C: LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    // Retrieve (or create) the session.
-    let session = state.sessions.get_or_create(payload.session_id.clone()).await;
+    // 检查 session_id 是否提供
+    let Some(session_id_val) = payload.session_id.clone() else {
+        send_general_error(
+            &outbound_tx,
+            &request_id,
+            "session_id is required".to_string(),
+            Some("INVALID_REQUEST".to_string()),
+        );
+        return;
+    };
+
+    // Retrieve the session.
+    let Some(session) = state.sessions.get(&session_id_val).await else {
+        send_general_error(
+            &outbound_tx,
+            &request_id,
+            format!("Session {} not found", session_id_val),
+            Some("SESSION_NOT_FOUND".to_string()),
+        );
+        return;
+    };
 
     // Serialize access to the session's chat state.
     let _lock = session.chat_lock.lock().await;
 
     let intent = TurnIntent::ExecuteChat;
-    // Determine the turn intent.
-    // let intent = {
-    //     let control = session.control.read().unwrap();
-    //     TurnRouter::classify(&payload.input, &control, Some(&state.agent_registry))
-    // };
-    // info!("intent {:?} {} ", intent, payload.input);
-
-    // Send intent to frontend
-    // let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::ChatIntent(
-    //     crate::gateway::protocol::ChatIntentPayload {
-    //         session_id: payload.session_id.clone().unwrap_or_default(),
-    //         intent: match &intent {
-    //             TurnIntent::ResolvePendingInteraction => "resolve".to_string(),
-    //             TurnIntent::AddressAgent { .. } => "address_agent".to_string(),
-    //             TurnIntent::ContinueWorkflow => "continue_workflow".to_string(),
-    //             TurnIntent::StartNewTask { .. } => "start_new_task".to_string(),
-    //             TurnIntent::ExecuteChat => "chat".to_string(),
-    //         },
-    //         agent_id: match &intent {
-    //             TurnIntent::AddressAgent { agent_id } => Some(agent_id.clone()),
-    //             _ => None,
-    //         },
-    //     },
-    // )));
 
     match intent {
         TurnIntent::ResolvePendingInteraction => {

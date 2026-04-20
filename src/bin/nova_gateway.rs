@@ -15,9 +15,9 @@ struct Args {
     #[arg(long, default_value_t = 9090)]
     port: u16,
 
-    /// Model name
-    #[arg(long, default_value = "gpt-oss-120b")]
-    model: String,
+    /// Model name, default_value = "gpt-oss-120b"
+    #[arg(long)]
+    model: Option<String>,
 
     /// Max tokens
     #[arg(long, default_value_t = 8192)]
@@ -57,6 +57,15 @@ async fn main() -> anyhow::Result<()> {
 
     config.gateway.host = _args.host;
     config.gateway.port = _args.port;
+    if let Some(model) = _args.model {
+        config.llm.model_config.model = model;
+    }
+
+    config.llm.model_config.max_tokens = _args.max_tokens;
+
+    if let Some(base_url) = _args.base_url {
+        config.llm.base_url = base_url;
+    }
 
     log::info!("Starting Nova Gateway {config:?}...");
 

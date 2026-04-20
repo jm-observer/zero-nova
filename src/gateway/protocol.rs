@@ -287,7 +287,7 @@ pub struct ErrorPayload {
 #[serde(rename_all = "camelCase")]
 pub struct SessionCreateRequest {
     pub title: Option<String>,
-    pub agent_id: Option<String>,
+    pub agent_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

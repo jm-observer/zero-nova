@@ -15,6 +15,7 @@ pub struct Session {
     pub control: std::sync::RwLock<crate::gateway::control::ControlState>,
     pub id: String,
     pub name: String,
+    pub system_prompt: String,
     pub history: RwLock<Vec<Message>>,
     pub created_at: i64,       // unix timestamp in milliseconds
     pub updated_at: AtomicI64, // 支持按活跃度排序
@@ -55,6 +56,7 @@ impl Session {
             .iter()
             .map(|m| MessageDTO {
                 role: match m.role {
+                    Role::System => "system".to_string(),
                     Role::User => "user".to_string(),
                     Role::Assistant => "assistant".to_string(),
                 },
@@ -130,36 +132,37 @@ impl SessionStore {
         }
     }
 
-    /// 获取或创建会话
-    pub async fn get_or_create(&self, id: Option<String>) -> Arc<Session> {
-        if let Some(id_str) = id {
-            if let Some(session) = self.get(&id_str).await {
-                return session;
-            }
-            // 如果提供了 ID 但不存在，则按此 ID 创建
-            self.create_with_id(id_str, None, None).await
-        } else {
-            self.create(None, None).await
-        }
-    }
-
     /// 创建一个新会话
-    pub async fn create(&self, name: Option<String>, agent_id: Option<String>) -> Arc<Session> {
+    pub async fn create(&self, name: Option<String>, agent_id: String, system_prompt: String) -> Arc<Session> {
         let id = Uuid::new_v4().to_string();
-        self.create_with_id(id, name, agent_id).await
+        self.create_with_id(id, name, agent_id, system_prompt).await
     }
 
-    pub async fn create_with_id(&self, id: String, name: Option<String>, agent_id: Option<String>) -> Arc<Session> {
+    pub async fn create_with_id(
+        &self,
+        id: String,
+        name: Option<String>,
+        agent_id: String,
+        system_prompt: String,
+    ) -> Arc<Session> {
         let length = if id.len() > 8 { 8 } else { id.len() };
         let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..length]));
         let now = Utc::now().timestamp_millis();
-        let agent_id = agent_id.unwrap_or_else(|| "default".to_string());
+
+        let mut initial_history = Vec::new();
+        if !system_prompt.is_empty() {
+            initial_history.push(Message {
+                role: Role::System,
+                content: vec![ContentBlock::Text { text: system_prompt }],
+            });
+        }
 
         let session = Arc::new(Session {
             control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
             id: id.clone(),
             name: session_name,
-            history: RwLock::new(Vec::new()),
+            system_prompt,
+            history: RwLock::new(initial_history),
             created_at: now,
             updated_at: AtomicI64::new(now),
             chat_lock: Mutex::new(()),

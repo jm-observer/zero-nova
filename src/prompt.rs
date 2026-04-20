@@ -8,65 +8,6 @@ pub struct SystemPromptBuilder {
 }
 
 impl SystemPromptBuilder {
-    /// Creates a new `SystemPromptBuilder` by loading the default prompt from a specific base path.
-    /// If the file `prompts/default.md` does not exist at the given base path, it falls back to an empty builder.
-    pub fn new_from_path(base_path: &Path) -> Self {
-        let mut builder = Self { sections: Vec::new() };
-        let mut prompt_path = None;
-
-        // Search for default.md in .nova/prompts or prompts, starting from base_path and going up
-        for ancestor in base_path.ancestors() {
-            let p1 = ancestor.join(".nova").join("prompts").join("default.md");
-            if p1.exists() {
-                prompt_path = Some(p1);
-                break;
-            }
-            let p2 = ancestor.join("prompts").join("default.md");
-            if p2.exists() {
-                prompt_path = Some(p2);
-                break;
-            }
-        }
-
-        if let Some(path) = prompt_path {
-            match fs::read_to_string(&path) {
-                Ok(content) => {
-                    if !content.trim().is_empty() {
-                        builder.sections.push(content);
-                    }
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Could not load default prompt from {:?}: {}. Using empty prompt.",
-                        path,
-                        e
-                    );
-                }
-            }
-        } else {
-            log::warn!(
-                "Could not find default prompt in any search paths (tried .nova/prompts/default.md and prompts/default.md in {:?} and its ancestors). Using empty prompt.",
-                base_path
-            );
-        }
-        builder
-    }
-
-    /// Creates a new `SystemPromptBuilder` and loads the default prompt from the current directory.
-    pub fn new() -> Self {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        Self::new_from_path(&current_dir)
-    }
-
-    /// Creates a builder pre‑configured for a personal assistant role.
-    pub fn personal_assistant() -> Self {
-        Self::new()
-    }
-
-    /// Creates a builder pre‑configured for a personal assistant role from a specific base path.
-    pub fn personal_assistant_from_path(base_path: &Path) -> Self {
-        Self::new_from_path(base_path)
-    }
 
     /// Adds a role section to the prompt.
     pub fn role(mut self, role: impl Into<String>) -> Self {
@@ -123,6 +64,8 @@ impl SystemPromptBuilder {
 
 impl Default for SystemPromptBuilder {
     fn default() -> Self {
-        Self::new()
+        Self {
+            sections: vec![],
+        }
     }
 }

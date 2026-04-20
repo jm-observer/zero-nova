@@ -50,14 +50,30 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
+    let Some(agent_descriptor) = state.agent_registry.get(&payload.agent_id) else {
+        send_general_error(
+            &outbound_tx,
+            &request_id,
+            format!("Agent {} not found", payload.agent_id),
+            Some("AGENT_NOT_FOUND".to_string()),
+        );
+        return;
+    };
+
+    // 构建初始 System Prompt
+    let system_prompt = crate::prompt::SystemPromptBuilder::default()
+        .custom_instruction(agent_descriptor.system_prompt_template.clone())
+        .with_tools(state.agent.tools())
+        .build();
+
     let internal_session = state
         .sessions
-        .create(payload.title.clone(), payload.agent_id.clone())
+        .create(payload.title.clone(), payload.agent_id.clone(), system_prompt)
         .await;
     let session = Session {
         id: internal_session.id.clone(),
         title: Some(internal_session.name.clone()),
-        agent_id: payload.agent_id.unwrap_or_else(|| "default".to_string()),
+        agent_id: payload.agent_id,
         created_at: internal_session.created_at,
         updated_at: internal_session.created_at,
         message_count: 0,

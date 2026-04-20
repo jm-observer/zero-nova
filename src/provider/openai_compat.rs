@@ -33,22 +33,14 @@ impl LlmClient for OpenAiCompatClient {
     async fn stream(
         &self,
         messages: &[crate::message::Message],
-        system: &str,
         tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
         let mut input_messages = Vec::new();
 
-        // 3.6.4 System Prompt Adaptation
-        if !system.is_empty() {
-            input_messages.push(json!({
-                "role": "system",
-                "content": system
-            }));
-        }
-
         for msg in messages {
             let role = match msg.role {
+                crate::message::Role::System => "system",
                 crate::message::Role::User => "user",
                 crate::message::Role::Assistant => "assistant",
             };

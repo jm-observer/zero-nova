@@ -129,13 +129,27 @@ fn select_shell(config: &crate::config::BashConfig) -> Box<dyn ShellBackend> {
 /// Tool for executing shell commands.
 pub struct BashTool {
     shell: Box<dyn ShellBackend>,
+    /// Optional workspace directory to execute commands in.
+    workspace: Option<std::path::PathBuf>,
 }
 
 impl BashTool {
     pub fn new(config: &crate::config::BashConfig) -> Self {
         let shell = select_shell(config);
         info!("BashTool initialized using shell: {}", shell.name());
-        Self { shell }
+        Self {
+            shell,
+            workspace: None,
+        }
+    }
+
+    /// Creates a new `BashTool` with a specific workspace directory.
+    pub fn with_workspace(config: &crate::config::BashConfig, workspace: std::path::PathBuf) -> Self {
+        let shell = select_shell(config);
+        Self {
+            shell,
+            workspace: Some(workspace),
+        }
     }
 }
 
@@ -169,6 +183,9 @@ impl Tool for BashTool {
         let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(30000);
 
         let mut cmd = self.shell.build_command(command_str);
+        if let Some(ws) = &self.workspace {
+            cmd.current_dir(ws);
+        }
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 

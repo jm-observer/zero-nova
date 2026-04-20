@@ -11,7 +11,6 @@ impl SystemPromptBuilder {
         Self::default()
     }
 
-
     /// Adds a role section to the prompt.
     pub fn role(mut self, role: impl Into<String>) -> Self {
         self.sections.push(format!("Role: {}", role.into()));
@@ -64,5 +63,3 @@ impl SystemPromptBuilder {
         self.sections.join("\n")
     }
 }
-
-

@@ -5,8 +5,8 @@ use crate::provider::{LlmClient, ProviderStreamEvent};
 pub use crate::tool::ToolRegistry;
 use anyhow::Result;
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use std::time::Duration;
 use serde::Serialize;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
@@ -231,7 +231,18 @@ impl<C: LlmClient> AgentRuntime<C> {
                         })
                         .await;
 
-                    let result = timeout(tool_timeout_duration, tool_registry.execute(&name, input_val)).await;
+                    let result = timeout(
+                        tool_timeout_duration,
+                        tool_registry.execute(
+                            &name,
+                            input_val,
+                            Some(crate::tool::ToolContext {
+                                event_tx: tx.clone(),
+                                tool_use_id: id.clone(),
+                            }),
+                        ),
+                    )
+                    .await;
 
                     let (content, is_error) = match result {
                         Ok(Ok(out)) => (out.content, out.is_error),

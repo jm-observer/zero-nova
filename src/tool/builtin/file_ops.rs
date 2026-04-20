@@ -29,7 +29,7 @@ impl Tool for ReadFileTool {
     }
 
     /// Executes the file operation based on the provided input.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let path_str = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'path' field"))?;
@@ -99,7 +99,7 @@ impl Tool for WriteFileTool {
     }
 
     /// Executes the file operation based on the provided input.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let path_str = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'path' field"))?;

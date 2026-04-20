@@ -63,10 +63,8 @@ async fn main() -> Result<()> {
     let _ =
         custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
-    let workspace = custom_utils::args::workspace(&cli
-        .workspace, ".nova")?;
+    let workspace = custom_utils::args::workspace(&cli.workspace, ".nova")?;
     let config_path = workspace.join("config.toml");
-
 
     let config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
         .unwrap_or_else(|e| {
@@ -227,7 +225,7 @@ async fn run_oneshot(
     json: bool,
 ) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
-    
+
     // Only spawn printer if NOT in JSON mode
     let printer = if !json {
         Some(tokio::spawn(async move {
@@ -331,6 +329,13 @@ fn render_event(event: &AgentEvent, verbose: bool) {
             print!("{text}");
             let _ = std::io::stdout().flush();
         }
+        AgentEvent::LogDelta { log, stream, .. } => {
+            if stream == "stderr" {
+                print!("{}", log.bright_red());
+            } else {
+                print!("{}", log.bright_black());
+            }
+            let _ = std::io::stdout().flush();
+        }
     }
 }
-

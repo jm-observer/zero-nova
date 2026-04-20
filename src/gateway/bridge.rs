@@ -39,6 +39,15 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
             is_error: Some(is_error),
             ..Default::default()
         }),
+        AgentEvent::LogDelta { id, name, log, stream } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "tool_log".to_string(),
+            session_id: Some(session_id.to_string()),
+            tool_name: Some(name),
+            tool_use_id: Some(id),
+            log: Some(log),
+            stream: Some(stream),
+            ..Default::default()
+        }),
         AgentEvent::TurnComplete { .. } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "turn_complete".to_string(),
             session_id: Some(session_id.to_string()),

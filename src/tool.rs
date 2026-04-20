@@ -1,7 +1,16 @@
 use anyhow::Result;
 use serde_json::Value;
+use tokio::sync::mpsc;
 
 pub mod builtin;
+
+/// Context for tool execution, providing access to event channels and other runtime info.
+pub struct ToolContext {
+    /// Channel for sending intermediate events (e.g., logs).
+    pub event_tx: mpsc::Sender<crate::event::AgentEvent>,
+    /// The tool_use_id to associate LogDelta events with.
+    pub tool_use_id: String,
+}
 
 /// Definition of a tool, including name, description, and input schema.
 #[derive(Clone)]
@@ -21,7 +30,8 @@ pub struct ToolOutput {
 /// Trait representing a callable tool.
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
-    async fn execute(&self, input: Value) -> Result<ToolOutput>;
+    /// Executes the tool.
+    async fn execute(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput>;
 }
 
 /// Registry for storing and accessing tools.
@@ -56,11 +66,16 @@ impl ToolRegistry {
             })
             .collect()
     }
-    /// Executes a tool by name with the given input.
-    pub async fn execute(&self, name: &str, input: serde_json::Value) -> anyhow::Result<ToolOutput> {
+    /// Executes a tool by name with the given input and context.
+    pub async fn execute(
+        &self,
+        name: &str,
+        input: serde_json::Value,
+        context: Option<ToolContext>,
+    ) -> anyhow::Result<ToolOutput> {
         for tool in &self.tools {
             if tool.definition().name == name {
-                return tool.execute(input).await;
+                return tool.execute(input, context).await;
             }
         }
         Ok(ToolOutput {

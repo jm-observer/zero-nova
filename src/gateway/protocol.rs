@@ -247,7 +247,7 @@ pub struct ChatPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ProgressEvent {
     #[serde(rename = "type")]
-    pub kind: String, // 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete'
+    pub kind: String, // 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'tool_log'
     pub session_id: Option<String>,
     pub iteration: Option<i32>,
     pub tool_name: Option<String>,
@@ -258,6 +258,12 @@ pub struct ProgressEvent {
     pub thinking: Option<String>,
     pub token: Option<String>,
     pub output: Option<String>,
+    /// 日志内容（仅 kind=”tool_log” 时有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log: Option<String>,
+    /// 日志来源流: “stdout” | “stderr”（仅 kind=”tool_log” 时有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

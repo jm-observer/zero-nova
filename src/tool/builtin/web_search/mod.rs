@@ -125,7 +125,7 @@ impl Tool for WebSearchTool {
     }
 
     /// Executes the web search based on the input query.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'query' field"))?;

@@ -18,23 +18,16 @@ from scripts.utils import parse_skill_md
 
 
 def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
-    """Run `claude -p` with the prompt on stdin and return the text response.
-
-    Prompt goes over stdin (not argv) because it embeds the full SKILL.md
-    body and can easily exceed comfortable argv length.
+    """Run `nova_cli run --json` and return the assistant response.
     """
-    cmd = ["claude", "-p", "--output-format", "text"]
+    cmd = ["cargo", "run", "--bin", "nova_cli", "--", "run", prompt, "--json"]
     if model:
         cmd.extend(["--model", model])
 
-    # Remove CLAUDECODE env var to allow nesting claude -p inside a
-    # Claude Code session. The guard is for interactive terminal conflicts;
-    # programmatic subprocess usage is safe. Same pattern as run_eval.py.
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
     result = subprocess.run(
         cmd,
-        input=prompt,
         capture_output=True,
         text=True,
         env=env,
@@ -42,9 +35,22 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"claude -p exited {result.returncode}\nstderr: {result.stderr}"
+            f"nova_cli exited {result.returncode}\nstderr: {result.stderr}"
         )
-    return result.stdout
+    
+    try:
+        data = json.loads(result.stdout)
+        # Extract the last assistant message
+        for msg in reversed(data.get("messages", [])):
+            if msg.get("role") == "assistant":
+                text_parts = []
+                for block in msg.get("content", []):
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                return "".join(text_parts)
+        return ""
+    except (json.JSONDecodeError, KeyError):
+        return result.stdout
 
 
 def improve_description(

@@ -6,11 +6,12 @@ pub use crate::tool::ToolRegistry;
 use anyhow::Result;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use std::time::Duration;
+use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct TurnResult {
     pub messages: Vec<Message>,
     pub usage: crate::provider::types::Usage,

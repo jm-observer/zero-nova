@@ -27,7 +27,7 @@ struct Cli {
     base_url: Option<String>,
     /// Optional workspace directory for config and prompts
     #[arg(long, global = true)]
-    workspace: Option<std::path::PathBuf>,
+    workspace: Option<String>,
     /// Verbose output (show tool inputs/outputs)
     #[arg(long, global = true)]
     verbose: bool,
@@ -43,6 +43,9 @@ enum Command {
     Run {
         /// Prompt to execute
         prompt: String,
+        /// Output result as JSON (for scripting)
+        #[arg(long)]
+        json: bool,
     },
     /// List registered tools
     Tools,
@@ -60,11 +63,10 @@ async fn main() -> Result<()> {
     let _ =
         custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
-    let config_path = cli
-        .workspace
-        .as_ref()
-        .map(|w| w.join("config.toml"))
-        .unwrap_or_else(|| std::path::PathBuf::from("config.toml"));
+    let workspace = custom_utils::args::workspace(&cli
+        .workspace, ".nova")?;
+    let config_path = workspace.join("config.toml");
+
 
     let config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
         .unwrap_or_else(|e| {
@@ -89,11 +91,20 @@ async fn main() -> Result<()> {
         tool_timeout: std::time::Duration::from_secs(120),
     };
 
+    // Load Skills from .nova/skills
+    let skill_dir = workspace.join(".nova").join("skills");
+    let mut skill_registry = zero_nova::skill::SkillRegistry::new();
+    if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
+        log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+    }
+    let skill_prompt = skill_registry.generate_system_prompt();
+    let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
+
     let mut agent = AgentRuntime::new(client, tools, agent_config);
 
     match cli.command {
-        Command::Chat => run_repl(&mut agent, &system_prompt_str, cli.verbose).await?,
-        Command::Run { prompt } => run_oneshot(&agent, &system_prompt_str, &prompt, cli.verbose).await?,
+        Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose).await?,
+        Command::Run { prompt, json } => run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, json).await?,
         Command::Tools => {
             print_tools(&agent);
         }
@@ -213,13 +224,20 @@ async fn run_oneshot(
     system_prompt: &str,
     user_input: &str,
     verbose: bool,
+    json: bool,
 ) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
-    let printer = tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            render_event(&event, verbose);
-        }
-    });
+    
+    // Only spawn printer if NOT in JSON mode
+    let printer = if !json {
+        Some(tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                render_event(&event, verbose);
+            }
+        }))
+    } else {
+        None
+    };
 
     let mut history = Vec::new();
     if !system_prompt.is_empty() {
@@ -231,9 +249,16 @@ async fn run_oneshot(
         });
     }
 
-    let _ = agent.run_turn(&history, user_input, tx.clone(), None).await?;
+    let result = agent.run_turn(&history, user_input, tx.clone(), None).await?;
     drop(tx);
-    printer.await.ok();
+    if let Some(p) = printer {
+        p.await.ok();
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
+
     Ok(())
 }
 

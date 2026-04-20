@@ -26,17 +26,13 @@ use std::sync::Arc;
 pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     config: crate::config::AppConfig,
     client: C,
-    workspace: Option<std::path::PathBuf>,
+    workspace: std::path::PathBuf,
 ) -> anyhow::Result<()> {
     let session_store = SessionStore::new();
     let mut tools = ToolRegistry::new();
     crate::tool::builtin::register_builtin_tools(&mut tools, &config);
 
-    let prompt_builder = if let Some(ref path) = workspace {
-        SystemPromptBuilder::new_from_path(path)
-    } else {
-        SystemPromptBuilder::new()
-    };
+    let prompt_builder = SystemPromptBuilder::new_from_path(&workspace);
     let prompt = prompt_builder.with_tools(&tools).build();
 
     let agent_config = AgentConfig {
@@ -57,6 +53,16 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
             system_prompt_template: a
                 .system_prompt_template
                 .clone()
+                .or_else(|| {
+                    let prompt_path = workspace.join("prompts").join(format!("agent-{}.md", a.id));
+                    match std::fs::read_to_string(&prompt_path) {
+                        Ok(content) => Some(content),
+                        Err(e) => {
+                            log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
+                            None
+                        }
+                    }
+                })
                 .unwrap_or_else(|| "You are an AI assistant.".to_string()),
             tool_whitelist: a.tool_whitelist.clone(),
             model_config: a.model_config.clone(),
@@ -83,10 +89,7 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     let agent = AgentRuntime::new(client, tools, prompt, agent_config);
 
     let config_arc = Arc::new(std::sync::RwLock::new(config.clone()));
-    let workspace_path = workspace
-        .clone()
-        .unwrap_or_else(crate::config::AppConfig::get_default_workspace);
-    let config_path = workspace_path.join("config.toml");
+    let config_path = workspace.join("config.toml");
 
     let state = Arc::new(AppState {
         agent,

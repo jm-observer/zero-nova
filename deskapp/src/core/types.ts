@@ -167,6 +167,23 @@ export interface EvolutionConfirmRequest {
     validationStatus: 'PASS' | 'WARN' | 'BLOCK';
 }
 
+export interface DebugLogEntry {
+    timestamp: string;
+    level: 'info' | 'warn' | 'error' | 'debug';
+    module: string;
+    message: string;
+    meta?: Record<string, unknown>;
+}
+
+export interface SchedulerEventView {
+    type: string;
+    taskId: string;
+    taskName?: string;
+    runId?: string;
+    error?: string;
+    timestamp: number;
+}
+
 export interface SessionArtifactView {
     id: string;
     type: 'file' | 'code' | 'output';
@@ -176,4 +193,126 @@ export interface SessionArtifactView {
     language?: string;
     size?: number;
     timestamp: number;
+}
+
+export interface McpServerView {
+    name: string;
+    location?: 'server' | 'client';
+    transport: 'stdio' | 'sse';
+    command?: string;
+    args?: string[];
+    url?: string;
+    env?: Record<string, string>;
+    enabled?: boolean;
+    toolCount?: number;
+    status?: 'connected' | 'disconnected' | 'error';
+}
+
+export interface ServerConfigView {
+    providers: Record<string, { apiKey?: string; baseUrl?: string }>;
+    llm: {
+        orchestration: { provider: string; model: string };
+        execution: { provider: string; model: string };
+        embedding?: { provider: string; model: string };
+        fallback?: { provider: string; model: string };
+    };
+    web?: {
+        search?: { provider?: string; apiKey?: string; maxResults?: number };
+        fetch?: { readability?: boolean; maxChars?: number };
+    };
+    mcp?: {
+        servers?: McpServerView[];
+    };
+    gatewayMode: 'embedded' | 'remote';
+    gatewayPort: number;
+    agents?: {
+        globalAgentName?: string;
+        globalSystemPrompt?: string;
+        skills?: Array<{ id: string; title: string; content: string; enabled: boolean }>;
+        list?: Array<{ id: string; name: string; description?: string; model?: { provider: string; model: string } }>;
+    };
+    sandbox?: {
+        mode?: string;
+        docker?: {
+            image?: string;
+            memoryLimit?: string;
+            cpuLimit?: string;
+            networkMode?: string;
+        };
+        blockedExtensions?: string[];
+    };
+    presetModels?: Record<string, { value: string; label: string; multimodal?: boolean }[]>;
+}
+
+export interface ServerConfigUpdate {
+    providers?: Record<string, { apiKey?: string; baseUrl?: string }>;
+    orchestration?: { provider?: string; model?: string };
+    execution?: { provider?: string; model?: string };
+    embedding?: { provider?: string; model?: string };
+    web?: {
+        search?: { provider?: string; apiKey?: string; maxResults?: number };
+        fetch?: { readability?: boolean; maxChars?: number };
+    };
+    mcp?: {
+        servers?: Array<{
+            name: string;
+            location?: 'server' | 'client';
+            transport: 'stdio' | 'sse';
+            command?: string;
+            args?: string[];
+            url?: string;
+            env?: Record<string, string>;
+            enabled?: boolean;
+        }>;
+    };
+    agents?: {
+        globalAgentName?: string;
+        globalSystemPrompt?: string;
+        skills?: Array<{ id: string; title: string; content: string; enabled: boolean }>;
+        list?: Array<{ id: string; model?: { provider: string; model: string } | null }>;
+    };
+    sandbox?: {
+        mode?: string;
+        docker?: {
+            image?: string;
+            memoryLimit?: string;
+            cpuLimit?: string;
+            networkMode?: string;
+        };
+        blockedExtensions?: string[];
+    };
+}
+
+export interface ScheduledTaskView {
+    id: string;
+    name: string;
+    trigger: {
+        type: 'cron' | 'interval' | 'once';
+        expression?: string;
+        intervalMs?: number;
+        runAt?: string | number;
+    };
+    target: {
+        type: 'agent' | 'workflow';
+        prompt?: string;
+        workflowId?: string;
+    };
+    status: 'active' | 'paused' | 'completed' | 'error';
+    createdAt: number;
+    lastRunAt?: number;
+    nextRunAt?: number;
+    runCount: number;
+    failCount: number;
+}
+
+export interface TaskRunView {
+    id: string;
+    taskId: string;
+    taskName: string;
+    status: 'running' | 'completed' | 'failed';
+    startedAt: number;
+    completedAt?: number;
+    duration?: number;
+    output?: string;
+    error?: string;
 }

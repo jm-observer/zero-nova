@@ -38,6 +38,16 @@ export class ChatView {
         this.bus.on('token', (token: string) => {
              this.appendToken(token);
         });
+
+        this.bus.on('chat:complete', () => {
+             console.log('[ChatView] Chat complete, resetting streaming state');
+             this.streamingMessageEl = null;
+             this.streamingContent = '';
+        });
+
+        this.bus.on(Events.CHAT_INTENT, (payload: any) => {
+            this.handleIntent(payload);
+        });
     }
 
     private bindEvents() {
@@ -53,15 +63,25 @@ export class ChatView {
     private sendMessage() {
         const text = this.messageInput.value.trim();
         if (!text) return;
+        
+        // 发送新消息前，确保重置流式状态，避免内容追加到旧的气泡中
+        this.streamingMessageEl = null;
+        this.streamingContent = '';
+        
         this.bus.emit('message:send', { text });
         this.messageInput.value = '';
     }
 
     clear() {
         this.messagesContainer.innerHTML = '';
+        this.streamingMessageEl = null;
+        this.streamingContent = '';
     }
 
     renderMessages(messages: any[]) {
+        this.streamingMessageEl = null;
+        this.streamingContent = '';
+        
         if (messages.length === 0) {
             this.showWelcome();
             return;
@@ -152,6 +172,50 @@ export class ChatView {
         div.className = 'message assistant streaming';
         div.innerHTML = '<div class="message-bubble"><div class="markdown-body"></div></div>';
         return div;
+    }
+
+    private handleIntent(payload: any) {
+        console.log('[ChatView] Handling intent:', payload);
+        let text = '';
+        switch(payload.intent) {
+            case 'chat': text = t('chat.intent_chat'); break;
+            case 'resolve': text = t('chat.intent_resolve'); break;
+            case 'continue_workflow': text = t('chat.intent_continue_workflow'); break;
+            case 'address_agent': 
+                const agent = this.state.agentsList.find(a => a.id === payload.agentId);
+                const name = agent ? agent.name : (payload.agentId || 'Unknown');
+                text = t('chat.intent_address_agent').replace('{0}', name);
+                break;
+        }
+        
+        if (text) {
+            this.showStatusTip(text);
+        }
+    }
+
+    private showStatusTip(text: string) {
+        // 如果已经有 streaming message，说明已经开始生成了，就不再显示引导性的意图了
+        if (this.streamingMessageEl) return;
+
+        const html = `
+            <div class="message assistant intent-tip">
+                <div class="message-bubble">
+                    <div class="intent-text">${escapeHtml(text)}</div>
+                </div>
+            </div>
+        `;
+        this.messagesContainer.insertAdjacentHTML('beforeend', html);
+        this.scrollToBottom();
+
+        // 5秒后自动淡出（如果还没被开始生成的 token 覆盖/跟随）
+        const tips = this.messagesContainer.querySelectorAll('.intent-tip');
+        const lastTip = tips[tips.length - 1] as HTMLElement;
+        setTimeout(() => {
+            if (lastTip && lastTip.parentElement) {
+                lastTip.classList.add('fade-out');
+                setTimeout(() => lastTip.remove(), 500);
+            }
+        }, 5000);
     }
 
     private scrollToBottom() {

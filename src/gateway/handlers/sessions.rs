@@ -50,7 +50,10 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let internal_session = state.sessions.create(payload.title.clone(), payload.agent_id.clone()).await;
+    let internal_session = state
+        .sessions
+        .create(payload.title.clone(), payload.agent_id.clone())
+        .await;
     let session = Session {
         id: internal_session.id.clone(),
         title: Some(internal_session.name.clone()),

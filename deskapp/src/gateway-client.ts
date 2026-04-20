@@ -36,6 +36,7 @@ export type {
     OpenFluxChatMessage
 };
 
+
 /**
  * WebSocket 客户端封装
  * 用于渲染进程连接 Gateway Server
@@ -262,6 +263,7 @@ export class GatewayClient {
             if (message.type === 'chat.intent') {
                 const payload = message.payload as ChatIntentPayload;
                 this.chatIntentHandlers.forEach(handler => handler(payload));
+                return;
             }
 
             // 处理聊天完成事件

@@ -14,7 +14,7 @@ export class ChatService {
         
         this.client.onChatIntent((payload) => {
             console.log('[ChatService] Received intent:', payload.intent);
-            this.bus.emit('chat:intent', payload);
+            this.bus.emit(Events.CHAT_INTENT, payload);
         });
 
         // Listen for outgoing messages

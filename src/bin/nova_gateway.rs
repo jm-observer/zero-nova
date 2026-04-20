@@ -32,7 +32,7 @@ struct Args {
     parent_pid: Option<u32>,
     /// Optional workspace directory for config and prompts
     #[arg(long)]
-    workspace: Option<std::path::PathBuf>,
+    workspace: Option<String>,
 }
 
 #[tokio::main]
@@ -42,10 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _args = Args::parse();
 
-    let workspace = _args
-        .workspace
-        .clone()
-        .unwrap_or_else(zero_nova::config::AppConfig::get_default_workspace);
+    let workspace = custom_utils::args::workspace(&_args.workspace, ".nova")?;
 
     log::info!("Working directory: {:?}", std::env::current_dir().unwrap_or_default());
     log::info!("Workspace directory: {:?}", workspace);
@@ -70,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {
         // Task 1: Run the server
-        res = start_server(config, client, Some(workspace)) => {
+        res = start_server(config, client, workspace) => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

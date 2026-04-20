@@ -118,24 +118,4 @@ impl AppConfig {
         let config: AppConfig = toml::from_str(&content)?;
         Ok(config)
     }
-
-    /// 获取默认的工作空间路径
-    /// 开发环境：项目根目录
-    /// 生产环境：用户目录下的 .nova 目录
-    pub fn get_default_workspace() -> std::path::PathBuf {
-        use std::path::PathBuf;
-
-        // 1. 开发环境：如果有 CARGO_MANIFEST_DIR，说明在 Cargo 环境下运行
-        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
-            return PathBuf::from(manifest_dir);
-        }
-
-        // 2. 生产环境：~/.nova
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."));
-
-        home.join(".nova")
-    }
 }

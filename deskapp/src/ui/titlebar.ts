@@ -42,22 +42,27 @@ export class TitleBarView {
         });
     }
 
-    private handleGatewayStatusChange(status: string) {
+    private handleGatewayStatusChange(payload: any) {
+        const { status, text } = typeof payload === 'string' ? { status: payload, text: null } : payload;
+        
         switch (status) {
             case 'connected':
-                this.setStatus(t('status.connected'), 'ready');
+                this.setStatus(text || t('status.connected'), 'ready');
+                break;
+            case 'running':
+                this.setStatus(text || t('status.running'), 'running');
                 break;
             case 'connecting':
-                this.setStatus(t('status.connecting'), 'running');
+                this.setStatus(text || t('status.connecting'), 'running');
                 break;
             case 'reconnecting':
-                this.setStatus(t('status.reconnecting'), 'running');
+                this.setStatus(text || t('status.reconnecting'), 'running');
                 break;
             case 'disconnected':
-                this.setStatus(t('status.disconnected'), 'error');
+                this.setStatus(text || t('status.disconnected'), 'error');
                 break;
             case 'failed':
-                this.setStatus(t('status.error'), 'error');
+                this.setStatus(text || t('status.error'), 'error');
                 break;
         }
     }

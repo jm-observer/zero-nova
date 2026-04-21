@@ -15,6 +15,12 @@ import time
 import webbrowser
 from pathlib import Path
 
+# Ensure the skill-creator root (parent of scripts/) is on sys.path so that
+# `from scripts.xxx import ...` works regardless of cwd or invocation method.
+_SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
+if _SKILL_CREATOR_ROOT not in sys.path:
+    sys.path.insert(0, _SKILL_CREATOR_ROOT)
+
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.package_skill import package_skill
@@ -59,6 +65,7 @@ def run_loop(
     verbose: bool,
     live_report_path: Path | None = None,
     log_dir: Path | None = None,
+    results_dir: Path | None = None,
 ) -> dict:
     """Run the eval + improvement loop."""
     project_root = find_project_root()
@@ -98,6 +105,7 @@ def run_loop(
             trigger_threshold=trigger_threshold,
             model=model,
             iteration=iteration,
+            output_root=results_dir,
         )
         eval_elapsed = time.time() - t0
 
@@ -270,32 +278,30 @@ def main():
 
     name, _, _ = parse_skill_md(skill_path)
 
-    # Set up live report path
+    # --- Unified output directory ---
+    # Everything (eval results, logs, reports) lives under one tree:
+    #   <temp>/nova_skill_creator/<skill_name>/<timestamp>/
+    # User can override via --results-dir.
+    timestamp = time.strftime("%Y-%m-%d_%H%M%S")
+    if args.results_dir:
+        results_dir = Path(args.results_dir) / timestamp
+    else:
+        results_dir = Path(tempfile.gettempdir()) / "nova_skill_creator" / name / timestamp
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    log_dir = results_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set up live report path (inside the unified directory)
     if args.report != "none":
         if args.report == "auto":
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            live_report_path = Path(tempfile.gettempdir()) / f"skill_description_report_{skill_path.name}_{timestamp}.html"
+            live_report_path = results_dir / "report_live.html"
         else:
             live_report_path = Path(args.report)
-        # Open the report immediately so the user can watch
         live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>")
         webbrowser.open(str(live_report_path))
     else:
         live_report_path = None
-
-    # Determine output directory (create before run_loop so logs can be written)
-    if args.results_dir:
-        timestamp = time.strftime("%Y-%m-%d_%H%M%S")
-        results_dir = Path(args.results_dir) / timestamp
-        results_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        # Default to system tmp as requested
-        timestamp = time.strftime("%Y-%m-%d_%H%M%S")
-        results_dir = Path(tempfile.gettempdir()) / "nova_skill_creator_results" / name / timestamp
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-    log_dir = results_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
 
     output = run_loop(
         eval_set=eval_set,
@@ -311,6 +317,7 @@ def main():
         verbose=args.verbose,
         live_report_path=live_report_path,
         log_dir=log_dir,
+        results_dir=results_dir,
     )
 
     # Save JSON output
@@ -334,8 +341,9 @@ def main():
     should_deploy = False
     project_root = find_project_root()
     
-    # Check if we should deploy
-    is_finished = output["summary"]["failed"] == 0 or len(output["history"]) >= args.max_iterations
+    # Check if we should deploy — use the last iteration's train results
+    last = output["history"][-1] if output["history"] else None
+    is_finished = (last is not None and last["train_failed"] == 0) or len(output["history"]) >= args.max_iterations
     
     if args.deploy_dir:
         should_deploy = True
@@ -358,10 +366,37 @@ def main():
     if should_deploy:
         print(f"Deploying skill to {deploy_dir}...", file=sys.stderr)
         deploy_dir.mkdir(parents=True, exist_ok=True)
-        # We need to update the actual file before packaging, or pass the best description to packager
-        (skill_path / "SKILL.md").write_text(content) # Restore content but maybe we should update description
-        # Note: In a real scenario, we'd update the frontmatter of SKILL.md with output["best_description"]
-        # but for now we follow the instruction to call package_skill.
+        # Update the SKILL.md frontmatter with the best description before packaging
+        best_desc = output["best_description"]
+        skill_md_path = skill_path / "SKILL.md"
+        original_content = skill_md_path.read_text()
+        lines = original_content.split("\n")
+        # Find and replace the description in frontmatter
+        in_frontmatter = False
+        new_lines = []
+        skip_continuation = False
+        for line in lines:
+            if line.strip() == "---" and not in_frontmatter:
+                in_frontmatter = True
+                new_lines.append(line)
+                continue
+            if line.strip() == "---" and in_frontmatter:
+                in_frontmatter = False
+                new_lines.append(line)
+                skip_continuation = False
+                continue
+            if skip_continuation and (line.startswith("  ") or line.startswith("\t")):
+                continue  # drop old multiline continuation
+            skip_continuation = False
+            if in_frontmatter and line.startswith("description:"):
+                new_lines.append(f"description: {best_desc}")
+                # Check if the old value was a multiline indicator
+                value = line[len("description:"):].strip()
+                if value in (">", "|", ">-", "|-"):
+                    skip_continuation = True
+                continue
+            new_lines.append(line)
+        skill_md_path.write_text("\n".join(new_lines))
         package_skill(skill_path, deploy_dir)
         print(f"Skill packaged and deployed to {deploy_dir}", file=sys.stderr)
 

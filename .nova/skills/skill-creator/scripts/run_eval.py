@@ -18,6 +18,12 @@ import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+# Ensure the skill-creator root (parent of scripts/) is on sys.path so that
+# `from scripts.xxx import ...` works regardless of cwd or invocation method.
+_SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
+if _SKILL_CREATOR_ROOT not in sys.path:
+    sys.path.insert(0, _SKILL_CREATOR_ROOT)
+
 from scripts.utils import parse_skill_md
 
 
@@ -138,12 +144,17 @@ def run_eval(
     trigger_threshold: float = 0.5,
     model: str | None = None,
     iteration: int | None = None,
+    output_root: Path | None = None,
 ) -> dict:
     """Run the full eval set and return results."""
     results = []
 
-    # Path standardization: All tests under system temp directory
-    output_root = Path(tempfile.gettempdir()) / "nova_skill_creator" / skill_name
+    # Path standardization: All tests under a unified temp directory tree.
+    # Callers (e.g. run_loop) can pass output_root to keep everything
+    # under one skill-level directory; standalone usage falls back to
+    # the system temp directory.
+    if output_root is None:
+        output_root = Path(tempfile.gettempdir()) / "nova_skill_creator" / skill_name
     if iteration is not None:
         output_root = output_root / f"iteration-{iteration}"
 

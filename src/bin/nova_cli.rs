@@ -337,5 +337,15 @@ fn render_event(event: &AgentEvent, verbose: bool) {
             }
             let _ = std::io::stdout().flush();
         }
+        AgentEvent::Iteration { current, total } => {
+            if verbose {
+                println!("\n{}", format!("[iteration {}/{}]", current, total).bright_black());
+            }
+        }
+        AgentEvent::SystemLog(log) => {
+            if verbose {
+                println!("\n{}", format!("[system: {}]", log).bright_black());
+            }
+        }
     }
 }

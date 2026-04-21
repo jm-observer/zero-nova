@@ -9,7 +9,7 @@ A skill for creating new skills and iteratively improving them.
 
 At a high level, the process of creating a skill goes like this:
 
-- Decide what you want the skill to do and roughly how it should do it. **Before implementation, you MUST create a design document in the `docx/` directory following the project convention: `docx/<YYYY-MM-DD>-<topic>.md`.**
+- Decide what you want the skill to do and roughly how it should do it. **Before implementation, you MUST create a design document in the `docs/` directory following the project convention: `docs/<YYYY-MM-DD>-<topic>.md`.**
 - Write a draft of the skill
 - Create a few test prompts and run claude-with-access-to-the-skill on them
 - Help the user evaluate the results both qualitatively and quantitatively
@@ -59,8 +59,8 @@ Start by understanding the user's intent. The current conversation might already
 **Before writing any code or actual skill files, you must formalize the design.**
 
 1. Propose a design plan to the user.
-2. Once the plan is agreed upon, **create a design document in the `docx/` directory.**
-3. Follow the naming convention: `docx/<YYYY-MM-DD>-<topic>.md`.
+2. Once the plan is agreed upon, **create a design document in the `docs/` directory.**
+3. Follow the naming convention: `docs/<YYYY-MM-DD>-<topic>.md`.
 4. The document should include: Time, Project Status, Goal, Detailed Design (modules, interfaces, data flow), Test Cases, and Risks.
 5. **Wait for user confirmation of the design document before proceeding to implementation.**
 
@@ -101,7 +101,23 @@ Skills use a three-level loading system:
 2. **SKILL.md body** - In context whenever skill triggers (<500 lines ideal)
 3. **Bundled resources** - As needed (unlimited, scripts can execute without loading)
 
-**Note: Throughout the development and testing phase, the skill folder (containing SKILL.md, scripts, etc.) MUST be created and maintained within the system's temporary directory (e.g., `AppData/Local/Temp/nova_skill_creator/<skill-name>/`). Do not create or edit skill files in the project root or workspace `skills/` directory until the final deployment step.**
+**Note: Throughout the development and testing phase, the skill folder (containing SKILL.md, scripts, etc.) MUST be created and maintained within the OS-level temporary directory — NOT a `tmp/` folder inside the project.**
+
+To get the correct temp path, run this one-liner first:
+```bash
+python -c "import tempfile; print(tempfile.gettempdir())"
+```
+Then use the returned path as the base. Example paths:
+- **Linux/macOS**: `/tmp/nova_skill_creator/<skill-name>/`
+- **Windows**: `C:\Users\<user>\AppData\Local\Temp\nova_skill_creator\<skill-name>/`
+
+**IMPORTANT — before writing any file to the temp directory, you MUST create the parent directories first.** Use `write_to_file` only after the directory exists. To create directories cross-platform, use Python instead of shell commands:
+```bash
+python -c "from pathlib import Path; Path(r'<full-path-to-parent-dir>').mkdir(parents=True, exist_ok=True)"
+```
+Do NOT use `mkdir -p` or `cat <<EOF` heredocs — they fail on Windows/PowerShell.
+
+**Do NOT create a `tmp/` directory in the project root. Do not create or edit skill files in the project root or workspace `skills/` directory until the final deployment step.**
 
 These word counts are approximate and you can feel free to go longer if needed.
 
@@ -177,7 +193,14 @@ See `references/schemas.md` for the full schema (including the `assertions` fiel
 
 This section is one continuous sequence — don't stop partway through. Do NOT use `/skill-test` or any other testing skill.
 
-**All development source files, test results, and temporary workspaces MUST be stored in the system's temporary directory (e.g., `tmp/` or `AppData/Local/Temp/nova_skill_creator/`) to keep the project root clean.** Final deployment should be located in the `skills/` directory of the current workspace.
+**All development source files, test results, and temporary workspaces MUST be stored in the OS-level temporary directory (the path returned by Python's `tempfile.gettempdir()`, NOT a `tmp/` folder inside the project) to keep the project root clean.** The unified workspace root is:
+
+```
+<tempdir>/nova_skill_creator/<skill-name>/<timestamp>/
+```
+(where `<tempdir>` = `tempfile.gettempdir()`, e.g. `/tmp` on Linux, `C:\Users\<user>\AppData\Local\Temp` on Windows)
+
+Where `<tempdir>` is the OS temp directory (e.g., `/tmp` on Linux/macOS, `AppData/Local/Temp` on Windows). All iteration outputs, logs, and reports go under this single tree. Final deployment goes to the `skills/` directory of the current workspace.
 
 ### Step 1: Spawn all runs (with-skill AND baseline) in the same turn
 
@@ -190,13 +213,13 @@ Execute this task:
 - Skill path: <path-to-skill>
 - Task: <eval prompt>
 - Input files: <eval files if any, or "none">
-- Save outputs to: <workspace>/iteration-<N>/eval-<ID>/with_skill/outputs/
+- Save outputs to: <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-<N>/eval-<ID>/with_skill/outputs/
 - Outputs to save: <what the user cares about — e.g., "the .docx file", "the final CSV">
 ```
 
 **Baseline run** (same prompt, but the baseline depends on context):
 - **Creating a new skill**: no skill at all. Same prompt, no skill path, save to `without_skill/outputs/`.
-- **Improving an existing skill**: the old version. Before editing, snapshot the skill (`cp -r <skill-path> <workspace>/skill-snapshot/`), then point the baseline subagent at the snapshot. Save to `old_skill/outputs/`.
+- **Improving an existing skill**: the old version. Before editing, snapshot the skill (`cp -r <skill-path> <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/skill-snapshot/`), then point the baseline subagent at the snapshot. Save to `old_skill/outputs/`.
 
 Write an `eval_metadata.json` for each test case (assertions can be empty for now). Give each eval a descriptive name based on what it's testing — not just "eval-0". Use this name for the directory too. If this iteration uses new or modified eval prompts, create these files for each new eval directory — don't assume they carry over from previous iterations.
 
@@ -238,7 +261,7 @@ Once all runs are done:
 1. **Grade each run** — spawn a grader subagent (or grade inline) that reads `agents/grader.md` and evaluates each assertion against the outputs. Save results to `grading.json` in each run directory. The grading.json expectations array must use the fields `text`, `passed`, and `evidence` (not `name`/`met`/`details` or other variants) — the viewer depends on these exact field names. For assertions that can be checked programmatically, write and run a script rather than eyeballing it — scripts are faster, more reliable, and can be reused across iterations.
 2. **Aggregate into benchmark** — run the aggregation script from the skill-creator directory:
    ```bash
-   python -m scripts.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
+   python -m scripts.aggregate_benchmark <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N --skill-name <name>
    ```
    This produces `benchmark.json` and `benchmark.md` with pass_rate, time, and tokens for each configuration, with mean ± stddev and the delta. If generating benchmark.json manually, see `references/schemas.md` for the exact schema the viewer expects.
    Put each with_skill version before its baseline counterpart.
@@ -246,13 +269,13 @@ Once all runs are done:
 4. **Launch the viewer** with both qualitative outputs and quantitative data:
    ```bash
    nohup python <skill-creator-path>/eval-viewer/generate_review.py \
-     <workspace>/iteration-N \
+     <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N \
      --skill-name "my-skill" \
-     --benchmark <workspace>/iteration-N/benchmark.json \
+     --benchmark <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N/benchmark.json \
      > /dev/null 2>&1 &
    VIEWER_PID=$!
    ```
-   For iteration 2+, also pass `--previous-workspace <workspace>/iteration-<N-1>`.
+   For iteration 2+, also pass `--previous-workspace <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-<N-1>`.
 
    **Cowork / headless environments:** If `webbrowser.open()` is not available (e.g., Claude.ai's VM has no display, or you're on a remote server), use `--static <output_path>` to write a standalone HTML file instead of starting a server. Feedback will be downloaded as a `feedback.json` file when the user clicks "Submit All Reviews". After download, copy `feedback.json` into the workspace directory for the next iteration to pick it up.
 

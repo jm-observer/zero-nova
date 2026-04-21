@@ -90,6 +90,12 @@ export class ChatView {
                 this.handleSystemLog(event);
             }
         });
+
+        this.bus.on('chat:iteration', (event: any) => {
+            if (event.sessionId === this.state.currentSessionId) {
+                this.handleIteration(event);
+            }
+        });
     }
 
     private bindEvents() {
@@ -487,6 +493,9 @@ export class ChatView {
 
     private handleSystemLog(event: any) {
         const { log } = event;
+        // 过滤常见的 Agent 迭代反馈，避免干扰用户视线
+        if (log.includes('Agent iteration')) return;
+
         const isError = log.toLowerCase().includes('failed') || log.toLowerCase().includes('error');
         const roleClass = isError ? 'system log error' : 'system log';
 
@@ -500,6 +509,19 @@ export class ChatView {
         
         this.messagesContainer.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();
+    }
+
+    /**
+     * 处理 AI 迭代进度，更新状态栏
+     */
+    private handleIteration(event: any) {
+        const { iteration } = event;
+        // 构建友好的状态文本
+        const statusText = `Agent Running (${iteration}/30)`;
+        // 发布全局状态更新，TitleBar 会捕获并更新顶部的红绿灯/文字
+        this.bus.emit(Events.GATEWAY_STATUS, { status: 'running', text: statusText });
+        
+        // 可选：如果 5s 内没有任何新进度，Titlebar 会保持这个状态直到任务完成（chat:complete 回调会重置状态）
     }
 
     private scrollToBottom() {

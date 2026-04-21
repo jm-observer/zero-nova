@@ -120,6 +120,8 @@ export class ChatService {
                 sessionId: event.sessionId,
                 iteration: event.iteration
             });
+        } else if (event.type === 'iteration') {
+            this.bus.emit('chat:iteration', event);
         } else if (event.type === 'system_log') {
             this.bus.emit('system:log', event);
         }

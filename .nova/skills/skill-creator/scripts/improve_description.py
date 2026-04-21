@@ -14,6 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Ensure the skill-creator root (parent of scripts/) is on sys.path so that
+# `from scripts.xxx import ...` works regardless of cwd or invocation method.
+_SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
+if _SKILL_CREATOR_ROOT not in sys.path:
+    sys.path.insert(0, _SKILL_CREATOR_ROOT)
+
 from scripts.utils import parse_skill_md
 
 

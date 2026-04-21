@@ -86,7 +86,12 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             let log_msg = format!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
             log::info!("{}", log_msg);
-            let _ = event_tx.send(crate::event::AgentEvent::SystemLog(log_msg)).await;
+            let _ = event_tx
+                .send(crate::event::AgentEvent::Iteration {
+                    current: iteration + 1,
+                    total: self.config.max_iterations,
+                })
+                .await;
 
             let tool_defs = self.tools.tool_definitions();
 

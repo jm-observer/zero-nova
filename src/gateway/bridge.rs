@@ -69,6 +69,12 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
             log: Some(log),
             ..Default::default()
         }),
+        AgentEvent::Iteration { current, total: _ } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "iteration".to_string(),
+            session_id: Some(session_id.to_string()),
+            iteration: Some(current as i32),
+            ..Default::default()
+        }),
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

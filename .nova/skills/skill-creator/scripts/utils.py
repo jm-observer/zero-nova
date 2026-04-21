@@ -123,7 +123,7 @@ def cleanup_residual_processes() -> None:
 
 
 def extract_assistant_text(data: dict) -> str:
-    """Extract assistant text from supported nova/Claude JSON shapes."""
+    """Extract assistant text from supported nova JSON shapes."""
     if isinstance(data.get("text"), str):
         return data["text"]
 

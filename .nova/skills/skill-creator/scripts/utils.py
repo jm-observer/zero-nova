@@ -168,15 +168,3 @@ def has_tool_call(data: dict) -> bool:
     return False
 
 
-def request_includes_skill(request_path: Path, skill_name: str) -> bool:
-    """Check whether a captured nova request contains injected skill instructions."""
-    if not request_path.exists():
-        return False
-
-    content = request_path.read_text(encoding="utf-8", errors="replace")
-    markers = [
-        f"## Skill: {skill_name}",
-        f"### Instructions for {skill_name}",
-        f"Path: ",
-    ]
-    return markers[0] in content or markers[1] in content

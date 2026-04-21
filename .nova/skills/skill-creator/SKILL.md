@@ -195,7 +195,7 @@ See `references/schemas.md` for the full schema (including the `assertions` fiel
 
 ## Running and evaluating test cases
 
-This section is one continuous sequence — don't stop partway through. Do NOT use `/skill-test` or any other testing skill.
+This section is one continuous sequence — don't stop partway through.
 
 **All development source files, test results, and temporary workspaces MUST be stored in the OS-level temporary directory (the path returned by Python's `tempfile.gettempdir()`, NOT a `tmp/` folder inside the project) to keep the project root clean.** The unified workspace root is:
 
@@ -421,7 +421,7 @@ If you have a well-defined `eval_set.json` and want to let the agent handle ever
 **执行 run_loop.py 的完整步骤（按顺序）：**
 
 1. 先确定 skill-creator 脚本的绝对路径（即包含 `scripts/run_loop.py` 的目录）。
-2. 确定你的 model ID — 在 system prompt 最底部查找 `"model":` 字段的精确值。
+2. 确定你的 model ID — 从当前会话配置或环境变量中获取实际使用的模型标识。
 3. 使用 `bash` 工具执行命令。
    - **【极其重要：双层超时约束】**：
      a. **外层协议超时 (timeout_ms)**：必须在 `bash` 工具调用的 JSON 中包含 `{"command": "...", "timeout_ms": 600000}`。这决定了 Rust 宿主给 Python 脚本预留的总时长。
@@ -440,7 +440,7 @@ cd "<skill-creator此技能本身的系统绝对存放路径(例如 D:\git\zero-
 
 **关键注意事项：**
 - `--skill-path` 必须指向**包含 SKILL.md 的目录**，而不是 SKILL.md 文件本身。例如：`C:\Users\36225\AppData\Local\Temp\nova_skill_creator\my-skill\` 而不是 `.../my-skill/SKILL.md`。
-- `--model` 必须填写实际的 model ID（从你的 system prompt 或配置中获取），不要用占位符 `<your-current-model-id>`。
+- `--model` 必须填写实际的 model ID（从当前会话配置中获取），不要用占位符 `<your-current-model-id>`。
 - 必须先 `cd` 到 skill-creator 目录，否则 `python -m scripts.run_loop` 找不到模块。
 
 Wait for the tool call to finish. If the tool call itself times out, do not claim the optimization is still running in the background. First check whether `run_loop.py`, `cargo run --bin nova_cli`, or `nova_cli.exe` processes still exist, then inspect the timestamped results directory for `results.json`, `report.html`, `report_live.html`, and `logs/`. Report only what actually exists.
@@ -459,17 +459,13 @@ Take `best_description` from the JSON output and update the skill's SKILL.md fro
 
 ---
 
-### Package and Present (only if `present_files` tool is available)
+### Package
 
-Check whether you have access to the `present_files` tool. If you don't, skip this step. If you do, package the skill and present the .skill file to the user:
+Package the skill and direct the user to the resulting `.skill` file path so they can install it:
 
 ```bash
 python -m scripts.package_skill <path/to/skill-folder>
 ```
-
-After packaging, direct the user to the resulting `.skill` file path so they can install it.
-
-
 
 ---
 
@@ -498,6 +494,6 @@ Repeating one more time the core loop here for emphasis:
 - Repeat until you and the user are satisfied
 - Package the final skill and return it to the user.
 
-Please add steps to your TodoList to make sure you don't forget to "Create evals JSON and run `eval-viewer/generate_review.py` so human can review test cases".
+Make sure you don't forget to "Create evals JSON and run `eval-viewer/generate_review.py` so human can review test cases".
 
 Good luck!

@@ -28,10 +28,20 @@ from scripts.utils import (
     has_tool_call,
     json_dumps,
     parse_skill_md,
-    request_includes_skill,
     subprocess_group_kwargs,
     terminate_process_tree,
 )
+
+
+def _response_mentions_skill(data: dict, skill_name: str) -> bool:
+    """Check whether a nova_cli JSON response contains injected skill instructions."""
+    # Serialize the response to text and look for skill injection markers
+    text = json.dumps(data)
+    markers = [
+        f"## Skill: {skill_name}",
+        f"### Instructions for {skill_name}",
+    ]
+    return any(marker in text for marker in markers)
 
 
 def find_project_root() -> Path:
@@ -176,7 +186,7 @@ def _run_single_query(
                 return {"triggered": False, "error": "no_json_output", "stdout": stdout, "stderr": stderr}
 
             # Check if our specific eval skill was requested/triggered
-            triggered = request_includes_skill(result_json, eval_skill_name) or has_tool_call(result_json, eval_skill_name)
+            triggered = _response_mentions_skill(result_json, eval_skill_name) or has_tool_call(result_json)
             
             return {
                 "triggered": triggered,

@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TurnResult {
     pub messages: Vec<Message>,
     pub usage: crate::provider::types::Usage,
@@ -84,8 +84,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                 }
             }
 
-            let log_msg = format!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
-            log::info!("{}", log_msg);
+            // let log_msg = format!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
+            // log::info!("{}", log_msg);
             let _ = event_tx
                 .send(crate::event::AgentEvent::Iteration {
                     current: iteration + 1,

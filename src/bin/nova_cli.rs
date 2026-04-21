@@ -6,6 +6,7 @@ use colored::Colorize;
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
+use log::info;
 use tokio::sync::mpsc;
 use zero_nova::agent::{AgentConfig, AgentRuntime};
 use zero_nova::event::AgentEvent;
@@ -258,7 +259,7 @@ async fn run_oneshot(
     if let Some(p) = printer {
         p.await.ok();
     }
-
+    info!("{result:?}");
     if json {
         println!("{}", serde_json::to_string_pretty(&result)?);
     }

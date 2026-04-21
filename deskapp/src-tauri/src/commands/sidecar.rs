@@ -174,7 +174,7 @@ pub fn stop_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<Mutex<GatewaySidecar>>();
     let mut sidecar = state.lock().map_err(|e| e.to_string())?;
 
-    if let Some(child) = sidecar.child.take() {
+    if let Some(mut child) = sidecar.child.take() {
         let pid = child.id();
         #[cfg(target_os = "windows")]
         {

@@ -2,7 +2,7 @@ use crate::event::AgentEvent;
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::time::Duration;
@@ -165,7 +165,7 @@ impl Tool for BashTool {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The shell command to execute" },
-                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 30000)" }
+                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 100000)" }
                 },
                 "required": ["command"]
             }),
@@ -177,7 +177,7 @@ impl Tool for BashTool {
         let command_str = input["command"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' field"))?;
-        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(30000);
+        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(100000);
 
         let mut cmd = self.shell.build_command(command_str);
         if let Some(ws) = &self.workspace {
@@ -331,6 +331,7 @@ impl Tool for BashTool {
                     truncate(&stdout_buf, 100_000),
                     truncate(&stderr_buf, 10_000)
                 );
+                warn!("{content}");
                 Ok(ToolOutput {
                     content,
                     is_error: true,

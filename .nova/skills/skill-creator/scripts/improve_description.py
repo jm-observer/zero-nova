@@ -20,7 +20,13 @@ _SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
 if _SKILL_CREATOR_ROOT not in sys.path:
     sys.path.insert(0, _SKILL_CREATOR_ROOT)
 
-from scripts.utils import extract_assistant_text, json_dumps, parse_skill_md
+from scripts.utils import (
+    extract_assistant_text,
+    json_dumps,
+    parse_skill_md,
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 
 
 def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
@@ -32,25 +38,32 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
 
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    result = subprocess.run(
+    process = subprocess.Popen(
         cmd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         env=env,
-        timeout=timeout,
+        **subprocess_group_kwargs(),
     )
-    if result.returncode != 0:
+    try:
+        stdout_bytes, stderr_bytes = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        terminate_process_tree(process)
+        raise TimeoutError(f"nova_cli timed out after {timeout}s while improving the skill description") from exc
+
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+
+    if process.returncode != 0:
         raise RuntimeError(
-            f"nova_cli exited {result.returncode}\nstderr: {result.stderr}"
+            f"nova_cli exited {process.returncode}\nstderr: {stderr}"
         )
     
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(stdout)
         return extract_assistant_text(data)
     except (json.JSONDecodeError, KeyError):
-        return result.stdout
+        return stdout
 
 
 def improve_description(

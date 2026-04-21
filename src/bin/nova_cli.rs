@@ -13,15 +13,15 @@ use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
 use zero_nova::provider::LlmClient;
-
+use zero_nova::provider::openai_compat::OpenAiCompatClient;
 use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
 struct Cli {
     /// Model name
-    #[arg(long, default_value = "gpt-oss-120b", global = true)]
-    model: String,
+    #[arg(long, global = true)]
+    model: Option<String>,
     /// Optional custom base URL for the LLM provider
     #[arg(long, global = true)]
     base_url: Option<String>,
@@ -66,15 +66,21 @@ async fn main() -> Result<()> {
     let workspace = custom_utils::args::workspace(&cli.workspace, ".nova")?;
     let config_path = workspace.join("config.toml");
 
-    let config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
+    let mut config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
         .unwrap_or_else(|e| {
             log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
             zero_nova::config::AppConfig::default()
         });
 
+    if let Some(model) = &cli.model {
+        config.llm.model_config.model = model.to_string();
+    }
+    if let Some(base_url) = &cli.base_url {
+        config.llm.base_url = base_url.to_string();
+    }
     log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
 
-    let client = zero_nova::provider::anthropic::AnthropicClient::from_config(&config.llm);
+    let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
     let mut tools = ToolRegistry::new();
     register_builtin_tools(&mut tools, &config);
 

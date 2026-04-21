@@ -24,7 +24,14 @@ _SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
 if _SKILL_CREATOR_ROOT not in sys.path:
     sys.path.insert(0, _SKILL_CREATOR_ROOT)
 
-from scripts.utils import has_tool_call, json_dumps, parse_skill_md, request_includes_skill
+from scripts.utils import (
+    has_tool_call,
+    json_dumps,
+    parse_skill_md,
+    request_includes_skill,
+    subprocess_group_kwargs,
+    terminate_process_tree,
+)
 
 
 def find_project_root() -> Path:
@@ -159,13 +166,19 @@ def run_single_query(
             stderr=subprocess.DEVNULL,
             cwd=project_root,
             env=env,
+            **subprocess_group_kwargs(),
         )
 
         # nova_cli run --json outputs a single large JSON blob (TurnResult)
         t_start = time.time()
         try:
-            stdout, _ = process.communicate(timeout=timeout)
-            duration_ms = int((time.time() - t_start) * 1000)
+            try:
+                stdout, _ = process.communicate(timeout=timeout)
+                duration_ms = int((time.time() - t_start) * 1000)
+            except subprocess.TimeoutExpired:
+                terminate_process_tree(process)
+                duration_ms = int((time.time() - t_start) * 1000)
+                return {"triggered": False, "total_tokens": 0, "duration_ms": duration_ms, "timed_out": True}
             
             if not stdout:
                 return {"triggered": False, "total_tokens": 0, "duration_ms": duration_ms}
@@ -202,8 +215,7 @@ def run_single_query(
         finally:
             # Clean up process on any exit path (return, exception, timeout)
             if process.poll() is None:
-                process.kill()
-                process.wait()
+                terminate_process_tree(process)
     finally:
         if installed_skill_path and installed_skill_path.exists():
             shutil.rmtree(installed_skill_path, ignore_errors=True)

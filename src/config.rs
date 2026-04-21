@@ -25,7 +25,8 @@ pub struct LlmConfig {
 }
 
 fn default_base_url() -> String {
-    "https://api.anthropic.com".to_string()
+    // "http://192.168.0.68:12340/v1".to_string()
+    "http://127.0.0.1:8082/v1".to_string()
 }
 
 impl Default for LlmConfig {

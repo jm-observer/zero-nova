@@ -411,7 +411,7 @@ Present the eval set to the user for review using the HTML template:
 This step matters — bad eval queries lead to bad descriptions.
 
 ### Step 3: Run the optimization loop
-Tell the user: "This will take some time — I'll run the optimization loop in the background and check on it periodically."
+Tell the user: "This will take some time — I'll run the optimization loop with an extended tool timeout and report the actual result."
 
 #### Unattended Optimization Mode (Recommended)
 If you have a well-defined `eval_set.json` and want to let the agent handle everything automatically without further prompts, use the `--non-interactive` flag. This will:
@@ -432,9 +432,10 @@ If you have a well-defined `eval_set.json` and want to let the agent handle ever
 **执行 run_loop.py 的完整步骤（按顺序）：**
 
 1. 先确定 skill-creator 脚本的绝对路径（即包含 `scripts/run_loop.py` 的目录）。
-2. 确定你的 model ID — 在 system prompt 中查找 `”model”:` 字段的值（如 `google/gemma-4-26B-A4B-it`）。
-3. 使用 `bash` 工具执行以下命令：
-   - **参数约束**：在 JSON 调用参数中，**必须**显式指定 `"timeout_ms": 600000` (或更大，如 10 分钟)，因为优化迭代是一个耗时任务，默认 30 秒超时会导致测试被中断！
+2. 确定你的 model ID — 在 system prompt 最底部查找 `"model":` 字段的精确值（例如 `"google/gemma-4-26B-A4B-it"`）。**绝对不要**试图简化、简写或猜想这个 ID，必须一字不差地完整提取并作为 `--model` 的参数传入，否则后端的迭代生成器会直接崩溃拦截！
+3. 使用 `bash` 工具执行以下命令时：
+   - **【极其重要】超时参数的位置约束**：你生成的 `bash` tool_call 必须包含 `"command"` 和 `"timeout_ms"` 两个平级的 JSON 字段！你必须写成类似 `{"command": "cd ... && python ...", "timeout_ms": 600000}` 的结构。**绝对不要**把 `--timeout_ms` 或 `--timeout` 等参数拼接到你编写的 shell command 字符串里面交付！
+   - `--timeout` 是 `run_loop.py` 的单个 query 子进程超时，单位是秒；`timeout_ms` 是外层工具调用超时，单位是毫秒。二者不是一回事。遇到 `Command timed out after 30000ms` 时，必须增大 tool_call 的 `timeout_ms`，不是把 `--timeout_ms` 加进 shell 命令。
    - **注意替换**以下示例中的所有路径和占位符为实际值：
 
 ```bash
@@ -451,7 +452,7 @@ cd "<skill-creator此技能本身的系统绝对存放路径(例如 D:\git\zero-
 - `--model` 必须填写实际的 model ID（从你的 system prompt 或配置中获取），不要用占位符 `<your-current-model-id>`。
 - 必须先 `cd` 到 skill-creator 目录，否则 `python -m scripts.run_loop` 找不到模块。
 
-While it runs, periodically tail the output to give the user updates on which iteration it's on and what the scores look like.
+Wait for the tool call to finish. If the tool call itself times out, do not claim the optimization is still running in the background. First check whether `run_loop.py`, `cargo run --bin nova_cli`, or `nova_cli.exe` processes still exist, then inspect the timestamped results directory for `results.json`, `report.html`, `report_live.html`, and `logs/`. Report only what actually exists.
 
 This handles the full optimization loop automatically. It splits the eval set into 60% train and 40% held-out test, evaluates the current description (running each query 3 times to get a reliable trigger rate), then calls Claude to propose improvements based on what failed. It re-evaluates each new description on both train and test, iterating up to 5 times. When it's done, it opens an HTML report in the browser showing the results per iteration and returns JSON with `best_description` — selected by test score rather than train score to avoid overfitting.
 

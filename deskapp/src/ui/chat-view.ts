@@ -13,6 +13,7 @@ export class ChatView {
     private streamingMessageEl: HTMLElement | null = null;
     private streamingContent = '';
     private currentIntentText: string | null = null;
+    private layoutObserver: ResizeObserver | null = null;
 
     constructor(private state: AppState, private bus: EventBus) {
         this.messagesContainer = document.getElementById('messages') as HTMLElement;
@@ -22,6 +23,16 @@ export class ChatView {
     }
 
     init() {
+        console.log('[ChatView] Initializing...');
+        this.bindEvents();
+        
+        // 监听消息容器大小变化，更新右侧的 Minimap 导航条
+        if (window.ResizeObserver) {
+            this.layoutObserver = new ResizeObserver(() => {
+                this.updateMinimap();
+            });
+            this.layoutObserver.observe(this.messagesContainer);
+        }
         console.log('[ChatView] Initializing...');
         this.bindEvents();
         
@@ -175,6 +186,7 @@ export class ChatView {
         this.messagesContainer.innerHTML = '';
         this.streamingMessageEl = null;
         this.streamingContent = '';
+        this.updateMinimap();
     }
 
     renderMessages(messages: any[]) {
@@ -207,6 +219,8 @@ export class ChatView {
         }
 
         this.scrollToBottom();
+        // 因为可能有大量 DOM 发生改变，使用 setTimeout 等待渲染结束再抓取位置
+        setTimeout(() => this.updateMinimap(), 50);
     }
 
     private showWelcome() {
@@ -225,6 +239,7 @@ export class ChatView {
         const html = this.renderMessage(message, index);
         this.messagesContainer.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();
+        this.updateMinimap();
     }
 
     private renderMessage(message: any, index: number): string {
@@ -257,12 +272,15 @@ export class ChatView {
                 } else if (type === 'tool_result') {
                     const originalContent = block.content || block.result || block.output || '';
                     let displayContent = '';
+                    let isErrorCode = block.isError;
                     
                     try {
-                        // Try to parse as JSON for specialized rendering (e.g. subagent)
                         const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
                         
                         if (parsed && typeof parsed === 'object') {
+                            if (!isErrorCode && parsed.exit_code !== undefined && parsed.exit_code !== 0) {
+                                isErrorCode = true;
+                            }
                             if (parsed.output_summary) {
                                 // Subagent summary rendering
                                 displayContent = renderMarkdown(parsed.output_summary);
@@ -291,12 +309,23 @@ export class ChatView {
                         } else {
                             displayContent = escapeHtml(String(originalContent));
                         }
+                        
+                        // Handle raw string containing exit_code manually if not parsed as standard JSON
+                        if (!parsed && !isErrorCode && typeof originalContent === 'string' && originalContent.includes('"exit_code":')) {
+                            if (!originalContent.includes('"exit_code": 0') && !originalContent.includes('"exit_code":0')) {
+                                isErrorCode = true;
+                            }
+                        }
                     } catch (e) {
-                        // Not JSON, render as plain text
                         displayContent = escapeHtml(String(originalContent));
+                        if (!isErrorCode && typeof originalContent === 'string' && originalContent.includes('"exit_code":')) {
+                            if (!originalContent.includes('"exit_code": 0') && !originalContent.includes('"exit_code":0')) {
+                                isErrorCode = true;
+                            }
+                        }
                     }
 
-                    return `<div class="tool-result-card collapsible collapsed ${block.isError ? 'error' : ''}">
+                    return `<div class="tool-result-card collapsible collapsed ${isErrorCode ? 'error' : ''}">
                         <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
                         <div class="tool-result-content">${displayContent}</div>
                     </div>`;
@@ -310,7 +339,22 @@ export class ChatView {
         }
         
         const isTool = Array.isArray(message.content) && message.content.some((b: any) => b.type === 'tool_result');
-        const roleClass = isTool ? 'tool' : message.role;
+        let hasToolError = false;
+        if (isTool) {
+             hasToolError = message.content.some((b: any) => {
+                  if (b.type !== 'tool_result') return false;
+                  if (b.isError) return true;
+                  const c = b.content || b.result || b.output || '';
+                  if (typeof c === 'string' && c.includes('"exit_code":')) {
+                      return !c.includes('"exit_code": 0') && !c.includes('"exit_code":0');
+                  }
+                  if (typeof c === 'object' && c !== null && c.exit_code !== undefined) {
+                      return c.exit_code !== 0;
+                  }
+                  return false;
+             });
+        }
+        const roleClass = isTool ? `tool ${hasToolError ? 'tool-error-msg' : ''}` : message.role;
         
         const intentText = message.metadata?.intentText || (isAssistant && this.currentIntentText ? this.currentIntentText : '');
         const intentHtml = intentText ? `<div class="message-intent">${escapeHtml(intentText)}</div>` : '';
@@ -480,6 +524,7 @@ export class ChatView {
             `;
             markdownBody.insertAdjacentHTML('beforeend', html);
             this.scrollToBottom();
+            this.updateMinimap();
 
             // 5s 后自动折叠工具调用和结果
             setTimeout(() => {
@@ -526,5 +571,72 @@ export class ChatView {
 
     private scrollToBottom() {
         this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    }
+
+    private updateMinimap() {
+        const minimap = document.getElementById('chat-minimap');
+        const minimapMarkers = document.getElementById('chat-minimap-markers');
+        if (!minimap || !minimapMarkers) return;
+
+        const messagesContainer = this.messagesContainer;
+        const scrollHeight = messagesContainer.scrollHeight;
+        const clientHeight = messagesContainer.clientHeight;
+        
+        // 如果内容不需要滚动，可以隐藏或仍保留。按比例的话，不超出一满屏会显得比较稀疏。
+        // if (scrollHeight <= clientHeight && messagesContainer.children.length < 2) {
+        //    minimap.style.display = 'none';
+        //    return;
+        // } else {
+        //    minimap.style.display = 'block';
+        // }
+
+        let hasAnyError = false;
+        minimapMarkers.innerHTML = '';
+
+        const messages = messagesContainer.querySelectorAll('.message');
+        if (messages.length === 0) return;
+
+        messages.forEach((msg) => {
+            const htmlMsg = msg as HTMLElement;
+            const isUser = htmlMsg.classList.contains('user');
+            const isToolError = htmlMsg.classList.contains('tool-error-msg');
+            
+            if (isToolError) hasAnyError = true;
+
+            if (isUser || isToolError) {
+                // 计算相对位置 (百分比)
+                // 以消息元素的中间位置为准，由于 scrollHeight 包含所有的 content，
+                // 计算比例能大致映射到 minimap 的竖线上。
+                const offsetTop = htmlMsg.offsetTop;
+                // 添加一个小偏移，使得中心点更准
+                const topPercent = ((offsetTop + (htmlMsg.clientHeight / 2)) / scrollHeight) * 100;
+                
+                const marker = document.createElement('div');
+                marker.className = `chat-minimap-marker ${isUser ? 'user' : 'tool-error'}`;
+                // 限制最高值为 98% 避免掉出底端
+                marker.style.top = `${Math.min(98, Math.max(2, topPercent))}%`;
+                marker.title = isUser ? 'User Message' : 'Tool Error (exit_code != 0)';
+                
+                // 用户点击跳转
+                marker.addEventListener('click', () => {
+                    htmlMsg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // 如果有高亮需求可以在这里补充
+                    htmlMsg.style.transition = 'background-color 0.5s ease';
+                    const origBg = htmlMsg.style.backgroundColor;
+                    // Flash effect
+                    htmlMsg.style.backgroundColor = 'rgba(99, 102, 241, 0.15)';
+                    setTimeout(() => { htmlMsg.style.backgroundColor = origBg; }, 1000);
+                });
+                
+                minimapMarkers.appendChild(marker);
+            }
+        });
+
+        // 根据是否有 tool error ，让外面的主线变成红色
+        if (hasAnyError) {
+            minimap.classList.add('has-error');
+        } else {
+            minimap.classList.remove('has-error');
+        }
     }
 }

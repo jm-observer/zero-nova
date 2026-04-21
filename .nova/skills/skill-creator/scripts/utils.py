@@ -1,7 +1,17 @@
 """Shared utilities for skill-creator scripts."""
 
 import json
+import os
+import signal
+import subprocess
 from pathlib import Path
+
+
+def subprocess_group_kwargs() -> dict:
+    """Return Popen kwargs that put children in a killable process group."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
 
 def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
     """Parse a SKILL.md file, returning (name, description, full_content)."""
@@ -49,6 +59,40 @@ def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
 def json_dumps(data) -> str:
     """Serialize JSON as UTF-8 friendly, human-readable text."""
     return json.dumps(data, indent=2, ensure_ascii=False)
+
+
+def terminate_process_tree(process: subprocess.Popen, wait_timeout: float = 5.0) -> None:
+    """Terminate a subprocess and any children it spawned."""
+    if process.poll() is not None:
+        return
+
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    try:
+        process.wait(timeout=wait_timeout)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            process.kill()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=wait_timeout)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def extract_assistant_text(data: dict) -> str:

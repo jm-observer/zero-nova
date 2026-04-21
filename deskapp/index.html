@@ -9,6 +9,7 @@
   <title>OpenFlux</title>
   <link rel="icon" type="image/png" href="/icon.png">
   <link rel="stylesheet" href="./src/styles/main.css">
+  <link rel="stylesheet" href="./src/styles/chat-timeline.css">
   <script>
     // Early locale detection: set lang and loading text before i18n loads
     (function () {
@@ -387,6 +388,12 @@
 
       <!-- 中间：工作区（聊天） -->
       <main class="workspace" id="workspace">
+        <!-- 竖向时间轴导航 Minimap -->
+        <div id="chat-minimap" class="chat-minimap">
+          <div class="chat-minimap-track"></div>
+          <div id="chat-minimap-markers" class="chat-minimap-markers"></div>
+        </div>
+
         <!-- 消息列表 -->
         <div id="messages" class="messages">
           <div class="welcome-message">

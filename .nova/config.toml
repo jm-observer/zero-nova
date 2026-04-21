@@ -33,7 +33,7 @@ port = 9090
 # 代理最大思考轮数 (防止死循环)
 max_iterations = 30
 # 工具执行超时时间 (秒)
-tool_timeout_secs = 120
+tool_timeout_secs = 3600
 
 # ── TurnRouter 配置 ──────────────────────────────────────────────
 [gateway.router]

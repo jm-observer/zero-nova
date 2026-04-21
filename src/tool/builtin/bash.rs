@@ -165,7 +165,7 @@ impl Tool for BashTool {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The shell command to execute" },
-                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 100000)" }
+                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 3600000)" }
                 },
                 "required": ["command"]
             }),
@@ -177,7 +177,7 @@ impl Tool for BashTool {
         let command_str = input["command"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' field"))?;
-        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(100000);
+        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(3600000);
 
         let mut cmd = self.shell.build_command(command_str);
         if let Some(ws) = &self.workspace {

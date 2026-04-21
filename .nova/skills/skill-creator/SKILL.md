@@ -15,7 +15,7 @@ A skill for creating new skills and iteratively improving them.
 > - `export VAR=value` → 改用 `$env:VAR = "value"`
 > - 行末 `\` 续行 → PowerShell 用反引号 `` ` `` 或直接写单行
 >
-> **【致命红线】绝对禁止使用 `python -c` 或 `python` 命令去执行长文本的 `write_text(...)` 写入操作！** 这将导致转义截断并立刻引发 `SyntaxError: unterminated string literal` 测试崩溃！只能使用专用的 `write_file` / `write_to_file` 工具！
+> **【致命红线】绝对禁止使用 `python3 -c` 或 `python3` 命令去执行长文本的 `write_text(...)` 写入操作！** 这将导致转义截断并立刻引发 `SyntaxError: unterminated string literal` 测试崩溃！只能使用专用的 `write_file` / `write_to_file` 工具！
 
 At a high level, the process of creating a skill goes like this:
 
@@ -106,16 +106,16 @@ skill-name/
 
 To get the correct temp path, run this one-liner first:
 ```bash
-python -c "import tempfile; print(tempfile.gettempdir())"
+python3 -c "import tempfile; print(tempfile.gettempdir())"
 ```
 Then use the returned path as the base. Example paths:
 - **Linux/macOS**: `/tmp/nova_skill_creator/<skill-name>/`
 - **Windows**: `C:\Users\<user>\AppData\Local\Temp\nova_skill_creator\<skill-name>/`
 
 **IMPORTANT — before writing any file to the temp directory, you MUST create the parent directories first.** Use `write_file` only after the directory exists.
-**ABSOLUTELY NEVER USE `python -c` to write file contents!!** If you try to pass long multi-line strings into `python -c "...write_text('long string\n...')"` it will instantly crash with `SyntaxError: unterminated string literal`.
+**ABSOLUTELY NEVER USE `python3 -c` (or `python3 -c`) to write file contents!!** If you try to pass long multi-line strings into `python3 -c "...write_text('long string\n...')"` it will instantly crash with `SyntaxError: unterminated string literal`.
 
-To create directories cross-platform, do NOT use `mkdir -p` nor python-c. Use the bash tool with PowerShell's native creation command:
+To create directories cross-platform, do NOT use `mkdir -p` nor python3 -c. Use the bash tool with PowerShell's native creation command:
 ```bash
 New-Item -ItemType Directory -Force -Path "<full-path-to-parent-dir>"
 ```
@@ -265,14 +265,14 @@ Once all runs are done:
 1. **Grade each run** — spawn a grader subagent (or grade inline) that reads `agents/grader.md` and evaluates each assertion against the outputs. Save results to `grading.json` in each run directory. The grading.json expectations array must use the fields `text`, `passed`, and `evidence` (not `name`/`met`/`details` or other variants) — the viewer depends on these exact field names. For assertions that can be checked programmatically, write and run a script rather than eyeballing it — scripts are faster, more reliable, and can be reused across iterations.
 2. **Aggregate into benchmark** — run the aggregation script from the skill-creator directory:
    ```bash
-   python -m scripts.aggregate_benchmark <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N --skill-name <name>
+   python3 -m scripts.aggregate_benchmark <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N --skill-name <name>
    ```
    This produces `benchmark.json` and `benchmark.md` with pass_rate, time, and tokens for each configuration, with mean ± stddev and the delta. If generating benchmark.json manually, see `references/schemas.md` for the exact schema the viewer expects.
    Put each with_skill version before its baseline counterpart.
 3. **Do an analyst pass** — read the benchmark data and surface patterns that the aggregate stats might hide. See `agents/analyzer.md` (the "Analyzing Benchmark Results" section) for what to look for — things like assertions that always pass regardless of skill (non-discriminating), high-variance evals (possibly flaky), and time/token tradeoffs.
 4. **Launch the viewer** with both qualitative outputs and quantitative data:
    ```bash
-   nohup python <skill-creator-path>/eval-viewer/generate_review.py \
+   nohup python3 <skill-creator-path>/eval-viewer/generate_review.py \
      <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N \
      --skill-name "my-skill" \
      --benchmark <tempdir>/nova_skill_creator/<skill-name>/<timestamp>/iteration-N/benchmark.json \
@@ -420,32 +420,32 @@ If you have a well-defined `eval_set.json` and want to let the agent handle ever
 
 **执行 run_loop.py 的完整步骤（按顺序）：**
 
-1. 先确定 skill-creator 脚本的绝对路径（即包含 `scripts/run_loop.py` 的目录）。
-2. 确定你的 model ID — 从当前会话配置或环境变量中获取实际使用的模型标识。
+1. 取出 skill-creator 的系统绝对路径：该路径已在你的系统提示词（System Prompt）的 `Available Skills` 部分（即紧挨着 `Description:` 下方的 `Path:` 字段）直接提供给你。请直接读取该 `Path:` 作为工作目录，**绝对禁止**使用 `find /` 去搜索寻找本地路径。
+2. 确定你的 model ID — 读取项目根目录下 `.nova/config.toml` 文件中 `[llm]` 段的 `model` 字段值。
 3. 使用 `bash` 工具执行命令。
    - **【极其重要：双层超时约束】**：
-     a. **外层协议超时 (timeout_ms)**：必须在 `bash` 工具调用的 JSON 中包含 `{"command": "...", "timeout_ms": 600000}`。这决定了 Rust 宿主给 Python 脚本预留的总时长。
+     a. **外层协议超时 (timeout_ms)**：必须在 `bash` 工具调用的 JSON 中包含 `{"command": "...", "timeout_ms": 600000}`。这决定了 Rust 宿主给 Python3 脚本预留的总时长。
      b. **内层脚本超时 (--timeout)**：这是 `run_loop.py` 的参数（单位为秒），决定了每个子 query 允许运行的时长。通常设为 60-120。
    - **绝对禁止**：禁止把外层的 `timeout_ms` 拼接到 shell 命令字符串中！
    - **注意替换**以下示例中的所有路径和占位符为实际值：
 
 ```bash
-cd "<skill-creator此技能本身的系统绝对存放路径(例如 D:\git\zero-nova\.nova\skills\skill-creator)>" && python -m scripts.run_loop --eval-set "<新建在temp里的eval_set.json的绝对路径>" --skill-path "<新建在temp包含SKILL.md的技能文件夹绝对路径>" --model <model-id-powering-this-session> --max-iterations 5 --non-interactive --verbose
+cd "<skill-creator此技能本身的系统绝对存放路径(例如 D:\git\zero-nova\.nova\skills\skill-creator)>" && python3 -m scripts.run_loop --eval-set "<新建在temp里的eval_set.json的绝对路径>" --skill-path "<新建在temp包含SKILL.md的技能文件夹绝对路径>" --model <model-id-powering-this-session> --max-iterations 20 --non-interactive --verbose
 ```
 
 > **【极其重要】路径分离警告**：
-> 1. `python -m scripts.run_loop` 这个命令是作为系统调度器执行的，工作目录(`cd`)必须在包含母体脚本的本技能所在目录(即 `skill-creator` 系统目录)。
+> 1. `python3 -m scripts.run_loop` 这个命令是作为系统调度器执行的，工作目录(`cd`)必须在包含母体脚本的本技能所在目录(即 `skill-creator` 系统目录)。
 > 2. **绝对不能**在刚刚为你创建技能时所建的临时目录下（如 `/tmp/...`）执行该命令！临时目录下只有纯净被测的源文件，并没有 `scripts` 框架引擎！
 > 3. 不要产生幻觉去尝试“修复环境”或者“把 `run_loop.py` 从其他地方拷贝到新建的临时目录里”。那是大错特错！
 
 **关键注意事项：**
 - `--skill-path` 必须指向**包含 SKILL.md 的目录**，而不是 SKILL.md 文件本身。例如：`C:\Users\36225\AppData\Local\Temp\nova_skill_creator\my-skill\` 而不是 `.../my-skill/SKILL.md`。
-- `--model` 必须填写实际的 model ID（从当前会话配置中获取），不要用占位符 `<your-current-model-id>`。
-- 必须先 `cd` 到 skill-creator 目录，否则 `python -m scripts.run_loop` 找不到模块。
+- `--model` 必须填写实际的 model ID（从 `.nova/config.toml` 的 `[llm]` 段中读取 `model` 字段），不要用占位符 `<your-current-model-id>`。
+- 必须先 `cd` 到 skill-creator 目录，否则 `python3 -m scripts.run_loop` 找不到模块。
 
 Wait for the tool call to finish. If the tool call itself times out, do not claim the optimization is still running in the background. First check whether `run_loop.py`, `cargo run --bin nova_cli`, or `nova_cli.exe` processes still exist, then inspect the timestamped results directory for `results.json`, `report.html`, `report_live.html`, and `logs/`. Report only what actually exists.
 
-This handles the full optimization loop automatically. It splits the eval set into 60% train and 40% held-out test, evaluates the current description (running each query 3 times to get a reliable trigger rate), then calls the LLM to propose improvements based on what failed. It re-evaluates each new description on both train and test, iterating up to 5 times. When it's done, it opens an HTML report in the browser showing the results per iteration and returns JSON with `best_description` — selected by test score rather than train score to avoid overfitting.
+This handles the full optimization loop automatically. It splits the eval set into 60% train and 40% held-out test, evaluates the current description (running each query 3 times to get a reliable trigger rate), then calls the LLM to propose improvements based on what failed. It re-evaluates each new description on both train and test, iterating up to 20 times. When it's done, it opens an HTML report in the browser showing the results per iteration and returns JSON with `best_description` — selected by test score rather than train score to avoid overfitting.
 
 ### How skill triggering works
 
@@ -464,7 +464,7 @@ Take `best_description` from the JSON output and update the skill's SKILL.md fro
 Package the skill and direct the user to the resulting `.skill` file path so they can install it:
 
 ```bash
-python -m scripts.package_skill <path/to/skill-folder>
+python3 -m scripts.package_skill <path/to/skill-folder>
 ```
 
 ---

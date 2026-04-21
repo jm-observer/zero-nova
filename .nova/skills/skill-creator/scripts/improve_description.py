@@ -20,7 +20,7 @@ _SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
 if _SKILL_CREATOR_ROOT not in sys.path:
     sys.path.insert(0, _SKILL_CREATOR_ROOT)
 
-from scripts.utils import parse_skill_md
+from scripts.utils import extract_assistant_text, json_dumps, parse_skill_md
 
 
 def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
@@ -36,6 +36,8 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         env=env,
         timeout=timeout,
     )
@@ -46,15 +48,7 @@ def _call_claude(prompt: str, model: str | None, timeout: int = 300) -> str:
     
     try:
         data = json.loads(result.stdout)
-        # Extract the last assistant message
-        for msg in reversed(data.get("messages", [])):
-            if msg.get("role") == "assistant":
-                text_parts = []
-                for block in msg.get("content", []):
-                    if block.get("type") == "text":
-                        text_parts.append(block.get("text", ""))
-                return "".join(text_parts)
-        return ""
+        return extract_assistant_text(data)
     except (json.JSONDecodeError, KeyError):
         return result.stdout
 
@@ -198,7 +192,7 @@ Please respond with only the new description text in <new_description> tags, not
     if log_dir:
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"improve_iter_{iteration or 'unknown'}.json"
-        log_file.write_text(json.dumps(transcript, indent=2))
+        log_file.write_text(json_dumps(transcript), encoding="utf-8")
 
     return description
 
@@ -217,10 +211,10 @@ def main():
         print(f"Error: No SKILL.md found at {skill_path}", file=sys.stderr)
         sys.exit(1)
 
-    eval_results = json.loads(Path(args.eval_results).read_text())
+    eval_results = json.loads(Path(args.eval_results).read_text(encoding="utf-8"))
     history = []
     if args.history:
-        history = json.loads(Path(args.history).read_text())
+        history = json.loads(Path(args.history).read_text(encoding="utf-8"))
 
     name, _, content = parse_skill_md(skill_path)
     current_description = eval_results["description"]
@@ -252,7 +246,7 @@ def main():
             "results": eval_results["results"],
         }],
     }
-    print(json.dumps(output, indent=2))
+    print(json_dumps(output))
 
 
 if __name__ == "__main__":

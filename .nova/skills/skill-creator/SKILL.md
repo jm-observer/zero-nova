@@ -7,9 +7,19 @@ description: Create new skills, modify and improve existing skills, and measure 
 
 A skill for creating new skills and iteratively improving them.
 
+> **跨平台 Shell 约束 (Cross-Platform Shell Rules)**:
+> 本项目运行在 Windows 上，`bash` 工具实际执行的是 **PowerShell (pwsh)**。以下语法在 PowerShell 中会失败，**禁止使用**：
+> - `mkdir -p` 和创建文件 → 请使用 PowerShell 命令 `New-Item -ItemType Directory -Force -Path "..."` 来创建目录。然后**必须**调用 `write_file` 工具来写入文件内容。
+> - `cat <<EOF ... EOF` (heredoc) → 必须改用 `write_file` 工具直接写入
+> - `nohup ... &` (后台进程) → 改用 `Start-Process` 或直接前台运行
+> - `export VAR=value` → 改用 `$env:VAR = "value"`
+> - 行末 `\` 续行 → PowerShell 用反引号 `` ` `` 或直接写单行
+>
+> **【致命红线】绝对禁止使用 `python -c` 或 `python` 命令去执行长文本的 `write_text(...)` 写入操作！** 这将导致转义截断并立刻引发 `SyntaxError: unterminated string literal` 测试崩溃！只能使用专用的 `write_file` / `write_to_file` 工具！
+
 At a high level, the process of creating a skill goes like this:
 
-- Decide what you want the skill to do and roughly how it should do it. **Before implementation, you MUST create a design document in the `docs/` directory following the project convention: `docs/<YYYY-MM-DD>-<topic>.md`.**
+- Decide what you want the skill to do and roughly how it should do it.
 - Write a draft of the skill
 - Create a few test prompts and run claude-with-access-to-the-skill on them
 - Help the user evaluate the results both qualitatively and quantitatively
@@ -54,15 +64,7 @@ Start by understanding the user's intent. The current conversation might already
 3. What's the expected output format?
 4. Should we set up test cases to verify the skill works? Skills with objectively verifiable outputs (file transforms, data extraction, code generation, fixed workflow steps) benefit from test cases. Skills with subjective outputs (writing style, art) often don't need them. Suggest the appropriate default based on the skill type, but let the user decide.
 
-### Design Phase (MANDATORY)
 
-**Before writing any code or actual skill files, you must formalize the design.**
-
-1. Propose a design plan to the user.
-2. Once the plan is agreed upon, **create a design document in the `docs/` directory.**
-3. Follow the naming convention: `docs/<YYYY-MM-DD>-<topic>.md`.
-4. The document should include: Time, Project Status, Goal, Detailed Design (modules, interfaces, data flow), Test Cases, and Risks.
-5. **Wait for user confirmation of the design document before proceeding to implementation.**
 
 ### Interview and Research
 
@@ -111,11 +113,14 @@ Then use the returned path as the base. Example paths:
 - **Linux/macOS**: `/tmp/nova_skill_creator/<skill-name>/`
 - **Windows**: `C:\Users\<user>\AppData\Local\Temp\nova_skill_creator\<skill-name>/`
 
-**IMPORTANT — before writing any file to the temp directory, you MUST create the parent directories first.** Use `write_to_file` only after the directory exists. To create directories cross-platform, use Python instead of shell commands:
+**IMPORTANT — before writing any file to the temp directory, you MUST create the parent directories first.** Use `write_file` only after the directory exists.
+**ABSOLUTELY NEVER USE `python -c` to write file contents!!** If you try to pass long multi-line strings into `python -c "...write_text('long string\n...')"` it will instantly crash with `SyntaxError: unterminated string literal`.
+
+To create directories cross-platform, do NOT use `mkdir -p` nor python-c. Use the bash tool with PowerShell's native creation command:
 ```bash
-python -c "from pathlib import Path; Path(r'<full-path-to-parent-dir>').mkdir(parents=True, exist_ok=True)"
+New-Item -ItemType Directory -Force -Path "<full-path-to-parent-dir>"
 ```
-Do NOT use `mkdir -p` or `cat <<EOF` heredocs — they fail on Windows/PowerShell.
+Do NOT use `cat <<EOF` heredocs — they fail on Windows/PowerShell. Just use the `write_file` tool call directly!
 
 **Do NOT create a `tmp/` directory in the project root. Do not create or edit skill files in the project root or workspace `skills/` directory until the final deployment step.**
 
@@ -414,22 +419,37 @@ If you have a well-defined `eval_set.json` and want to let the agent handle ever
 2. Automatically improve the description if evals fail.
 3. Automatically deploy the best version to the workspace's `skills/` directory once all tests pass or the iteration limit is reached.
 
-> [!IMPORTANT]
-> **立即执行要求 (Immediate Execution Requirement)**:
-> 当用户授权进入无人值守模式或确认方案后，你接下来的回复**必须（MUST）**立即包含具体的工具调用（例如使用 `write_to_file` 创建初始 `SKILL.md` 或执行 `run_loop.py`）。
-> **禁止**仅通过文本回复详细计划而不触发任何实质性工具调用。你的第一个“行动”回复应当是工具调用与计划说明的结合体，确保护航流程立即启动。
+> [!CAUTION]
+> **ANTI-SIMULATION PROTOCOL (反模拟执行协议)**:
+> 你现处于真实系统环境中！绝对禁止由于不确定路径或借口“当前环境限制”而拒绝调用工具并转为无意义的文本模拟。
+> **强烈禁止以下典型 LLM 幻觉行为**：
+> 1. 生成诸如 `*(由于我无法在当前对话框...我会通过模拟...)*` 或 `由于遇到报错...我已通过专家介入手动为你完成...` 等逃避或伪造执行的借口文本。
+> 2. 自己写出伪造的模拟日志（如 `正在运行 Test Case 1` 等）。
+> 把命令写在代码块里但不发起真实 tool_calls = 任务严重失败！
+> 
+> 如果有历史报错，这不代表以后都会报错（底层代码已被人类修复）！你要不屈不挠地继续发起 `bash` 执行。无论如何，当前回复 **必须 (MUST) 产生实际的 `tool_calls` 发起物理操作**！绝不允许用语言直接编造结局交差！
+
+**执行 run_loop.py 的完整步骤（按顺序）：**
+
+1. 先确定 skill-creator 脚本的绝对路径（即包含 `scripts/run_loop.py` 的目录）。
+2. 确定你的 model ID — 在 system prompt 中查找 `”model”:` 字段的值（如 `google/gemma-4-26B-A4B-it`）。
+3. 使用 `bash` 工具执行以下命令：
+   - **参数约束**：在 JSON 调用参数中，**必须**显式指定 `"timeout_ms": 600000` (或更大，如 10 分钟)，因为优化迭代是一个耗时任务，默认 30 秒超时会导致测试被中断！
+   - **注意替换**以下示例中的所有路径和占位符为实际值：
 
 ```bash
-python -m scripts.run_loop \
-  --eval-set <path-to-trigger-eval.json> \
-  --skill-path <path-to-skill> \
-  --model <model-id-powering-this-session> \
-  --max-iterations 5 \
-  --non-interactive \
-  --verbose
+cd "<skill-creator此技能本身的系统绝对存放路径(例如 D:\git\zero-nova\.nova\skills\skill-creator)>" && python -m scripts.run_loop --eval-set "<新建在temp里的eval_set.json的绝对路径>" --skill-path "<新建在temp包含SKILL.md的技能文件夹绝对路径>" --model <model-id-powering-this-session> --max-iterations 5 --non-interactive --verbose
 ```
 
-Use the model ID from your system prompt (the one powering the current session) so the triggering test matches what the user actually experiences.
+> **【极其重要】路径分离警告**：
+> 1. `python -m scripts.run_loop` 这个命令是作为系统调度器执行的，工作目录(`cd`)必须在包含母体脚本的本技能所在目录(即 `skill-creator` 系统目录)。
+> 2. **绝对不能**在刚刚为你创建技能时所建的临时目录下（如 `/tmp/...`）执行该命令！临时目录下只有纯净被测的源文件，并没有 `scripts` 框架引擎！
+> 3. 不要产生幻觉去尝试“修复环境”或者“把 `run_loop.py` 从其他地方拷贝到新建的临时目录里”。那是大错特错！
+
+**关键注意事项：**
+- `--skill-path` 必须指向**包含 SKILL.md 的目录**，而不是 SKILL.md 文件本身。例如：`C:\Users\36225\AppData\Local\Temp\nova_skill_creator\my-skill\` 而不是 `.../my-skill/SKILL.md`。
+- `--model` 必须填写实际的 model ID（从你的 system prompt 或配置中获取），不要用占位符 `<your-current-model-id>`。
+- 必须先 `cd` 到 skill-creator 目录，否则 `python -m scripts.run_loop` 找不到模块。
 
 While it runs, periodically tail the output to give the user updates on which iteration it's on and what the scores look like.
 

@@ -25,7 +25,7 @@ from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.package_skill import package_skill
 from scripts.run_eval import find_project_root, run_eval
-from scripts.utils import parse_skill_md
+from scripts.utils import json_dumps, parse_skill_md
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
@@ -106,6 +106,7 @@ def run_loop(
             model=model,
             iteration=iteration,
             output_root=results_dir,
+            source_skill_path=skill_path,
         )
         eval_elapsed = time.time() - t0
 
@@ -158,7 +159,7 @@ def run_loop(
                 "test_size": len(test_set),
                 "history": history,
             }
-            live_report_path.write_text(generate_html(partial_output, auto_refresh=True, skill_name=name))
+            live_report_path.write_text(generate_html(partial_output, auto_refresh=True, skill_name=name), encoding="utf-8")
 
         if verbose:
             def print_eval_stats(label, results, elapsed):
@@ -269,7 +270,7 @@ def main():
     parser.add_argument("--non-interactive", action="store_true", help="Run without user interaction and deploy automatically if successful")
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text())
+    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():
@@ -298,7 +299,7 @@ def main():
             live_report_path = results_dir / "report_live.html"
         else:
             live_report_path = Path(args.report)
-        live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>")
+        live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>", encoding="utf-8")
         webbrowser.open(str(live_report_path))
     else:
         live_report_path = None
@@ -321,18 +322,18 @@ def main():
     )
 
     # Save JSON output
-    json_output = json.dumps(output, indent=2)
+    json_output = json_dumps(output)
     print(json_output)
     if results_dir:
-        (results_dir / "results.json").write_text(json_output)
+        (results_dir / "results.json").write_text(json_output, encoding="utf-8")
 
     # Write final HTML report (without auto-refresh)
     if live_report_path:
-        live_report_path.write_text(generate_html(output, auto_refresh=False, skill_name=name))
+        live_report_path.write_text(generate_html(output, auto_refresh=False, skill_name=name), encoding="utf-8")
         print(f"\nReport: {live_report_path}", file=sys.stderr)
 
     if results_dir and live_report_path:
-        (results_dir / "report.html").write_text(generate_html(output, auto_refresh=False, skill_name=name))
+        (results_dir / "report.html").write_text(generate_html(output, auto_refresh=False, skill_name=name), encoding="utf-8")
 
     if results_dir:
         print(f"Results saved to: {results_dir}", file=sys.stderr)
@@ -369,7 +370,7 @@ def main():
         # Update the SKILL.md frontmatter with the best description before packaging
         best_desc = output["best_description"]
         skill_md_path = skill_path / "SKILL.md"
-        original_content = skill_md_path.read_text()
+        original_content = skill_md_path.read_text(encoding="utf-8")
         lines = original_content.split("\n")
         # Find and replace the description in frontmatter
         in_frontmatter = False
@@ -396,7 +397,7 @@ def main():
                     skip_continuation = True
                 continue
             new_lines.append(line)
-        skill_md_path.write_text("\n".join(new_lines))
+        skill_md_path.write_text("\n".join(new_lines), encoding="utf-8")
         package_skill(skill_path, deploy_dir)
         print(f"Skill packaged and deployed to {deploy_dir}", file=sys.stderr)
 

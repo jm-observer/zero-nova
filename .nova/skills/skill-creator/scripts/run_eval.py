@@ -9,7 +9,7 @@ import argparse
 import hashlib
 import json
 import os
-import select
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,20 +24,88 @@ _SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
 if _SKILL_CREATOR_ROOT not in sys.path:
     sys.path.insert(0, _SKILL_CREATOR_ROOT)
 
-from scripts.utils import parse_skill_md
+from scripts.utils import has_tool_call, json_dumps, parse_skill_md, request_includes_skill
 
 
 def find_project_root() -> Path:
-    """Find the project root by walking up from cwd looking for .claude/.
+    """Find the project root by walking up from cwd looking for .nova/.
 
-    Mimics how Claude Code discovers its project root, so the command file
-    we create ends up where claude -p will look for it.
+    Mimics how zero-nova discovers its project root, so the installed eval
+    skill ends up in the actual workspace.
     """
     current = Path.cwd()
     for parent in [current, *current.parents]:
-        if (parent / ".claude").is_dir():
+        if (parent / ".nova").is_dir():
             return parent
     return current
+
+
+def _replace_frontmatter_fields(content: str, name: str, description: str) -> str:
+    """Replace name/description in SKILL.md frontmatter."""
+    lines = content.split("\n")
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("SKILL.md missing frontmatter")
+
+    new_lines = [lines[0]]
+    in_frontmatter = True
+    skip_continuation = False
+    saw_name = False
+    saw_description = False
+
+    for line in lines[1:]:
+        if in_frontmatter and skip_continuation and (line.startswith("  ") or line.startswith("\t")):
+            continue
+        skip_continuation = False
+
+        if in_frontmatter and line.strip() == "---":
+            if not saw_name:
+                new_lines.append(f"name: {name}")
+            if not saw_description:
+                new_lines.extend(_description_frontmatter_lines(description))
+            new_lines.append(line)
+            in_frontmatter = False
+            continue
+
+        if in_frontmatter and line.startswith("name:"):
+            new_lines.append(f"name: {name}")
+            saw_name = True
+            continue
+
+        if in_frontmatter and line.startswith("description:"):
+            new_lines.extend(_description_frontmatter_lines(description))
+            saw_description = True
+            value = line[len("description:"):].strip()
+            if value in (">", "|", ">-", "|-"):
+                skip_continuation = True
+            continue
+
+        new_lines.append(line)
+
+    return "\n".join(new_lines)
+
+
+def _description_frontmatter_lines(description: str) -> list[str]:
+    lines = description.splitlines() or [""]
+    return ["description: >-", *[f"  {line}" for line in lines]]
+
+
+def _install_eval_skill(source_skill_path: Path, project_root: Path, eval_skill_name: str, description: str) -> Path:
+    """Copy a candidate skill into .nova/skills under a unique eval name."""
+    target_path = project_root / ".nova" / "skills" / eval_skill_name
+    if target_path.exists():
+        shutil.rmtree(target_path)
+
+    shutil.copytree(
+        source_skill_path,
+        target_path,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "evals"),
+    )
+
+    skill_md_path = target_path / "SKILL.md"
+    content = skill_md_path.read_text(encoding="utf-8")
+    content = _replace_frontmatter_fields(content, eval_skill_name, description)
+    skill_md_path.write_text(content, encoding="utf-8")
+    return target_path
 
 
 def run_single_query(
@@ -48,6 +116,7 @@ def run_single_query(
     project_root: str,
     model: str | None = None,
     output_dir: Path | None = None,
+    source_skill_path: str | None = None,
 ) -> dict:
     """Run a single query and return whether the skill was triggered.
 
@@ -58,11 +127,18 @@ def run_single_query(
     full assistant message, which only arrives after tool execution.
     """
     unique_id = uuid.uuid4().hex[:8]
-    clean_name = f"{skill_name}-skill-{unique_id}"
+    eval_skill_name = f"{skill_name}-skill-{unique_id}" if source_skill_path else skill_name
+    project_root_path = Path(project_root)
+    installed_skill_path = None
 
     try:
-        # Note: In zero-nova adaptation, we don't need to write to .claude/commands
-        # because the CLI loads skills from .nova/skills automatically.
+        if source_skill_path:
+            installed_skill_path = _install_eval_skill(
+                Path(source_skill_path),
+                project_root_path,
+                eval_skill_name,
+                skill_description,
+            )
         
         cmd = [
             "cargo", "run", "--bin", "nova_cli", "--",
@@ -95,26 +171,25 @@ def run_single_query(
                 return {"triggered": False, "total_tokens": 0, "duration_ms": duration_ms}
                 
             try:
-                result_data = json.loads(stdout.decode("utf-8"))
+                result_data = json.loads(stdout.decode("utf-8", errors="replace"))
                 
                 # Capture usage data if available
                 # Schema assumption: result_data.get("usage", {}) -> {"input_tokens": X, "output_tokens": Y}
                 usage = result_data.get("usage", {})
                 total_tokens = usage.get("total_tokens", usage.get("input_tokens", 0) + usage.get("output_tokens", 0))
 
-                # Search all messages for ToolUse that matches our target
-                triggered = False
-                for msg in result_data.get("messages", []):
-                    for block in msg.get("content", []):
-                        if block.get("type") == "tool_use":
-                             triggered = True
-                             break
-                    if triggered: break
+                triggered = has_tool_call(result_data) or request_includes_skill(project_root_path / "target" / "request", eval_skill_name)
                 
                 # Optional: save specific output to output_dir if provided
                 if output_dir:
                     output_dir.mkdir(parents=True, exist_ok=True)
-                    (output_dir / "result.json").write_text(json.dumps(result_data, indent=2))
+                    (output_dir / "result.json").write_text(json_dumps(result_data), encoding="utf-8")
+                    request_path = project_root_path / "target" / "request"
+                    response_path = project_root_path / "target" / "response"
+                    if request_path.exists():
+                        shutil.copy2(request_path, output_dir / "request.json")
+                    if response_path.exists():
+                        shutil.copy2(response_path, output_dir / "response.json")
 
                 return {
                     "triggered": triggered,
@@ -130,7 +205,8 @@ def run_single_query(
                 process.kill()
                 process.wait()
     finally:
-        pass
+        if installed_skill_path and installed_skill_path.exists():
+            shutil.rmtree(installed_skill_path, ignore_errors=True)
 
 
 def run_eval(
@@ -145,6 +221,7 @@ def run_eval(
     model: str | None = None,
     iteration: int | None = None,
     output_root: Path | None = None,
+    source_skill_path: Path | None = None,
 ) -> dict:
     """Run the full eval set and return results."""
     results = []
@@ -158,39 +235,54 @@ def run_eval(
     if iteration is not None:
         output_root = output_root / f"iteration-{iteration}"
 
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        future_to_info = {}
-        for item in eval_set:
-            query_id = hashlib.md5(item["query"].encode()).hexdigest()[:8]
-            for run_idx in range(runs_per_query):
-                # Unique output dir for each run
-                run_output_dir = output_root / f"query-{query_id}" / f"run-{run_idx}"
+    eval_skill_name = skill_name
+    installed_eval_skill = None
+    if source_skill_path:
+        # zero-nova writes the last model request to target/request. Use one
+        # worker when evaluating injected skill instructions so trigger
+        # detection cannot race against another concurrent run.
+        num_workers = 1
+        eval_skill_name = f"{skill_name}-eval-{uuid.uuid4().hex[:8]}"
+        installed_eval_skill = _install_eval_skill(source_skill_path, project_root, eval_skill_name, description)
 
-                future = executor.submit(
-                    run_single_query,
-                    item["query"],
-                    skill_name,
-                    description,
-                    timeout,
-                    str(project_root),
-                    model,
-                    run_output_dir,
-                )
-                future_to_info[future] = (item, run_idx)
+    try:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            future_to_info = {}
+            for item in eval_set:
+                query_id = hashlib.md5(item["query"].encode()).hexdigest()[:8]
+                for run_idx in range(runs_per_query):
+                    # Unique output dir for each run
+                    run_output_dir = output_root / f"query-{query_id}" / f"run-{run_idx}"
 
-        query_data: dict[str, list[dict]] = {}
-        query_items: dict[str, dict] = {}
-        for future in as_completed(future_to_info):
-            item, _ = future_to_info[future]
-            query = item["query"]
-            query_items[query] = item
-            if query not in query_data:
-                query_data[query] = []
-            try:
-                query_data[query].append(future.result())
-            except Exception as e:
-                print(f"Warning: query failed: {e}", file=sys.stderr)
-                query_data[query].append({"triggered": False, "total_tokens": 0, "duration_ms": 0})
+                    future = executor.submit(
+                        run_single_query,
+                        item["query"],
+                        eval_skill_name,
+                        description,
+                        timeout,
+                        str(project_root),
+                        model,
+                        run_output_dir,
+                        None,
+                    )
+                    future_to_info[future] = (item, run_idx)
+
+            query_data: dict[str, list[dict]] = {}
+            query_items: dict[str, dict] = {}
+            for future in as_completed(future_to_info):
+                item, _ = future_to_info[future]
+                query = item["query"]
+                query_items[query] = item
+                if query not in query_data:
+                    query_data[query] = []
+                try:
+                    query_data[query].append(future.result())
+                except Exception as e:
+                    print(f"Warning: query failed: {e}", file=sys.stderr)
+                    query_data[query].append({"triggered": False, "total_tokens": 0, "duration_ms": 0})
+    finally:
+        if installed_eval_skill and installed_eval_skill.exists():
+            shutil.rmtree(installed_eval_skill, ignore_errors=True)
 
     total_tokens = 0
     total_duration_ms = 0
@@ -252,7 +344,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print progress to stderr")
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text())
+    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
     skill_path = Path(args.skill_path)
 
     if not (skill_path / "SKILL.md").exists():
@@ -276,6 +368,7 @@ def main():
         runs_per_query=args.runs_per_query,
         trigger_threshold=args.trigger_threshold,
         model=args.model,
+        source_skill_path=skill_path,
     )
 
     if args.verbose:
@@ -286,7 +379,7 @@ def main():
             rate_str = f"{r['triggers']}/{r['runs']}"
             print(f"  [{status}] rate={rate_str} expected={r['should_trigger']}: {r['query'][:70]}", file=sys.stderr)
 
-    print(json.dumps(output, indent=2))
+    print(json_dumps(output))
 
 
 if __name__ == "__main__":

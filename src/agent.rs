@@ -98,15 +98,16 @@ impl<C: LlmClient> AgentRuntime<C> {
             let mut receiver = match self
                 .client
                 .stream(&all_messages, &tool_defs[..], &self.config.model_config)
-                .await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        let err_msg = format!("Failed to start stream: {}", e);
-                        log::error!("{}", err_msg);
-                        let _ = event_tx.send(crate::event::AgentEvent::SystemLog(err_msg)).await;
-                        return Err(e);
-                    }
-                };
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    let err_msg = format!("Failed to start stream: {}", e);
+                    log::error!("{}", err_msg);
+                    let _ = event_tx.send(crate::event::AgentEvent::SystemLog(err_msg)).await;
+                    return Err(e);
+                }
+            };
 
             let mut current_text = String::new();
             let mut current_thinking = String::new();

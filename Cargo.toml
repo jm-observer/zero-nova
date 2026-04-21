@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "deskapp/src-tauri"]
+
 [package]
 name = "zero-nova"
 version = "0.1.0"
@@ -8,7 +11,7 @@ tokio-util = { version = "0.7", features = ["full"] }
 tokio-tungstenite = { version = "0.21", features = ["__rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 log = "0.4"
-custom-utils = { version = "0.10.21", features = ["daemon-async", "prod"] }
+custom-utils = { version = "0.11", features = ["daemon-async", "prod"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
@@ -17,8 +20,11 @@ async-trait = "0.1.74"
 scraper = "0.19"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
 toml = "0.8"
 sysinfo = "0.30"
+
+
 
 
 

@@ -1,26 +1,14 @@
 use crate::tool::ToolRegistry;
 
+#[derive(Default)]
 /// Builder for constructing system prompts with optional sections.
 pub struct SystemPromptBuilder {
     sections: Vec<String>,
 }
 
 impl SystemPromptBuilder {
-    /// Creates a new SystemPromptBuilder and loads the default prompt.
     pub fn new() -> Self {
-        // Load default prompt from the prompts/default.md file at compile time.
-        // If the file contains any content (non‑empty after trimming), it will be added as the initial section.
-        let mut builder = Self { sections: Vec::new() };
-        let default_content = include_str!("../prompts/default.md");
-        if !default_content.trim().is_empty() {
-            builder.sections.push(default_content.to_string());
-        }
-        builder
-    }
-
-    /// Creates a builder pre‑configured for a personal assistant role.
-    pub fn personal_assistant() -> Self {
-        Self::new()
+        Self::default()
     }
 
     /// Adds a role section to the prompt.
@@ -73,11 +61,5 @@ impl SystemPromptBuilder {
     /// Builds the final prompt string by joining all sections.
     pub fn build(&self) -> String {
         self.sections.join("\n")
-    }
-}
-
-impl Default for SystemPromptBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }

@@ -1,11 +1,14 @@
+use crate::event::AgentEvent;
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
 use serde_json::{json, Value};
+use std::process::Stdio;
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::time::{timeout, Instant};
 use which::which;
 
 /// Shell 执行后端接口
@@ -126,13 +129,24 @@ fn select_shell(config: &crate::config::BashConfig) -> Box<dyn ShellBackend> {
 /// Tool for executing shell commands.
 pub struct BashTool {
     shell: Box<dyn ShellBackend>,
+    /// Optional workspace directory to execute commands in.
+    workspace: Option<std::path::PathBuf>,
 }
 
 impl BashTool {
     pub fn new(config: &crate::config::BashConfig) -> Self {
         let shell = select_shell(config);
         info!("BashTool initialized using shell: {}", shell.name());
-        Self { shell }
+        Self { shell, workspace: None }
+    }
+
+    /// Creates a new `BashTool` with a specific workspace directory.
+    pub fn with_workspace(config: &crate::config::BashConfig, workspace: std::path::PathBuf) -> Self {
+        let shell = select_shell(config);
+        Self {
+            shell,
+            workspace: Some(workspace),
+        }
     }
 }
 
@@ -151,7 +165,7 @@ impl Tool for BashTool {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The shell command to execute" },
-                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 30000)" }
+                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 100000)" }
                 },
                 "required": ["command"]
             }),
@@ -159,41 +173,170 @@ impl Tool for BashTool {
     }
 
     /// Executes the bash command as defined in the input JSON.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let command_str = input["command"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' field"))?;
-        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(30000);
+        let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(100000);
 
         let mut cmd = self.shell.build_command(command_str);
-        let fut = cmd.output();
+        if let Some(ws) = &self.workspace {
+            cmd.current_dir(ws);
+        }
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
 
-        match timeout(Duration::from_millis(timeout_ms), fut).await {
-            Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let exit_code = output.status.code().unwrap_or(-1);
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to spawn command: {}", e))?;
 
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr"))?;
+
+        let mut stdout_buf = String::new();
+        let mut stderr_buf = String::new();
+
+        const LOG_FLUSH_INTERVAL_MS: u128 = 200;
+
+        let read_fut = async {
+            let mut stdout_reader = BufReader::new(stdout).lines();
+            let mut stderr_reader = BufReader::new(stderr).lines();
+
+            let mut stdout_done = false;
+            let mut stderr_done = false;
+
+            let mut pending_stdout = String::new();
+            let mut pending_stderr = String::new();
+            let mut last_flush = Instant::now();
+
+            while !stdout_done || !stderr_done {
+                tokio::select! {
+                    line = stdout_reader.next_line(), if !stdout_done => {
+                        match line {
+                            Ok(Some(line)) => {
+                                pending_stdout.push_str(&line);
+                                pending_stdout.push('\n');
+                                stdout_buf.push_str(&line);
+                                stdout_buf.push('\n');
+
+                                if last_flush.elapsed().as_millis() >= LOG_FLUSH_INTERVAL_MS {
+                                    if let Some(ctx) = &context {
+                                        let _ = ctx.event_tx.send(AgentEvent::LogDelta {
+                                            id: ctx.tool_use_id.clone(),
+                                            name: "bash".to_string(),
+                                            log: std::mem::take(&mut pending_stdout),
+                                            stream: "stdout".to_string(),
+                                        }).await;
+                                    }
+                                    last_flush = Instant::now();
+                                }
+                            }
+                            Ok(None) => stdout_done = true,
+                            Err(e) => {
+                                stderr_buf.push_str(&format!("Error reading stdout: {}\n", e));
+                                stdout_done = true;
+                            }
+                        }
+                    }
+                    line = stderr_reader.next_line(), if !stderr_done => {
+                        match line {
+                            Ok(Some(line)) => {
+                                pending_stderr.push_str(&line);
+                                pending_stderr.push('\n');
+                                stderr_buf.push_str(&line);
+                                stderr_buf.push('\n');
+
+                                if last_flush.elapsed().as_millis() >= LOG_FLUSH_INTERVAL_MS {
+                                    if let Some(ctx) = &context {
+                                        let _ = ctx.event_tx.send(AgentEvent::LogDelta {
+                                            id: ctx.tool_use_id.clone(),
+                                            name: "bash".to_string(),
+                                            log: std::mem::take(&mut pending_stderr),
+                                            stream: "stderr".to_string(),
+                                        }).await;
+                                    }
+                                    last_flush = Instant::now();
+                                }
+                            }
+                            Ok(None) => stderr_done = true,
+                            Err(e) => {
+                                stderr_buf.push_str(&format!("Error reading stderr: {}\n", e));
+                                stderr_done = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Final flush
+            if !pending_stdout.is_empty() {
+                if let Some(ctx) = &context {
+                    let _ = ctx
+                        .event_tx
+                        .send(AgentEvent::LogDelta {
+                            id: ctx.tool_use_id.clone(),
+                            name: "bash".to_string(),
+                            log: pending_stdout,
+                            stream: "stdout".to_string(),
+                        })
+                        .await;
+                }
+            }
+            if !pending_stderr.is_empty() {
+                if let Some(ctx) = &context {
+                    let _ = ctx
+                        .event_tx
+                        .send(AgentEvent::LogDelta {
+                            id: ctx.tool_use_id.clone(),
+                            name: "bash".to_string(),
+                            log: pending_stderr,
+                            stream: "stderr".to_string(),
+                        })
+                        .await;
+                }
+            }
+
+            child.wait().await
+        };
+
+        match timeout(Duration::from_millis(timeout_ms), read_fut).await {
+            Ok(Ok(status)) => {
+                let exit_code = status.code().unwrap_or(-1);
                 let content = format!(
                     "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
                     exit_code,
-                    truncate(&stdout, 100_000),
-                    truncate(&stderr, 10_000)
+                    truncate(&stdout_buf, 100_000),
+                    truncate(&stderr_buf, 10_000)
                 );
-
                 Ok(ToolOutput {
                     content,
-                    is_error: !output.status.success(),
+                    is_error: !status.success(),
                 })
             }
             Ok(Err(e)) => Ok(ToolOutput {
                 content: format!("Failed to execute command: {}", e),
                 is_error: true,
             }),
-            Err(_) => Ok(ToolOutput {
-                content: format!("Command timed out after {}ms", timeout_ms),
-                is_error: true,
-            }),
+            Err(_) => {
+                let _ = child.kill().await;
+                let content = format!(
+                    "Command timed out after {}ms\nstdout so far:\n{}\nstderr so far:\n{}",
+                    timeout_ms,
+                    truncate(&stdout_buf, 100_000),
+                    truncate(&stderr_buf, 10_000)
+                );
+                warn!("{content}");
+                Ok(ToolOutput {
+                    content,
+                    is_error: true,
+                })
+            }
         }
     }
 }
@@ -251,7 +394,7 @@ mod tests {
             "command": "echo hello",
             "timeout_ms": 5000
         });
-        let result = tool.execute(input).await.unwrap();
+        let result = tool.execute(input, None).await.unwrap();
         assert!(result.content.contains("hello"));
         assert!(!result.is_error);
     }

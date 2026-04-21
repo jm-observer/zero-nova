@@ -2,7 +2,7 @@
 use clap::Parser;
 use sysinfo::{Pid, System};
 use zero_nova::gateway::start_server;
-use zero_nova::provider::anthropic::AnthropicClient;
+use zero_nova::provider::openai_compat::OpenAiCompatClient;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -15,9 +15,9 @@ struct Args {
     #[arg(long, default_value_t = 9090)]
     port: u16,
 
-    /// Model name
-    #[arg(long, default_value = "gpt-oss-120b")]
-    model: String,
+    /// Model name, default_value = "gpt-oss-120b"
+    #[arg(long)]
+    model: Option<String>,
 
     /// Max tokens
     #[arg(long, default_value_t = 8192)]
@@ -30,6 +30,9 @@ struct Args {
     /// Parent PID for lifecycle management
     #[arg(long)]
     parent_pid: Option<u32>,
+    /// Optional workspace directory for config and prompts
+    #[arg(long)]
+    workspace: Option<String>,
 }
 
 #[tokio::main]
@@ -37,34 +40,43 @@ async fn main() -> anyhow::Result<()> {
     // Initialize logger
     let _ = custom_utils::logger::logger_feature("nova-gateway", "debug", log::LevelFilter::Debug, false).build();
 
-    log::info!(
-        "Current working directory: {:?}",
-        std::env::current_dir().unwrap_or_else(|e| std::path::PathBuf::from(e.to_string()))
-    );
-    log::info!(
-        "Attempting to load config from: {:?}",
-        std::env::current_dir().unwrap_or_default().join("config.toml")
-    );
-
     let _args = Args::parse();
 
-    let mut config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
-        log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
+    let workspace = custom_utils::args::workspace(&_args.workspace, ".nova")?;
+
+    log::info!("Working directory: {:?}", std::env::current_dir().unwrap_or_default());
+    log::info!("Workspace directory: {:?}", workspace);
+
+    let config_path = workspace.join("config.toml");
+    log::info!("Attempting to load config from: {:?}", config_path);
+
+    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path).unwrap_or_else(|e| {
+        log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
         zero_nova::config::AppConfig::default()
     });
 
     config.gateway.host = _args.host;
     config.gateway.port = _args.port;
+    if let Some(model) = _args.model {
+        config.llm.model_config.model = model;
+    }
+
+    config.llm.model_config.max_tokens = _args.max_tokens;
+
+    if let Some(base_url) = _args.base_url {
+        config.llm.base_url = base_url;
+    }
 
     log::info!("Starting Nova Gateway {config:?}...");
 
     // Initialize client (using Anthropic as default for now)
-    let client = AnthropicClient::from_config(&config.llm);
+    // let client = OpenAiCompatClient::from_config(&config.llm);
+    let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
 
     // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {
         // Task 1: Run the server
-        res = start_server(config, client) => {
+        res = start_server(config, client, workspace) => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

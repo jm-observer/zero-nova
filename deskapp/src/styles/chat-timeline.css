@@ -1,0 +1,71 @@
+.chat-minimap {
+  position: absolute;
+  right: 12px;
+  top: 100px;
+  bottom: 80px; /* 避开输入框的高度 */
+  width: 24px;
+  z-index: 50;
+  pointer-events: none; /* 让主体不阻挡点击 */
+}
+
+/* 轨道背景 - 外边的那条线 */
+.chat-minimap-track {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--border-color, #e5e7eb);
+  transition: background-color 0.3s ease;
+  border-radius: 2px;
+}
+
+/* 当整个对话因为 tool 执行产生错误（exit_code !== 0）而将主线变成红色 */
+.chat-minimap.has-error .chat-minimap-track {
+  background-color: var(--error-color, #ef4444);
+}
+
+.chat-minimap-markers {
+  position: absolute;
+  inset: 0;
+}
+
+/* 标记的基准点 */
+.chat-minimap-marker {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: auto; /* 允许点击本身 */
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+/* 用户的圆圈 */
+.chat-minimap-marker.user {
+  width: 14px;
+  height: 14px;
+  background-color: var(--primary-color, #6366f1);
+  border: 2px solid var(--bg-color, #ffffff);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.chat-minimap-marker.user:hover {
+  transform: translate(-50%, -50%) scale(1.3);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+/* Tool 调用出错时的点 */
+.chat-minimap-marker.tool-error {
+  width: 10px;
+  height: 10px;
+  background-color: var(--error-color, #ef4444);
+  border: 2px solid var(--bg-color, #ffffff);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.4);
+}
+
+.chat-minimap-marker.tool-error:hover {
+  transform: translate(-50%, -50%) scale(1.5);
+}

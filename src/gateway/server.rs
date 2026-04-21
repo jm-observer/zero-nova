@@ -1,7 +1,7 @@
 use crate::gateway::protocol::{GatewayMessage, MessageEnvelope, WelcomePayload};
 use crate::gateway::router::{handle_message, AppState};
 use futures_util::{SinkExt, StreamExt};
-use log::info;
+use log::{info, trace};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -57,7 +57,7 @@ async fn handle_connection<C: crate::provider::LlmClient + 'static>(
 
     // Read Loop: 接收客户端消息
     while let Some(msg_result) = ws_source.next().await {
-        info!("recv: {:?}", msg_result);
+        trace!("recv: {:?}", msg_result);
         match msg_result {
             Ok(WsMessage::Text(text)) => {
                 match serde_json::from_str::<GatewayMessage>(&text) {

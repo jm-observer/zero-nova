@@ -5,16 +5,22 @@ use crate::provider::{LlmClient, ProviderStreamEvent};
 pub use crate::tool::ToolRegistry;
 use anyhow::Result;
 use futures_util::stream::{FuturesUnordered, StreamExt};
+use serde::Serialize;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone, Serialize)]
+pub struct TurnResult {
+    pub messages: Vec<Message>,
+    pub usage: crate::provider::types::Usage,
+}
+
 /// Runtime for the zero-nova agent.
 pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
-    system_prompt: String,
     config: AgentConfig,
 }
 
@@ -27,13 +33,8 @@ pub struct AgentConfig {
 
 impl<C: LlmClient> AgentRuntime<C> {
     /// Creates a new `AgentRuntime` instance.
-    pub fn new(client: C, tools: ToolRegistry, system_prompt: String, config: AgentConfig) -> Self {
-        Self {
-            client,
-            tools,
-            system_prompt,
-            config,
-        }
+    pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
+        Self { client, tools, config }
     }
 
     /// Sets the tool registry for this runtime.
@@ -44,11 +45,6 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// Registers a new tool with the registry.
     pub fn register_tool(&mut self, tool: Box<dyn crate::tool::Tool>) {
         self.tools.register(tool);
-    }
-
-    /// Returns a reference to the system prompt string.
-    pub fn system_prompt(&self) -> &str {
-        &self.system_prompt
     }
 
     /// Returns a reference to the tool registry.
@@ -63,8 +59,9 @@ impl<C: LlmClient> AgentRuntime<C> {
         user_input: &str,
         event_tx: mpsc::Sender<crate::event::AgentEvent>,
         cancellation_token: Option<CancellationToken>,
-    ) -> Result<Vec<Message>> {
+    ) -> Result<TurnResult> {
         let mut all_messages = history.to_vec();
+
         // Append initial user message
         all_messages.push(Message {
             role: Role::User,
@@ -80,27 +77,41 @@ impl<C: LlmClient> AgentRuntime<C> {
         for iteration in 0..self.config.max_iterations {
             if let Some(token) = &cancellation_token {
                 if token.is_cancelled() {
-                    return Ok(turn_messages);
+                    return Ok(TurnResult {
+                        messages: turn_messages,
+                        usage: cumulative_usage,
+                    });
                 }
             }
 
-            log::debug!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
-            let tool_defs = self.tools.tool_definitions();
-            log::info!("Starting stream for iteration {}", iteration + 1);
+            let log_msg = format!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
+            log::info!("{}", log_msg);
+            let _ = event_tx
+                .send(crate::event::AgentEvent::Iteration {
+                    current: iteration + 1,
+                    total: self.config.max_iterations,
+                })
+                .await;
 
-            let mut receiver = self
+            let tool_defs = self.tools.tool_definitions();
+
+            let mut receiver = match self
                 .client
-                .stream(
-                    &all_messages,
-                    &self.system_prompt,
-                    &tool_defs[..],
-                    &self.config.model_config,
-                )
+                .stream(&all_messages, &tool_defs[..], &self.config.model_config)
                 .await
-                .inspect_err(|e| log::error!("Failed to start stream: {}", e))?;
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    let err_msg = format!("Failed to start stream: {}", e);
+                    log::error!("{}", err_msg);
+                    let _ = event_tx.send(crate::event::AgentEvent::SystemLog(err_msg)).await;
+                    return Err(e);
+                }
+            };
 
             let mut current_text = String::new();
-            let mut tool_calls = Vec::new(); // (id, name, input_json)
+            let mut current_thinking = String::new();
+            let mut tool_calls: Vec<(String, String, String)> = Vec::new();
             let mut iter_usage = crate::provider::types::Usage::default();
             let mut last_stop_reason: Option<crate::provider::types::StopReason> = None;
 
@@ -111,11 +122,18 @@ impl<C: LlmClient> AgentRuntime<C> {
             {
                 if let Some(token) = &cancellation_token {
                     if token.is_cancelled() {
-                        return Ok(turn_messages);
+                        return Ok(TurnResult {
+                            messages: turn_messages,
+                            usage: cumulative_usage,
+                        });
                     }
                 }
 
                 match event {
+                    ProviderStreamEvent::ThinkingDelta(delta) => {
+                        current_thinking.push_str(&delta);
+                        let _ = event_tx.send(crate::event::AgentEvent::ThinkingDelta(delta)).await;
+                    }
                     ProviderStreamEvent::TextDelta(delta) => {
                         current_text.push_str(&delta);
                         let _ = event_tx.send(crate::event::AgentEvent::TextDelta(delta)).await;
@@ -143,22 +161,35 @@ impl<C: LlmClient> AgentRuntime<C> {
             cumulative_usage.cache_read_input_tokens += iter_usage.cache_read_input_tokens;
 
             let mut current_blocks = Vec::new();
+            if !current_thinking.is_empty() {
+                current_blocks.push(ContentBlock::Thinking {
+                    thinking: current_thinking,
+                });
+            }
             if !current_text.is_empty() {
                 current_blocks.push(ContentBlock::Text { text: current_text });
             }
 
-            for (id, name, input_json) in &tool_calls {
-                let input_val: serde_json::Value = match serde_json::from_str(input_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
-                        serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
-                    }
-                };
+            // Parse tool call JSON once and store the parsed values for reuse
+            let parsed_tool_calls: Vec<(String, String, serde_json::Value)> = tool_calls
+                .into_iter()
+                .map(|(id, name, input_json)| {
+                    let input_val: serde_json::Value = match serde_json::from_str(&input_json) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
+                            serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
+                        }
+                    };
+                    (id, name, input_val)
+                })
+                .collect();
+
+            for (id, name, input_val) in &parsed_tool_calls {
                 current_blocks.push(ContentBlock::ToolUse {
                     id: id.clone(),
                     name: name.clone(),
-                    input: input_val,
+                    input: input_val.clone(),
                 });
             }
 
@@ -171,13 +202,12 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             // 3.4 MaxTokens 自动续写
             if last_stop_reason == Some(crate::provider::types::StopReason::MaxTokens) {
-                let is_truncated = if tool_calls.is_empty() {
+                let is_truncated = if parsed_tool_calls.is_empty() {
                     true
                 } else {
-                    // 检查最后一个 tool call 是否结束
-                    let (_, _, last_json) = tool_calls.last().unwrap();
-                    let trimmed = last_json.trim();
-                    trimmed.is_empty() || !trimmed.ends_with('}')
+                    // 检查最后一个 tool call 的 input 是否为有效 JSON 对象
+                    let (_, _, last_val) = parsed_tool_calls.last().unwrap();
+                    last_val.get("__error").is_some()
                 };
 
                 if is_truncated {
@@ -191,13 +221,10 @@ impl<C: LlmClient> AgentRuntime<C> {
                 }
             }
 
-            if tool_calls.is_empty() {
+            if parsed_tool_calls.is_empty() {
                 completed_naturally = true;
                 let _ = event_tx
-                    .send(crate::event::AgentEvent::TurnComplete {
-                        new_messages: turn_messages.clone(),
-                        usage: cumulative_usage.clone(),
-                    })
+                    .send(crate::event::AgentEvent::TextDelta("".to_string())) // No-op to maintain stream if needed, but we removed TurnComplete
                     .await;
                 break;
             }
@@ -205,16 +232,9 @@ impl<C: LlmClient> AgentRuntime<C> {
             // 3.6 Tool 执行超时 & 3.1 Tool 结果顺序保持
             let mut tool_results_fut = FuturesUnordered::new();
 
-            for (call_idx, (id, name, input_json)) in tool_calls.into_iter().enumerate() {
+            for (call_idx, (id, name, input_val)) in parsed_tool_calls.into_iter().enumerate() {
                 let tool_registry = &self.tools;
                 let tx = event_tx.clone();
-                let input_val: serde_json::Value = match serde_json::from_str(&input_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
-                        serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
-                    }
-                };
                 let tool_timeout_duration = self.config.tool_timeout;
 
                 tool_results_fut.push(async move {
@@ -226,7 +246,18 @@ impl<C: LlmClient> AgentRuntime<C> {
                         })
                         .await;
 
-                    let result = timeout(tool_timeout_duration, tool_registry.execute(&name, input_val)).await;
+                    let result = timeout(
+                        tool_timeout_duration,
+                        tool_registry.execute(
+                            &name,
+                            input_val,
+                            Some(crate::tool::ToolContext {
+                                event_tx: tx.clone(),
+                                tool_use_id: id.clone(),
+                            }),
+                        ),
+                    )
+                    .await;
 
                     let (content, is_error) = match result {
                         Ok(Ok(out)) => (out.content, out.is_error),
@@ -258,7 +289,10 @@ impl<C: LlmClient> AgentRuntime<C> {
             while let Some(res) = tool_results_fut.next().await {
                 if let Some(token) = &cancellation_token {
                     if token.is_cancelled() {
-                        return Ok(turn_messages);
+                        return Ok(TurnResult {
+                            messages: turn_messages,
+                            usage: cumulative_usage,
+                        });
                     }
                 }
                 indexed_results.push(res);
@@ -289,6 +323,9 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .await;
         }
 
-        Ok(turn_messages)
+        Ok(TurnResult {
+            messages: turn_messages,
+            usage: cumulative_usage,
+        })
     }
 }

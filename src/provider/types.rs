@@ -14,6 +14,21 @@ pub struct MessageRequest {
     pub system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDefinition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub kind: ThinkingMode,
+    pub budget_tokens: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingMode {
+    Enabled,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,6 +43,9 @@ pub enum InputContentBlock {
     Text {
         text: String,
     },
+    Thinking {
+        thinking: String,
+    },
     /// Tool usage block, containing tool ID, name, and input.
     ToolUse {
         id: String,
@@ -37,7 +55,7 @@ pub enum InputContentBlock {
     /// Tool result block, containing the result output and error flag.
     ToolResult {
         tool_use_id: String,
-        #[serde(alias = "content", default)]
+        #[serde(rename = "content")]
         output: String,
         #[serde(default)]
         is_error: bool,

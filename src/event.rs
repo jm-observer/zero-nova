@@ -1,12 +1,13 @@
 use crate::message::Message;
 use crate::provider::types::Usage;
-use anyhow::Error;
 
-#[derive(Debug)]
-/// Turn complete event, containing new messages and usage information.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// Agent events emitted during a turn.
 pub enum AgentEvent {
     /// Text delta emitted by the LLM.
     TextDelta(String),
+    /// Thinking delta emitted by the LLM.
+    ThinkingDelta(String),
     /// Tool invocation start event.
     ToolStart {
         id: String,
@@ -25,5 +26,20 @@ pub enum AgentEvent {
     /// Agent reached the maximum number of iterations.
     IterationLimitReached { iterations: usize },
     /// Generic error event.
-    Error(Error),
+    Error(String),
+    /// Agent working iteration info
+    Iteration { current: usize, total: usize },
+    /// System-level logs (e.g. Iteration progress, internal errors)
+    SystemLog(String),
+    /// Tool execution process streaming output (e.g., bash stdout/stderr)
+    LogDelta {
+        /// Corresponds to tool_use_id in ToolStart
+        id: String,
+        /// Tool name
+        name: String,
+        /// Log content (one or multiple aggregated lines)
+        log: String,
+        /// Source stream: "stdout" | "stderr"
+        stream: String,
+    },
 }

@@ -1,0 +1,112 @@
+[llm]
+# LLM 服务的 API Key
+api_key = "your-anthropic-key"
+# 模型服务的 Base URL，默认为 Anthropic 官方地址
+#base_url = "http://192.168.0.68:12340/v1"
+base_url = "http://127.0.0.1:8082/v1"
+# 使用的模型名称
+model = "google/gemma-4-26B-A4B-it"
+# 最大输出 Token 数
+max_tokens = 8192
+# 生成随机性 (0.0 到 1.0)
+temperature = 0.7
+# 核采样参数 (0.0 到 1.0)
+top_p = 1.0
+# 开启 Thinking/Reasoning 模式 (Gemma 4, DeepSeek R1 等)
+thinking_budget = 4096
+# Anthropic 系：thinking_budget = 4000
+# OpenAI 系：reasoning_effort = "medium"
+
+[search]
+backend = "tavily"
+tavily_api_key = "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"
+
+[tool.bash]
+# 默认 shell。Windows 下可选 "pwsh", "powershell", "cmd"；Unix 下可选 "sh", "bash"
+shell = "pwsh"
+
+[gateway]
+# 网关监听地址
+host = "127.0.0.1"
+# 网关监听端口
+port = 9090
+# 代理最大思考轮数 (防止死循环)
+max_iterations = 30
+# 工具执行超时时间 (秒)
+tool_timeout_secs = 120
+
+# ── TurnRouter 配置 ──────────────────────────────────────────────
+[gateway.router]
+# 意图分类是否启用 LLM 辅助（false 则纯规则匹配）
+use_llm_classification = false
+
+# ── Agent 注册 ───────────────────────────────────────────────────
+# 使用 [[gateway.agents]] 数组表，每个条目定义一个 Agent。
+# 第一个 Agent 为默认活跃 Agent。
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "默认通用助手，负责日常问答与任务分发"
+aliases = ["小助手", "助手"]
+
+[[gateway.agents]]
+id = "openclaw"
+display_name = "OpenClaw"
+description = "擅长编写代码与系统部署的资深架构师"
+aliases = ["oc", "claw", "架构师"]
+
+# ── 挂起交互配置 ─────────────────────────────────────────────────
+[gateway.interaction]
+# 等待用户确认/选择的默认超时时间 (秒)
+default_ttl_seconds = 300
+# 超时后的行为："cancel" 自动取消挂起交互 | "keep" 保持挂起直到用户回应
+timeout_action = "cancel"
+
+# 风险等级确认策略
+[gateway.interaction.risk]
+# Low: 自然语言确认即可通过，支持前端自动接受
+low_min_confidence = 0.6
+# Medium: 要求明确正向确认，模糊回复应追问
+medium_min_confidence = 0.8
+# High: 低置信度时要求二次确认
+high_min_confidence = 0.9
+# High 风险动作是否强制在确认前回显操作摘要
+high_require_summary = true
+
+# ── 历史记录裁剪配置 ─────────────────────────────────────────────
+[gateway.trimmer]
+# 历史记录最大 Token 数 (估算值)
+max_history_tokens = 50000
+# 即使超过长度，也强制保留的最近消息条数
+preserve_recent = 10
+# 裁剪时是否必须保留完整的 tool_use 和 tool_result 对
+preserve_tool_pairs = true
+
+# ── Workflow 配置 ────────────────────────────────────────────────
+[gateway.workflow]
+# 当前仅支持 SolutionWorkflow，后续可扩展
+enabled_types = ["solution"]
+# 单个 workflow 最大存活时间 (秒)，超时后自动标记为过期并清除
+max_lifetime_seconds = 3600
+# 搜索候选方案的最大数量
+max_candidates = 5
+
+
+# ========================
+# 远程访问配置
+# ========================
+[remote]
+enabled = true
+port = 18801
+
+# ========================
+# Sidecar 配置 (AI Engine)
+# ========================
+[sidecar]
+#mode = "auto"
+mode = "manual"
+name = "Built-in Gateway"
+command = "D:\\git\\zero-nova\\target\\debug\\nova_gateway.exe"
+args = []
+port_arg = "--port"

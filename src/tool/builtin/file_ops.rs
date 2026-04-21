@@ -6,7 +6,15 @@ use std::path::Path;
 use tokio::fs;
 
 /// Tool to read file contents.
-pub struct ReadFileTool;
+pub struct ReadFileTool {
+    pub root_dir: Option<std::path::PathBuf>,
+}
+
+impl ReadFileTool {
+    pub fn new(root_dir: Option<std::path::PathBuf>) -> Self {
+        Self { root_dir }
+    }
+}
 
 #[async_trait]
 /// Implementation of the `Tool` trait for reading files.
@@ -29,7 +37,7 @@ impl Tool for ReadFileTool {
     }
 
     /// Executes the file operation based on the provided input.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let path_str = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'path' field"))?;
@@ -41,6 +49,17 @@ impl Tool for ReadFileTool {
                 content: format!("File not found: {}", path_str),
                 is_error: true,
             });
+        }
+
+        // Path validation for subagents
+        if let Some(root) = &self.root_dir {
+            let full_path = std::fs::canonicalize(path_str).unwrap_or_else(|_| std::path::PathBuf::from(path_str));
+            if !full_path.starts_with(root) {
+                return Ok(ToolOutput {
+                    content: "Access denied: path is outside of allowed workspace".to_string(),
+                    is_error: true,
+                });
+            }
         }
 
         match fs::read_to_string(path_str).await {
@@ -77,7 +96,15 @@ impl Tool for ReadFileTool {
 }
 
 /// Tool to write content to a file.
-pub struct WriteFileTool;
+pub struct WriteFileTool {
+    pub root_dir: Option<std::path::PathBuf>,
+}
+
+impl WriteFileTool {
+    pub fn new(root_dir: Option<std::path::PathBuf>) -> Self {
+        Self { root_dir }
+    }
+}
 
 #[async_trait]
 /// Implementation of the `Tool` trait for writing files.
@@ -99,13 +126,36 @@ impl Tool for WriteFileTool {
     }
 
     /// Executes the file operation based on the provided input.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let path_str = input["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'path' field"))?;
         let content = input["content"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'content' field"))?;
+
+        // Path validation for subagents
+        if let Some(root) = &self.root_dir {
+            let p = Path::new(path_str);
+            if p.is_absolute() {
+                if !p.starts_with(root) {
+                    return Ok(ToolOutput {
+                        content: "Access denied: absolute path is outside of allowed workspace".to_string(),
+                        is_error: true,
+                    });
+                }
+            } else {
+                // For relative paths, we ensure it's within root by joining
+                let _full_path = root.join(p);
+                // Basic directory traversal protection
+                if p.to_string_lossy().contains("..") {
+                    return Ok(ToolOutput {
+                        content: "Access denied: directory traversal detected".to_string(),
+                        is_error: true,
+                    });
+                }
+            }
+        }
 
         match fs::write(path_str, content).await {
             Ok(_) => Ok(ToolOutput {

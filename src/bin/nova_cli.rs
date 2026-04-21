@@ -1,7 +1,6 @@
 //! CLI for zero-nova library
 
 use anyhow::Result;
-use chrono::Local;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use rustyline::history::FileHistory;
@@ -14,18 +13,21 @@ use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
 use zero_nova::provider::LlmClient;
-
+use zero_nova::provider::openai_compat::OpenAiCompatClient;
 use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
 struct Cli {
     /// Model name
-    #[arg(long, default_value = "gpt-oss-120b", global = true)]
-    model: String,
+    #[arg(long, global = true)]
+    model: Option<String>,
     /// Optional custom base URL for the LLM provider
     #[arg(long, global = true)]
     base_url: Option<String>,
+    /// Optional workspace directory for config and prompts
+    #[arg(long, global = true)]
+    workspace: Option<String>,
     /// Verbose output (show tool inputs/outputs)
     #[arg(long, global = true)]
     verbose: bool,
@@ -41,6 +43,9 @@ enum Command {
     Run {
         /// Prompt to execute
         prompt: String,
+        /// Output result as JSON (for scripting)
+        #[arg(long)]
+        json: bool,
     },
     /// List registered tools
     Tools,
@@ -58,23 +63,31 @@ async fn main() -> Result<()> {
     let _ =
         custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
-    let config = zero_nova::config::AppConfig::load_from_file("config.toml").unwrap_or_else(|e| {
-        log::warn!("Failed to load config.toml: {}. Using default configuration.", e);
-        zero_nova::config::AppConfig::default()
-    });
+    let workspace = custom_utils::args::workspace(&cli.workspace, ".nova")?;
+    let config_path = workspace.join("config.toml");
 
+    let mut config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
+        .unwrap_or_else(|e| {
+            log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
+            zero_nova::config::AppConfig::default()
+        });
+
+    if let Some(model) = &cli.model {
+        config.llm.model_config.model = model.to_string();
+    }
+    if let Some(base_url) = &cli.base_url {
+        config.llm.base_url = base_url.to_string();
+    }
     log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
 
-    let client = zero_nova::provider::anthropic::AnthropicClient::from_config(&config.llm);
+    let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
     let mut tools = ToolRegistry::new();
     register_builtin_tools(&mut tools, &config);
 
     // Build system prompt including loaded tools and environment information
-    let prompt = SystemPromptBuilder::personal_assistant()
-        .with_tools(&tools)
-        .environment("date", current_date())
-        .environment("platform", std::env::consts::OS)
-        .build();
+    let prompt_builder = SystemPromptBuilder::new();
+
+    let system_prompt_str = prompt_builder.with_tools(&tools).build();
 
     let agent_config = AgentConfig {
         max_iterations: 5,
@@ -82,11 +95,20 @@ async fn main() -> Result<()> {
         tool_timeout: std::time::Duration::from_secs(120),
     };
 
-    let mut agent = AgentRuntime::new(client, tools, prompt, agent_config);
+    // Load Skills from .nova/skills
+    let skill_dir = workspace.join(".nova").join("skills");
+    let mut skill_registry = zero_nova::skill::SkillRegistry::new();
+    if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
+        log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+    }
+    let skill_prompt = skill_registry.generate_system_prompt();
+    let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
+
+    let mut agent = AgentRuntime::new(client, tools, agent_config);
 
     match cli.command {
-        Command::Chat => run_repl(&mut agent, cli.verbose).await?,
-        Command::Run { prompt } => run_oneshot(&agent, &prompt, cli.verbose).await?,
+        Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose).await?,
+        Command::Run { prompt, json } => run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, json).await?,
         Command::Tools => {
             print_tools(&agent);
         }
@@ -96,9 +118,20 @@ async fn main() -> Result<()> {
 }
 
 /// Runs the REPL loop for interactive chat.
-async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Result<()> {
+async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, system_prompt: &str, verbose: bool) -> Result<()> {
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
+
+    // Initialize history with system prompt
+    if !system_prompt.is_empty() {
+        history.push(Message {
+            role: zero_nova::message::Role::System,
+            content: vec![zero_nova::message::ContentBlock::Text {
+                text: system_prompt.to_string(),
+            }],
+        });
+    }
+
     while let Ok(line) = rl.readline("you> ") {
         let input = line.trim();
         if input.is_empty() {
@@ -111,7 +144,7 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                 println!("  /quit     - Exit the CLI");
                 println!("  /help     - Show this help message");
                 println!("  /tools    - List all registered tools");
-                println!("  /clear    - Clear conversation history");
+                println!("  /clear    - Clear conversation history (keeps system prompt)");
                 println!("  /history  - Show conversation history stats");
                 println!("  /prompt   - Show current system prompt");
                 continue;
@@ -121,8 +154,16 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
                 continue;
             }
             "/clear" => {
+                // Keep the first system message if it exists
+                let system_msg = history
+                    .first()
+                    .cloned()
+                    .filter(|m| m.role == zero_nova::message::Role::System);
                 history.clear();
-                println!("{}", "Conversation history cleared.".green());
+                if let Some(msg) = system_msg {
+                    history.push(msg);
+                }
+                println!("{}", "Conversation history cleared (system prompt preserved).".green());
                 continue;
             }
             "/history" => {
@@ -134,13 +175,20 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
             }
             "/prompt" => {
                 println!("{}", "--- System Prompt ---".bright_black());
-                println!("{}", agent.system_prompt());
+                if let Some(msg) = history.first().filter(|m| m.role == zero_nova::message::Role::System) {
+                    for block in &msg.content {
+                        if let zero_nova::message::ContentBlock::Text { text } = block {
+                            println!("{}", text);
+                        }
+                    }
+                } else {
+                    println!("(No system prompt set)");
+                }
                 println!("{}", "---------------------".bright_black());
                 continue;
             }
             _ => {
                 let (tx, mut rx) = mpsc::channel(100);
-                // Spawn a task to render events as they arrive
                 let printer = tokio::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         render_event(&event, verbose);
@@ -149,13 +197,18 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
 
                 tokio::select! {
                     result = agent.run_turn(&history, input, tx.clone(), None) => {
-                        let msgs = result?;
                         drop(tx);
                         printer.await.ok();
-                        // Ensure a newline separates output from next prompt
-                        println!();
-                        for msg in msgs {
-                            history.push(msg);
+                        match result {
+                            Ok(turn_result) => {
+                                println!();
+                                for msg in turn_result.messages {
+                                    history.push(msg);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("\n{}", format!("[error] {}", e).red());
+                            }
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {
@@ -170,16 +223,46 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, verbose: bool) -> Re
 }
 
 /// Executes a one-shot interaction with the given prompt.
-async fn run_oneshot(agent: &AgentRuntime<impl LlmClient>, prompt: &str, verbose: bool) -> Result<()> {
+async fn run_oneshot(
+    agent: &AgentRuntime<impl LlmClient>,
+    system_prompt: &str,
+    user_input: &str,
+    verbose: bool,
+    json: bool,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::channel(100);
-    let printer = tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            render_event(&event, verbose);
-        }
-    });
-    let _ = agent.run_turn(&[], prompt, tx.clone(), None).await?;
+
+    // Only spawn printer if NOT in JSON mode
+    let printer = if !json {
+        Some(tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                render_event(&event, verbose);
+            }
+        }))
+    } else {
+        None
+    };
+
+    let mut history = Vec::new();
+    if !system_prompt.is_empty() {
+        history.push(Message {
+            role: zero_nova::message::Role::System,
+            content: vec![zero_nova::message::ContentBlock::Text {
+                text: system_prompt.to_string(),
+            }],
+        });
+    }
+
+    let result = agent.run_turn(&history, user_input, tx.clone(), None).await?;
     drop(tx);
-    printer.await.ok();
+    if let Some(p) = printer {
+        p.await.ok();
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
+
     Ok(())
 }
 
@@ -248,9 +331,27 @@ fn render_event(event: &AgentEvent, verbose: bool) {
         AgentEvent::Error(e) => {
             eprintln!("\n{}", format!("[error] {e}").red().bold());
         }
+        AgentEvent::ThinkingDelta(text) => {
+            print!("{text}");
+            let _ = std::io::stdout().flush();
+        }
+        AgentEvent::LogDelta { log, stream, .. } => {
+            if stream == "stderr" {
+                print!("{}", log.bright_red());
+            } else {
+                print!("{}", log.bright_black());
+            }
+            let _ = std::io::stdout().flush();
+        }
+        AgentEvent::Iteration { current, total } => {
+            if verbose {
+                println!("\n{}", format!("[iteration {}/{}]", current, total).bright_black());
+            }
+        }
+        AgentEvent::SystemLog(log) => {
+            if verbose {
+                println!("\n{}", format!("[system: {}]", log).bright_black());
+            }
+        }
     }
-}
-
-fn current_date() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }

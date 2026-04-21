@@ -45,6 +45,8 @@ pub enum MessageEnvelope {
     Chat(ChatPayload),
     #[serde(rename = "chat.stop")]
     ChatStop(SessionIdPayload),
+    #[serde(rename = "chat.stop.response")]
+    ChatStopResponse(SessionIdPayload),
     #[serde(rename = "sessions.list")]
     SessionsList,
     #[serde(rename = "sessions.list.response")]
@@ -69,14 +71,26 @@ pub enum MessageEnvelope {
     SessionsArtifacts(SessionIdPayload),
     #[serde(rename = "sessions.artifacts.response")]
     SessionsArtifactsResponse(ArtifactListResponse),
+    #[serde(rename = "sessions.copy")]
+    SessionsCopy(SessionCopyRequest),
+    #[serde(rename = "sessions.copy.response")]
+    SessionsCopyResponse(SessionCreateResponse),
 
     // --- 3.1 Progress & Chat Events ---
     #[serde(rename = "chat.start")]
     ChatStart(SessionIdPayload),
+    #[serde(rename = "chat.intent")]
+    ChatIntent(ChatIntentPayload),
     #[serde(rename = "chat.progress")]
     ChatProgress(ProgressEvent),
     #[serde(rename = "chat.complete")]
     ChatComplete(ChatCompletePayload),
+
+    // --- Interaction Events ---
+    #[serde(rename = "interaction.request")]
+    InteractionRequest(InteractionRequestPayload),
+    #[serde(rename = "interaction.resolved")]
+    InteractionResolved(InteractionResolvedPayload),
 
     // --- 2.2 Agent Management ---
     #[serde(rename = "agents.list")]
@@ -110,7 +124,11 @@ pub enum MessageEnvelope {
     #[serde(rename = "config.get")]
     ConfigGet,
     #[serde(rename = "config.get.response")]
-    ConfigGetResponse(Value),
+    ConfigGetResponse(serde_json::Value),
+    #[serde(rename = "config.update")]
+    ConfigUpdate(serde_json::Value),
+    #[serde(rename = "config.update.response")]
+    ConfigUpdateResponse(SuccessResponse),
     #[serde(rename = "config.get-llm-source")]
     ConfigGetLlmSource,
     #[serde(rename = "config.get-llm-source.response")]
@@ -185,6 +203,32 @@ pub struct LanguageUpdatePayload {
     pub language: String,
 }
 
+// --- Interaction protocol structs ---
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionOptionDTO {
+    pub id: String,
+    pub label: String,
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionRequestPayload {
+    pub session_id: String,
+    pub interaction_id: String,
+    pub kind: String, // "approve" | "select" | "input"
+    pub subject: String,
+    pub prompt: String,
+    pub options: Vec<InteractionOptionDTO>,
+    pub risk_level: String, // "low" | "medium" | "high"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InteractionResolvedPayload {
+    pub session_id: String,
+    pub interaction_id: String,
+    pub result: String, // "approved" | "rejected" | "selected" | "input" | "expired"
+}
+
 // --- Payload Definitions ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -207,15 +251,31 @@ pub struct ChatPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ProgressEvent {
     #[serde(rename = "type")]
-    pub kind: String, // 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete'
+    pub kind: String, // 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'tool_log'
     pub session_id: Option<String>,
     pub iteration: Option<i32>,
-    pub tool: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_use_id: Option<String>,
     pub args: Option<Value>,
     pub result: Option<Value>,
+    pub is_error: Option<bool>,
     pub thinking: Option<String>,
     pub token: Option<String>,
     pub output: Option<String>,
+    /// 日志内容（仅 kind=”tool_log” 时有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log: Option<String>,
+    /// 日志来源流: “stdout” | “stderr”（仅 kind=”tool_log” 时有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatIntentPayload {
+    pub session_id: String,
+    pub intent: String,
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -237,7 +297,7 @@ pub struct ErrorPayload {
 #[serde(rename_all = "camelCase")]
 pub struct SessionCreateRequest {
     pub title: Option<String>,
-    pub agent_id: Option<String>,
+    pub agent_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -255,6 +315,13 @@ pub struct AgentCreateRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SessionIdPayload {
     pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCopyRequest {
+    pub session_id: String,
+    pub index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -297,7 +364,7 @@ pub struct SessionsListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsMessagesResponse {
-    pub messages: Vec<Value>,
+    pub messages: Vec<MessageDTO>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -329,6 +396,36 @@ pub struct Session {
     pub agent_id: String,
     pub created_at: i64,
     pub updated_at: i64,
+    pub message_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageDTO {
+    pub role: String,
+    pub content: Vec<ContentBlockDTO>,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ContentBlockDTO {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

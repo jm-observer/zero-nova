@@ -10,6 +10,7 @@ pub mod mcp;
 pub mod message;
 pub mod prompt;
 pub mod provider;
+pub mod skill;
 pub mod tool;
 
 #[cfg(feature = "gateway")]

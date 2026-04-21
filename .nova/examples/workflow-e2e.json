@@ -1,0 +1,127 @@
+{
+  "_comment": "SolutionWorkflow 端到端测试场景，模拟 TTS 方案搜索部署的完整流程",
+
+  "scenario": "TTS 方案搜索与部署",
+  "workflow_type": "Solution",
+  "topic": "tts",
+
+  "steps": [
+    {
+      "step": 1,
+      "user_input": "我想要一个 TTS 方案",
+      "before_state": { "workflow": null, "pending_interaction": null },
+      "expected_turn_intent": "StartNewTask",
+      "expected_after_state": {
+        "workflow_stage": "GatherRequirements",
+        "pending_interaction_kind": "Input"
+      },
+      "expected_system_output_contains": ["环境", "GPU", "需求"]
+    },
+    {
+      "step": 2,
+      "user_input": "本地部署，有 GPU，Ubuntu，优先中文效果",
+      "before_state": { "workflow_stage": "GatherRequirements", "pending_interaction_kind": "Input" },
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "ProvideInput" },
+      "expected_after_state": {
+        "workflow_stage": "AwaitSelection",
+        "pending_interaction_kind": "Select",
+        "constraints_updated": true,
+        "candidates_count_gte": 2
+      },
+      "expected_system_output_contains": ["方案", "对比", "选择"]
+    },
+    {
+      "step": 3,
+      "user_input": "第二个",
+      "before_state": { "workflow_stage": "AwaitSelection", "pending_interaction_kind": "Select" },
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "Select", "selected_option_id": "c2" },
+      "expected_after_state": {
+        "workflow_stage": "AwaitExecutionConfirm",
+        "pending_interaction_kind": "Approve",
+        "pending_interaction_risk_level": "High",
+        "selected_candidate": "c2"
+      },
+      "expected_system_output_contains": ["部署", "确认", "端口"]
+    },
+    {
+      "step": 4,
+      "user_input": "可以，继续部署",
+      "before_state": { "workflow_stage": "AwaitExecutionConfirm", "pending_interaction_kind": "Approve" },
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "Approve", "min_confidence": 0.9 },
+      "expected_after_state": {
+        "workflow_stage": "Executing",
+        "pending_interaction": null
+      },
+      "expected_system_output_contains": ["执行", "部署"]
+    },
+    {
+      "step": 5,
+      "description": "部署完成，系统自动推进",
+      "user_input": null,
+      "before_state": { "workflow_stage": "Executing" },
+      "expected_after_state": {
+        "workflow_stage": "AwaitTestInput",
+        "pending_interaction_kind": "Input"
+      },
+      "expected_system_output_contains": ["完成", "测试"]
+    },
+    {
+      "step": 6,
+      "user_input": "用这段文字测试：你好世界，欢迎使用 TTS 服务",
+      "before_state": { "workflow_stage": "AwaitTestInput", "pending_interaction_kind": "Input" },
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "ProvideInput" },
+      "expected_after_state": {
+        "workflow_stage": "Testing",
+        "pending_interaction": null
+      }
+    },
+    {
+      "step": 7,
+      "description": "测试完成，系统自动推进",
+      "user_input": null,
+      "before_state": { "workflow_stage": "Testing" },
+      "expected_after_state": {
+        "workflow_stage": "Completed"
+      },
+      "expected_system_output_contains": ["完成", "配置"]
+    }
+  ],
+
+  "edge_cases": [
+    {
+      "name": "选择阶段用户要求重新搜索",
+      "at_step": 3,
+      "user_input": "这些都不太满意，能再搜搜别的吗",
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "Reject" },
+      "expected_after_state": { "workflow_stage": "GatherRequirements" }
+    },
+    {
+      "name": "执行确认阶段用户拒绝",
+      "at_step": 4,
+      "user_input": "先不要，我再想想",
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "Reject" },
+      "expected_after_state": { "workflow_stage": "AwaitSelection" }
+    },
+    {
+      "name": "流程中途用户放弃",
+      "at_step": 3,
+      "user_input": "算了，我不需要 TTS 了",
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "expected_resolution": { "intent": "Reject" },
+      "expected_after_state": { "workflow": null, "pending_interaction": null }
+    },
+    {
+      "name": "流程中途切换 Agent",
+      "at_step": 3,
+      "user_input": "让 OpenClaw 来处理这个选择",
+      "expected_turn_intent": "ResolvePendingInteraction",
+      "note": "挂起交互优先级高于 Agent 点名，但 runtime 应识别这不是有效的选择回应，可能需要特殊处理"
+    }
+  ]
+}

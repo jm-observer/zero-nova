@@ -53,7 +53,7 @@ impl Tool for WebFetchTool {
     }
 
     /// Executes the web fetch based on input parameters.
-    async fn execute(&self, input: Value) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
         let url = input["url"].as_str().ok_or_else(|| anyhow!("Missing 'url' field"))?;
         let selector_str = input["selector"].as_str().unwrap_or("body");
 

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 /// Role of a message sender (User or Assistant).
 pub enum Role {
+    System,
     User,
     Assistant,
 }
@@ -13,6 +14,8 @@ pub enum Role {
 pub enum ContentBlock {
     /// Text block.
     Text { text: String },
+    /// Thinking block, containing the reasoning process.
+    Thinking { thinking: String },
     /// Tool usage block, containing tool ID, name, and input.
     ToolUse {
         id: String,

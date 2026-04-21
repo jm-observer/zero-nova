@@ -25,7 +25,8 @@ pub struct LlmConfig {
 }
 
 fn default_base_url() -> String {
-    "https://api.anthropic.com".to_string()
+    // "http://192.168.0.68:12340/v1".to_string()
+    "http://127.0.0.1:8082/v1".to_string()
 }
 
 impl Default for LlmConfig {
@@ -38,6 +39,8 @@ impl Default for LlmConfig {
                 max_tokens: 8192,
                 temperature: None,
                 top_p: None,
+                thinking_budget: None,
+                reasoning_effort: None,
             },
         }
     }
@@ -59,6 +62,17 @@ pub struct ToolConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AgentConfig {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub aliases: Vec<String>,
+    pub system_prompt_template: Option<String>,
+    pub tool_whitelist: Option<Vec<String>>,
+    pub model_config: Option<crate::gateway::agents::ModelConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct BashConfig {
     pub shell: Option<String>,
 }
@@ -73,6 +87,10 @@ pub struct GatewayConfig {
     pub max_iterations: usize,
     #[serde(default)]
     pub tool_timeout_secs: Option<u64>,
+    #[serde(default = "default_subagent_timeout")]
+    pub subagent_timeout_secs: u64,
+    #[serde(default)]
+    pub agents: Vec<AgentConfig>,
 }
 
 fn default_host() -> String {
@@ -82,7 +100,10 @@ fn default_port() -> u16 {
     9090
 }
 fn default_max_iterations() -> usize {
-    10
+    30
+}
+fn default_subagent_timeout() -> u64 {
+    300
 }
 
 impl Default for GatewayConfig {
@@ -92,6 +113,8 @@ impl Default for GatewayConfig {
             port: default_port(),
             max_iterations: default_max_iterations(),
             tool_timeout_secs: None,
+            subagent_timeout_secs: default_subagent_timeout(),
+            agents: Vec::new(),
         }
     }
 }

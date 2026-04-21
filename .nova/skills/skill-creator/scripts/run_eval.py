@@ -6,11 +6,13 @@ for a set of queries. Outputs results as JSON.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import select
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -39,7 +41,8 @@ def run_single_query(
     timeout: int,
     project_root: str,
     model: str | None = None,
-) -> bool:
+    output_dir: Path | None = None,
+) -> dict:
     """Run a single query and return whether the skill was triggered.
 
     Creates a command file in .claude/commands/ so it appears in Claude's
@@ -77,41 +80,49 @@ def run_single_query(
         )
 
         # nova_cli run --json outputs a single large JSON blob (TurnResult)
+        t_start = time.time()
         try:
             stdout, _ = process.communicate(timeout=timeout)
+            duration_ms = int((time.time() - t_start) * 1000)
+            
             if not stdout:
-                return False
+                return {"triggered": False, "total_tokens": 0, "duration_ms": duration_ms}
                 
             try:
                 result_data = json.loads(stdout.decode("utf-8"))
-                # Search all messages for ToolUse that matches our target (skill-creator or target skill)
+                
+                # Capture usage data if available
+                # Schema assumption: result_data.get("usage", {}) -> {"input_tokens": X, "output_tokens": Y}
+                usage = result_data.get("usage", {})
+                total_tokens = usage.get("total_tokens", usage.get("input_tokens", 0) + usage.get("output_tokens", 0))
+
+                # Search all messages for ToolUse that matches our target
+                triggered = False
                 for msg in result_data.get("messages", []):
                     for block in msg.get("content", []):
                         if block.get("type") == "tool_use":
-                             # In zero-nova, skills aren't necessarily separate 'tools' but 
-                             # can be instructions. However, if they use tools, it's a trigger.
-                             # For skill-creator adaptation, we just care if it successfully engaged.
-                             # Since zero-nova doesn't use the 'Skill' tool pattern (it's implicit),
-                             # we might need to look for specific keywords in thinking or text,
-                             # or simply check if the turn completed without error.
-                             
-                             # For the purpose of 'trigger evaluation', we check if the model used
-                             # any tool or mention the skill name in its thought process.
-                             return True
+                             triggered = True
+                             break
+                    if triggered: break
                 
-                # If no tools were used, check if the text mentions the skill context
-                # (This is a simplified detection for local adaptation)
-                return False
+                # Optional: save specific output to output_dir if provided
+                if output_dir:
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    (output_dir / "result.json").write_text(json.dumps(result_data, indent=2))
+
+                return {
+                    "triggered": triggered,
+                    "total_tokens": total_tokens,
+                    "duration_ms": duration_ms
+                }
                 
             except json.JSONDecodeError:
-                return False
+                return {"triggered": False, "total_tokens": 0, "duration_ms": duration_ms}
         finally:
             # Clean up process on any exit path (return, exception, timeout)
             if process.poll() is None:
                 process.kill()
                 process.wait()
-
-        return triggered
     finally:
         pass
 
@@ -126,14 +137,24 @@ def run_eval(
     runs_per_query: int = 1,
     trigger_threshold: float = 0.5,
     model: str | None = None,
+    iteration: int | None = None,
 ) -> dict:
     """Run the full eval set and return results."""
     results = []
 
+    # Path standardization: All tests under system temp directory
+    output_root = Path(tempfile.gettempdir()) / "nova_skill_creator" / skill_name
+    if iteration is not None:
+        output_root = output_root / f"iteration-{iteration}"
+
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         future_to_info = {}
         for item in eval_set:
+            query_id = hashlib.md5(item["query"].encode()).hexdigest()[:8]
             for run_idx in range(runs_per_query):
+                # Unique output dir for each run
+                run_output_dir = output_root / f"query-{query_id}" / f"run-{run_idx}"
+
                 future = executor.submit(
                     run_single_query,
                     item["query"],
@@ -142,26 +163,38 @@ def run_eval(
                     timeout,
                     str(project_root),
                     model,
+                    run_output_dir,
                 )
                 future_to_info[future] = (item, run_idx)
 
-        query_triggers: dict[str, list[bool]] = {}
+        query_data: dict[str, list[dict]] = {}
         query_items: dict[str, dict] = {}
         for future in as_completed(future_to_info):
             item, _ = future_to_info[future]
             query = item["query"]
             query_items[query] = item
-            if query not in query_triggers:
-                query_triggers[query] = []
+            if query not in query_data:
+                query_data[query] = []
             try:
-                query_triggers[query].append(future.result())
+                query_data[query].append(future.result())
             except Exception as e:
                 print(f"Warning: query failed: {e}", file=sys.stderr)
-                query_triggers[query].append(False)
+                query_data[query].append({"triggered": False, "total_tokens": 0, "duration_ms": 0})
 
-    for query, triggers in query_triggers.items():
+    total_tokens = 0
+    total_duration_ms = 0
+
+    for query, data_list in query_data.items():
         item = query_items[query]
+        triggers = [d["triggered"] for d in data_list]
         trigger_rate = sum(triggers) / len(triggers)
+        
+        # Accumulate metrics
+        query_tokens = sum(d["total_tokens"] for d in data_list)
+        query_duration = sum(d["duration_ms"] for d in data_list)
+        total_tokens += query_tokens
+        total_duration_ms += query_duration
+
         should_trigger = item["should_trigger"]
         if should_trigger:
             did_pass = trigger_rate >= trigger_threshold
@@ -174,6 +207,8 @@ def run_eval(
             "triggers": sum(triggers),
             "runs": len(triggers),
             "pass": did_pass,
+            "tokens": query_tokens,
+            "duration_ms": query_duration,
         })
 
     passed = sum(1 for r in results if r["pass"])
@@ -187,6 +222,8 @@ def run_eval(
             "total": total,
             "passed": passed,
             "failed": total - passed,
+            "total_tokens": total_tokens,
+            "total_duration_ms": total_duration_ms,
         },
     }
 

@@ -27,6 +27,8 @@ pub enum AgentEvent {
     IterationLimitReached { iterations: usize },
     /// Generic error event.
     Error(String),
+    /// System-level logs (e.g. Iteration progress, internal errors)
+    SystemLog(String),
     /// Tool execution process streaming output (e.g., bash stdout/stderr)
     LogDelta {
         /// Corresponds to tool_use_id in ToolStart

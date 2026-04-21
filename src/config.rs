@@ -99,7 +99,7 @@ fn default_port() -> u16 {
     9090
 }
 fn default_max_iterations() -> usize {
-    10
+    30
 }
 fn default_subagent_timeout() -> u64 {
     300

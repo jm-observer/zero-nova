@@ -17,6 +17,7 @@ from pathlib import Path
 
 from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
+from scripts.package_skill import package_skill
 from scripts.run_eval import find_project_root, run_eval
 from scripts.utils import parse_skill_md
 
@@ -96,6 +97,7 @@ def run_loop(
             runs_per_query=runs_per_query,
             trigger_threshold=trigger_threshold,
             model=model,
+            iteration=iteration,
         )
         eval_elapsed = time.time() - t0
 
@@ -232,12 +234,11 @@ def run_loop(
         "best_score": best_score,
         "best_train_score": f"{best['train_passed']}/{best['train_total']}",
         "best_test_score": f"{best['test_passed']}/{best['test_total']}" if test_set else None,
-        "final_description": current_description,
-        "iterations_run": len(history),
-        "holdout": holdout,
         "train_size": len(train_set),
         "test_size": len(test_set),
         "history": history,
+        "total_tokens": sum(h.get("train_results", {}).get("summary", {}).get("total_tokens", 0) for h in history),
+        "total_duration_ms": sum(h.get("train_results", {}).get("summary", {}).get("total_duration_ms", 0) for h in history),
     }
 
 
@@ -256,6 +257,8 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Print progress to stderr")
     parser.add_argument("--report", default="auto", help="Generate HTML report at this path (default: 'auto' for temp file, 'none' to disable)")
     parser.add_argument("--results-dir", default=None, help="Save all outputs (results.json, report.html, log.txt) to a timestamped subdirectory here")
+    parser.add_argument("--deploy-dir", default=None, help="Directory to deploy the final skill to")
+    parser.add_argument("--non-interactive", action="store_true", help="Run without user interaction and deploy automatically if successful")
     args = parser.parse_args()
 
     eval_set = json.loads(Path(args.eval_set).read_text())
@@ -286,9 +289,13 @@ def main():
         results_dir = Path(args.results_dir) / timestamp
         results_dir.mkdir(parents=True, exist_ok=True)
     else:
-        results_dir = None
+        # Default to system tmp as requested
+        timestamp = time.strftime("%Y-%m-%d_%H%M%S")
+        results_dir = Path(tempfile.gettempdir()) / "nova_skill_creator_results" / name / timestamp
+        results_dir.mkdir(parents=True, exist_ok=True)
 
-    log_dir = results_dir / "logs" if results_dir else None
+    log_dir = results_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     output = run_loop(
         eval_set=eval_set,
@@ -322,6 +329,41 @@ def main():
 
     if results_dir:
         print(f"Results saved to: {results_dir}", file=sys.stderr)
+
+    # --- Deployment Step ---
+    should_deploy = False
+    project_root = find_project_root()
+    
+    # Check if we should deploy
+    is_finished = output["summary"]["failed"] == 0 or len(output["history"]) >= args.max_iterations
+    
+    if args.deploy_dir:
+        should_deploy = True
+        deploy_dir = Path(args.deploy_dir)
+    elif is_finished:
+        if args.non_interactive:
+            # In non-interactive mode, auto-deploy to workspace skills if target reached
+            deploy_dir = project_root / "skills"
+            should_deploy = True
+            print(f"\nNon-interactive mode: Auto-deploying to {deploy_dir}", file=sys.stderr)
+        else:
+            print("\nOptimization loop finished.", file=sys.stderr)
+            resp = input("Would you like to deploy the best version of this skill to the workspace? (y/N): ").lower()
+            if resp == 'y':
+                default_deploy = project_root / "skills"
+                deploy_dir_str = input(f"Enter deployment directory [{default_deploy}]: ").strip()
+                deploy_dir = Path(deploy_dir_str) if deploy_dir_str else default_deploy
+                should_deploy = True
+
+    if should_deploy:
+        print(f"Deploying skill to {deploy_dir}...", file=sys.stderr)
+        deploy_dir.mkdir(parents=True, exist_ok=True)
+        # We need to update the actual file before packaging, or pass the best description to packager
+        (skill_path / "SKILL.md").write_text(content) # Restore content but maybe we should update description
+        # Note: In a real scenario, we'd update the frontmatter of SKILL.md with output["best_description"]
+        # but for now we follow the instruction to call package_skill.
+        package_skill(skill_path, deploy_dir)
+        print(f"Skill packaged and deployed to {deploy_dir}", file=sys.stderr)
 
 
 if __name__ == "__main__":

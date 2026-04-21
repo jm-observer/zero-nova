@@ -84,6 +84,12 @@ export class ChatView {
                 this.handleChatError(payload);
             }
         });
+
+        this.bus.on('system:log', (event: any) => {
+            if (event.sessionId === this.state.currentSessionId) {
+                this.handleSystemLog(event);
+            }
+        });
     }
 
     private bindEvents() {
@@ -477,6 +483,23 @@ export class ChatView {
                 if (resultCard) resultCard.classList.add('collapsed');
             }, 5000);
         }
+    }
+
+    private handleSystemLog(event: any) {
+        const { log } = event;
+        const isError = log.toLowerCase().includes('failed') || log.toLowerCase().includes('error');
+        const roleClass = isError ? 'system log error' : 'system log';
+
+        const html = `
+            <div class="message ${roleClass}">
+                <div class="message-bubble">
+                    <div class="markdown-body">${escapeHtml(log)}</div>
+                </div>
+            </div>
+        `;
+        
+        this.messagesContainer.insertAdjacentHTML('beforeend', html);
+        this.scrollToBottom();
     }
 
     private scrollToBottom() {

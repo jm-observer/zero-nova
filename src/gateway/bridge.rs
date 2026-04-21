@@ -63,6 +63,12 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
             message: format!("{:#}", e),
             code: Some("AGENT_RUNTIME_ERROR".to_string()),
         }),
+        AgentEvent::SystemLog(log) => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "system_log".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(log),
+            ..Default::default()
+        }),
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

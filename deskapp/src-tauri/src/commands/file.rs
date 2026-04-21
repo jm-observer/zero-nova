@@ -176,7 +176,8 @@ pub async fn file_reveal(file_path: String) -> Result<(), String> {
         }
         #[cfg(target_os = "linux")]
         {
-            open::that(parent.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+            // todo
+            // open::that(_parent.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
         }
         Ok(())
     } else {

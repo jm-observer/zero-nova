@@ -89,6 +89,8 @@ def run_loop(
             item["query"] = item.pop("prompt")
         if "query" not in item:
             raise KeyError(f"Eval item at index {i} missing 'query' or 'prompt' field.")
+        if "should_trigger" not in item:
+            item["should_trigger"] = True
 
     # Split into train/test if holdout > 0
     if holdout > 0:

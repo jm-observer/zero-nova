@@ -54045,24 +54045,14 @@ body.router-active .input-area {
 
 
 
-.tool-result-card.error {
-
-
-
-
-
+.tool-error-msg .tool-result-card {
   background: rgba(239, 68, 68, 0.05);
-
-
-
-
-
   border-color: rgba(239, 68, 68, 0.2);
+}
 
-
-
-
-
+.tool-error-msg .tool-result-content {
+  color: #ef4444;
+  font-weight: bold;
 }
 
 

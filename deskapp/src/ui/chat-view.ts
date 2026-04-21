@@ -242,6 +242,30 @@ export class ChatView {
         `;
     }
 
+    private hasExitCodeError(content: any, backendIsError: boolean = false): boolean {
+        if (backendIsError) return true;
+        if (!content) return false;
+        
+        let c = content;
+        if (typeof content === 'string') {
+            try {
+                c = JSON.parse(content);
+            } catch(e) {}
+        }
+        
+        if (typeof c === 'object' && c !== null && c.exit_code !== undefined) {
+            return c.exit_code !== 0;
+        }
+        if (typeof content === 'string') {
+            if (content.includes('"exit_code":')) {
+                return !content.includes('"exit_code": 0') && !content.includes('"exit_code":0');
+            } else if (content.includes('exit_code:')) {
+                return !content.match(/exit_code:\s*0\b/);
+            }
+        }
+        return false;
+    }
+
     private addMessage(message: any) {
         if (message.role === 'system') return;
         // 使用 state 中的消息总数减 1 作为原始索引
@@ -282,15 +306,12 @@ export class ChatView {
                 } else if (type === 'tool_result') {
                     const originalContent = block.content || block.result || block.output || '';
                     let displayContent = '';
-                    let isErrorCode = block.isError;
+                    let isErrorCode = this.hasExitCodeError(originalContent, block.isError);
                     
                     try {
                         const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
                         
                         if (parsed && typeof parsed === 'object') {
-                            if (!isErrorCode && parsed.exit_code !== undefined && parsed.exit_code !== 0) {
-                                isErrorCode = true;
-                            }
                             if (parsed.output_summary) {
                                 // Subagent summary rendering
                                 displayContent = renderMarkdown(parsed.output_summary);
@@ -319,20 +340,8 @@ export class ChatView {
                         } else {
                             displayContent = escapeHtml(String(originalContent));
                         }
-                        
-                        // Handle raw string containing exit_code manually if not parsed as standard JSON
-                        if (!parsed && !isErrorCode && typeof originalContent === 'string' && originalContent.includes('"exit_code":')) {
-                            if (!originalContent.includes('"exit_code": 0') && !originalContent.includes('"exit_code":0')) {
-                                isErrorCode = true;
-                            }
-                        }
                     } catch (e) {
                         displayContent = escapeHtml(String(originalContent));
-                        if (!isErrorCode && typeof originalContent === 'string' && originalContent.includes('"exit_code":')) {
-                            if (!originalContent.includes('"exit_code": 0') && !originalContent.includes('"exit_code":0')) {
-                                isErrorCode = true;
-                            }
-                        }
                     }
 
                     return `<div class="tool-result-card collapsible collapsed ${isErrorCode ? 'error' : ''}">
@@ -353,15 +362,7 @@ export class ChatView {
         if (isTool) {
              hasToolError = message.content.some((b: any) => {
                   if (b.type !== 'tool_result') return false;
-                  if (b.isError) return true;
-                  const c = b.content || b.result || b.output || '';
-                  if (typeof c === 'string' && c.includes('"exit_code":')) {
-                      return !c.includes('"exit_code": 0') && !c.includes('"exit_code":0');
-                  }
-                  if (typeof c === 'object' && c !== null && c.exit_code !== undefined) {
-                      return c.exit_code !== 0;
-                  }
-                  return false;
+                  return this.hasExitCodeError(b.content || b.result || b.output, b.isError);
              });
         }
         const roleClass = isTool ? `tool ${hasToolError ? 'tool-error-msg' : ''}` : message.role;
@@ -515,6 +516,7 @@ export class ChatView {
         if (markdownBody) {
             const originalContent = result || '';
             let displayContent = '';
+            let isErrorCode = this.hasExitCodeError(originalContent, isError);
             try {
                 const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
                 if (parsed && typeof parsed === 'object' && parsed.output_summary) {
@@ -527,7 +529,7 @@ export class ChatView {
             }
 
             const html = `
-                <div class="tool-result-card collapsible ${isError ? 'error' : ''}" data-rel-id="${toolUseId}">
+                <div class="tool-result-card collapsible ${isErrorCode ? 'error' : ''}" data-rel-id="${toolUseId}">
                     <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
                     <div class="tool-result-content">${displayContent}</div>
                 </div>

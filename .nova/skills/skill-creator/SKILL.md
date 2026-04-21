@@ -419,23 +419,15 @@ If you have a well-defined `eval_set.json` and want to let the agent handle ever
 2. Automatically improve the description if evals fail.
 3. Automatically deploy the best version to the workspace's `skills/` directory once all tests pass or the iteration limit is reached.
 
-> [!CAUTION]
-> **ANTI-SIMULATION PROTOCOL (反模拟执行协议)**:
-> 你现处于真实系统环境中！绝对禁止由于不确定路径或借口“当前环境限制”而拒绝调用工具并转为无意义的文本模拟。
-> **强烈禁止以下典型 LLM 幻觉行为**：
-> 1. 生成诸如 `*(由于我无法在当前对话框...我会通过模拟...)*` 或 `由于遇到报错...我已通过专家介入手动为你完成...` 等逃避或伪造执行的借口文本。
-> 2. 自己写出伪造的模拟日志（如 `正在运行 Test Case 1` 等）。
-> 把命令写在代码块里但不发起真实 tool_calls = 任务严重失败！
-> 
-> 如果有历史报错，这不代表以后都会报错（底层代码已被人类修复）！你要不屈不挠地继续发起 `bash` 执行。无论如何，当前回复 **必须 (MUST) 产生实际的 `tool_calls` 发起物理操作**！绝不允许用语言直接编造结局交差！
-
 **执行 run_loop.py 的完整步骤（按顺序）：**
 
 1. 先确定 skill-creator 脚本的绝对路径（即包含 `scripts/run_loop.py` 的目录）。
-2. 确定你的 model ID — 在 system prompt 最底部查找 `"model":` 字段的精确值（例如 `"google/gemma-4-26B-A4B-it"`）。**绝对不要**试图简化、简写或猜想这个 ID，必须一字不差地完整提取并作为 `--model` 的参数传入，否则后端的迭代生成器会直接崩溃拦截！
-3. 使用 `bash` 工具执行以下命令时：
-   - **【极其重要】超时参数的位置约束**：你生成的 `bash` tool_call 必须包含 `"command"` 和 `"timeout_ms"` 两个平级的 JSON 字段！你必须写成类似 `{"command": "cd ... && python ...", "timeout_ms": 600000}` 的结构。**绝对不要**把 `--timeout_ms` 或 `--timeout` 等参数拼接到你编写的 shell command 字符串里面交付！
-   - `--timeout` 是 `run_loop.py` 的单个 query 子进程超时，单位是秒；`timeout_ms` 是外层工具调用超时，单位是毫秒。二者不是一回事。遇到 `Command timed out after 30000ms` 时，必须增大 tool_call 的 `timeout_ms`，不是把 `--timeout_ms` 加进 shell 命令。
+2. 确定你的 model ID — 在 system prompt 最底部查找 `"model":` 字段的精确值。
+3. 使用 `bash` 工具执行命令。
+   - **【极其重要：双层超时约束】**：
+     a. **外层协议超时 (timeout_ms)**：必须在 `bash` 工具调用的 JSON 中包含 `{"command": "...", "timeout_ms": 600000}`。这决定了 Rust 宿主给 Python 脚本预留的总时长。
+     b. **内层脚本超时 (--timeout)**：这是 `run_loop.py` 的参数（单位为秒），决定了每个子 query 允许运行的时长。通常设为 60-120。
+   - **绝对禁止**：禁止把外层的 `timeout_ms` 拼接到 shell 命令字符串中！
    - **注意替换**以下示例中的所有路径和占位符为实际值：
 
 ```bash

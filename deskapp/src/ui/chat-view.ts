@@ -124,11 +124,21 @@ export class ChatView {
         // 工具卡片折叠监听
         this.messagesContainer.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;
+            // 允许点击整个 Header 或 Header 内部的任何元素
             const header = target.closest('.tool-name, .tool-result-header');
             if (header) {
                 const card = header.closest('.tool-use-card, .tool-result-card');
                 if (card) {
                     card.classList.toggle('collapsed');
+                    // 触发布局更刷新，确保导航条位置正确
+                    this.updateMinimap();
+                }
+            } else {
+                // 如果直接点击了已折叠卡片的空白处，也执行展开
+                const collapsedCard = target.closest('.collapsible.collapsed');
+                if (collapsedCard) {
+                    collapsedCard.classList.remove('collapsed');
+                    this.updateMinimap();
                 }
             }
         });

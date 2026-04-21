@@ -95,6 +95,33 @@ def terminate_process_tree(process: subprocess.Popen, wait_timeout: float = 5.0)
             pass
 
 
+def cleanup_residual_processes() -> None:
+    """Force kill any residual nova_cli processes that belong to Skill Creator.
+    
+    Filters processes by checking if their command line contains the temporary 
+    directory path used by this skill, preventing accidental killing of unrelated
+    user processes.
+    """
+    if os.name == "nt":
+        temp_base = os.path.join(tempfile.gettempdir(), "nova_skill_creator")
+        # Use PowerShell to find processes where the command line contains our temp path.
+        # This is much safer than killing all processes by name.
+        ps_cmd = (
+            f"Get-CimInstance Win32_Process | "
+            f"Where-Object {{ $_.CommandLine -like '*{temp_base}*' -and ($_.Name -eq 'nova_cli.exe' -or $_.Name -eq 'cargo.exe') }} | "
+            f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}"
+        )
+        subprocess.run(
+            ["powershell", "-Command", ps_cmd],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        # On Unix, we could use pgrep -f similarly.
+        pass
+
+
 def extract_assistant_text(data: dict) -> str:
     """Extract assistant text from supported nova/Claude JSON shapes."""
     if isinstance(data.get("text"), str):

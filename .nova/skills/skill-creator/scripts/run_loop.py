@@ -15,8 +15,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-# Ensure the skill-creator root (parent of scripts/) is on sys.path so that
-# `from scripts.xxx import ...` works regardless of cwd or invocation method.
+# Ensure the skill-creator root (parent of scripts/) is on sys.path.
 _SKILL_CREATOR_ROOT = str(Path(__file__).resolve().parent.parent)
 if _SKILL_CREATOR_ROOT not in sys.path:
     sys.path.insert(0, _SKILL_CREATOR_ROOT)
@@ -25,12 +24,17 @@ from scripts.generate_report import generate_html
 from scripts.improve_description import improve_description
 from scripts.package_skill import package_skill
 from scripts.run_eval import find_project_root, run_eval
-from scripts.utils import json_dumps, parse_skill_md
+from scripts.utils import cleanup_residual_processes, json_dumps, parse_skill_md
 
 
 def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
     """Split eval set into train and test sets, stratified by should_trigger."""
     random.seed(seed)
+
+    # Validate schema
+    for i, e in enumerate(eval_set):
+        if "should_trigger" not in e:
+            raise KeyError(f"Eval item at index {i} missing 'should_trigger' field. Required for description optimization.")
 
     # Separate by should_trigger
     trigger = [e for e in eval_set if e["should_trigger"]]
@@ -41,8 +45,8 @@ def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tupl
     random.shuffle(no_trigger)
 
     # Calculate split points
-    n_trigger_test = max(1, int(len(trigger) * holdout))
-    n_no_trigger_test = max(1, int(len(no_trigger) * holdout))
+    n_trigger_test = max(1, int(len(trigger) * holdout)) if trigger else 0
+    n_no_trigger_test = max(1, int(len(no_trigger) * holdout)) if no_trigger else 0
 
     # Split
     test_set = trigger[:n_trigger_test] + no_trigger[:n_no_trigger_test]
@@ -90,6 +94,9 @@ def run_loop(
             print(f"Iteration {iteration}/{max_iterations}", file=sys.stderr)
             print(f"Description: {current_description}", file=sys.stderr)
             print(f"{'='*60}", file=sys.stderr)
+
+        # Cleanup any residual processes from previous attempts or other runs
+        cleanup_residual_processes()
 
         # Evaluate train + test together in one batch for parallelism
         all_queries = train_set + test_set
@@ -175,7 +182,10 @@ def run_loop(
                 precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
                 recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
                 accuracy = (tp + tn) / total if total > 0 else 0.0
-                print(f"{label}: {tp+tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%} ({elapsed:.1f}s)", file=sys.stderr)
+                if elapsed > 0:
+                    print(f"{label}: {tp+tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%} ({elapsed:.1f}s)", file=sys.stderr)
+                else:
+                    print(f"{label}: {tp+tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%}", file=sys.stderr)
                 for r in results:
                     status = "PASS" if r["pass"] else "FAIL"
                     rate_str = f"{r['triggers']}/{r['runs']}"
@@ -280,9 +290,6 @@ def main():
     name, _, _ = parse_skill_md(skill_path)
 
     # --- Unified output directory ---
-    # Everything (eval results, logs, reports) lives under one tree:
-    #   <temp>/nova_skill_creator/<skill_name>/<timestamp>/
-    # User can override via --results-dir.
     timestamp = time.strftime("%Y-%m-%d_%H%M%S")
     if args.results_dir:
         results_dir = Path(args.results_dir) / timestamp
@@ -293,14 +300,18 @@ def main():
     log_dir = results_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Set up live report path (inside the unified directory)
+    # Set up live report path
     if args.report != "none":
         if args.report == "auto":
             live_report_path = results_dir / "report_live.html"
         else:
             live_report_path = Path(args.report)
         live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>", encoding="utf-8")
-        webbrowser.open(str(live_report_path))
+        # Try to open browser, but don't fail if it doesn't work.
+        try:
+            webbrowser.open(str(live_report_path))
+        except Exception:
+            pass
     else:
         live_report_path = None
 
@@ -323,11 +334,12 @@ def main():
 
     # Save JSON output
     json_output = json_dumps(output)
-    print(json_output)
+    if verbose:
+        print(json_output)
     if results_dir:
         (results_dir / "results.json").write_text(json_output, encoding="utf-8")
 
-    # Write final HTML report (without auto-refresh)
+    # Write final HTML report
     if live_report_path:
         live_report_path.write_text(generate_html(output, auto_refresh=False, skill_name=name), encoding="utf-8")
         print(f"\nReport: {live_report_path}", file=sys.stderr)
@@ -351,7 +363,6 @@ def main():
         deploy_dir = Path(args.deploy_dir)
     elif is_finished:
         if args.non_interactive:
-            # In non-interactive mode, auto-deploy to workspace skills if target reached
             deploy_dir = project_root / "skills"
             should_deploy = True
             print(f"\nNon-interactive mode: Auto-deploying to {deploy_dir}", file=sys.stderr)
@@ -367,12 +378,10 @@ def main():
     if should_deploy:
         print(f"Deploying skill to {deploy_dir}...", file=sys.stderr)
         deploy_dir.mkdir(parents=True, exist_ok=True)
-        # Update the SKILL.md frontmatter with the best description before packaging
         best_desc = output["best_description"]
         skill_md_path = skill_path / "SKILL.md"
         original_content = skill_md_path.read_text(encoding="utf-8")
         lines = original_content.split("\n")
-        # Find and replace the description in frontmatter
         in_frontmatter = False
         new_lines = []
         skip_continuation = False
@@ -387,11 +396,10 @@ def main():
                 skip_continuation = False
                 continue
             if skip_continuation and (line.startswith("  ") or line.startswith("\t")):
-                continue  # drop old multiline continuation
+                continue
             skip_continuation = False
             if in_frontmatter and line.startswith("description:"):
                 new_lines.append(f"description: {best_desc}")
-                # Check if the old value was a multiline indicator
                 value = line[len("description:"):].strip()
                 if value in (">", "|", ">-", "|-"):
                     skip_continuation = True

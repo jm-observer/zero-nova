@@ -54497,30 +54497,20 @@ body.router-active .input-area {
 
 
     cursor: pointer;
-
-
-
-
     user-select: none;
-
-
-
-
     display: flex;
-
-
-
-
     justify-content: space-between;
-
-
-
-
     align-items: center;
+    width: 100%;
+    margin-left: -4px;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
 
-
-
-
+.tool-use-card.collapsible .tool-name:hover,
+.tool-result-card.collapsible .tool-result-header:hover {
+    background-color: rgba(128, 128, 128, 0.1);
 }
 
 

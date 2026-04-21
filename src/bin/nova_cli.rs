@@ -12,8 +12,8 @@ use zero_nova::event::AgentEvent;
 use zero_nova::mcp::client::McpClient;
 use zero_nova::message::Message;
 use zero_nova::prompt::SystemPromptBuilder;
-use zero_nova::provider::LlmClient;
 use zero_nova::provider::openai_compat::OpenAiCompatClient;
+use zero_nova::provider::LlmClient;
 use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
 #[derive(Parser)]

@@ -15,10 +15,10 @@ def subprocess_group_kwargs() -> dict:
 
 def parse_skill_md(skill_path: Path) -> tuple[str, str, str]:
     """Parse a SKILL.md file, returning (name, description, full_content)."""
-    content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
+    content = (skill_path / "SKILL.md").read_text(encoding="utf-8-sig")
     lines = content.split("\n")
 
-    if lines[0].strip() != "---":
+    if not lines or lines[0].strip() != "---":
         raise ValueError("SKILL.md missing frontmatter (no opening ---)")
 
     end_idx = None

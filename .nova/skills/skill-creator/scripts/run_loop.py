@@ -56,7 +56,7 @@ def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tupl
 
 
 def run_loop(
-    eval_set: list[dict],
+    eval_set: list[dict] | dict,
     skill_path: Path,
     description_override: str | None,
     num_workers: int,
@@ -75,6 +75,20 @@ def run_loop(
     project_root = find_project_root()
     name, original_description, content = parse_skill_md(skill_path)
     current_description = description_override or original_description
+
+    # Robustly handle evals.json structure: support both [evals] and {"evals": [...]}
+    if isinstance(eval_set, dict):
+        if "evals" in eval_set:
+            eval_set = eval_set["evals"]
+        else:
+            raise KeyError("JSON is a dictionary but missing 'evals' key.")
+    
+    # Ensure every item has a 'query' field, mapping from 'prompt' if necessary
+    for i, item in enumerate(eval_set):
+        if "query" not in item and "prompt" in item:
+            item["query"] = item.pop("prompt")
+        if "query" not in item:
+            raise KeyError(f"Eval item at index {i} missing 'query' or 'prompt' field.")
 
     # Split into train/test if holdout > 0
     if holdout > 0:

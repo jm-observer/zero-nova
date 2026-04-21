@@ -99,6 +99,7 @@ max_candidates = 5
 [remote]
 enabled = true
 port = 18801
+host = "192.168.0.68"
 
 # ========================
 # Sidecar 配置 (AI Engine)

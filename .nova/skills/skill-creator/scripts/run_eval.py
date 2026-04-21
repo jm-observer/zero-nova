@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run trigger evaluation for a skill description.
 
-Tests whether a skill's description causes Claude to trigger (read the skill)
+Tests whether a skill's description causes the model to trigger (read the skill)
 for a set of queries. Outputs results as JSON.
 """
 

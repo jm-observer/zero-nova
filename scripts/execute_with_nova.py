@@ -9,7 +9,7 @@ def execute_with_nova(
     prompt: str,
     skill_path: str = None,
     workspace: str = None,
-    model: str = "gemini-3-flash",
+    model: str = "google/gemma-4-26B-A4B-it",
     timeout: int = 300
 ):
     """
@@ -17,9 +17,9 @@ def execute_with_nova(
     """
     cmd = [
         "cargo", "run", "--bin", "nova_cli", "--",
-        "run", prompt,
+        "run",
         "--model", model,
-        "--output-format", "stream-json"
+        "--output-format", "stream-json", prompt
     ]
 
     if workspace:

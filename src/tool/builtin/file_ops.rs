@@ -1,7 +1,8 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use log::{error, info};
+use serde_json::{Value, json};
 use std::path::Path;
 use tokio::fs;
 
@@ -157,24 +158,47 @@ impl Tool for WriteFileTool {
             }
         }
 
-        match fs::write(path_str, content).await {
-            Ok(_) => Ok(ToolOutput {
-                content: format!("Successfully written to {}", path_str),
-                is_error: false,
-            }),
-            Err(e) => Ok(ToolOutput {
-                content: format!("Failed to write file: {}", e),
-                is_error: true,
-            }),
+        // 1. Handle automatic directory creation
+        let path = Path::new(path_str);
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                info!(
+                    "Target path '{}' requires new directories. Attempting to create parent: {:?}",
+                    path_str, parent
+                );
+                if let Err(e) = fs::create_dir_all(parent).await {
+                    error!("Failed to create directory structure for {}: {}", path_str, e);
+                    return Ok(ToolOutput {
+                        content: format!("Failed to create directories: {}", e),
+                        is_error: true,
+                    });
+                }
+                info!("Successfully created directory structure: {:?}", parent);
+            }
+        }
+
+        // 2. Perform the write operation
+        info!("Attempting to write file to: {}", path_str);
+        match fs::write(path, content).await {
+            Ok(_) => {
+                info!("Successfully wrote file to: {}", path_str);
+                Ok(ToolOutput {
+                    content: format!("Successfully written to {}", path_str),
+                    is_error: false,
+                })
+            }
+            Err(e) => {
+                error!("Failed to write file to {}: {}", path_str, e);
+                Ok(ToolOutput {
+                    content: format!("Failed to write file: {}", e),
+                    is_error: true,
+                })
+            }
         }
     }
 }
 
 /// Truncates a line to a maximum length, returns a slice.
 fn truncate_line(s: &str, max_len: usize) -> &str {
-    if s.len() > max_len {
-        &s[..max_len]
-    } else {
-        s
-    }
+    if s.len() > max_len { &s[..max_len] } else { s }
 }

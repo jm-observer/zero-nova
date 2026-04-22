@@ -31,7 +31,7 @@
 
 ### 运行单次评估
 ```bash
-python scripts/execute_with_nova.py "帮我设计一个 Rust 架构" --skill ./skills/tech-solution-architect --workspace ./temp_eval
+python scripts/execute_with_nova.py "帮我设计一个 Rust 架构" --skill ./tech-solution-architect --workspace ./.nova
 ```
 
 ### 验证触发率

@@ -20,14 +20,14 @@ from scripts.utils import parse_skill_md
 
 
 def find_project_root() -> Path:
-    """Find the project root by walking up from cwd looking for .claude/.
+    """Find the project root by walking up from cwd looking for .nova/.
 
-    Mimics how Claude Code discovers its project root, so the command file
-    we create ends up where claude -p will look for it.
+    Mimics how Nova CLI discovers its project root, so the command file
+    we create ends up where nova_cli -p will look for it.
     """
     current = Path.cwd()
     for parent in [current, *current.parents]:
-        if (parent / ".claude").is_dir():
+        if (parent / ".nova").is_dir():
             return parent
     return current
 
@@ -42,15 +42,15 @@ def run_single_query(
 ) -> bool:
     """Run a single query and return whether the skill was triggered.
 
-    Creates a command file in .claude/commands/ so it appears in Claude's
-    available_skills list, then runs `claude -p` with the raw query.
+    Creates a command file in .nova/commands/ so it appears in Nova CLI's
+    available_skills list, then runs `nova_cli -p` with the raw query.
     Uses --include-partial-messages to detect triggering early from
     stream events (content_block_start) rather than waiting for the
     full assistant message, which only arrives after tool execution.
     """
     unique_id = uuid.uuid4().hex[:8]
     clean_name = f"{skill_name}-skill-{unique_id}"
-    project_commands_dir = Path(project_root) / ".claude" / "commands"
+    project_commands_dir = Path(project_root) / ".nova" / "commands"
     command_file = project_commands_dir / f"{clean_name}.md"
 
     try:
@@ -68,8 +68,8 @@ def run_single_query(
         command_file.write_text(command_content)
 
         cmd = [
-            "claude",
-            "-p", query,
+            "nova_cli",
+            "run", query,
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
@@ -77,8 +77,8 @@ def run_single_query(
         if model:
             cmd.extend(["--model", model])
 
-        # Remove CLAUDECODE env var to allow nesting claude -p inside a
-        # Claude Code session. The guard is for interactive terminal conflicts;
+        # Remove CLAUDECODE env var to allow nesting nova_cli -p inside a
+        # Nova CLI session. The guard is for interactive terminal conflicts;
         # programmatic subprocess usage is safe.
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
@@ -100,16 +100,17 @@ def run_single_query(
         try:
             while time.time() - start_time < timeout:
                 if process.poll() is not None:
-                    remaining = process.stdout.read()
-                    if remaining:
-                        buffer += remaining.decode("utf-8", errors="replace")
+                    if process.stdout is not None:
+                        remaining = process.stdout.read()
+                        if remaining:
+                            buffer += remaining.decode("utf-8", errors="replace")
                     break
 
                 ready, _, _ = select.select([process.stdout], [], [], 1.0)
                 if not ready:
                     continue
 
-                chunk = os.read(process.stdout.fileno(), 8192)
+                chunk = os.read(process.stdout.fileno(), 8192) if process.stdout is not None else b""
                 if not chunk:
                     break
                 buffer += chunk.decode("utf-8", errors="replace")

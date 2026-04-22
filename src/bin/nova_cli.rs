@@ -75,6 +75,7 @@ async fn main() -> Result<()> {
         custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
     let workspace = custom_utils::args::workspace(&cli.workspace, ".nova")?;
+    info!("workspace {}", workspace.display());
     let config_path = workspace.join("config.toml");
 
     let mut config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))

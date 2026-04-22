@@ -2,7 +2,7 @@ use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{error, info};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::Path;
 use tokio::fs;
 
@@ -114,7 +114,7 @@ impl Tool for WriteFileTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "write_file".to_string(),
-            description: "Write content to a file. Overwrites if file exists.".to_string(),
+            description: "Write content to a file. Overwrites if file exists. Automatically creates parent directories if they do not exist.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -200,5 +200,9 @@ impl Tool for WriteFileTool {
 
 /// Truncates a line to a maximum length, returns a slice.
 fn truncate_line(s: &str, max_len: usize) -> &str {
-    if s.len() > max_len { &s[..max_len] } else { s }
+    if s.len() > max_len {
+        &s[..max_len]
+    } else {
+        s
+    }
 }

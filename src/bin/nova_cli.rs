@@ -3,10 +3,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use log::info;
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
-use log::info;
 use tokio::sync::mpsc;
 use zero_nova::agent::{AgentConfig, AgentRuntime};
 use zero_nova::event::AgentEvent;
@@ -25,7 +25,7 @@ enum OutputFormat {
 }
 
 #[derive(Parser)]
-#[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
+#[command(name = "nova-cli", about = "Zero-Nova agent test CLI", version)]
 struct Cli {
     /// Model name
     #[arg(long, global = true)]
@@ -78,11 +78,7 @@ async fn main() -> Result<()> {
     info!("workspace {}", workspace.display());
     let config_path = workspace.join("config.toml");
 
-    let mut config = zero_nova::config::AppConfig::load_from_file(config_path.to_str().unwrap_or("config.toml"))
-        .unwrap_or_else(|e| {
-            log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
-            zero_nova::config::AppConfig::default()
-        });
+    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path)?;
 
     if let Some(model) = &cli.model {
         config.llm.model_config.model = model.to_string();
@@ -90,12 +86,8 @@ async fn main() -> Result<()> {
     if let Some(base_url) = &cli.base_url {
         config.llm.base_url = base_url.to_string();
     }
-    
-    // Only log info if not in StreamJson mode to avoid polluting the output
-    if matches!(cli.output_format, OutputFormat::PlainText) {
-        log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
-    }
 
+    log::info!("Starting Nova CLI with : {:?}", config);
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
     let mut tools = ToolRegistry::new();
     register_builtin_tools(&mut tools, &config);
@@ -113,7 +105,7 @@ async fn main() -> Result<()> {
 
     // Skills handling
     let mut skill_registry = zero_nova::skill::SkillRegistry::new();
-    
+
     // Load skills from the default workspace location
     let skill_dir = workspace.join(".nova").join("skills");
     if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
@@ -137,7 +129,9 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose, cli.output_format).await?,
-        Command::Run { prompt } => run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, cli.output_format).await?,
+        Command::Run { prompt } => {
+            run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, cli.output_format).await?
+        }
         Command::Tools => {
             print_tools(&agent);
         }
@@ -342,81 +336,79 @@ impl EventPrinter {
                     println!("{}", json);
                 }
             }
-            OutputFormat::PlainText => {
-                match event {
-                    AgentEvent::TextDelta(text) => {
-                        print!("{text}");
-                        let _ = std::io::stdout().flush();
-                    }
-                    AgentEvent::ToolStart { name, input, .. } => {
-                        if self.verbose {
-                            println!("\n{} {input:?}", format!("[tool: {name}]").cyan());
-                        } else {
-                            println!("\n{}", format!("[tool: {name}]").cyan());
-                        }
-                    }
-                    AgentEvent::ToolEnd {
-                        name,
-                        output,
-                        is_error,
-                        ..
-                    } => {
-                        if *is_error {
-                            println!("{}", format!("[tool: {name}] ERROR: {output}").red());
-                        } else if self.verbose {
-                            println!("{}", format!("[tool: {name}] OK: {output}").green());
-                        }
-                    }
-                    AgentEvent::TurnComplete { usage, .. } => {
-                        println!(
-                            "\n{}",
-                            format!("[tokens: input={}, output={}]", usage.input_tokens, usage.output_tokens)
-                                .bright_black()
-                        );
-                    }
-                    AgentEvent::IterationLimitReached { iterations } => {
-                        println!(
-                            "\n{}",
-                            format!("[warn] iteration limit reached ({iterations} iterations)").yellow()
-                        );
-                    }
-                    AgentEvent::Error(e) => {
-                        eprintln!("\n{}", format!("[error] {e}").red().bold());
-                    }
-                    AgentEvent::ThinkingDelta(text) => {
-                        print!("{text}");
-                        let _ = std::io::stdout().flush();
-                    }
-                    AgentEvent::LogDelta { log, stream, .. } => {
-                        if stream == "stderr" {
-                            print!("{}", log.bright_red());
-                        } else {
-                            print!("{}", log.bright_black());
-                        }
-                        let _ = std::io::stdout().flush();
-                    }
-                    AgentEvent::Iteration { current, total } => {
-                        if self.verbose {
-                            println!("\n{}", format!("[iteration {}/{}]", current, total).bright_black());
-                        }
-                    }
-                    AgentEvent::SystemLog(log) => {
-                        if self.verbose {
-                            println!("\n{}", format!("[system: {}]", log).bright_black());
-                        }
+            OutputFormat::PlainText => match event {
+                AgentEvent::TextDelta(text) => {
+                    print!("{text}");
+                    let _ = std::io::stdout().flush();
+                }
+                AgentEvent::ToolStart { name, input, .. } => {
+                    if self.verbose {
+                        println!("\n{} {input:?}", format!("[tool: {name}]").cyan());
+                    } else {
+                        println!("\n{}", format!("[tool: {name}]").cyan());
                     }
                 }
-            }
+                AgentEvent::ToolEnd {
+                    name, output, is_error, ..
+                } => {
+                    if *is_error {
+                        println!("{}", format!("[tool: {name}] ERROR: {output}").red());
+                    } else if self.verbose {
+                        println!("{}", format!("[tool: {name}] OK: {output}").green());
+                    }
+                }
+                AgentEvent::TurnComplete { usage, .. } => {
+                    println!(
+                        "\n{}",
+                        format!("[tokens: input={}, output={}]", usage.input_tokens, usage.output_tokens)
+                            .bright_black()
+                    );
+                }
+                AgentEvent::IterationLimitReached { iterations } => {
+                    println!(
+                        "\n{}",
+                        format!("[warn] iteration limit reached ({iterations} iterations)").yellow()
+                    );
+                }
+                AgentEvent::Error(e) => {
+                    eprintln!("\n{}", format!("[error] {e}").red().bold());
+                }
+                AgentEvent::ThinkingDelta(text) => {
+                    print!("{text}");
+                    let _ = std::io::stdout().flush();
+                }
+                AgentEvent::LogDelta { log, stream, .. } => {
+                    if stream == "stderr" {
+                        print!("{}", log.bright_red());
+                    } else {
+                        print!("{}", log.bright_black());
+                    }
+                    let _ = std::io::stdout().flush();
+                }
+                AgentEvent::Iteration { current, total } => {
+                    if self.verbose {
+                        println!("\n{}", format!("[iteration {}/{}]", current, total).bright_black());
+                    }
+                }
+                AgentEvent::SystemLog(log) => {
+                    if self.verbose {
+                        println!("\n{}", format!("[system: {}]", log).bright_black());
+                    }
+                }
+            },
         }
     }
 
     fn print_error(&self, error: &dyn std::fmt::Display) {
         match self.format {
             OutputFormat::StreamJson => {
-                println!("{}", serde_json::json!({
-                    "type": "Error",
-                    "message": error.to_string()
-                }));
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "type": "Error",
+                        "message": error.to_string()
+                    })
+                );
             }
             OutputFormat::PlainText => {
                 eprintln!("\n{}", format!("[error] {}", error).red());

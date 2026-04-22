@@ -50,10 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let config_path = workspace.join("config.toml");
     log::info!("Attempting to load config from: {:?}", config_path);
 
-    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path).unwrap_or_else(|e| {
-        log::warn!("Failed to load {:?}: {}. Using default configuration.", config_path, e);
-        zero_nova::config::AppConfig::default()
-    });
+    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path)?;
 
     config.gateway.host = _args.host;
     config.gateway.port = _args.port;

@@ -175,11 +175,10 @@ pub fn stop_gateway_sidecar(app: &AppHandle) -> Result<(), String> {
     let mut sidecar = state.lock().map_err(|e| e.to_string())?;
 
     if let Some(mut child) = sidecar.child.take() {
-        let pid = child.id();
         #[cfg(target_os = "windows")]
         {
             let _ = Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .args(["/F", "/T", "/PID", &child.id().to_string()])
                 .creation_flags(CREATE_NO_WINDOW)
                 .output();
         }

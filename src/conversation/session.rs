@@ -1,5 +1,6 @@
+use crate::conversation::control::ControlState;
+use crate::conversation::repository::SqliteSessionRepository;
 use crate::gateway::protocol::{ContentBlockDTO, MessageDTO, Session as SessionProtocol};
-use crate::gateway::sqlite_session_repository::SqliteSessionRepository;
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -12,7 +13,7 @@ use uuid::Uuid;
 
 /// 单个会话的详细信息与状态
 pub struct Session {
-    pub control: std::sync::RwLock<crate::gateway::control::ControlState>,
+    pub control: std::sync::RwLock<ControlState>,
     pub id: String,
     pub name: String,
     pub history: RwLock<Vec<Message>>,
@@ -127,7 +128,7 @@ impl SessionStore {
                 self.repository.load_session(&id).await
             {
                 let session = Arc::new(Session {
-                    control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
+                    control: std::sync::RwLock::new(ControlState::new(&agent_id)),
                     id: id.clone(),
                     name: title,
                     history: RwLock::new(history),
@@ -159,7 +160,7 @@ impl SessionStore {
         }
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
+            control: std::sync::RwLock::new(ControlState::new(&agent_id)),
             id: id.clone(),
             name: session_name.clone(),
             history: RwLock::new(initial_history),
@@ -200,7 +201,7 @@ impl SessionStore {
         if let Ok(Some((id, title, agent_id, created_at, updated_at, history))) = self.repository.load_session(id).await
         {
             let session = Arc::new(Session {
-                control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
+                control: std::sync::RwLock::new(ControlState::new(&agent_id)),
                 id: id.clone(),
                 name: title,
                 history: RwLock::new(history),
@@ -306,7 +307,7 @@ impl SessionStore {
         let new_name = format!("{} (Copy)", source.name);
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(crate::gateway::control::ControlState::new(&agent_id)),
+            control: std::sync::RwLock::new(ControlState::new(&agent_id)),
             id: new_id.clone(),
             name: new_name.clone(),
             history: RwLock::new(new_history),

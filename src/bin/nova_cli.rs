@@ -395,6 +395,22 @@ impl EventPrinter {
                         println!("\n{}", format!("[system: {}]", log).bright_black());
                     }
                 }
+                AgentEvent::AssistantMessage { content } => {
+                    for block in content {
+                        if let zero_nova::message::ContentBlock::Text { text } = block {
+                            println!("\n{text}");
+                        }
+                    }
+                }
+                AgentEvent::AgentSwitched { agent_name, .. } => {
+                    println!("\n{}", format!("[agent switched] {agent_name}").bright_black());
+                }
+                AgentEvent::InteractionRequest { prompt, .. } => {
+                    println!("\n{}", format!("[interaction] {prompt}").bright_black());
+                }
+                AgentEvent::InteractionResolved { result, .. } => {
+                    println!("\n{}", format!("[interaction resolved] {result}").bright_black());
+                }
             },
         }
     }

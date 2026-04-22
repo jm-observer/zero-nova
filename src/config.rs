@@ -69,7 +69,7 @@ pub struct AgentConfig {
     pub aliases: Vec<String>,
     pub system_prompt_template: Option<String>,
     pub tool_whitelist: Option<Vec<String>>,
-    pub model_config: Option<crate::gateway::agents::ModelConfig>,
+    pub model_config: Option<crate::agent_catalog::ModelConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

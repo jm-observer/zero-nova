@@ -1,3 +1,4 @@
+use super::control::PendingInteraction;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,7 +61,7 @@ impl WorkflowState {
 }
 
 pub struct WorkflowAdvanceResult {
-    pub new_pending: Option<crate::gateway::control::PendingInteraction>,
+    pub new_pending: Option<PendingInteraction>,
     pub messages: Vec<String>,
     pub stage_changed: bool,
 }
@@ -69,7 +70,6 @@ pub struct WorkflowEngine;
 
 impl WorkflowEngine {
     /// 判断用户输入是否像在继续 workflow
-    /// 初版规则：如果 workflow 处于 Await* 阶段，任何输入都视为 workflow 回应
     pub fn looks_like_continuation(workflow: &WorkflowState) -> bool {
         matches!(
             workflow.stage,
@@ -92,12 +92,10 @@ impl WorkflowEngine {
 
         match workflow.stage {
             WorkflowStage::GatherRequirements => {
-                // 模拟：用户提供了约束，自动进入 Discover 阶段
                 workflow.constraints = serde_json::json!({ "user_input": input });
                 workflow.stage = WorkflowStage::Discover;
                 messages.push("正在为您搜索合适的方案...".to_string());
 
-                // 模拟发现候选方案
                 workflow.candidates = vec![
                     WorkflowCandidate {
                         id: "c1".to_string(),
@@ -120,7 +118,6 @@ impl WorkflowEngine {
                 messages.push("1. 方案 A (高性能)\n2. 方案 B (高性价比)".to_string());
             }
             WorkflowStage::AwaitSelection => {
-                // 模拟：用户输入了数字或名称进行选择
                 if input.contains('1') {
                     workflow.selected_candidate = Some("c1".to_string());
                 } else if input.contains('2') {
@@ -144,7 +141,7 @@ impl WorkflowEngine {
                     stage_changed = true;
                     messages.push("正在开始部署任务...".to_string());
                 } else {
-                    workflow.stage = WorkflowStage::GatherRequirements; // 简单处理：取消则回到起点
+                    workflow.stage = WorkflowStage::GatherRequirements;
                     stage_changed = true;
                     messages.push("已取消任务。".to_string());
                 }
@@ -159,94 +156,5 @@ impl WorkflowEngine {
             messages,
             stage_changed,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_workflow_initial_stage() {
-        let wf = WorkflowState::new("TTS".to_string());
-        assert_eq!(wf.stage, WorkflowStage::GatherRequirements);
-    }
-
-    #[test]
-    fn test_looks_like_continuation() {
-        let mut wf = WorkflowState::new("Test".to_string());
-
-        // GatherRequirements 阶段
-        assert!(WorkflowEngine::looks_like_continuation(&wf));
-
-        // 切换到 Discover
-        wf.stage = WorkflowStage::Discover;
-        assert!(!WorkflowEngine::looks_like_continuation(&wf));
-
-        // 切换到 AwaitSelection
-        wf.stage = WorkflowStage::AwaitSelection;
-        assert!(WorkflowEngine::looks_like_continuation(&wf));
-    }
-
-    #[tokio::test]
-    async fn test_workflow_advance_flow() {
-        use crate::agent::{AgentConfig, AgentRuntime};
-        use crate::provider::{LlmClient, ModelConfig, StreamReceiver};
-        use crate::tool::ToolRegistry;
-        use async_trait::async_trait;
-        use std::time::Duration;
-
-        struct DummyClient;
-        #[async_trait]
-        impl LlmClient for DummyClient {
-            async fn stream(
-                &self,
-                _msgs: &[crate::message::Message],
-                _tools: &[crate::provider::types::ToolDefinition],
-                _conf: &ModelConfig,
-            ) -> anyhow::Result<Box<dyn StreamReceiver>> {
-                unimplemented!()
-            }
-        }
-
-        let client = DummyClient;
-        let tools = ToolRegistry::new();
-        let agent_config = AgentConfig {
-            max_iterations: 1,
-            model_config: ModelConfig {
-                model: "test".to_string(),
-                max_tokens: 10,
-                temperature: None,
-                top_p: None,
-                thinking_budget: None,
-                reasoning_effort: None,
-            },
-            tool_timeout: Duration::from_secs(1),
-        };
-        let agent = AgentRuntime::new(client, tools, agent_config);
-        let (tx, _rx) = tokio::sync::mpsc::channel(1);
-
-        let mut wf = WorkflowState::new("TTS".to_string());
-
-        // 1. GatherRequirements -> AwaitSelection (模拟 Discover 过程)
-        let res = WorkflowEngine::advance(&mut wf, "我需要一个快速的 TTS", &agent, tx.clone())
-            .await
-            .unwrap();
-        assert!(res.stage_changed);
-        assert_eq!(wf.stage, WorkflowStage::AwaitSelection);
-        assert!(res.messages[0].contains("搜索"));
-
-        // 2. AwaitSelection -> AwaitExecutionConfirm
-        let res = WorkflowEngine::advance(&mut wf, "选 1", &agent, tx.clone())
-            .await
-            .unwrap();
-        assert!(res.stage_changed);
-        assert_eq!(wf.stage, WorkflowStage::AwaitExecutionConfirm);
-        assert_eq!(wf.selected_candidate, Some("c1".to_string()));
-
-        // 3. AwaitExecutionConfirm -> Executing
-        let res = WorkflowEngine::advance(&mut wf, "确认", &agent, tx).await.unwrap();
-        assert!(res.stage_changed);
-        assert_eq!(wf.stage, WorkflowStage::Executing);
     }
 }

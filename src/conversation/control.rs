@@ -1,8 +1,7 @@
 // Control layer for conversation handling
 
-use crate::gateway::agents::AgentRegistry;
-use crate::gateway::protocol::InteractionOptionDTO;
-use crate::gateway::workflow::{WorkflowEngine, WorkflowState};
+use super::workflow::{WorkflowEngine, WorkflowState};
+use crate::agent_catalog::AgentRegistry;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Represents the overall control state attached to a Session.
@@ -26,6 +25,7 @@ impl ControlState {
 }
 
 /// Simple representation of a pending interaction.
+#[derive(Debug, Clone)]
 pub struct PendingInteraction {
     pub id: String,
     pub kind: InteractionKind,
@@ -44,7 +44,7 @@ pub enum InteractionKind {
     Input,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct InteractionOption {
     pub id: String,
     pub label: String,
@@ -123,7 +123,6 @@ impl InteractionResolver {
                 }
             }
             // Simple ordinal matching: "第N个" or just a digit.
-            // Expect "1" or "第一" patterns – for brevity we only support digits.
             if let Ok(idx) = lower.trim().parse::<usize>() {
                 if idx > 0 && idx <= pending.options.len() {
                     let opt = &pending.options[idx - 1];
@@ -168,9 +167,8 @@ pub struct TurnRouter;
 impl TurnRouter {
     /// Determine the intent for the current user input.
     pub fn classify(input: &str, control: &ControlState, agent_registry: Option<&AgentRegistry>) -> TurnIntent {
-        // 1️⃣ pending interaction takes highest priority
+        // 1. pending interaction takes highest priority
         if let Some(pending) = &control.pending_interaction {
-            // Check expiration (ttl_seconds)
             let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
             if now - pending.created_at > pending.ttl_seconds as i64 {
                 return TurnIntent::ExecuteChat;
@@ -178,7 +176,7 @@ impl TurnRouter {
             return TurnIntent::ResolvePendingInteraction;
         }
 
-        // 2️⃣ agent address (Phase 5 real implementation)
+        // 2. agent address
         if let Some(registry) = agent_registry {
             if let Some(agent_id) = registry.resolve_addressing(input) {
                 if agent_id != control.active_agent {
@@ -187,14 +185,14 @@ impl TurnRouter {
             }
         }
 
-        // 3️⃣ workflow continuation (Phase 5 real implementation)
+        // 3. workflow continuation
         if let Some(wf) = &control.workflow {
             if WorkflowEngine::looks_like_continuation(wf) {
                 return TurnIntent::ContinueWorkflow;
             }
         }
 
-        // 4️⃣ new task detection – does this input look like a task that should start a workflow?
+        // 4. new task detection
         if let Some(topic) = Self::detect_new_task(input) {
             return TurnIntent::StartNewTask { topic };
         }
@@ -203,10 +201,7 @@ impl TurnRouter {
         TurnIntent::ExecuteChat
     }
 
-    /// Detect whether user input is requesting a new task (solution search, deployment, etc.).
-    /// Returns the extracted topic if matched.
     fn detect_new_task(input: &str) -> Option<String> {
-        // Pattern groups: "帮我找/推荐/搜索一个 X 方案" or "我想要/需要一个 X" or "部署一个 X"
         let task_patterns: &[&[&str]] = &[
             &["找", "方案"],
             &["推荐", "方案"],
@@ -221,21 +216,9 @@ impl TurnRouter {
 
         for pattern in task_patterns {
             if pattern.iter().all(|kw| input.contains(kw)) {
-                // Extract topic: take the input as-is for now, let workflow refine it
                 return Some(input.to_string());
             }
         }
         None
-    }
-}
-
-// Helper to create InteractionOptionDTO for protocol messages.
-impl From<&InteractionOption> for InteractionOptionDTO {
-    fn from(opt: &InteractionOption) -> Self {
-        InteractionOptionDTO {
-            id: opt.id.clone(),
-            label: opt.label.clone(),
-            aliases: opt.aliases.clone(),
-        }
     }
 }

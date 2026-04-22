@@ -29,7 +29,7 @@ shell = "pwsh"
 # 网关监听地址
 host = "127.0.0.1"
 # 网关监听端口
-port = 9090
+port = 18801
 # 代理最大思考轮数 (防止死循环)
 max_iterations = 30
 # 工具执行超时时间 (秒)
@@ -99,7 +99,8 @@ max_candidates = 5
 [remote]
 enabled = true
 port = 18801
-host = "192.168.0.68"
+host = "127.0.0.1"
+#host = "192.168.0.68"
 
 # ========================
 # Sidecar 配置 (AI Engine)

@@ -1,8 +1,10 @@
 use crate::event::AgentEvent;
-use crate::gateway::protocol::{ErrorPayload, GatewayMessage, MessageEnvelope, ProgressEvent};
+use crate::gateway::protocol::{
+    Agent, AgentsSwitchResponse, ErrorPayload, GatewayMessage, InteractionOptionDTO, InteractionRequestPayload,
+    InteractionResolvedPayload, MessageEnvelope, ProgressEvent,
+};
 
 /// 将 AgentEvent 转换为 GatewayMessage。
-/// 消费 AgentEvent 的所有权，因为 AgentEvent 不实现 Clone，且包含 anyhow::Error。
 pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &str) -> GatewayMessage {
     let envelope = match event {
         AgentEvent::TextDelta(text) => MessageEnvelope::ChatProgress(ProgressEvent {
@@ -75,6 +77,65 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
             iteration: Some(current as i32),
             ..Default::default()
         }),
+        AgentEvent::AssistantMessage { content } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "message_complete".to_string(),
+            session_id: Some(session_id.to_string()),
+            output: Some(
+                content
+                    .into_iter()
+                    .filter_map(|block| match block {
+                        crate::message::ContentBlock::Text { text } => Some(text),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            ..Default::default()
+        }),
+        AgentEvent::AgentSwitched {
+            agent_id,
+            agent_name,
+            description,
+        } => MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {
+            agent: Agent {
+                id: agent_id,
+                name: agent_name,
+                description,
+                ..Default::default()
+            },
+            messages: vec![],
+        }),
+        AgentEvent::InteractionRequest {
+            interaction_id,
+            kind,
+            subject,
+            prompt,
+            options,
+        } => {
+            MessageEnvelope::InteractionRequest(InteractionRequestPayload {
+                session_id: session_id.to_string(),
+                interaction_id,
+                kind,
+                subject,
+                prompt,
+                options: options
+                    .into_iter()
+                    .map(|o| InteractionOptionDTO {
+                        id: o.id,
+                        label: o.label,
+                        aliases: o.aliases,
+                    })
+                    .collect(),
+                risk_level: "low".to_string(), // Default for now
+            })
+        }
+        AgentEvent::InteractionResolved { interaction_id, result } => {
+            MessageEnvelope::InteractionResolved(InteractionResolvedPayload {
+                session_id: session_id.to_string(),
+                interaction_id,
+                result,
+            })
+        }
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

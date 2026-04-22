@@ -30,17 +30,13 @@ impl GatewayMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum MessageEnvelope {
-    // --- 3.2 System & Control Events ---
-    #[serde(rename = "welcome")]
-    Welcome(WelcomePayload),
-    #[serde(rename = "auth.success")]
-    AuthSuccess,
-    #[serde(rename = "auth.failed")]
-    AuthFailed(ErrorPayload),
+    // --- System & Control Events ---
     #[serde(rename = "error")]
     Error(ErrorPayload),
+    #[serde(rename = "welcome")]
+    Welcome(WelcomePayload),
 
-    // --- 2.1 Chat & Session Management ---
+    // --- Chat & Session Management ---
     #[serde(rename = "chat")]
     Chat(ChatPayload),
     #[serde(rename = "chat.stop")]
@@ -68,7 +64,7 @@ pub enum MessageEnvelope {
     #[serde(rename = "sessions.copy.response")]
     SessionsCopyResponse(SessionCreateResponse),
 
-    // --- 3.1 Progress & Chat Events ---
+    // --- Progress & Chat Events ---
     #[serde(rename = "chat.start")]
     ChatStart(SessionIdPayload),
     #[serde(rename = "chat.intent")]
@@ -84,27 +80,17 @@ pub enum MessageEnvelope {
     #[serde(rename = "interaction.resolved")]
     InteractionResolved(InteractionResolvedPayload),
 
-    // --- 2.2 Agent Management ---
+    // --- Agent Management ---
     #[serde(rename = "agents.list")]
     AgentsList,
     #[serde(rename = "agents.list.response")]
     AgentsListResponse(AgentsListResponse),
-    #[serde(rename = "agents.create")]
-    AgentsCreate(AgentCreateRequest),
     #[serde(rename = "agents.switch")]
     AgentsSwitch(AgentIdPayload),
     #[serde(rename = "agents.switch.response")]
     AgentsSwitchResponse(AgentsSwitchResponse),
 
-    // --- 2.4 Memory & Distillation ---
-    #[serde(rename = "memory.stats")]
-    MemoryStats,
-    #[serde(rename = "memory.stats.response")]
-    MemoryStatsResponse(Value),
-
-    // --- 2.5 System & Integration ---
-    #[serde(rename = "auth")]
-    Auth(AuthRequest),
+    // --- System & Integration ---
     #[serde(rename = "config.get")]
     ConfigGet,
     #[serde(rename = "config.get.response")]
@@ -113,14 +99,6 @@ pub enum MessageEnvelope {
     ConfigUpdate(serde_json::Value),
     #[serde(rename = "config.update.response")]
     ConfigUpdateResponse(SuccessResponse),
-    #[serde(rename = "settings.get")]
-    SettingsGet,
-    #[serde(rename = "browser.launch")]
-    BrowserLaunch,
-    #[serde(rename = "browser.status")]
-    BrowserStatus,
-    #[serde(rename = "browser.status.response")]
-    BrowserStatusResponse(Value),
 
     #[serde(other)]
     Unknown,
@@ -225,17 +203,6 @@ pub struct SessionCreateRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentCreateRequest {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub icon: Option<String>,
-    pub color: Option<String>,
-    pub system_prompt: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionIdPayload {
     pub session_id: String,
 }
@@ -251,12 +218,6 @@ pub struct SessionCopyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AgentIdPayload {
     pub agent_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthRequest {
-    pub token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

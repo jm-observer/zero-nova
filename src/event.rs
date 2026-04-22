@@ -1,4 +1,4 @@
-use crate::message::Message;
+use crate::message::{ContentBlock, Message};
 use crate::provider::types::Usage;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -33,13 +33,34 @@ pub enum AgentEvent {
     SystemLog(String),
     /// Tool execution process streaming output (e.g., bash stdout/stderr)
     LogDelta {
-        /// Corresponds to tool_use_id in ToolStart
         id: String,
-        /// Tool name
         name: String,
-        /// Log content (one or multiple aggregated lines)
         log: String,
-        /// Source stream: "stdout" | "stderr"
         stream: String,
     },
+    /// 发送完整的 Assistant 消息块
+    AssistantMessage { content: Vec<ContentBlock> },
+    /// Agent 切换完成
+    AgentSwitched {
+        agent_id: String,
+        agent_name: String,
+        description: Option<String>,
+    },
+    /// 发送交互请求
+    InteractionRequest {
+        interaction_id: String,
+        kind: String,
+        subject: String,
+        prompt: String,
+        options: Vec<InteractionOptionEvent>,
+    },
+    /// 发送交互解决事件
+    InteractionResolved { interaction_id: String, result: String },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InteractionOptionEvent {
+    pub id: String,
+    pub label: String,
+    pub aliases: Vec<String>,
 }

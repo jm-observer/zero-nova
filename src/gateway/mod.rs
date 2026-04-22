@@ -1,26 +1,20 @@
-pub mod agents;
 pub mod bridge;
-pub mod control;
 pub mod handlers;
 pub mod protocol;
 pub mod router;
 pub mod server;
-pub mod session;
-pub mod sqlite_manager;
-pub mod sqlite_session_repository;
-pub mod workflow;
 
 pub use protocol::GatewayMessage;
-
 pub use router::handle_message;
 pub use server::run_server;
 
 use crate::agent::{AgentConfig, AgentRuntime};
-use crate::gateway::agents::{AgentDescriptor, AgentRegistry};
+use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
+use crate::app::conversation_service::ConversationService;
+use crate::conversation::repository::SqliteSessionRepository;
+use crate::conversation::sqlite_manager::SqliteManager;
+use crate::conversation::SessionStore;
 use crate::gateway::router::AppState;
-use crate::gateway::session::SessionStore;
-use crate::gateway::sqlite_manager::SqliteManager;
-use crate::gateway::sqlite_session_repository::SqliteSessionRepository;
 
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
@@ -70,7 +64,6 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
                 })
                 .unwrap_or_default();
 
-            // Internal behavior guards to force tool execution consistency
             let behavior_guards = r#"
 ## CRITICAL: Action Consistency
 - You are a physical entity with real-world capabilities.
@@ -79,7 +72,6 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
 - Textual confirmation of an action is only valid AFTER the tool has been invoked.
 "#;
 
-            // Append skill instructions and guards to system prompt
             let full_system_prompt = format!("{}\n\n{}\n\n{}", agent_prompt, skill_prompt, behavior_guards);
 
             AgentDescriptor {
@@ -115,10 +107,11 @@ pub async fn start_server<C: crate::provider::LlmClient + 'static>(
     let session_store = SessionStore::new(repository);
     session_store.load_all().await?;
 
+    // Construct ConversationService
+    let conversation_service = ConversationService::new(agent, agent_registry, session_store);
+
     let state = Arc::new(AppState {
-        agent,
-        agent_registry,
-        sessions: session_store,
+        conversation_service,
         config: config_arc,
         config_path,
     });

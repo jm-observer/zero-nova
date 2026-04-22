@@ -1,10 +1,9 @@
-use crate::gateway::handlers::system::send_general_error;
-use crate::gateway::protocol::GatewayMessage;
 use crate::gateway::protocol::{
-    MessageEnvelope, Session, SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload,
-    SessionsListResponse, SessionsMessagesResponse, SuccessResponse,
+    GatewayMessage, SessionCreateRequest, SessionCreateResponse, SessionsListResponse, SessionsMessagesResponse,
+    SuccessResponse,
 };
 use crate::gateway::router::AppState;
+use log::error;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -13,11 +12,10 @@ pub async fn handle_sessions_list<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let sessions = state.sessions.list_sorted().await;
-
+    let sessions = state.conversation_service.sessions.list_sorted().await;
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
+        crate::gateway::protocol::MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
     ));
 }
 
@@ -27,20 +25,33 @@ pub async fn handle_session_get<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    if let Ok(Some(session)) = state.sessions.get(&session_id).await {
-        let messages = session.get_messages_dto();
-
-        let _ = outbound_tx.send(GatewayMessage::new(
-            request_id,
-            MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse { messages }),
-        ));
-    } else {
-        send_general_error(
-            &outbound_tx,
-            &request_id,
-            "Session not found".to_string(),
-            Some("SESSION_NOT_FOUND".to_string()),
-        );
+    match state.conversation_service.sessions.get(&session_id).await {
+        Ok(Some(session)) => {
+            let messages = session.get_messages_dto();
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                crate::gateway::protocol::MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse {
+                    messages,
+                }),
+            ));
+        }
+        Ok(None) => {
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                "Session not found".to_string(),
+                None::<String>,
+            );
+        }
+        Err(e) => {
+            error!("Failed to get session {}: {}", session_id, e);
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                e.to_string(),
+                None::<String>,
+            );
+        }
     }
 }
 
@@ -50,107 +61,114 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let Some(agent_descriptor) = state.agent_registry.get(&payload.agent_id) else {
-        send_general_error(
-            &outbound_tx,
-            &request_id,
-            format!("Agent {} not found", payload.agent_id),
-            Some("AGENT_NOT_FOUND".to_string()),
-        );
-        return;
-    };
+    let system_prompt = state
+        .conversation_service
+        .agent_registry
+        .get(&payload.agent_id)
+        .map(|a| a.system_prompt_template.clone())
+        .unwrap_or_default();
 
-    // 构建初始 System Prompt
-    let system_prompt = crate::prompt::SystemPromptBuilder::default()
-        .custom_instruction(agent_descriptor.system_prompt_template.clone())
-        .with_tools(state.agent.tools())
-        .build();
-
-    let internal_session = match state
+    match state
+        .conversation_service
         .sessions
-        .create(payload.title.clone(), payload.agent_id.clone(), system_prompt)
+        .create(payload.title, payload.agent_id, system_prompt)
         .await
     {
-        Ok(s) => s,
+        Ok(session) => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                crate::gateway::protocol::MessageEnvelope::SessionsCreateResponse(SessionCreateResponse {
+                    session: crate::gateway::protocol::Session {
+                        id: session.id.clone(),
+                        title: Some(session.name.clone()),
+                        agent_id: session.control.read().unwrap().active_agent.clone(),
+                        created_at: session.created_at,
+                        updated_at: session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
+                        message_count: session.history.read().unwrap().len(),
+                    },
+                }),
+            ));
+        }
         Err(e) => {
-            send_general_error(
+            error!("Failed to create session: {}", e);
+            crate::gateway::handlers::system::send_general_error(
                 &outbound_tx,
                 &request_id,
-                format!("Failed to create session: {}", e),
-                Some("SESSION_CREATE_ERROR".to_string()),
+                e.to_string(),
+                None::<String>,
             );
-            return;
         }
-    };
-    let session = Session {
-        id: internal_session.id.clone(),
-        title: Some(internal_session.name.clone()),
-        agent_id: payload.agent_id,
-        created_at: internal_session.created_at,
-        updated_at: internal_session.created_at,
-        message_count: 0,
-    };
-
-    let _ = outbound_tx.send(GatewayMessage::new(
-        request_id,
-        MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
-    ));
+    }
 }
 
 pub async fn handle_session_delete<C: crate::provider::LlmClient>(
-    payload: SessionIdPayload,
+    payload: crate::gateway::protocol::SessionIdPayload,
     state: Arc<AppState<C>>,
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    let success = state.sessions.delete(&payload.session_id).await.unwrap_or(false);
-
-    if success {
-        let _ = outbound_tx.send(GatewayMessage::new(
-            request_id,
-            MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success: true }),
-        ));
-    } else {
-        log::warn!(
-            "Delete failed: Session {} not found. Current sessions: {:?}",
-            payload.session_id,
-            state.sessions.list_ids().await
-        );
-        send_general_error(
-            &outbound_tx,
-            &request_id,
-            "Session not found".to_string(),
-            Some("SESSION_NOT_FOUND".to_string()),
-        );
+    match state.conversation_service.sessions.delete(&payload.session_id).await {
+        Ok(success) => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                crate::gateway::protocol::MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success }),
+            ));
+        }
+        Err(e) => {
+            error!("Failed to delete session {}: {}", payload.session_id, e);
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                e.to_string(),
+                None::<String>,
+            );
+        }
     }
 }
 
 pub async fn handle_session_copy<C: crate::provider::LlmClient>(
-    payload: SessionCopyRequest,
+    payload: crate::gateway::protocol::SessionCopyRequest,
     state: Arc<AppState<C>>,
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
     request_id: String,
 ) {
-    if let Ok(Some(internal_session)) = state.sessions.copy_session(&payload.session_id, payload.index).await {
-        let session = Session {
-            id: internal_session.id.clone(),
-            title: Some(internal_session.name.clone()),
-            agent_id: internal_session.control.read().unwrap().active_agent.clone(),
-            created_at: internal_session.created_at,
-            updated_at: internal_session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
-            message_count: internal_session.history.read().unwrap().len(),
-        };
-
-        let _ = outbound_tx.send(GatewayMessage::new(
-            request_id,
-            MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
-        ));
-    } else {
-        send_general_error(
-            &outbound_tx,
-            &request_id,
-            "Session not found".to_string(),
-            Some("SESSION_NOT_FOUND".to_string()),
-        );
+    match state
+        .conversation_service
+        .sessions
+        .copy_session(&payload.session_id, payload.index)
+        .await
+    {
+        Ok(Some(session)) => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                crate::gateway::protocol::MessageEnvelope::SessionsCopyResponse(SessionCreateResponse {
+                    session: crate::gateway::protocol::Session {
+                        id: session.id.clone(),
+                        title: Some(session.name.clone()),
+                        agent_id: session.control.read().unwrap().active_agent.clone(),
+                        created_at: session.created_at,
+                        updated_at: session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
+                        message_count: session.history.read().unwrap().len(),
+                    },
+                }),
+            ));
+        }
+        Ok(None) => {
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                "Source session not found".to_string(),
+                None::<String>,
+            );
+        }
+        Err(e) => {
+            error!("Failed to copy session {}: {}", payload.session_id, e);
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                e.to_string(),
+                None::<String>,
+            );
+        }
     }
 }

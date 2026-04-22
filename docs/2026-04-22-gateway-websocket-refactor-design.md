@@ -432,6 +432,26 @@ pub struct ConversationService<C: LlmClient> {
 
 建议分四个阶段执行，每一步都保持系统可运行。
 
+阶段详文：
+
+1. [Phase 1: 协议收缩与未实现能力下线](/D:/git/zero-nova/docs/2026-04-22-gateway-websocket-refactor-phase-1-protocol-convergence.md)
+2. [Phase 2: 会话 / Agent 领域与应用服务抽离](/D:/git/zero-nova/docs/2026-04-22-gateway-websocket-refactor-phase-2-domain-extraction.md)
+3. [Phase 3: `channel-websocket` 独立 crate 提取](/D:/git/zero-nova/docs/2026-04-22-gateway-websocket-refactor-phase-3-channel-websocket-crate.md)
+4. [Phase 4: 启动装配层重写与最终收口](/D:/git/zero-nova/docs/2026-04-22-gateway-websocket-refactor-phase-4-bootstrap-and-finalization.md)
+
+### 8.1 阶段执行原则
+
+每个阶段都必须满足以下约束，才能进入下一阶段：
+
+1. 阶段目标只做边界内工作，不把下一阶段重构混入当前提交
+2. 阶段完成后，现有对外功能保持完整，不允许用“后面阶段再补回来”作为临时缺口
+3. 阶段结束时必须通过完整验证：
+   1. `cargo clippy --workspace -- -D warnings`
+   2. `cargo fmt --check --all`
+   3. `cargo test --workspace`
+4. 若阶段引入前端联动，前后端入口必须同步收敛，避免暴露无效能力
+5. 若阶段内发现边界定义错误，先回到对应阶段文档修订，再继续实现，避免直接在代码里临时漂移设计
+
 ### Phase 1: 先收缩协议，停止继续扩散
 
 目标：

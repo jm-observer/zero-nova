@@ -1,6 +1,6 @@
-use crate::gateway::agents::AgentRegistry;
+use crate::app::conversation_service::ConversationService;
 use crate::gateway::handlers::{agents, chat, config, sessions, system};
-use crate::gateway::protocol::{AuthRequest, GatewayMessage, MessageEnvelope};
+use crate::gateway::protocol::{GatewayMessage, MessageEnvelope};
 use crate::provider::LlmClient;
 use log::warn;
 use std::sync::Arc;
@@ -8,15 +8,13 @@ use tokio::sync::mpsc;
 
 /// 共享应用状态
 pub struct AppState<C: LlmClient> {
-    pub agent: crate::agent::AgentRuntime<C>,
-    pub agent_registry: AgentRegistry,
-    pub sessions: crate::gateway::session::SessionStore,
+    pub conversation_service: ConversationService<C>,
     pub config: std::sync::Arc<std::sync::RwLock<crate::config::AppConfig>>,
     pub config_path: std::path::PathBuf,
 }
 
 /// 消息路由入口
-pub async fn handle_message<C: LlmClient>(
+pub async fn handle_message<C: LlmClient + 'static>(
     msg: GatewayMessage,
     state: Arc<AppState<C>>,
     outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
@@ -30,48 +28,39 @@ pub async fn handle_message<C: LlmClient>(
     };
 
     match msg.envelope {
-        MessageEnvelope::Auth(AuthRequest { token: _ }) => {
-            system::send_general_error_direct(
-                &outbound_tx,
-                &msg_id,
-                "Auth not implemented".to_string(),
-                Some("NOT_IMPLEMENTED".to_string()),
-            );
-        }
         MessageEnvelope::Chat(payload) => {
-            chat::handle_chat(payload, state, outbound_tx, msg_id).await;
+            chat::handle_chat::<C>(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::ChatStop(payload) => {
-            chat::handle_chat_stop(payload, state, outbound_tx, msg_id).await;
+            chat::handle_chat_stop::<C>(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsList => {
-            sessions::handle_sessions_list(state, outbound_tx, msg_id).await;
+            sessions::handle_sessions_list::<C>(state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsMessages(payload) => {
-            sessions::handle_session_get(payload.session_id, state, outbound_tx, msg_id).await;
+            sessions::handle_session_get::<C>(payload.session_id, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsCreate(payload) => {
-            sessions::handle_session_create(payload, state, outbound_tx, msg_id).await;
+            sessions::handle_session_create::<C>(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsDelete(payload) => {
-            sessions::handle_session_delete(payload, state, outbound_tx, msg_id).await;
+            sessions::handle_session_delete::<C>(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsCopy(payload) => {
-            sessions::handle_session_copy(payload, state, outbound_tx, msg_id).await;
+            sessions::handle_session_copy::<C>(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentsList => {
             agents::handle_agents_list::<C>(state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentsSwitch(payload) => {
-            agents::handle_agents_switch(payload, outbound_tx, msg_id).await;
+            agents::handle_agents_switch::<C>(payload, state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::ConfigGet => {
-            config::handle_config_get(state, outbound_tx, msg_id).await;
+            config::handle_config_get::<C>(state, outbound_tx, msg_id).await;
         }
         MessageEnvelope::ConfigUpdate(payload) => {
-            config::handle_config_update(payload, state, outbound_tx, msg_id).await;
+            config::handle_config_update::<C>(payload, state, outbound_tx, msg_id).await;
         }
-        // Stub / Not implemented handling
         _ => {
             warn!(
                 "Unhandled or not implemented message envelope for id={}: {:?}",

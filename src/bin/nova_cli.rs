@@ -17,6 +17,13 @@ use zero_nova::provider::openai_compat::OpenAiCompatClient;
 use zero_nova::provider::LlmClient;
 use zero_nova::tool::{builtin::register_builtin_tools, ToolRegistry};
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum, Default)]
+enum OutputFormat {
+    #[default]
+    PlainText,
+    StreamJson,
+}
+
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI")]
 struct Cli {
@@ -32,6 +39,12 @@ struct Cli {
     /// Verbose output (show tool inputs/outputs)
     #[arg(long, global = true)]
     verbose: bool,
+    /// Output format
+    #[arg(long, global = true, value_enum, default_value_t = OutputFormat::PlainText)]
+    output_format: OutputFormat,
+    /// Include a specific skill directory
+    #[arg(long, global = true)]
+    include_skill: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -44,9 +57,6 @@ enum Command {
     Run {
         /// Prompt to execute
         prompt: String,
-        /// Output result as JSON (for scripting)
-        #[arg(long)]
-        json: bool,
     },
     /// List registered tools
     Tools,
@@ -79,7 +89,11 @@ async fn main() -> Result<()> {
     if let Some(base_url) = &cli.base_url {
         config.llm.base_url = base_url.to_string();
     }
-    log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
+    
+    // Only log info if not in StreamJson mode to avoid polluting the output
+    if matches!(cli.output_format, OutputFormat::PlainText) {
+        log::info!("Starting Nova CLI with model: {}", config.llm.model_config.model);
+    }
 
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
     let mut tools = ToolRegistry::new();
@@ -91,25 +105,38 @@ async fn main() -> Result<()> {
     let system_prompt_str = prompt_builder.with_tools(&tools).build();
 
     let agent_config = AgentConfig {
-        max_iterations: 5,
+        max_iterations: 15, // Increase for skill evaluation tasks
         model_config: config.llm.model_config.clone(),
-        tool_timeout: std::time::Duration::from_secs(120),
+        tool_timeout: std::time::Duration::from_secs(300),
     };
 
-    // Load Skills from .nova/skills
-    let skill_dir = workspace.join(".nova").join("skills");
+    // Skills handling
     let mut skill_registry = zero_nova::skill::SkillRegistry::new();
+    
+    // Load skills from the default workspace location
+    let skill_dir = workspace.join(".nova").join("skills");
     if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
-        log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+        if matches!(cli.output_format, OutputFormat::PlainText) {
+            log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+        }
     }
+
+    // Additionally include a specific skill if provided via --include-skill
+    if let Some(extra_skill_path) = &cli.include_skill {
+        let path = std::path::Path::new(extra_skill_path);
+        if let Err(e) = skill_registry.load_single_skill(path) {
+            log::error!("Failed to load included skill from {:?}: {}", path, e);
+        }
+    }
+
     let skill_prompt = skill_registry.generate_system_prompt();
     let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);
 
     match cli.command {
-        Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose).await?,
-        Command::Run { prompt, json } => run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, json).await?,
+        Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose, cli.output_format).await?,
+        Command::Run { prompt } => run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, cli.output_format).await?,
         Command::Tools => {
             print_tools(&agent);
         }
@@ -119,7 +146,12 @@ async fn main() -> Result<()> {
 }
 
 /// Runs the REPL loop for interactive chat.
-async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, system_prompt: &str, verbose: bool) -> Result<()> {
+async fn run_repl(
+    agent: &mut AgentRuntime<impl LlmClient>,
+    system_prompt: &str,
+    verbose: bool,
+    format: OutputFormat,
+) -> Result<()> {
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
 
@@ -189,31 +221,34 @@ async fn run_repl(agent: &mut AgentRuntime<impl LlmClient>, system_prompt: &str,
                 continue;
             }
             _ => {
+                let printer_instance = EventPrinter::new(verbose, format);
                 let (tx, mut rx) = mpsc::channel(100);
-                let printer = tokio::spawn(async move {
+                let printer_task = tokio::spawn(async move {
                     while let Some(event) = rx.recv().await {
-                        render_event(&event, verbose);
+                        printer_instance.render(&event);
                     }
                 });
 
                 tokio::select! {
                     result = agent.run_turn(&history, input, tx.clone(), None) => {
                         drop(tx);
-                        printer.await.ok();
+                        printer_task.await.ok();
                         match result {
                             Ok(turn_result) => {
-                                println!();
+                                if matches!(format, OutputFormat::PlainText) {
+                                    println!();
+                                }
                                 for msg in turn_result.messages {
                                     history.push(msg);
                                 }
                             }
                             Err(e) => {
-                                eprintln!("\n{}", format!("[error] {}", e).red());
+                                EventPrinter::new(verbose, format).print_error(&e);
                             }
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {
-                        printer.abort();
+                        printer_task.abort();
                         println!("\n{}", "Interrupted by user.".yellow());
                     }
                 }
@@ -229,20 +264,17 @@ async fn run_oneshot(
     system_prompt: &str,
     user_input: &str,
     verbose: bool,
-    json: bool,
+    format: OutputFormat,
 ) -> Result<()> {
+    let printer = EventPrinter::new(verbose, format);
     let (tx, mut rx) = mpsc::channel(100);
 
-    // Only spawn printer if NOT in JSON mode
-    let printer = if !json {
-        Some(tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                render_event(&event, verbose);
-            }
-        }))
-    } else {
-        None
-    };
+    let printer_task = tokio::spawn(async move {
+        let internal_printer = EventPrinter::new(verbose, format);
+        while let Some(event) = rx.recv().await {
+            internal_printer.render(&event);
+        }
+    });
 
     let mut history = Vec::new();
     if !system_prompt.is_empty() {
@@ -254,14 +286,12 @@ async fn run_oneshot(
         });
     }
 
-    let result = agent.run_turn(&history, user_input, tx.clone(), None).await?;
-    drop(tx);
-    if let Some(p) = printer {
-        p.await.ok();
-    }
-    info!("{result:?}");
-    if json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+    let result = agent.run_turn(&history, user_input, tx, None).await;
+    printer_task.await.ok();
+
+    if let Err(e) = result {
+        printer.print_error(&e);
+        return Err(e);
     }
 
     Ok(())
@@ -294,64 +324,101 @@ async fn test_mcp(cmd: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Renders an `AgentEvent` to the console, optionally verbose.
-fn render_event(event: &AgentEvent, verbose: bool) {
-    match event {
-        AgentEvent::TextDelta(text) => {
-            print!("{text}");
-            let _ = std::io::stdout().flush();
-        }
-        AgentEvent::ToolStart { name, input, .. } => {
-            if verbose {
-                println!("\n{} {input:?}", format!("[tool: {name}]").cyan());
-            } else {
-                println!("\n{}", format!("[tool: {name}]").cyan());
+struct EventPrinter {
+    verbose: bool,
+    format: OutputFormat,
+}
+
+impl EventPrinter {
+    fn new(verbose: bool, format: OutputFormat) -> Self {
+        Self { verbose, format }
+    }
+
+    fn render(&self, event: &AgentEvent) {
+        match self.format {
+            OutputFormat::StreamJson => {
+                if let Ok(json) = serde_json::to_string(event) {
+                    println!("{}", json);
+                }
+            }
+            OutputFormat::PlainText => {
+                match event {
+                    AgentEvent::TextDelta(text) => {
+                        print!("{text}");
+                        let _ = std::io::stdout().flush();
+                    }
+                    AgentEvent::ToolStart { name, input, .. } => {
+                        if self.verbose {
+                            println!("\n{} {input:?}", format!("[tool: {name}]").cyan());
+                        } else {
+                            println!("\n{}", format!("[tool: {name}]").cyan());
+                        }
+                    }
+                    AgentEvent::ToolEnd {
+                        name,
+                        output,
+                        is_error,
+                        ..
+                    } => {
+                        if *is_error {
+                            println!("{}", format!("[tool: {name}] ERROR: {output}").red());
+                        } else if self.verbose {
+                            println!("{}", format!("[tool: {name}] OK: {output}").green());
+                        }
+                    }
+                    AgentEvent::TurnComplete { usage, .. } => {
+                        println!(
+                            "\n{}",
+                            format!("[tokens: input={}, output={}]", usage.input_tokens, usage.output_tokens)
+                                .bright_black()
+                        );
+                    }
+                    AgentEvent::IterationLimitReached { iterations } => {
+                        println!(
+                            "\n{}",
+                            format!("[warn] iteration limit reached ({iterations} iterations)").yellow()
+                        );
+                    }
+                    AgentEvent::Error(e) => {
+                        eprintln!("\n{}", format!("[error] {e}").red().bold());
+                    }
+                    AgentEvent::ThinkingDelta(text) => {
+                        print!("{text}");
+                        let _ = std::io::stdout().flush();
+                    }
+                    AgentEvent::LogDelta { log, stream, .. } => {
+                        if stream == "stderr" {
+                            print!("{}", log.bright_red());
+                        } else {
+                            print!("{}", log.bright_black());
+                        }
+                        let _ = std::io::stdout().flush();
+                    }
+                    AgentEvent::Iteration { current, total } => {
+                        if self.verbose {
+                            println!("\n{}", format!("[iteration {}/{}]", current, total).bright_black());
+                        }
+                    }
+                    AgentEvent::SystemLog(log) => {
+                        if self.verbose {
+                            println!("\n{}", format!("[system: {}]", log).bright_black());
+                        }
+                    }
+                }
             }
         }
-        AgentEvent::ToolEnd {
-            name, output, is_error, ..
-        } => {
-            if *is_error {
-                println!("{}", format!("[tool: {name}] ERROR: {output}").red());
-            } else if verbose {
-                println!("{}", format!("[tool: {name}] OK: {output}").green());
+    }
+
+    fn print_error(&self, error: &dyn std::fmt::Display) {
+        match self.format {
+            OutputFormat::StreamJson => {
+                println!("{}", serde_json::json!({
+                    "type": "Error",
+                    "message": error.to_string()
+                }));
             }
-        }
-        AgentEvent::TurnComplete { usage, .. } => {
-            println!(
-                "\n{}",
-                format!("[tokens: input={}, output={}]", usage.input_tokens, usage.output_tokens).bright_black()
-            );
-        }
-        AgentEvent::IterationLimitReached { iterations } => {
-            println!(
-                "\n{}",
-                format!("[warn] iteration limit reached ({iterations} iterations)").yellow()
-            );
-        }
-        AgentEvent::Error(e) => {
-            eprintln!("\n{}", format!("[error] {e}").red().bold());
-        }
-        AgentEvent::ThinkingDelta(text) => {
-            print!("{text}");
-            let _ = std::io::stdout().flush();
-        }
-        AgentEvent::LogDelta { log, stream, .. } => {
-            if stream == "stderr" {
-                print!("{}", log.bright_red());
-            } else {
-                print!("{}", log.bright_black());
-            }
-            let _ = std::io::stdout().flush();
-        }
-        AgentEvent::Iteration { current, total } => {
-            if verbose {
-                println!("\n{}", format!("[iteration {}/{}]", current, total).bright_black());
-            }
-        }
-        AgentEvent::SystemLog(log) => {
-            if verbose {
-                println!("\n{}", format!("[system: {}]", log).bright_black());
+            OutputFormat::PlainText => {
+                eprintln!("\n{}", format!("[error] {}", error).red());
             }
         }
     }

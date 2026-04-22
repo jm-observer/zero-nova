@@ -30,16 +30,27 @@ impl SkillRegistry {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                let skill_md = path.join("SKILL.md");
-                if skill_md.exists() {
-                    if let Ok(skill) = self.parse_skill_file(&skill_md) {
-                        log::info!("Loaded skill: {} from {:?}", skill.name, path);
-                        self.skills.push(skill);
-                    }
-                }
+                self.load_single_skill(&path)?;
             }
         }
         Ok(())
+    }
+
+    pub fn load_single_skill<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        let path = path.as_ref();
+        let skill_md = path.join("SKILL.md");
+        if skill_md.exists() {
+            match self.parse_skill_file(&skill_md) {
+                Ok(skill) => {
+                    log::info!("Loaded skill: {} from {:?}", skill.name, path);
+                    self.skills.push(skill);
+                    Ok(())
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to parse skill at {:?}: {}", path, e)),
+            }
+        } else {
+            Ok(())
+        }
     }
 
     fn parse_skill_file(&self, path: &Path) -> Result<Skill> {

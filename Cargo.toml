@@ -24,10 +24,6 @@ sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
 toml = "0.8"
 sysinfo = "0.30"
 
-
-
-
-
 # Optional dependencies for CLI
 clap = { version = "4", features = ["derive"], optional = true }
 rustyline = { version = "15", optional = true }
@@ -45,4 +41,4 @@ prod = ["custom-utils/prod"]
 [[bin]]
 name = "nova_gateway"
 path = "src/bin/nova_gateway.rs"
-required-features = ["gateway", "cli"]
+required-features = ["gateway"]

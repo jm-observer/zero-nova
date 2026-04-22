@@ -2,13 +2,13 @@ use crate::agent::{AgentConfig, AgentRuntime};
 use crate::config::AppConfig;
 use crate::message::{ContentBlock, Message, Role};
 use crate::provider::openai_compat::OpenAiCompatClient;
+use crate::tool::builtin::register_builtin_tools;
 use crate::tool::{Tool, ToolDefinition, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use crate::tool::builtin::register_builtin_tools;
 
 /// Tool to spawn a subagent for isolated task execution.
 pub struct SpawnSubagentTool {

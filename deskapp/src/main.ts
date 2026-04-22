@@ -11,8 +11,6 @@ import { ChatService } from './services/chat-service';
 import { TitleBarView } from './ui/titlebar';
 import { SidebarView } from './ui/sidebar-view';
 import { ChatView } from './ui/chat-view';
-import { ArtifactsView } from './ui/artifacts-view';
-import { SchedulerView } from './ui/scheduler-view';
 import { SettingsView } from './ui/settings-view';
 import { ModalsView } from './ui/modals';
 import { VoiceOverlayView } from './ui/voice-overlay';
@@ -46,8 +44,6 @@ async function init() {
             titleBar: new TitleBarView(state, bus),
             sidebar: new SidebarView(state, bus),
             chat: new ChatView(state, bus),
-            artifacts: new ArtifactsView(state, bus),
-            scheduler: new SchedulerView(state, bus),
             settings: new SettingsView(state, bus),
             modals: new ModalsView(state, bus),
             voiceOverlay: new VoiceOverlayView(state, bus)

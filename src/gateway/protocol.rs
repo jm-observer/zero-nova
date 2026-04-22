@@ -63,14 +63,6 @@ pub enum MessageEnvelope {
     SessionsDelete(SessionIdPayload),
     #[serde(rename = "sessions.delete.response")]
     SessionsDeleteResponse(SuccessResponse),
-    #[serde(rename = "sessions.logs")]
-    SessionsLogs(SessionIdPayload),
-    #[serde(rename = "sessions.logs.response")]
-    SessionsLogsResponse(LogListResponse),
-    #[serde(rename = "sessions.artifacts")]
-    SessionsArtifacts(SessionIdPayload),
-    #[serde(rename = "sessions.artifacts.response")]
-    SessionsArtifactsResponse(ArtifactListResponse),
     #[serde(rename = "sessions.copy")]
     SessionsCopy(SessionCopyRequest),
     #[serde(rename = "sessions.copy.response")]
@@ -104,14 +96,6 @@ pub enum MessageEnvelope {
     #[serde(rename = "agents.switch.response")]
     AgentsSwitchResponse(AgentsSwitchResponse),
 
-    // --- 2.3 Scheduler API ---
-    #[serde(rename = "scheduler.list")]
-    SchedulerList,
-    #[serde(rename = "scheduler.list.response")]
-    SchedulerListResponse(Value),
-    #[serde(rename = "scheduler.trigger")]
-    SchedulerTrigger(TaskIdPayload),
-
     // --- 2.4 Memory & Distillation ---
     #[serde(rename = "memory.stats")]
     MemoryStats,
@@ -129,10 +113,6 @@ pub enum MessageEnvelope {
     ConfigUpdate(serde_json::Value),
     #[serde(rename = "config.update.response")]
     ConfigUpdateResponse(SuccessResponse),
-    #[serde(rename = "config.get-llm-source")]
-    ConfigGetLlmSource,
-    #[serde(rename = "config.get-llm-source.response")]
-    ConfigGetLlmSourceResponse(Value),
     #[serde(rename = "settings.get")]
     SettingsGet,
     #[serde(rename = "browser.launch")]
@@ -142,65 +122,8 @@ pub enum MessageEnvelope {
     #[serde(rename = "browser.status.response")]
     BrowserStatusResponse(Value),
 
-    // --- Router & Weixin ---
-    #[serde(rename = "router.config.get")]
-    RouterConfigGet,
-    #[serde(rename = "router.status")]
-    RouterStatus(ConnectStatusPayload),
-    #[serde(rename = "weixin.config.get")]
-    WeixinConfigGet,
-    #[serde(rename = "weixin.config.update")]
-    WeixinConfigUpdate(Value),
-    #[serde(rename = "weixin.status")]
-    WeixinStatus(ConnectStatusPayload),
-
-    // --- Voice ---
-    #[serde(rename = "voice.get-status")]
-    VoiceGetStatus,
-    #[serde(rename = "voice.get-status.response")]
-    VoiceGetStatusResponse(Value),
-
-    // --- OpenFlux Cloud ---
-    #[serde(rename = "openflux.status")]
-    OpenFluxStatus,
-    #[serde(rename = "openflux.status.response")]
-    OpenFluxStatusResponse(Value),
-    #[serde(rename = "language.update")]
-    LanguageUpdate(LanguageUpdatePayload),
-    #[serde(rename = "language.update.response")]
-    LanguageUpdateResponse(Value),
-
-    #[serde(rename = "router.config.update")]
-    RouterConfigUpdate(RouterConfigUpdatePayload),
-
     #[serde(other)]
     Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct RouterConfigUpdatePayload {
-    pub app_user_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LogListResponse {
-    pub logs: Vec<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ArtifactListResponse {
-    pub artifacts: Vec<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LanguageUpdatePayload {
-    pub language: String,
 }
 
 // --- Interaction protocol structs ---
@@ -332,21 +255,8 @@ pub struct AgentIdPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskIdPayload {
-    pub task_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
 pub struct AuthRequest {
     pub token: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectStatusPayload {
-    pub connected: bool,
-    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

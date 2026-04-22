@@ -202,15 +202,6 @@
         </div>
       </div>
       <div class="title-bar-right">
-        <!-- 成果物面板收起/展开按钮 -->
-        <button id="artifacts-toggle" class="icon-btn title-bar-btn" data-i18n-title="titlebar.artifacts" title="成果物面板">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-          </svg>
-        </button>
         <!-- 深色/浅色主题切换 -->
         <button id="theme-toggle" class="icon-btn title-bar-btn" data-i18n-title="titlebar.theme_toggle" title="切换主题">
           <!-- 太阳图标（深色模式下显示，点击切换到浅色） -->
@@ -230,14 +221,6 @@
           <svg class="theme-icon-moon hidden" width="16" height="16" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2">
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-          </svg>
-        </button>
-        <!-- 启动调试浏览器 -->
-        <button id="browser-launch-btn" class="icon-btn title-bar-btn" data-i18n-title="titlebar.launch_browser" title="Launch Debug Browser">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="2" y1="12" x2="22" y2="12" />
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
           </svg>
         </button>
         <!-- App 绑定二维码 -->
@@ -331,19 +314,6 @@
         <!-- Agent 列表切换（两级结构中的第一级） -->
         <div id="agent-list" class="agent-list">
           <!-- Agent 列表由 JS 动态生成 -->
-        </div>
-
-        <!-- 视图切换区 -->
-        <div class="sidebar-nav">
-          <!-- 定时任务按钮 -->
-          <!-- 定时任务按钮 -->
-          <div id="scheduler-btn" class="sidebar-action" data-i18n-title="sidebar.scheduler" title="定时任务">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            <span class="action-text" data-i18n="sidebar.scheduler">定时任务</span>
-          </div>
         </div>
 
         <!-- Agent 列表（默认显示，Agent = 会话） -->
@@ -561,41 +531,6 @@
           </div>
         </div>
 
-        <!-- Toast 通知容器 -->
-        <div id="scheduler-toast-container" class="scheduler-toast-container"></div>
-
-        <!-- 调度器视图（默认隐藏，显示在中部区域） -->
-        <div id="scheduler-view" class="scheduler-view hidden">
-          <!-- 列表视图（默认） -->
-          <div id="scheduler-list-view" class="scheduler-list-view">
-            <div class="scheduler-view-header">
-              <h3 data-i18n="scheduler.title">定时任务</h3>
-              <button id="scheduler-refresh-btn" class="icon-btn-sm" title="刷新">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="23 4 23 10 17 10" />
-                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                </svg>
-              </button>
-            </div>
-            <div id="scheduler-tasks-wrapper" class="scheduler-tasks-wrapper">
-              <div id="scheduler-tasks" class="scheduler-tasks">
-                <div class="empty-state">暂无定时任务<br><span style="font-size:0.75rem;opacity:0.5">通过对话创建:
-                    "每天9点帮我..."</span></div>
-              </div>
-              <!-- 内联详情（选中任务后，在卡片下方展开） -->
-              <div id="scheduler-inline-detail" class="scheduler-inline-detail hidden">
-                <div id="scheduler-inline-actions" class="scheduler-inline-actions"></div>
-                <div class="scheduler-inline-runs-header">
-                  <span>执行记录</span>
-                </div>
-                <div id="scheduler-inline-runs" class="scheduler-inline-runs">
-                  <div class="empty-state">暂无执行记录</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Router 绑定区域（未绑定时显示在输入框位置） -->
         <div id="router-bind-area" class="router-bind-area hidden">
           <div class="router-bind-container">
@@ -660,12 +595,6 @@
         </div>
       </main>
 
-      <div class="resize-handle" id="artifacts-resize-handle"></div>
-      <!-- 右侧：成果物面板（默认隐藏） -->
-      <aside class="artifacts-panel collapsed" id="artifacts-panel">
-        <div id="artifacts-filter-tabs" class="artifacts-filter-tabs"></div>
-        <div id="artifacts-list" class="artifacts-list"></div>
-      </aside>
     </div>
 
     <!-- Debug 面板（底部日志窗口，参与 flex 布局，不遮盖上方内容） -->

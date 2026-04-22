@@ -1,0 +1,370 @@
+/* ========== 语音对话模式入口按钮 ========== */
+.voice-mode-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+.voice-mode-btn:hover {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+.voice-mode-btn.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.voice-mode-btn.disabled:hover {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-primary);
+  box-shadow: none;
+}
+/* ========== 语音对话全屏覆盖�?========== */
+.voice-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+.voice-overlay:not(.hidden) {
+  opacity: 1;
+  visibility: visible;
+}
+.voice-overlay.hidden {
+  display: none;
+}
+.voice-overlay-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 15, 30, 0.92);
+  backdrop-filter: blur(20px);
+}
+.voice-overlay-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  padding: 24px 32px 40px;
+  z-index: 1;
+}
+/* 顶部�?*/
+.voice-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 600px;
+}
+.voice-overlay-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.5px;
+}
+.voice-overlay-close {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.voice-overlay-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text);
+}
+/* 中部视觉区域 */
+.voice-visual-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  flex: 1;
+  justify-content: center;
+}
+/* 波纹动画容器 */
+.voice-ripple-container {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.voice-ripple-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.ring-1 {
+  width: 100%;
+  height: 100%;
+}
+.ring-2 {
+  width: 140%;
+  height: 140%;
+  top: -20%;
+  left: -20%;
+}
+.ring-3 {
+  width: 180%;
+  height: 180%;
+  top: -40%;
+  left: -40%;
+}
+/* 核心�?*/
+.voice-ripple-core {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.2));
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  transition: all 0.3s ease;
+  z-index: 1;
+}
+/* 状态：等待中（idle�?*/
+.voice-overlay[data-state="idle"] .voice-ripple-core {
+  color: var(--color-text-secondary);
+  border-color: rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+}
+/* 状态：录音中（recording�?*/
+.voice-overlay[data-state="recording"] .voice-ripple-core {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.5);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.25));
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.2);
+}
+.voice-overlay[data-state="recording"] .voice-ripple-ring {
+  opacity: 1;
+  border-color: rgba(239, 68, 68, 0.12);
+  animation: voice-ripple-expand 2s ease-out infinite;
+}
+.voice-overlay[data-state="recording"] .ring-2 {
+  animation-delay: 0.4s;
+}
+.voice-overlay[data-state="recording"] .ring-3 {
+  animation-delay: 0.8s;
+}
+@keyframes voice-ripple-expand {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+}
+/* 状态：识别中（processing�?*/
+.voice-overlay[data-state="processing"] .voice-ripple-core {
+  color: var(--color-warning);
+  border-color: rgba(250, 173, 20, 0.4);
+  background: linear-gradient(135deg, rgba(250, 173, 20, 0.1), rgba(250, 173, 20, 0.2));
+  animation: voice-processing-pulse 1s ease-in-out infinite;
+}
+@keyframes voice-processing-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+/* 状态：思�?回复中（answering�?*/
+.voice-overlay[data-state="answering"] .voice-ripple-core {
+  color: var(--color-primary);
+  border-color: rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.3));
+  animation: voice-answering-glow 1.5s ease-in-out infinite;
+}
+.voice-overlay[data-state="answering"] .voice-ripple-ring {
+  opacity: 1;
+  border-color: rgba(99, 102, 241, 0.1);
+  animation: voice-ripple-slow 3s ease-in-out infinite;
+}
+.voice-overlay[data-state="answering"] .ring-2 {
+  animation-delay: 0.6s;
+}
+.voice-overlay[data-state="answering"] .ring-3 {
+  animation-delay: 1.2s;
+}
+@keyframes voice-answering-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(99, 102, 241, 0.3);
+  }
+}
+@keyframes voice-ripple-slow {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.15;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.4;
+  }
+}
+/* 状态：朗读中（speaking�?*/
+.voice-overlay[data-state="speaking"] .voice-ripple-core {
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(16, 185, 129, 0.25));
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.2);
+}
+.voice-overlay[data-state="speaking"] .voice-ripple-ring {
+  opacity: 1;
+  border-color: rgba(16, 185, 129, 0.1);
+  animation: voice-speaking-wave 1.5s ease-in-out infinite;
+}
+.voice-overlay[data-state="speaking"] .ring-2 {
+  animation-delay: 0.3s;
+}
+.voice-overlay[data-state="speaking"] .ring-3 {
+  animation-delay: 0.6s;
+}
+@keyframes voice-speaking-wave {
+  0%,
+  100% {
+    transform: scale(0.95);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.08;
+  }
+}
+/* 状态文�?*/
+.voice-status-text {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  transition: color 0.3s;
+  text-align: center;
+}
+/* 实时转写文字 */
+.voice-transcript {
+  max-width: 500px;
+  min-height: 24px;
+  font-size: 18px;
+  color: var(--color-text);
+  text-align: center;
+  line-height: 1.6;
+  word-break: break-word;
+  opacity: 0.9;
+}
+.voice-transcript:empty {
+  display: none;
+}
+/* 底部控制按钮 */
+.voice-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding-bottom: 20px;
+}
+.voice-main-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid var(--color-primary);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.15));
+  color: var(--color-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+}
+.voice-main-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
+  box-shadow: 0 0 24px rgba(99, 102, 241, 0.3);
+  transform: scale(1.05);
+}
+.voice-main-btn:active {
+  transform: scale(0.95);
+}
+/* 录音�?�?按钮变红 */
+.voice-overlay[data-state="recording"] .voice-main-btn {
+  border-color: #ef4444;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.25));
+  color: #ef4444;
+}
+.voice-main-btn .hidden {
+  display: none;
+}
+/* 嵌入模型重建进度�?*/
+.embedding-progress {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+.embedding-progress.hidden {
+  display: none;
+}
+.embedding-progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs);
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.embedding-progress-bar-bg {
+  height: 6px;
+  background: var(--color-bg);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.embedding-progress-bar-fill {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.3s ease;
+}
+.embedding-progress-hint {
+  margin-top: var(--spacing-xs);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}

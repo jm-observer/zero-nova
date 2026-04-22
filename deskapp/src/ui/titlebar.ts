@@ -6,21 +6,17 @@ import { EventBus, Events } from '../core/event-bus';
 
 export class TitleBarView {
     private statusIndicator: HTMLDivElement;
-    private browserLaunchBtn: HTMLButtonElement | null;
     private btnMinimize: HTMLButtonElement;
     private btnMaximize: HTMLButtonElement;
     private btnClose: HTMLButtonElement;
     private themeToggle: HTMLButtonElement;
-    private artifactsToggle: HTMLButtonElement;
 
     constructor(private state: AppState, private bus: EventBus) {
         this.statusIndicator = document.getElementById('status-indicator') as HTMLDivElement;
-        this.browserLaunchBtn = document.getElementById('browser-launch-btn') as HTMLButtonElement;
         this.btnMinimize = document.getElementById('btn-minimize') as HTMLButtonElement;
         this.btnMaximize = document.getElementById('btn-maximize') as HTMLButtonElement;
         this.btnClose = document.getElementById('btn-close') as HTMLButtonElement;
         this.themeToggle = document.getElementById('theme-toggle') as HTMLButtonElement;
-        this.artifactsToggle = document.getElementById('artifacts-toggle') as HTMLButtonElement;
     }
 
     init() {
@@ -31,10 +27,6 @@ export class TitleBarView {
         // 订阅状态变化
         this.bus.on(Events.THEME_CHANGED, (payload: any) => {
             this.applyThemeToDOM(payload.theme);
-        });
-
-        this.bus.on('browser:status_changed', (payload: { connected: boolean }) => {
-            this.updateBrowserStatusIndicator(payload.connected);
         });
 
         this.bus.on(Events.GATEWAY_STATUS, (payload: { status: string }) => {
@@ -79,41 +71,6 @@ export class TitleBarView {
             localStorage.setItem('openflux-theme', newTheme);
         });
 
-        this.browserLaunchBtn?.addEventListener('click', async () => {
-            if (!this.state.gatewayClient) return;
-            this.browserLaunchBtn!.classList.add('loading');
-            this.browserLaunchBtn!.disabled = true;
-            try {
-                const result = await this.state.gatewayClient.launchBrowser();
-                this.browserLaunchBtn!.classList.remove('loading');
-                if (result.success) {
-                    this.browserLaunchBtn!.classList.add('success');
-                    setTimeout(() => this.browserLaunchBtn!.classList.remove('success'), 2000);
-                } else {
-                    this.browserLaunchBtn!.classList.add('error');
-                    setTimeout(() => this.browserLaunchBtn!.classList.remove('error'), 2000);
-                }
-            } catch (err) {
-                this.browserLaunchBtn!.classList.remove('loading');
-                this.browserLaunchBtn!.classList.add('error');
-                setTimeout(() => this.browserLaunchBtn!.classList.remove('error'), 2000);
-            } finally {
-                this.browserLaunchBtn!.disabled = false;
-            }
-        });
-
-        this.artifactsToggle.addEventListener('click', () => {
-            const panel = document.getElementById('artifacts-panel');
-            if (panel) {
-                panel.classList.toggle('collapsed');
-                if (!panel.classList.contains('collapsed')) {
-                    const saved = localStorage.getItem('artifacts-panel-width');
-                    if (saved) panel.style.width = saved + 'px';
-                } else {
-                    panel.style.width = '';
-                }
-            }
-        });
     }
 
     private initDragging() {
@@ -160,16 +117,5 @@ export class TitleBarView {
         const textEl = this.statusIndicator.querySelector('.text');
         if (dot) dot.className = `dot ${type}`;
         if (textEl) textEl.textContent = text;
-    }
-
-    updateBrowserStatusIndicator(connected: boolean): void {
-        if (!this.browserLaunchBtn) return;
-        if (connected) {
-            this.browserLaunchBtn.classList.add('connected');
-            this.browserLaunchBtn.title = 'Browser Connected (CDP)';
-        } else {
-            this.browserLaunchBtn.classList.remove('connected');
-            this.browserLaunchBtn.title = 'Launch Debug Browser';
-        }
     }
 }

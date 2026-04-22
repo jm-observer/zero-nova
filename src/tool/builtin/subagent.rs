@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
+use crate::tool::builtin::register_builtin_tools;
 
 /// Tool to spawn a subagent for isolated task execution.
 pub struct SpawnSubagentTool {
@@ -84,19 +85,7 @@ impl Tool for SpawnSubagentTool {
 
         // 3. Setup Tool Registry for subagent (Isolation)
         let mut sub_registry = ToolRegistry::new();
-
-        sub_registry.register(Box::new(crate::tool::builtin::bash::BashTool::with_workspace(
-            &self.config.tool.bash,
-            workspace
-                .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
-        )));
-        sub_registry.register(Box::new(crate::tool::builtin::file_ops::ReadFileTool::new(
-            workspace.clone(),
-        )));
-        sub_registry.register(Box::new(crate::tool::builtin::file_ops::WriteFileTool::new(
-            workspace.clone(),
-        )));
+        register_builtin_tools(&mut sub_registry, &self.config);
 
         // 4. Setup Runtime
         let mut model_config = self.config.llm.model_config.clone();
@@ -113,13 +102,13 @@ impl Tool for SpawnSubagentTool {
         let runtime = AgentRuntime::new(client, sub_registry, agent_config);
 
         // 5. Build System Prompt
-        let base_system = r#"You are an autonomous subagent. 
+        let base_system = r#"You are an autonomous subagent.
 Your goal is to complete the assigned task by directly AGENTICALLY using the provided tools.
 - If the task involves creating or modifying code, use `write_file`.
 - If the task involves testing or running code, use `bash`.
 - ALWAYS prioritize taking action over describing what you would do.
 - You are operating within an isolated workspace. All file paths should be relative to your current directory.
-- **Cross-Platform Compatibility**: You might be running on Windows or Linux. 
+- **Cross-Platform Compatibility**: You might be running on Windows or Linux.
   - Prefer using common commands that work in both (e.g., `ls` is aliased in PowerShell, but `dir` fails on Linux).
   - Use `python` as the command unless specifically told otherwise.
   - If a command fails, interpret the error and try the alternative platform's equivalent.

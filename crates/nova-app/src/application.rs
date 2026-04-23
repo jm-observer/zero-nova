@@ -1,6 +1,6 @@
 use crate::conversation_service::ConversationService;
 use crate::types::{AppAgent, AppEvent, AppMessage, AppSession};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use nova_core::config::AppConfig;
 use nova_core::provider::LlmClient;
@@ -134,10 +134,19 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 
         let id = session.id.clone();
         let name = session.name.clone();
-        let active_agent = session.control.read().unwrap().active_agent.clone();
+        let active_agent = session
+            .control
+            .read()
+            .map_err(|_| anyhow!("Session control lock poisoned"))?
+            .active_agent
+            .clone();
         let created_at = session.created_at;
         let updated_at = session.updated_at.load(std::sync::atomic::Ordering::SeqCst);
-        let message_count = session.history.read().unwrap().len();
+        let message_count = session
+            .history
+            .read()
+            .map_err(|_| anyhow!("Session history lock poisoned"))?
+            .len();
 
         Ok(AppSession {
             id,
@@ -163,10 +172,19 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 
         let id = session.id.clone();
         let name = session.name.clone();
-        let active_agent = session.control.read().unwrap().active_agent.clone();
+        let active_agent = session
+            .control
+            .read()
+            .map_err(|_| anyhow!("Session control lock poisoned"))?
+            .active_agent
+            .clone();
         let created_at = session.created_at;
         let updated_at = session.updated_at.load(std::sync::atomic::Ordering::SeqCst);
-        let message_count = session.history.read().unwrap().len();
+        let message_count = session
+            .history
+            .read()
+            .map_err(|_| anyhow!("Session history lock poisoned"))?
+            .len();
 
         Ok(AppSession {
             id,
@@ -212,7 +230,10 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     fn config_snapshot(&self) -> Result<Value> {
-        let config = self.config.read().unwrap();
+        let config = self
+            .config
+            .read()
+            .map_err(|_| anyhow!("Application config lock poisoned"))?;
         serde_json::to_value(&*config).context("Failed to serialize config")
     }
 
@@ -224,7 +245,10 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await
             .with_context(|| format!("Failed to save config to {:?}", self.config_path))?;
 
-        let mut config = self.config.write().unwrap();
+        let mut config = self
+            .config
+            .write()
+            .map_err(|_| anyhow!("Application config lock poisoned"))?;
         *config = new_config;
         Ok(())
     }

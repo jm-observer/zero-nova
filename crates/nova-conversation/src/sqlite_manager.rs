@@ -17,7 +17,11 @@ impl SqliteManager {
                 .context("Failed to create data directory")?;
         }
 
-        let db_path = data_path.join("sessions.db").to_str().unwrap().to_string();
+        let db_path = data_path
+            .join("sessions.db")
+            .to_str()
+            .context("SQLite database path contains non-UTF8 characters")?
+            .to_string();
 
         let options = SqliteConnectOptions::new().filename(&db_path).create_if_missing(true);
 

@@ -13,10 +13,12 @@ pub async fn handle_agents_list(
 ) {
     let agents = app.list_agents().into_iter().map(app_agent_to_protocol).collect();
 
-    let _ = outbound_tx.send(GatewayMessage::new(
-        request_id,
-        MessageEnvelope::AgentsListResponse(AgentsListResponse { agents }),
-    ));
+    let _ = outbound_tx
+        .send_async(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::AgentsListResponse(AgentsListResponse { agents }),
+        ))
+        .await;
 }
 
 pub async fn handle_agents_switch(
@@ -30,13 +32,15 @@ pub async fn handle_agents_switch(
     match app.switch_agent(&payload.session_id, &payload.agent_id).await {
         Ok(agent) => {
             let agent = app_agent_to_protocol(agent);
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {
-                    agent,
-                    messages: vec![],
-                }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {
+                        agent,
+                        messages: vec![],
+                    }),
+                ))
+                .await;
         }
         Err(error) => {
             super::system::send_general_error(
@@ -44,7 +48,8 @@ pub async fn handle_agents_switch(
                 &request_id,
                 error.to_string(),
                 Some(error_code(&error).to_string()),
-            );
+            )
+            .await;
         }
     }
 }

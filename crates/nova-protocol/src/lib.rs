@@ -13,7 +13,6 @@ pub use system::*;
 
 #[cfg(test)]
 mod tests {
-    use crate::chat::*;
     use crate::envelope::*;
     use crate::system::*;
 

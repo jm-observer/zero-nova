@@ -18,7 +18,8 @@ pub async fn handle_chat(
                 &request_id,
                 "session_id is required".to_string(),
                 Some("INVALID_REQUEST".to_string()),
-            );
+            )
+            .await;
             return;
         }
     };
@@ -32,7 +33,7 @@ pub async fn handle_chat(
     let event_forwarder = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let gateway_msg = app_event_to_gateway(event, &request_id_clone, &session_id_clone);
-            if outbound_tx_clone.send(gateway_msg).is_err() {
+            if outbound_tx_clone.send_async(gateway_msg).await.is_err() {
                 break;
             }
         }
@@ -46,7 +47,8 @@ pub async fn handle_chat(
                 &request_id,
                 format!("Session {} not found", session_id),
                 Some("SESSION_NOT_FOUND".to_string()),
-            );
+            )
+            .await;
             return;
         }
         Err(e) => {
@@ -55,17 +57,20 @@ pub async fn handle_chat(
                 &request_id,
                 format!("Service error: {}", e),
                 Some("SERVICE_ERROR".to_string()),
-            );
+            )
+            .await;
             return;
         }
     }
 
-    let _ = outbound_tx.send(GatewayMessage::new(
-        request_id.clone(),
-        MessageEnvelope::ChatStart(SessionIdPayload {
-            session_id: session_id.clone(),
-        }),
-    ));
+    let _ = outbound_tx
+        .send_async(GatewayMessage::new(
+            request_id.clone(),
+            MessageEnvelope::ChatStart(SessionIdPayload {
+                session_id: session_id.clone(),
+            }),
+        ))
+        .await;
 
     if let Err(e) = app.start_turn(&session_id, &payload.input, event_tx).await {
         if let Err(join_error) = event_forwarder.await {
@@ -79,7 +84,8 @@ pub async fn handle_chat(
             &request_id,
             format!("Service error: {}", e),
             Some(error_code(&e).to_string()),
-        );
+        )
+        .await;
         return;
     }
 
@@ -88,14 +94,16 @@ pub async fn handle_chat(
         log::error!("Failed to join app event forwarder: {}", join_error);
     }
 
-    let _ = outbound_tx.send(GatewayMessage::new(
-        request_id,
-        MessageEnvelope::ChatComplete(ChatCompletePayload {
-            session_id,
-            output: None,
-            usage: None,
-        }),
-    ));
+    let _ = outbound_tx
+        .send_async(GatewayMessage::new(
+            request_id,
+            MessageEnvelope::ChatComplete(ChatCompletePayload {
+                session_id,
+                output: None,
+                usage: None,
+            }),
+        ))
+        .await;
 }
 
 pub async fn handle_chat_stop(
@@ -106,10 +114,12 @@ pub async fn handle_chat_stop(
 ) {
     match app.stop_turn(&payload.session_id).await {
         Ok(()) => {
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::ChatStopResponse(payload),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::ChatStopResponse(payload),
+                ))
+                .await;
         }
         Err(e) => {
             super::system::send_general_error(
@@ -117,7 +127,8 @@ pub async fn handle_chat_stop(
                 &request_id,
                 format!("Service error: {}", e),
                 Some(error_code(&e).to_string()),
-            );
+            )
+            .await;
         }
     }
 }

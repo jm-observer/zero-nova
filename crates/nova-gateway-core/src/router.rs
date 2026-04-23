@@ -58,7 +58,8 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
                 &msg_id,
                 "Not implemented".to_string(),
                 Some("NOT_IMPLEMENTED".to_string()),
-            );
+            )
+            .await;
         }
     }
 }

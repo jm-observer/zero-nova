@@ -5,7 +5,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 // use std::sync::Arc;
 
-use crate::mcp::transport::{McpTransport, StdioTransport, WebSocketTransport};
+#[cfg(feature = "mcp-websocket")]
+use crate::mcp::transport::WebSocketTransport;
+use crate::mcp::transport::{McpTransport, StdioTransport};
 use crate::mcp::types::{
     CallToolResult, InitializeResult, JsonRpcRequest, ListToolsResult, McpToolDef, ServerCapabilities, ServerInfo,
 };
@@ -31,6 +33,7 @@ impl McpClient {
     }
 
     /// Connect via WebSocket
+    #[cfg(feature = "mcp-websocket")]
     pub async fn connect_ws(url: &str) -> Result<Self> {
         let transport = WebSocketTransport::connect(url).await?;
         let mut client = Self {
@@ -40,6 +43,14 @@ impl McpClient {
         };
         client.initialize().await?;
         Ok(client)
+    }
+
+    /// Connect via WebSocket
+    #[cfg(not(feature = "mcp-websocket"))]
+    pub async fn connect_ws(_url: &str) -> Result<Self> {
+        Err(anyhow!(
+            "MCP WebSocket transport is disabled; enable the 'mcp-websocket' feature"
+        ))
     }
 
     /// Perform the "initialize" handshake and send the "initialized" notification.

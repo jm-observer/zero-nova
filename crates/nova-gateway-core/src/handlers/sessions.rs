@@ -15,14 +15,16 @@ pub async fn handle_sessions_list(
     match app.list_sessions().await {
         Ok(sessions) => {
             let sessions = sessions.into_iter().map(app_session_to_protocol).collect();
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
+                ))
+                .await;
         }
         Err(e) => {
             error!("Failed to list sessions: {}", e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>);
+            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -36,10 +38,12 @@ pub async fn handle_session_get(
     match app.session_messages(&session_id).await {
         Ok(messages) => {
             let messages = messages.into_iter().map(app_message_to_protocol).collect();
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse { messages }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse { messages }),
+                ))
+                .await;
         }
         Err(e) if e.to_string().contains("Session not found") => {
             super::system::send_general_error(
@@ -47,11 +51,12 @@ pub async fn handle_session_get(
                 &request_id,
                 "Session not found".to_string(),
                 None::<String>,
-            );
+            )
+            .await;
         }
         Err(e) => {
             error!("Failed to get session {}: {}", session_id, e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>);
+            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -65,14 +70,16 @@ pub async fn handle_session_create(
     match app.create_session(payload.title, payload.agent_id).await {
         Ok(session) => {
             let session = app_session_to_protocol(session);
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
+                ))
+                .await;
         }
         Err(e) => {
             error!("Failed to create session: {}", e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>);
+            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -85,14 +92,16 @@ pub async fn handle_session_delete(
 ) {
     match app.delete_session(&payload.session_id).await {
         Ok(success) => {
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success }),
+                ))
+                .await;
         }
         Err(e) => {
             error!("Failed to delete session {}: {}", payload.session_id, e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>);
+            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -106,10 +115,12 @@ pub async fn handle_session_copy(
     match app.copy_session(&payload.session_id, payload.index).await {
         Ok(session) => {
             let session = app_session_to_protocol(session);
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
+                ))
+                .await;
         }
         Err(e) if e.to_string().contains("Source session not found") => {
             super::system::send_general_error(
@@ -117,11 +128,12 @@ pub async fn handle_session_copy(
                 &request_id,
                 "Source session not found".to_string(),
                 None::<String>,
-            );
+            )
+            .await;
         }
         Err(e) => {
             error!("Failed to copy session {}: {}", payload.session_id, e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>);
+            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }

@@ -2,12 +2,14 @@
 use crate::mcp::types::{JsonRpcRequest, JsonRpcResponse};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+#[cfg(feature = "mcp-websocket")]
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, Mutex};
+#[cfg(feature = "mcp-websocket")]
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream};
 
 #[async_trait]
@@ -124,11 +126,13 @@ impl McpTransport for StdioTransport {
 
 /// WebSocket transport – connects to a ws:// or wss:// endpoint.
 /// Transport implementation using a WebSocket connection.
+#[cfg(feature = "mcp-websocket")]
 pub struct WebSocketTransport {
     write_sink: Mutex<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>,
     pending: PendingRequests,
 }
 
+#[cfg(feature = "mcp-websocket")]
 impl WebSocketTransport {
     pub async fn connect(url: &str) -> Result<Self> {
         let (ws_stream, _): (WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, _) = connect_async(url).await?;
@@ -159,6 +163,7 @@ impl WebSocketTransport {
     }
 }
 
+#[cfg(feature = "mcp-websocket")]
 #[async_trait]
 impl McpTransport for WebSocketTransport {
     /// Sends a JSON-RPC request and awaits the response.

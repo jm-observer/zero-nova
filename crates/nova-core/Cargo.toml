@@ -7,7 +7,7 @@ description = "Core agent library for zero-nova"
 [dependencies]
 tokio-util = { workspace = true }
 tokio = { workspace = true }
-tokio-tungstenite = { workspace = true }
+tokio-tungstenite = { workspace = true, optional = true }
 log = { workspace = true }
 custom-utils = { workspace = true }
 reqwest = { workspace = true }
@@ -22,3 +22,7 @@ toml = { workspace = true }
 sysinfo = { workspace = true }
 which = { workspace = true }
 chrono = { workspace = true }
+
+[features]
+default = []
+mcp-websocket = ["dep:tokio-tungstenite"]

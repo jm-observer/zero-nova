@@ -11,10 +11,12 @@ pub async fn handle_config_get(
 ) {
     match app.config_snapshot() {
         Ok(config) => {
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::ConfigGetResponse(config),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::ConfigGetResponse(config),
+                ))
+                .await;
         }
         Err(e) => {
             error!("Failed to serialize config snapshot: {}", e);
@@ -23,7 +25,8 @@ pub async fn handle_config_get(
                 &request_id,
                 format!("Service error: {}", e),
                 Some("SERVICE_ERROR".to_string()),
-            );
+            )
+            .await;
         }
     }
 }
@@ -38,10 +41,12 @@ pub async fn handle_config_update(
 
     match app.update_config(payload).await {
         Ok(()) => {
-            let _ = outbound_tx.send(GatewayMessage::new(
-                request_id,
-                MessageEnvelope::ConfigUpdateResponse(SuccessResponse { success: true }),
-            ));
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::ConfigUpdateResponse(SuccessResponse { success: true }),
+                ))
+                .await;
         }
         Err(e) => {
             error!("Failed to update config: {}", e);
@@ -50,7 +55,8 @@ pub async fn handle_config_update(
                 &request_id,
                 format!("Service error: {}", e),
                 Some(config_error_code(&e).to_string()),
-            );
+            )
+            .await;
         }
     }
 }

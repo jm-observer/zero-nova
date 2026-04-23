@@ -43,7 +43,7 @@ impl SqliteSessionRepository {
         session_id: &str,
         role: Role,
         content: Vec<ContentBlock>,
-        timestamp: i64,
+        created_at: i64,
     ) -> Result<()> {
         let role_str = match role {
             Role::System => "system",
@@ -53,13 +53,13 @@ impl SqliteSessionRepository {
         let content_json = serde_json::to_string(&content)?;
 
         sqlx::query(
-            "INSERT INTO messages (session_id, role, content, timestamp) 
+            "INSERT INTO messages (session_id, role, content, created_at) 
              VALUES (?, ?, ?, ?)",
         )
         .bind(session_id)
         .bind(role_str)
         .bind(content_json)
-        .bind(timestamp)
+        .bind(created_at)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -82,7 +82,7 @@ impl SqliteSessionRepository {
             let updated_at: i64 = row.get("updated_at");
 
             let messages_rows =
-                sqlx::query("SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp")
+                sqlx::query("SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at, id")
                     .bind(&id)
                     .fetch_all(&self.pool)
                     .await?;

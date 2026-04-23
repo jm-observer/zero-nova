@@ -1,7 +1,10 @@
 //! Independent WebSocket gateway binary
 use clap::Parser;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use sysinfo::{Pid, System};
-use zero_nova::gateway::start_server;
+use zero_nova::app::bootstrap::bootstrap;
+use zero_nova::gateway::run_server;
 use zero_nova::provider::openai_compat::OpenAiCompatClient;
 
 #[derive(Parser, Debug)]
@@ -73,7 +76,11 @@ async fn main() -> anyhow::Result<()> {
     // Use tokio::select! to run the server and monitor parent process or stdin
     tokio::select! {
         // Task 1: Run the server
-        res = start_server(config, client, workspace) => {
+        res = async {
+            let app = bootstrap(config.clone(), client, workspace).await?;
+            let addr: SocketAddr = format!("{}:{}", config.gateway.host, config.gateway.port).parse()?;
+            run_server(addr, Arc::new(app)).await
+        } => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

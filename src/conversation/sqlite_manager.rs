@@ -60,6 +60,41 @@ impl SqliteManager {
         .await
         .context("Failed to create messages table")?;
 
+        self.migrate_messages_timestamp_column().await?;
+
+        Ok(())
+    }
+
+    async fn migrate_messages_timestamp_column(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(messages)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect messages table schema")?;
+
+        let mut has_created_at = false;
+        let mut has_timestamp = false;
+
+        for column in columns {
+            let name: String = sqlx::Row::get(&column, "name");
+            if name == "created_at" {
+                has_created_at = true;
+            } else if name == "timestamp" {
+                has_timestamp = true;
+            }
+        }
+
+        if !has_created_at && has_timestamp {
+            sqlx::query("ALTER TABLE messages ADD COLUMN created_at INTEGER")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add created_at column to messages table")?;
+
+            sqlx::query("UPDATE messages SET created_at = timestamp WHERE created_at IS NULL")
+                .execute(&self.pool)
+                .await
+                .context("Failed to backfill created_at from timestamp")?;
+        }
+
         Ok(())
     }
 }

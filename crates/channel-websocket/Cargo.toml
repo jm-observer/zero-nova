@@ -1,0 +1,16 @@
+[package]
+name = "channel-websocket"
+version = "0.1.0"
+edition = "2021"
+description = "Generic WebSocket channel for zero-nova"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }

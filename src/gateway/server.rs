@@ -1,83 +1,59 @@
+use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::{GatewayMessage, MessageEnvelope, WelcomePayload};
-use crate::gateway::router::{handle_message, AppState};
-use futures_util::{SinkExt, StreamExt};
-use log::{info, trace};
+use crate::gateway::router::handle_message;
+use crate::provider::LlmClient;
+use async_trait::async_trait;
+use channel_websocket::{ChannelHandler, ResponseSink};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-pub async fn run_server<C: crate::provider::LlmClient + 'static>(
-    addr: SocketAddr,
-    state: Arc<AppState<C>>,
-) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    log::info!("WebSocket Gateway listening on: {}", addr);
-
-    while let Ok((stream, peer)) = listener.accept().await {
-        let state_clone = state.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle_connection::<C>(stream, peer, state_clone).await {
-                log::error!("Error handling connection from {}: {}", peer, e);
-            }
-        });
-    }
-    Ok(())
+pub struct GatewayHandler<C: LlmClient> {
+    app: Arc<GatewayApplication<C>>,
 }
 
-async fn handle_connection<C: crate::provider::LlmClient + 'static>(
-    stream: tokio::net::TcpStream,
-    peer: SocketAddr,
-    state: Arc<AppState<C>>,
-) -> anyhow::Result<()> {
-    let ws_stream = tokio_tungstenite::accept_async(stream).await?;
-    info!("New WebSocket connection: {}", peer);
+impl<C: LlmClient> GatewayHandler<C> {
+    pub fn new(app: Arc<GatewayApplication<C>>) -> Self {
+        Self { app }
+    }
+}
 
-    let (mut ws_sink, mut ws_source) = ws_stream.split();
-    let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<GatewayMessage>();
+#[async_trait]
+impl<C: LlmClient + 'static> ChannelHandler for GatewayHandler<C> {
+    type Req = GatewayMessage;
+    type Resp = GatewayMessage;
 
-    let _ = outbound_tx.send(GatewayMessage::new_event(MessageEnvelope::Welcome(WelcomePayload {
-        require_auth: false,
-        setup_required: false,
-    })));
-
-    let write_task = tokio::spawn(async move {
-        while let Some(msg) = outbound_rx.recv().await {
-            if let Ok(json_str) = serde_json::to_string(&msg) {
-                if ws_sink.send(WsMessage::Text(json_str)).await.is_err() {
-                    break;
-                }
-            }
-        }
-    });
-
-    while let Some(msg_result) = ws_source.next().await {
-        trace!("recv: {:?}", msg_result);
-        match msg_result {
-            Ok(WsMessage::Text(text)) => match serde_json::from_str::<GatewayMessage>(&text) {
-                Ok(gateway_msg) => {
-                    let state_clone = state.clone();
-                    let tx_clone = outbound_tx.clone();
-                    tokio::spawn(async move {
-                        handle_message::<C>(gateway_msg, state_clone, tx_clone).await;
-                    });
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse GatewayMessage from {}: {}. Text: {}", peer, e, text);
-                }
+    async fn on_connect(&self, _peer: SocketAddr) -> anyhow::Result<Vec<Self::Resp>> {
+        // 返回 Welcome 消息
+        Ok(vec![GatewayMessage::new_event(MessageEnvelope::Welcome(
+            WelcomePayload {
+                require_auth: false,
+                setup_required: false,
             },
-            Ok(WsMessage::Close(_)) => break,
-            Err(e) => {
-                log::error!("WS read error from {}: {}", peer, e);
-                break;
-            }
-            _ => {}
-        }
+        ))])
     }
 
-    drop(outbound_tx);
-    let _ = write_task.await;
-    log::info!("Connection closed: {}", peer);
-    Ok(())
+    async fn on_message(
+        &self,
+        _peer: SocketAddr,
+        req: Self::Req,
+        response_sink: ResponseSink<Self::Resp>,
+    ) -> anyhow::Result<()> {
+        let app_clone = self.app.clone();
+        tokio::spawn(async move {
+            handle_message::<C>(req, app_clone, response_sink).await;
+        });
+        Ok(())
+    }
+
+    async fn on_disconnect(&self, peer: SocketAddr) {
+        log::info!("Gateway peer disconnected: {}", peer);
+    }
+}
+
+pub async fn run_server<C: LlmClient + 'static>(
+    addr: SocketAddr,
+    app: Arc<GatewayApplication<C>>,
+) -> anyhow::Result<()> {
+    let handler = Arc::new(GatewayHandler::new(app));
+    channel_websocket::run_server(addr, handler).await
 }

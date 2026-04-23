@@ -1,14 +1,15 @@
+use crate::app::application::GatewayApplication;
 use crate::gateway::bridge::agent_event_to_gateway;
 use crate::gateway::protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload};
-use crate::gateway::router::AppState;
 use crate::provider::LlmClient;
+use channel_websocket::ResponseSink;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub async fn handle_chat<C: LlmClient + 'static>(
     payload: ChatPayload,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     let session_id = match payload.session_id {
@@ -39,7 +40,7 @@ pub async fn handle_chat<C: LlmClient + 'static>(
         }
     });
 
-    match state.conversation_service.sessions.get(&session_id).await {
+    match app.conversation_service.sessions.get(&session_id).await {
         Ok(Some(_)) => {}
         Ok(None) => {
             crate::gateway::handlers::system::send_general_error(
@@ -68,7 +69,7 @@ pub async fn handle_chat<C: LlmClient + 'static>(
         }),
     ));
 
-    if let Err(e) = state
+    if let Err(e) = app
         .conversation_service
         .start_turn(&session_id, &payload.input, event_tx)
         .await
@@ -94,11 +95,11 @@ pub async fn handle_chat<C: LlmClient + 'static>(
 
 pub async fn handle_chat_stop<C: LlmClient + 'static>(
     payload: SessionIdPayload,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match state.conversation_service.stop_turn(&payload.session_id).await {
+    match app.conversation_service.stop_turn(&payload.session_id).await {
         Ok(()) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,

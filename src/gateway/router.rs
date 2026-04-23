@@ -1,23 +1,16 @@
-use crate::app::conversation_service::ConversationService;
+use crate::app::application::GatewayApplication;
 use crate::gateway::handlers::{agents, chat, config, sessions, system};
 use crate::gateway::protocol::{GatewayMessage, MessageEnvelope};
 use crate::provider::LlmClient;
+use channel_websocket::ResponseSink;
 use log::warn;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-
-/// 共享应用状态
-pub struct AppState<C: LlmClient> {
-    pub conversation_service: ConversationService<C>,
-    pub config: std::sync::Arc<std::sync::RwLock<crate::config::AppConfig>>,
-    pub config_path: std::path::PathBuf,
-}
 
 /// 消息路由入口
 pub async fn handle_message<C: LlmClient + 'static>(
     msg: GatewayMessage,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
 ) {
     let msg_id = match msg.id {
         Some(id) => id,
@@ -29,37 +22,37 @@ pub async fn handle_message<C: LlmClient + 'static>(
 
     match msg.envelope {
         MessageEnvelope::Chat(payload) => {
-            chat::handle_chat::<C>(payload, state, outbound_tx, msg_id).await;
+            chat::handle_chat::<C>(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::ChatStop(payload) => {
-            chat::handle_chat_stop::<C>(payload, state, outbound_tx, msg_id).await;
+            chat::handle_chat_stop::<C>(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsList => {
-            sessions::handle_sessions_list::<C>(state, outbound_tx, msg_id).await;
+            sessions::handle_sessions_list::<C>(app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsMessages(payload) => {
-            sessions::handle_session_get::<C>(payload.session_id, state, outbound_tx, msg_id).await;
+            sessions::handle_session_get::<C>(payload.session_id, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsCreate(payload) => {
-            sessions::handle_session_create::<C>(payload, state, outbound_tx, msg_id).await;
+            sessions::handle_session_create::<C>(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsDelete(payload) => {
-            sessions::handle_session_delete::<C>(payload, state, outbound_tx, msg_id).await;
+            sessions::handle_session_delete::<C>(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionsCopy(payload) => {
-            sessions::handle_session_copy::<C>(payload, state, outbound_tx, msg_id).await;
+            sessions::handle_session_copy::<C>(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentsList => {
-            agents::handle_agents_list::<C>(state, outbound_tx, msg_id).await;
+            agents::handle_agents_list::<C>(app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentsSwitch(payload) => {
-            agents::handle_agents_switch::<C>(payload, state, outbound_tx, msg_id).await;
+            agents::handle_agents_switch::<C>(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::ConfigGet => {
-            config::handle_config_get::<C>(state, outbound_tx, msg_id).await;
+            config::handle_config_get::<C>(app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::ConfigUpdate(payload) => {
-            config::handle_config_update::<C>(payload, state, outbound_tx, msg_id).await;
+            config::handle_config_update::<C>(payload, app, outbound_tx, msg_id).await;
         }
         _ => {
             warn!(

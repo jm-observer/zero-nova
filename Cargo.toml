@@ -1,15 +1,10 @@
 [workspace]
-members = [".", "deskapp/src-tauri"]
+members = [".", "deskapp/src-tauri", "crates/channel-websocket"]
 
-[package]
-name = "zero-nova"
-version = "0.2.0"
-edition = "2021"
-
-[dependencies]
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tokio-tungstenite = { version = "0.21", features = ["__rustls-tls"] }
-tokio = { version = "1", features = ["full"] }
 log = "0.4"
 custom-utils = { version = "0.11", features = ["daemon-async", "prod"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
@@ -19,18 +14,46 @@ serde_json = "1"
 async-trait = "0.1.74"
 scraper = "0.19"
 futures-util = "0.3"
-uuid = { version = "1", features = ["v4", "serde"], optional = true }
+uuid = { version = "1", features = ["v4", "serde"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
 toml = "0.8"
 sysinfo = "0.30"
-
-# Optional dependencies for CLI
-clap = { version = "4", features = ["derive"], optional = true }
-rustyline = { version = "15", optional = true }
-chrono = { version = "0.4", optional = true }
-colored = { version = "3", optional = true }
+clap = { version = "4", features = ["derive"] }
+rustyline = { version = "15" }
+chrono = { version = "0.4" }
+colored = { version = "3" }
 which = "8.0.2"
 
+[package]
+name = "zero-nova"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+channel-websocket = { path = "crates/channel-websocket" }
+tokio-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+custom-utils = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+scraper = { workspace = true }
+futures-util = { workspace = true }
+uuid = { workspace = true, optional = true }
+sqlx = { workspace = true }
+toml = { workspace = true }
+sysinfo = { workspace = true }
+which = { workspace = true }
+
+# Optional dependencies for CLI
+clap = { workspace = true, optional = true }
+rustyline = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+colored = { workspace = true, optional = true }
 
 [features]
 gateway = ["uuid"]

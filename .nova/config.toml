@@ -2,12 +2,14 @@
 # LLM 服务的 API Key
 api_key = "your-anthropic-key"
 # 模型服务的 Base URL，默认为 Anthropic 官方地址
-#base_url = "http://192.168.0.68:12340/v1"
-base_url = "http://127.0.0.1:8082/v1"
+base_url = "http://192.168.0.68:12340/v1"
+#base_url = "http://127.0.0.1:8082/v1"
 # 使用的模型名称
-model = "google/gemma-4-26B-A4B-it"
+#model = "google/gemma-4-26B-A4B-it"
+model = "qwen3.6-35b-a3b-dflash"
 # 最大输出 Token 数
 max_tokens = 8192
+#max_tokens = 262144
 # 生成随机性 (0.0 到 1.0)
 temperature = 0.7
 # 核采样参数 (0.0 到 1.0)

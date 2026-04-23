@@ -1,15 +1,15 @@
+use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::{Agent, AgentsListResponse, AgentsSwitchResponse, GatewayMessage};
-use crate::gateway::router::AppState;
+use channel_websocket::ResponseSink;
 use log::info;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 pub async fn handle_agents_list<C: crate::provider::LlmClient>(
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let agents = state.conversation_service.agent_registry.list();
+    let agents = app.conversation_service.agent_registry.list();
     let agents_dto = agents
         .into_iter()
         .map(|a| Agent {
@@ -29,13 +29,13 @@ pub async fn handle_agents_list<C: crate::provider::LlmClient>(
 
 pub async fn handle_agents_switch<C: crate::provider::LlmClient>(
     payload: crate::gateway::protocol::AgentIdPayload,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     info!("Switched to agent: {}", payload.agent_id);
 
-    match state.conversation_service.agent_registry.get(&payload.agent_id) {
+    match app.conversation_service.agent_registry.get(&payload.agent_id) {
         Some(agent) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,

@@ -1,18 +1,18 @@
+use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::{
     GatewayMessage, SessionCreateRequest, SessionCreateResponse, SessionsListResponse, SessionsMessagesResponse,
     SuccessResponse,
 };
-use crate::gateway::router::AppState;
+use channel_websocket::ResponseSink;
 use log::error;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 pub async fn handle_sessions_list<C: crate::provider::LlmClient>(
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let sessions = state.conversation_service.sessions.list_sorted().await;
+    let sessions = app.conversation_service.sessions.list_sorted().await;
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
         crate::gateway::protocol::MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
@@ -21,11 +21,11 @@ pub async fn handle_sessions_list<C: crate::provider::LlmClient>(
 
 pub async fn handle_session_get<C: crate::provider::LlmClient>(
     session_id: String,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match state.conversation_service.sessions.get(&session_id).await {
+    match app.conversation_service.sessions.get(&session_id).await {
         Ok(Some(session)) => {
             let messages = session.get_messages_dto();
             let _ = outbound_tx.send(GatewayMessage::new(
@@ -57,18 +57,18 @@ pub async fn handle_session_get<C: crate::provider::LlmClient>(
 
 pub async fn handle_session_create<C: crate::provider::LlmClient>(
     payload: SessionCreateRequest,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let system_prompt = state
+    let system_prompt = app
         .conversation_service
         .agent_registry
         .get(&payload.agent_id)
         .map(|a| a.system_prompt_template.clone())
         .unwrap_or_default();
 
-    match state
+    match app
         .conversation_service
         .sessions
         .create(payload.title, payload.agent_id, system_prompt)
@@ -103,11 +103,11 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
 
 pub async fn handle_session_delete<C: crate::provider::LlmClient>(
     payload: crate::gateway::protocol::SessionIdPayload,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match state.conversation_service.sessions.delete(&payload.session_id).await {
+    match app.conversation_service.sessions.delete(&payload.session_id).await {
         Ok(success) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
@@ -128,11 +128,11 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient>(
 
 pub async fn handle_session_copy<C: crate::provider::LlmClient>(
     payload: crate::gateway::protocol::SessionCopyRequest,
-    state: Arc<AppState<C>>,
-    outbound_tx: mpsc::UnboundedSender<GatewayMessage>,
+    app: Arc<GatewayApplication<C>>,
+    outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match state
+    match app
         .conversation_service
         .sessions
         .copy_session(&payload.session_id, payload.index)

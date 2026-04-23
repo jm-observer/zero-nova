@@ -56,7 +56,7 @@ chrono = { workspace = true, optional = true }
 colored = { workspace = true, optional = true }
 
 [features]
-gateway = ["uuid"]
+gateway = ["uuid", "clap"]
 cli = ["clap", "rustyline", "chrono", "colored"]
 default = ["cli", "gateway"]
 prod = ["custom-utils/prod"]

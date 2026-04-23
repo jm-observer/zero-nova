@@ -1,36 +1,49 @@
 use crate::app::application::GatewayApplication;
+use crate::gateway::bridge::{app_message_to_protocol, app_session_to_protocol};
 use crate::gateway::protocol::{
-    GatewayMessage, SessionCreateRequest, SessionCreateResponse, SessionsListResponse, SessionsMessagesResponse,
-    SuccessResponse,
+    GatewayMessage, MessageEnvelope, SessionCreateRequest, SessionCreateResponse, SessionsListResponse,
+    SessionsMessagesResponse, SuccessResponse,
 };
 use channel_websocket::ResponseSink;
 use log::error;
 
-pub async fn handle_sessions_list<C: crate::provider::LlmClient + 'static>(
-    app: &GatewayApplication<C>,
+pub async fn handle_sessions_list(
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let sessions = app.list_sessions().await;
-    let _ = outbound_tx.send(GatewayMessage::new(
-        request_id,
-        crate::gateway::protocol::MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
-    ));
+    match app.list_sessions().await {
+        Ok(sessions) => {
+            let sessions = sessions.into_iter().map(app_session_to_protocol).collect();
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
+            ));
+        }
+        Err(e) => {
+            error!("Failed to list sessions: {}", e);
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                e.to_string(),
+                None::<String>,
+            );
+        }
+    }
 }
 
-pub async fn handle_session_get<C: crate::provider::LlmClient + 'static>(
+pub async fn handle_session_get(
     session_id: String,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     match app.session_messages(&session_id).await {
         Ok(messages) => {
+            let messages = messages.into_iter().map(app_message_to_protocol).collect();
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
-                crate::gateway::protocol::MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse {
-                    messages,
-                }),
+                MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse { messages }),
             ));
         }
         Err(e) if e.to_string().contains("Session not found") => {
@@ -53,17 +66,18 @@ pub async fn handle_session_get<C: crate::provider::LlmClient + 'static>(
     }
 }
 
-pub async fn handle_session_create<C: crate::provider::LlmClient + 'static>(
+pub async fn handle_session_create(
     payload: SessionCreateRequest,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     match app.create_session(payload.title, payload.agent_id).await {
         Ok(session) => {
+            let session = app_session_to_protocol(session);
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
-                crate::gateway::protocol::MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
+                MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
             ));
         }
         Err(e) => {
@@ -78,9 +92,9 @@ pub async fn handle_session_create<C: crate::provider::LlmClient + 'static>(
     }
 }
 
-pub async fn handle_session_delete<C: crate::provider::LlmClient + 'static>(
+pub async fn handle_session_delete(
     payload: crate::gateway::protocol::SessionIdPayload,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -88,7 +102,7 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient + 'static>(
         Ok(success) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
-                crate::gateway::protocol::MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success }),
+                MessageEnvelope::SessionsDeleteResponse(SuccessResponse { success }),
             ));
         }
         Err(e) => {
@@ -103,17 +117,18 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient + 'static>(
     }
 }
 
-pub async fn handle_session_copy<C: crate::provider::LlmClient + 'static>(
+pub async fn handle_session_copy(
     payload: crate::gateway::protocol::SessionCopyRequest,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     match app.copy_session(&payload.session_id, payload.index).await {
         Ok(session) => {
+            let session = app_session_to_protocol(session);
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
-                crate::gateway::protocol::MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
+                MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
             ));
         }
         Err(e) if e.to_string().contains("Source session not found") => {

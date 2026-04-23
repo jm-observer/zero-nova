@@ -1,12 +1,11 @@
 use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::{GatewayMessage, MessageEnvelope, SuccessResponse};
-use anyhow::Result;
 use channel_websocket::ResponseSink;
 use log::{error, info};
 use serde_json::Value;
 
-pub async fn handle_config_get<C: crate::provider::LlmClient + 'static>(
-    app: &GatewayApplication<C>,
+pub async fn handle_config_get(
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -29,15 +28,15 @@ pub async fn handle_config_get<C: crate::provider::LlmClient + 'static>(
     }
 }
 
-pub async fn handle_config_update<C: crate::provider::LlmClient + 'static>(
+pub async fn handle_config_update(
     payload: Value,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     info!("Handling config update: {:?}", payload);
 
-    match update_config(app, payload).await {
+    match app.update_config(payload).await {
         Ok(()) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
@@ -54,13 +53,6 @@ pub async fn handle_config_update<C: crate::provider::LlmClient + 'static>(
             );
         }
     }
-}
-
-async fn update_config<C: crate::provider::LlmClient + 'static>(
-    app: &GatewayApplication<C>,
-    payload: Value,
-) -> Result<()> {
-    app.update_config(payload).await
 }
 
 fn config_error_code(error: &anyhow::Error) -> &'static str {

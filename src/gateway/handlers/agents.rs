@@ -1,24 +1,25 @@
 use crate::app::application::GatewayApplication;
+use crate::gateway::bridge::app_agent_to_protocol;
 use crate::gateway::protocol::{AgentsListResponse, AgentsSwitchResponse, GatewayMessage, SessionAgentSwitchPayload};
 use channel_websocket::ResponseSink;
 use log::info;
 
-pub async fn handle_agents_list<C: crate::provider::LlmClient + 'static>(
-    app: &GatewayApplication<C>,
+pub async fn handle_agents_list(
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let agents_dto = app.list_agents();
+    let agents = app.list_agents().into_iter().map(app_agent_to_protocol).collect();
 
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
-        crate::gateway::protocol::MessageEnvelope::AgentsListResponse(AgentsListResponse { agents: agents_dto }),
+        crate::gateway::protocol::MessageEnvelope::AgentsListResponse(AgentsListResponse { agents }),
     ));
 }
 
-pub async fn handle_agents_switch<C: crate::provider::LlmClient + 'static>(
+pub async fn handle_agents_switch(
     payload: SessionAgentSwitchPayload,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -26,6 +27,7 @@ pub async fn handle_agents_switch<C: crate::provider::LlmClient + 'static>(
 
     match app.switch_agent(&payload.session_id, &payload.agent_id).await {
         Ok(agent) => {
+            let agent = app_agent_to_protocol(agent);
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
                 crate::gateway::protocol::MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {

@@ -143,10 +143,61 @@ impl AppConfig {
         }
     }
 }
+
+#[cfg(feature = "gateway")]
+use clap::Parser;
+
+#[cfg(feature = "gateway")]
+#[derive(Parser, Debug, Clone)]
+#[command(author, version, about, long_about = None)]
+#[cfg_attr(not(feature = "gateway"), allow(dead_code))]
+pub struct Args {
+    /// Host address
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Port
+    #[arg(long, default_value_t = 9090)]
+    pub port: u16,
+
+    /// Model name
+    #[arg(long)]
+    pub model: Option<String>,
+
+    /// Max tokens
+    #[arg(long, default_value_t = 8192)]
+    pub max_tokens: u32,
+
+    /// Base URL for LLM
+    #[arg(long)]
+    pub base_url: Option<String>,
+
+    /// Parent PID for lifecycle management
+    #[arg(long)]
+    pub parent_pid: Option<u32>,
+    /// Optional workspace directory for config and prompts
+    #[arg(long)]
+    pub workspace: Option<String>,
+}
+
 impl OriginAppConfig {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         let config: OriginAppConfig = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    pub fn from_file_with_args<P: AsRef<Path>>(path: P, args: &Args) -> Result<Self> {
+        let mut config = Self::load_from_file(path)?;
+        config.gateway.host = args.host.clone();
+        config.gateway.port = args.port;
+        if let Some(ref model) = args.model {
+            config.llm.model_config.model = model.clone();
+        }
+        config.llm.model_config.max_tokens = args.max_tokens;
+        if let Some(ref base_url) = args.base_url {
+            config.llm.base_url = base_url.clone();
+        }
         Ok(config)
     }
 }

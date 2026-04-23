@@ -1,13 +1,12 @@
 use crate::app::application::GatewayApplication;
-use crate::gateway::bridge::agent_event_to_gateway;
+use crate::gateway::bridge::app_event_to_gateway;
 use crate::gateway::protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload};
-use crate::provider::LlmClient;
 use channel_websocket::ResponseSink;
 use tokio::sync::mpsc;
 
-pub async fn handle_chat<C: LlmClient + 'static>(
+pub async fn handle_chat(
     payload: ChatPayload,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -30,9 +29,9 @@ pub async fn handle_chat<C: LlmClient + 'static>(
     let session_id_clone = session_id.clone();
 
     // 适配器：将应用层事件桥接到渠道层协议
-    tokio::spawn(async move {
+    let event_forwarder = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
-            let gateway_msg = agent_event_to_gateway(event, &request_id_clone, &session_id_clone);
+            let gateway_msg = app_event_to_gateway(event, &request_id_clone, &session_id_clone);
             if outbound_tx_clone.send(gateway_msg).is_err() {
                 break;
             }
@@ -69,6 +68,12 @@ pub async fn handle_chat<C: LlmClient + 'static>(
     ));
 
     if let Err(e) = app.start_turn(&session_id, &payload.input, event_tx).await {
+        if let Err(join_error) = event_forwarder.await {
+            log::error!(
+                "Failed to join app event forwarder after start_turn error: {}",
+                join_error
+            );
+        }
         crate::gateway::handlers::system::send_general_error(
             &outbound_tx,
             &request_id,
@@ -76,6 +81,11 @@ pub async fn handle_chat<C: LlmClient + 'static>(
             Some(error_code(&e).to_string()),
         );
         return;
+    }
+
+    // 等到所有 progress 事件转发完成后再发 complete，避免前端看到乱序消息。
+    if let Err(join_error) = event_forwarder.await {
+        log::error!("Failed to join app event forwarder: {}", join_error);
     }
 
     let _ = outbound_tx.send(GatewayMessage::new(
@@ -88,9 +98,9 @@ pub async fn handle_chat<C: LlmClient + 'static>(
     ));
 }
 
-pub async fn handle_chat_stop<C: LlmClient + 'static>(
+pub async fn handle_chat_stop(
     payload: SessionIdPayload,
-    app: &GatewayApplication<C>,
+    app: &dyn GatewayApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {

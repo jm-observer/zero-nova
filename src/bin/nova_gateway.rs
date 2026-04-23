@@ -2,39 +2,8 @@
 use clap::Parser;
 use sysinfo::{Pid, System};
 use zero_nova::app::bootstrap::bootstrap;
-use zero_nova::config::AppConfig;
+use zero_nova::config::{AppConfig, Args, OriginAppConfig};
 use zero_nova::provider::openai_compat::OpenAiCompatClient;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Host address
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
-
-    /// Port
-    #[arg(long, default_value_t = 9090)]
-    port: u16,
-
-    /// Model name, default_value = "gpt-oss-120b"
-    #[arg(long)]
-    model: Option<String>,
-
-    /// Max tokens
-    #[arg(long, default_value_t = 8192)]
-    max_tokens: u32,
-
-    /// Base URL for LLM
-    #[arg(long)]
-    base_url: Option<String>,
-
-    /// Parent PID for lifecycle management
-    #[arg(long)]
-    parent_pid: Option<u32>,
-    /// Optional workspace directory for config and prompts
-    #[arg(long)]
-    workspace: Option<String>,
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -51,19 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let config_path = workspace.join("config.toml");
     log::info!("Attempting to load config from: {:?}", config_path);
 
-    let mut config = zero_nova::config::OriginAppConfig::load_from_file(&config_path)?;
-
-    config.gateway.host = _args.host;
-    config.gateway.port = _args.port;
-    if let Some(model) = _args.model {
-        config.llm.model_config.model = model;
-    }
-
-    config.llm.model_config.max_tokens = _args.max_tokens;
-
-    if let Some(base_url) = _args.base_url {
-        config.llm.base_url = base_url;
-    }
+    let config = OriginAppConfig::from_file_with_args(&config_path, &_args)?;
 
     log::info!("Starting Nova Gateway {config:?}...");
 

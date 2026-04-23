@@ -1,11 +1,10 @@
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
-use crate::app::application::GatewayApplication;
+use crate::app::application::{GatewayApplication, GatewayApplicationImpl};
 use crate::app::conversation_service::ConversationService;
 use crate::config::AppConfig;
 use crate::conversation::repository::SqliteSessionRepository;
 use crate::conversation::sqlite_manager::SqliteManager;
-use crate::conversation::SessionStore;
 use crate::provider::LlmClient;
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
@@ -18,7 +17,7 @@ async fn build_application<C: LlmClient + 'static>(
     config: AppConfig,
     client: C,
     workspace: PathBuf,
-) -> Result<GatewayApplication<C>> {
+) -> Result<Arc<dyn GatewayApplication>> {
     let mut tools = ToolRegistry::new();
     crate::tool::builtin::register_builtin_tools(&mut tools, &config);
 
@@ -92,12 +91,17 @@ async fn build_application<C: LlmClient + 'static>(
         .context("Workspace data directory contains non-UTF8 characters")?;
     let sqlite_manager = SqliteManager::new(data_dir).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
-    let session_store = SessionStore::new(repository);
-    session_store.load_all().await?;
+    let session_cache = Arc::new(crate::conversation::SessionCache::new());
+    let session_service = crate::conversation::SessionService::new(session_cache, repository);
+    session_service.load_all().await?;
 
-    let conversation_service = ConversationService::new(agent, agent_registry, session_store);
+    let conversation_service = ConversationService::new(agent, agent_registry, session_service);
 
-    Ok(GatewayApplication::new(conversation_service, config_arc, config_path))
+    Ok(Arc::new(GatewayApplicationImpl::new(
+        conversation_service,
+        config_arc,
+        config_path,
+    )))
 }
 
 /// 初始化应用服务并启动 Gateway WebSocket 服务
@@ -106,5 +110,5 @@ pub async fn bootstrap<C: LlmClient + 'static>(config: AppConfig, client: C, wor
         .parse()
         .context("Failed to parse gateway listen address")?;
     let app = build_application(config, client, workspace).await?;
-    crate::gateway::run_server(addr, Arc::new(app)).await
+    crate::gateway::run_server(addr, app).await
 }

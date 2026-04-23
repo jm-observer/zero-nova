@@ -1,23 +1,22 @@
 use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::GatewayMessage;
-use crate::provider::LlmClient;
 use async_trait::async_trait;
 use channel_websocket::{ChannelHandler, ResponseSink};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-pub struct GatewayHandler<C: LlmClient> {
-    app: Arc<GatewayApplication<C>>,
+pub struct GatewayHandler {
+    app: Arc<dyn GatewayApplication>,
 }
 
-impl<C: LlmClient> GatewayHandler<C> {
-    pub fn new(app: Arc<GatewayApplication<C>>) -> Self {
+impl GatewayHandler {
+    pub fn new(app: Arc<dyn GatewayApplication>) -> Self {
         Self { app }
     }
 }
 
 #[async_trait]
-impl<C: LlmClient + 'static> ChannelHandler for GatewayHandler<C> {
+impl ChannelHandler for GatewayHandler {
     type Req = GatewayMessage;
     type Resp = GatewayMessage;
 
@@ -43,10 +42,7 @@ impl<C: LlmClient + 'static> ChannelHandler for GatewayHandler<C> {
     }
 }
 
-pub async fn run_server<C: LlmClient + 'static>(
-    addr: SocketAddr,
-    app: Arc<GatewayApplication<C>>,
-) -> anyhow::Result<()> {
+pub async fn run_server(addr: SocketAddr, app: Arc<dyn GatewayApplication>) -> anyhow::Result<()> {
     let handler = Arc::new(GatewayHandler::new(app));
     channel_websocket::run_server(addr, handler).await
 }

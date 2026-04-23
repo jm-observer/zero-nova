@@ -1,6 +1,6 @@
 use crate::agent::AgentRuntime;
 use crate::agent_catalog::AgentRegistry;
-use crate::conversation::SessionStore;
+use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
@@ -11,11 +11,11 @@ use tokio_util::sync::CancellationToken;
 pub struct ConversationService<C: LlmClient> {
     pub agent: AgentRuntime<C>,
     pub agent_registry: AgentRegistry,
-    pub sessions: SessionStore,
+    pub sessions: SessionService,
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
-    pub fn new(agent: AgentRuntime<C>, agent_registry: AgentRegistry, sessions: SessionStore) -> Self {
+    pub fn new(agent: AgentRuntime<C>, agent_registry: AgentRegistry, sessions: SessionService) -> Self {
         Self {
             agent,
             agent_registry,

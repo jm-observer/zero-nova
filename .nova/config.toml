@@ -23,9 +23,6 @@ thinking_budget = 4096
 backend = "tavily"
 tavily_api_key = "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"
 
-[tool.bash]
-# 默认 shell。Windows 下可选 "pwsh", "powershell", "cmd"；Unix 下可选 "sh", "bash"
-shell = "pwsh"
 
 [gateway]
 # 网关监听地址

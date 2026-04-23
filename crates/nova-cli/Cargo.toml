@@ -1,0 +1,21 @@
+[package]
+name = "nova-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI REPL for zero-nova"
+
+[[bin]]
+name = "nova_cli"
+path = "src/main.rs"
+
+[dependencies]
+nova-core = { workspace = true }
+clap = { workspace = true }
+rustyline = { workspace = true }
+chrono = { workspace = true }
+colored = { workspace = true }
+tokio = { workspace = true }
+custom-utils = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

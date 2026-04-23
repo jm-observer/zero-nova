@@ -1,5 +1,23 @@
 [workspace]
-members = [".", "deskapp/src-tauri", "crates/channel-websocket"]
+resolver = "2"
+members = [
+  "crates/nova-core",
+  "crates/nova-conversation",
+  "crates/nova-app",
+  "crates/nova-protocol",
+  "crates/channel-core",
+  "crates/channel-websocket",
+  "crates/channel-stdio",
+  "crates/nova-gateway-core",
+  "crates/nova-server-ws",
+  "crates/nova-server-stdio",
+  "crates/nova-cli",
+  "deskapp/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -24,44 +42,15 @@ chrono = { version = "0.4" }
 colored = { version = "3" }
 which = "8.0.2"
 
-[package]
-name = "zero-nova"
-version = "0.2.0"
-edition = "2021"
-
-[dependencies]
+# Internal crates
+nova-core = { path = "crates/nova-core" }
+nova-conversation = { path = "crates/nova-conversation" }
+nova-app = { path = "crates/nova-app" }
+nova-protocol = { path = "crates/nova-protocol" }
+channel-core = { path = "crates/channel-core" }
 channel-websocket = { path = "crates/channel-websocket" }
-tokio-util = { workspace = true }
-tokio-tungstenite = { workspace = true }
-tokio = { workspace = true }
-log = { workspace = true }
-custom-utils = { workspace = true }
-reqwest = { workspace = true }
-anyhow = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-async-trait = { workspace = true }
-scraper = { workspace = true }
-futures-util = { workspace = true }
-uuid = { workspace = true, optional = true }
-sqlx = { workspace = true }
-toml = { workspace = true }
-sysinfo = { workspace = true }
-which = { workspace = true }
-
-# Optional dependencies for CLI
-clap = { workspace = true, optional = true }
-rustyline = { workspace = true, optional = true }
-chrono = { workspace = true, optional = true }
-colored = { workspace = true, optional = true }
-
-[features]
-gateway = ["uuid", "clap"]
-cli = ["clap", "rustyline", "chrono", "colored"]
-default = ["cli", "gateway"]
-prod = ["custom-utils/prod"]
-
-[[bin]]
-name = "nova_gateway"
-path = "src/bin/nova_gateway.rs"
-required-features = ["gateway"]
+channel-stdio = { path = "crates/channel-stdio" }
+nova-gateway-core = { path = "crates/nova-gateway-core" }
+nova-server-ws = { path = "crates/nova-server-ws" }
+nova-server-stdio = { path = "crates/nova-server-stdio" }
+nova-cli = { path = "crates/nova-cli" }

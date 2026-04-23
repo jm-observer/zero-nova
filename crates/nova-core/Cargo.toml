@@ -1,0 +1,24 @@
+[package]
+name = "nova-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core agent library for zero-nova"
+
+[dependencies]
+tokio-util = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+log = { workspace = true }
+custom-utils = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+scraper = { workspace = true }
+futures-util = { workspace = true }
+uuid = { workspace = true }
+toml = { workspace = true }
+sysinfo = { workspace = true }
+which = { workspace = true }
+chrono = { workspace = true }

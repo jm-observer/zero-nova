@@ -1,0 +1,10 @@
+[package]
+name = "nova-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "JSON protocol DTOs for zero-nova gateway"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }

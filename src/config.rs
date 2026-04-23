@@ -1,7 +1,20 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OriginAppConfig {
+    #[serde(default)]
+    pub llm: LlmConfig,
+    #[serde(default)]
+    pub search: SearchConfig,
+    #[serde(default)]
+    pub tool: ToolConfig,
+    #[serde(default)]
+    pub gateway: GatewayConfig,
+    pub workspace: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
@@ -13,6 +26,7 @@ pub struct AppConfig {
     pub tool: ToolConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    pub workspace: PathBuf
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -120,9 +134,14 @@ impl Default for GatewayConfig {
 }
 
 impl AppConfig {
+    pub fn from_origin(origin: OriginAppConfig, workspace: PathBuf) -> Result<Self> {
+        todo!()
+    }
+}
+impl OriginAppConfig {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let config: AppConfig = toml::from_str(&content)?;
+        let config: OriginAppConfig = toml::from_str(&content)?;
         Ok(config)
     }
 }

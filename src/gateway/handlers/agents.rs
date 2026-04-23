@@ -2,24 +2,13 @@ use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::{Agent, AgentsListResponse, AgentsSwitchResponse, GatewayMessage};
 use channel_websocket::ResponseSink;
 use log::info;
-use std::sync::Arc;
 
-pub async fn handle_agents_list<C: crate::provider::LlmClient>(
-    app: Arc<GatewayApplication<C>>,
+pub async fn handle_agents_list<C: crate::provider::LlmClient + 'static>(
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let agents = app.conversation_service.agent_registry.list();
-    let agents_dto = agents
-        .into_iter()
-        .map(|a| Agent {
-            id: a.id.clone(),
-            name: a.display_name.clone(),
-            description: Some(a.description.clone()),
-            icon: None,
-            system_prompt: None,
-        })
-        .collect();
+    let agents_dto = app.list_agents();
 
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
@@ -27,25 +16,20 @@ pub async fn handle_agents_list<C: crate::provider::LlmClient>(
     ));
 }
 
-pub async fn handle_agents_switch<C: crate::provider::LlmClient>(
+pub async fn handle_agents_switch<C: crate::provider::LlmClient + 'static>(
     payload: crate::gateway::protocol::AgentIdPayload,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     info!("Switched to agent: {}", payload.agent_id);
 
-    match app.conversation_service.agent_registry.get(&payload.agent_id) {
+    match app.get_agent(&payload.agent_id) {
         Some(agent) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
                 crate::gateway::protocol::MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {
-                    agent: Agent {
-                        id: agent.id.clone(),
-                        name: agent.display_name.clone(),
-                        description: Some(agent.description.clone()),
-                        ..Default::default()
-                    },
+                    agent: Agent { ..agent },
                     messages: vec![],
                 }),
             ));

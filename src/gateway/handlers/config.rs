@@ -1,50 +1,89 @@
 use crate::app::application::GatewayApplication;
 use crate::gateway::protocol::{GatewayMessage, MessageEnvelope, SuccessResponse};
+use anyhow::Result;
 use channel_websocket::ResponseSink;
 use log::{error, info};
 use serde_json::Value;
-use std::sync::Arc;
 
-pub async fn handle_config_get<C: crate::provider::LlmClient>(
-    app: Arc<GatewayApplication<C>>,
+pub async fn handle_config_get<C: crate::provider::LlmClient + 'static>(
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let config = app.config.read().unwrap();
-    let val = serde_json::to_value(&*config).unwrap_or(Value::Null);
-
-    let _ = outbound_tx.send(GatewayMessage::new(request_id, MessageEnvelope::ConfigGetResponse(val)));
+    match app.config_snapshot() {
+        Ok(config) => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                MessageEnvelope::ConfigGetResponse(config),
+            ));
+        }
+        Err(e) => {
+            error!("Failed to serialize config snapshot: {}", e);
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                format!("Service error: {}", e),
+                Some("SERVICE_ERROR".to_string()),
+            );
+        }
+    }
 }
 
-pub async fn handle_config_update<C: crate::provider::LlmClient>(
+pub async fn handle_config_update<C: crate::provider::LlmClient + 'static>(
     payload: Value,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
     info!("Handling config update: {:?}", payload);
 
-    // 1. Update in-memory config
-    {
-        let mut config = app.config.write().unwrap();
-        // Simple merge or replacement (assuming full config for now)
-        if let Ok(new_config) = serde_json::from_value::<crate::config::AppConfig>(payload) {
-            *config = new_config;
-
-            // 2. Save to file
-            let config_str = toml::to_string(&*config).unwrap_or_default();
-            if let Err(e) = std::fs::write(&app.config_path, config_str) {
-                error!("Failed to save config to {:?}: {}", app.config_path, e);
-            } else {
-                info!("Config saved successfully to {:?}", app.config_path);
-            }
-        } else {
-            error!("Failed to parse config update payload");
+    match update_config(app, payload).await {
+        Ok(()) => {
+            let _ = outbound_tx.send(GatewayMessage::new(
+                request_id,
+                MessageEnvelope::ConfigUpdateResponse(SuccessResponse { success: true }),
+            ));
+        }
+        Err(e) => {
+            error!("Failed to update config: {}", e);
+            crate::gateway::handlers::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                format!("Service error: {}", e),
+                Some(config_error_code(&e).to_string()),
+            );
         }
     }
+}
 
-    let _ = outbound_tx.send(GatewayMessage::new(
-        request_id,
-        MessageEnvelope::ConfigUpdateResponse(SuccessResponse { success: true }),
-    ));
+async fn update_config<C: crate::provider::LlmClient + 'static>(
+    app: &GatewayApplication<C>,
+    payload: Value,
+) -> Result<()> {
+    app.update_config(payload).await
+}
+
+fn config_error_code(error: &anyhow::Error) -> &'static str {
+    if error.to_string().contains("parse config update payload") {
+        "INVALID_REQUEST"
+    } else {
+        "SERVICE_ERROR"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_failures_map_to_invalid_request() {
+        let err = anyhow::anyhow!("Failed to parse config update payload");
+        assert_eq!(config_error_code(&err), "INVALID_REQUEST");
+    }
+
+    #[test]
+    fn other_failures_map_to_service_error() {
+        let err = anyhow::anyhow!("{}", serde_json::json!({ "write": "failed" }));
+        assert_eq!(config_error_code(&err), "SERVICE_ERROR");
+    }
 }

@@ -4,12 +4,11 @@ use crate::gateway::protocol::{GatewayMessage, MessageEnvelope};
 use crate::provider::LlmClient;
 use channel_websocket::ResponseSink;
 use log::warn;
-use std::sync::Arc;
 
 /// 消息路由入口
 pub async fn handle_message<C: LlmClient + 'static>(
     msg: GatewayMessage,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
 ) {
     let msg_id = match msg.id {

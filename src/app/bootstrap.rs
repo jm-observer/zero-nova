@@ -9,12 +9,12 @@ use crate::conversation::SessionStore;
 use crate::provider::LlmClient;
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-/// 初始化应用服务、加载资源并构造 GatewayApplication 实例
-pub async fn bootstrap<C: LlmClient + 'static>(
+async fn build_application<C: LlmClient + 'static>(
     config: AppConfig,
     client: C,
     workspace: PathBuf,
@@ -35,27 +35,23 @@ pub async fn bootstrap<C: LlmClient + 'static>(
         tool_timeout: std::time::Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
     };
 
-    let mut agents = config
-        .gateway
-        .agents
-        .iter()
-        .map(|a| {
-            let agent_prompt = a
-                .system_prompt_template
-                .clone()
-                .or_else(|| {
-                    let prompt_path = workspace.join("prompts").join(format!("agent-{}.md", a.id));
-                    match std::fs::read_to_string(&prompt_path) {
-                        Ok(content) => Some(content),
-                        Err(e) => {
-                            log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
-                            None
-                        }
+    let mut agents = Vec::with_capacity(config.gateway.agents.len());
+    for agent in &config.gateway.agents {
+        let agent_prompt = match &agent.system_prompt_template {
+            Some(prompt) => prompt.clone(),
+            None => {
+                let prompt_path = workspace.join("prompts").join(format!("agent-{}.md", agent.id));
+                match tokio::fs::read_to_string(&prompt_path).await {
+                    Ok(content) => content,
+                    Err(e) => {
+                        log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
+                        String::new()
                     }
-                })
-                .unwrap_or_default();
+                }
+            }
+        };
 
-            let behavior_guards = r#"
+        let behavior_guards = r#"
 ## CRITICAL: Action Consistency
 - You are a physical entity with real-world capabilities.
 - If you state that you are going to perform an action (e.g., "running a command", "writing a file", "searching the web"), you MUST generate the corresponding tool_use block in the SAME response.
@@ -63,19 +59,18 @@ pub async fn bootstrap<C: LlmClient + 'static>(
 - Textual confirmation of an action is only valid AFTER the tool has been invoked.
 "#;
 
-            let full_system_prompt = format!("{}\n\n{}\n\n{}", agent_prompt, skill_prompt, behavior_guards);
+        let full_system_prompt = format!("{}\n\n{}\n\n{}", agent_prompt, skill_prompt, behavior_guards);
 
-            AgentDescriptor {
-                id: a.id.clone(),
-                display_name: a.display_name.clone(),
-                description: a.description.clone(),
-                aliases: a.aliases.clone(),
-                system_prompt_template: full_system_prompt,
-                tool_whitelist: a.tool_whitelist.clone(),
-                model_config: a.model_config.clone(),
-            }
-        })
-        .collect::<Vec<_>>();
+        agents.push(AgentDescriptor {
+            id: agent.id.clone(),
+            display_name: agent.display_name.clone(),
+            description: agent.description.clone(),
+            aliases: agent.aliases.clone(),
+            system_prompt_template: full_system_prompt,
+            tool_whitelist: agent.tool_whitelist.clone(),
+            model_config: agent.model_config.clone(),
+        });
+    }
 
     if agents.is_empty() {
         bail!("No agents configured");
@@ -91,15 +86,25 @@ pub async fn bootstrap<C: LlmClient + 'static>(
     let config_arc = Arc::new(RwLock::new(config.clone()));
     let config_path = workspace.join("config.toml");
 
-    // Initialize SQLite and SessionStore
     let data_dir = workspace.join(".nova").join("data");
-    let sqlite_manager = SqliteManager::new(data_dir.to_str().unwrap()).await?;
+    let data_dir = data_dir
+        .to_str()
+        .context("Workspace data directory contains non-UTF8 characters")?;
+    let sqlite_manager = SqliteManager::new(data_dir).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
     let session_store = SessionStore::new(repository);
     session_store.load_all().await?;
 
-    // Construct ConversationService
     let conversation_service = ConversationService::new(agent, agent_registry, session_store);
 
     Ok(GatewayApplication::new(conversation_service, config_arc, config_path))
+}
+
+/// 初始化应用服务并启动 Gateway WebSocket 服务
+pub async fn bootstrap<C: LlmClient + 'static>(config: AppConfig, client: C, workspace: PathBuf) -> Result<()> {
+    let addr: SocketAddr = format!("{}:{}", config.gateway.host, config.gateway.port)
+        .parse()
+        .context("Failed to parse gateway listen address")?;
+    let app = build_application(config, client, workspace).await?;
+    crate::gateway::run_server(addr, Arc::new(app)).await
 }

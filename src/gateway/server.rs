@@ -1,6 +1,5 @@
 use crate::app::application::GatewayApplication;
-use crate::gateway::protocol::{GatewayMessage, MessageEnvelope, WelcomePayload};
-use crate::gateway::router::handle_message;
+use crate::gateway::protocol::GatewayMessage;
 use crate::provider::LlmClient;
 use async_trait::async_trait;
 use channel_websocket::{ChannelHandler, ResponseSink};
@@ -23,13 +22,7 @@ impl<C: LlmClient + 'static> ChannelHandler for GatewayHandler<C> {
     type Resp = GatewayMessage;
 
     async fn on_connect(&self, _peer: SocketAddr) -> anyhow::Result<Vec<Self::Resp>> {
-        // 返回 Welcome 消息
-        Ok(vec![GatewayMessage::new_event(MessageEnvelope::Welcome(
-            WelcomePayload {
-                require_auth: false,
-                setup_required: false,
-            },
-        ))])
+        self.app.connect().await
     }
 
     async fn on_message(
@@ -40,13 +33,13 @@ impl<C: LlmClient + 'static> ChannelHandler for GatewayHandler<C> {
     ) -> anyhow::Result<()> {
         let app_clone = self.app.clone();
         tokio::spawn(async move {
-            handle_message::<C>(req, app_clone, response_sink).await;
+            app_clone.handle(req, response_sink).await;
         });
         Ok(())
     }
 
     async fn on_disconnect(&self, peer: SocketAddr) {
-        log::info!("Gateway peer disconnected: {}", peer);
+        self.app.disconnect(peer).await;
     }
 }
 

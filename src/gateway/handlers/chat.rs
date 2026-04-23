@@ -3,12 +3,11 @@ use crate::gateway::bridge::agent_event_to_gateway;
 use crate::gateway::protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload};
 use crate::provider::LlmClient;
 use channel_websocket::ResponseSink;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub async fn handle_chat<C: LlmClient + 'static>(
     payload: ChatPayload,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -40,9 +39,9 @@ pub async fn handle_chat<C: LlmClient + 'static>(
         }
     });
 
-    match app.conversation_service.sessions.get(&session_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => {
+    match app.session_exists(&session_id).await {
+        Ok(true) => {}
+        Ok(false) => {
             crate::gateway::handlers::system::send_general_error(
                 &outbound_tx,
                 &request_id,
@@ -69,11 +68,7 @@ pub async fn handle_chat<C: LlmClient + 'static>(
         }),
     ));
 
-    if let Err(e) = app
-        .conversation_service
-        .start_turn(&session_id, &payload.input, event_tx)
-        .await
-    {
+    if let Err(e) = app.start_turn(&session_id, &payload.input, event_tx).await {
         crate::gateway::handlers::system::send_general_error(
             &outbound_tx,
             &request_id,
@@ -95,11 +90,11 @@ pub async fn handle_chat<C: LlmClient + 'static>(
 
 pub async fn handle_chat_stop<C: LlmClient + 'static>(
     payload: SessionIdPayload,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match app.conversation_service.stop_turn(&payload.session_id).await {
+    match app.stop_turn(&payload.session_id).await {
         Ok(()) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,

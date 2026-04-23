@@ -5,29 +5,27 @@ use crate::gateway::protocol::{
 };
 use channel_websocket::ResponseSink;
 use log::error;
-use std::sync::Arc;
 
-pub async fn handle_sessions_list<C: crate::provider::LlmClient>(
-    app: Arc<GatewayApplication<C>>,
+pub async fn handle_sessions_list<C: crate::provider::LlmClient + 'static>(
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let sessions = app.conversation_service.sessions.list_sorted().await;
+    let sessions = app.list_sessions().await;
     let _ = outbound_tx.send(GatewayMessage::new(
         request_id,
         crate::gateway::protocol::MessageEnvelope::SessionsListResponse(SessionsListResponse { sessions }),
     ));
 }
 
-pub async fn handle_session_get<C: crate::provider::LlmClient>(
+pub async fn handle_session_get<C: crate::provider::LlmClient + 'static>(
     session_id: String,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match app.conversation_service.sessions.get(&session_id).await {
-        Ok(Some(session)) => {
-            let messages = session.get_messages_dto();
+    match app.session_messages(&session_id).await {
+        Ok(messages) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
                 crate::gateway::protocol::MessageEnvelope::SessionsMessagesResponse(SessionsMessagesResponse {
@@ -35,7 +33,7 @@ pub async fn handle_session_get<C: crate::provider::LlmClient>(
                 }),
             ));
         }
-        Ok(None) => {
+        Err(e) if e.to_string().contains("Session not found") => {
             crate::gateway::handlers::system::send_general_error(
                 &outbound_tx,
                 &request_id,
@@ -55,38 +53,17 @@ pub async fn handle_session_get<C: crate::provider::LlmClient>(
     }
 }
 
-pub async fn handle_session_create<C: crate::provider::LlmClient>(
+pub async fn handle_session_create<C: crate::provider::LlmClient + 'static>(
     payload: SessionCreateRequest,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    let system_prompt = app
-        .conversation_service
-        .agent_registry
-        .get(&payload.agent_id)
-        .map(|a| a.system_prompt_template.clone())
-        .unwrap_or_default();
-
-    match app
-        .conversation_service
-        .sessions
-        .create(payload.title, payload.agent_id, system_prompt)
-        .await
-    {
+    match app.create_session(payload.title, payload.agent_id).await {
         Ok(session) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
-                crate::gateway::protocol::MessageEnvelope::SessionsCreateResponse(SessionCreateResponse {
-                    session: crate::gateway::protocol::Session {
-                        id: session.id.clone(),
-                        title: Some(session.name.clone()),
-                        agent_id: session.control.read().unwrap().active_agent.clone(),
-                        created_at: session.created_at,
-                        updated_at: session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
-                        message_count: session.history.read().unwrap().len(),
-                    },
-                }),
+                crate::gateway::protocol::MessageEnvelope::SessionsCreateResponse(SessionCreateResponse { session }),
             ));
         }
         Err(e) => {
@@ -101,13 +78,13 @@ pub async fn handle_session_create<C: crate::provider::LlmClient>(
     }
 }
 
-pub async fn handle_session_delete<C: crate::provider::LlmClient>(
+pub async fn handle_session_delete<C: crate::provider::LlmClient + 'static>(
     payload: crate::gateway::protocol::SessionIdPayload,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match app.conversation_service.sessions.delete(&payload.session_id).await {
+    match app.delete_session(&payload.session_id).await {
         Ok(success) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
@@ -126,34 +103,20 @@ pub async fn handle_session_delete<C: crate::provider::LlmClient>(
     }
 }
 
-pub async fn handle_session_copy<C: crate::provider::LlmClient>(
+pub async fn handle_session_copy<C: crate::provider::LlmClient + 'static>(
     payload: crate::gateway::protocol::SessionCopyRequest,
-    app: Arc<GatewayApplication<C>>,
+    app: &GatewayApplication<C>,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match app
-        .conversation_service
-        .sessions
-        .copy_session(&payload.session_id, payload.index)
-        .await
-    {
-        Ok(Some(session)) => {
+    match app.copy_session(&payload.session_id, payload.index).await {
+        Ok(session) => {
             let _ = outbound_tx.send(GatewayMessage::new(
                 request_id,
-                crate::gateway::protocol::MessageEnvelope::SessionsCopyResponse(SessionCreateResponse {
-                    session: crate::gateway::protocol::Session {
-                        id: session.id.clone(),
-                        title: Some(session.name.clone()),
-                        agent_id: session.control.read().unwrap().active_agent.clone(),
-                        created_at: session.created_at,
-                        updated_at: session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
-                        message_count: session.history.read().unwrap().len(),
-                    },
-                }),
+                crate::gateway::protocol::MessageEnvelope::SessionsCopyResponse(SessionCreateResponse { session }),
             ));
         }
-        Ok(None) => {
+        Err(e) if e.to_string().contains("Source session not found") => {
             crate::gateway::handlers::system::send_general_error(
                 &outbound_tx,
                 &request_id,

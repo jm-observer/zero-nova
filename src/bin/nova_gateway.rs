@@ -2,6 +2,7 @@
 use clap::Parser;
 use sysinfo::{Pid, System};
 use zero_nova::app::bootstrap::bootstrap;
+use zero_nova::config::AppConfig;
 use zero_nova::provider::openai_compat::OpenAiCompatClient;
 
 #[derive(Parser, Debug)]
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let config_path = workspace.join("config.toml");
     log::info!("Attempting to load config from: {:?}", config_path);
 
-    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path)?;
+    let mut config = zero_nova::config::OriginAppConfig::load_from_file(&config_path)?;
 
     config.gateway.host = _args.host;
     config.gateway.port = _args.port;
@@ -74,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::select! {
         // Task 1: Run the server
         res = async {
-            bootstrap(config.clone(), client, workspace).await
+            bootstrap(AppConfig::from_origin(config, workspace), client, workspace).await
         } => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);

@@ -13,7 +13,6 @@ pub struct OriginAppConfig {
     pub tool: ToolConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
-    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -26,7 +25,7 @@ pub struct AppConfig {
     pub tool: ToolConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
-    pub workspace: PathBuf
+    pub workspace: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -134,8 +133,14 @@ impl Default for GatewayConfig {
 }
 
 impl AppConfig {
-    pub fn from_origin(origin: OriginAppConfig, workspace: PathBuf) -> Result<Self> {
-        todo!()
+    pub fn from_origin(origin: OriginAppConfig, workspace: PathBuf) -> Self {
+        Self {
+            llm: origin.llm,
+            search: origin.search,
+            tool: origin.tool,
+            gateway: origin.gateway,
+            workspace,
+        }
     }
 }
 impl OriginAppConfig {

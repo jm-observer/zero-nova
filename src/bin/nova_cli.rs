@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
     info!("workspace {}", workspace.display());
     let config_path = workspace.join("config.toml");
 
-    let mut config = zero_nova::config::AppConfig::load_from_file(&config_path)?;
+    let mut config = zero_nova::config::OriginAppConfig::load_from_file(&config_path)?;
 
     if let Some(model) = &cli.model {
         config.llm.model_config.model = model.to_string();
@@ -86,6 +86,8 @@ async fn main() -> Result<()> {
     if let Some(base_url) = &cli.base_url {
         config.llm.base_url = base_url.to_string();
     }
+
+    let config = zero_nova::config::AppConfig::from_origin(config, workspace.clone());
 
     log::info!("Starting Nova CLI with : {:?}", config);
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
@@ -404,12 +406,6 @@ impl EventPrinter {
                 }
                 AgentEvent::AgentSwitched { agent_name, .. } => {
                     println!("\n{}", format!("[agent switched] {agent_name}").bright_black());
-                }
-                AgentEvent::InteractionRequest { prompt, .. } => {
-                    println!("\n{}", format!("[interaction] {prompt}").bright_black());
-                }
-                AgentEvent::InteractionResolved { result, .. } => {
-                    println!("\n{}", format!("[interaction resolved] {result}").bright_black());
                 }
             },
         }

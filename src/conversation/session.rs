@@ -1,6 +1,5 @@
 use crate::conversation::control::ControlState;
 use crate::conversation::repository::SqliteSessionRepository;
-use crate::gateway::protocol::{ContentBlockDTO, MessageDTO, Session as SessionProtocol};
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -21,6 +20,15 @@ pub struct Session {
     pub updated_at: AtomicI64,
     pub chat_lock: Mutex<()>,
     pub cancellation_token: RwLock<Option<CancellationToken>>,
+}
+
+pub(crate) struct SessionSummary {
+    pub id: String,
+    pub name: String,
+    pub agent_id: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub message_count: usize,
 }
 
 impl Session {
@@ -46,43 +54,8 @@ impl Session {
         self.history.read().unwrap().clone()
     }
 
-    pub fn get_messages_dto(&self) -> Vec<MessageDTO> {
-        let history = self.history.read().unwrap();
-        history
-            .iter()
-            .map(|m| MessageDTO {
-                role: match m.role {
-                    Role::System => "system".to_string(),
-                    Role::User => "user".to_string(),
-                    Role::Assistant => "assistant".to_string(),
-                },
-                content: m
-                    .content
-                    .iter()
-                    .map(|c| match c {
-                        ContentBlock::Text { text } => ContentBlockDTO::Text { text: text.clone() },
-                        ContentBlock::Thinking { thinking } => ContentBlockDTO::Thinking {
-                            thinking: thinking.clone(),
-                        },
-                        ContentBlock::ToolUse { id, name, input } => ContentBlockDTO::ToolUse {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: input.clone(),
-                        },
-                        ContentBlock::ToolResult {
-                            tool_use_id,
-                            output,
-                            is_error,
-                        } => ContentBlockDTO::ToolResult {
-                            tool_use_id: tool_use_id.clone(),
-                            content: output.clone(),
-                            is_error: *is_error,
-                        },
-                    })
-                    .collect(),
-                timestamp: self.created_at,
-            })
-            .collect()
+    pub(crate) fn get_internal_messages(&self) -> Vec<Message> {
+        self.history.read().unwrap().clone()
     }
 
     pub fn touch_updated_at(&self) {
@@ -254,7 +227,7 @@ impl SessionStore {
     }
 
     /// 按 updated_at 降序返回会话摘要列表
-    pub async fn list_sorted(&self) -> Vec<SessionProtocol> {
+    pub(crate) async fn list_sorted(&self) -> Vec<SessionSummary> {
         let sessions = self.sessions.read().unwrap();
         let mut list: Vec<_> = sessions.values().cloned().collect();
 
@@ -265,15 +238,36 @@ impl SessionStore {
         });
 
         list.into_iter()
-            .map(|s| SessionProtocol {
+            .map(|s| SessionSummary {
                 id: s.id.clone(),
-                title: Some(s.name.clone()),
+                name: s.name.clone(),
                 agent_id: s.control.read().unwrap().active_agent.clone(),
                 created_at: s.created_at,
                 updated_at: s.updated_at.load(Ordering::SeqCst),
                 message_count: s.history.read().unwrap().len(),
             })
             .collect()
+    }
+
+    pub async fn set_active_agent(&self, session_id: &str, agent_id: &str) -> Result<Arc<Session>> {
+        let session = self.get(session_id).await?.context("Session not found")?;
+
+        {
+            let mut control = session.control.write().unwrap();
+            control.active_agent = agent_id.to_string();
+        }
+
+        self.repository
+            .save_session(
+                &session.id,
+                &session.name,
+                agent_id,
+                session.created_at,
+                session.updated_at.load(Ordering::SeqCst),
+            )
+            .await?;
+
+        Ok(session)
     }
 
     /// 删除会话

@@ -46,21 +46,4 @@ pub enum AgentEvent {
         agent_name: String,
         description: Option<String>,
     },
-    /// 发送交互请求
-    InteractionRequest {
-        interaction_id: String,
-        kind: String,
-        subject: String,
-        prompt: String,
-        options: Vec<InteractionOptionEvent>,
-    },
-    /// 发送交互解决事件
-    InteractionResolved { interaction_id: String, result: String },
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct InteractionOptionEvent {
-    pub id: String,
-    pub label: String,
-    pub aliases: Vec<String>,
 }

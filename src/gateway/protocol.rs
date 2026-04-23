@@ -74,19 +74,13 @@ pub enum MessageEnvelope {
     #[serde(rename = "chat.complete")]
     ChatComplete(ChatCompletePayload),
 
-    // --- Interaction Events ---
-    #[serde(rename = "interaction.request")]
-    InteractionRequest(InteractionRequestPayload),
-    #[serde(rename = "interaction.resolved")]
-    InteractionResolved(InteractionResolvedPayload),
-
     // --- Agent Management ---
     #[serde(rename = "agents.list")]
     AgentsList,
     #[serde(rename = "agents.list.response")]
     AgentsListResponse(AgentsListResponse),
     #[serde(rename = "agents.switch")]
-    AgentsSwitch(AgentIdPayload),
+    AgentsSwitch(SessionAgentSwitchPayload),
     #[serde(rename = "agents.switch.response")]
     AgentsSwitchResponse(AgentsSwitchResponse),
 
@@ -102,32 +96,6 @@ pub enum MessageEnvelope {
 
     #[serde(other)]
     Unknown,
-}
-
-// --- Interaction protocol structs ---
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InteractionOptionDTO {
-    pub id: String,
-    pub label: String,
-    pub aliases: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InteractionRequestPayload {
-    pub session_id: String,
-    pub interaction_id: String,
-    pub kind: String, // "approve" | "select" | "input"
-    pub subject: String,
-    pub prompt: String,
-    pub options: Vec<InteractionOptionDTO>,
-    pub risk_level: String, // "low" | "medium" | "high"
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InteractionResolvedPayload {
-    pub session_id: String,
-    pub interaction_id: String,
-    pub result: String, // "approved" | "rejected" | "selected" | "input" | "expired"
 }
 
 // --- Payload Definitions ---
@@ -216,7 +184,8 @@ pub struct SessionCopyRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentIdPayload {
+pub struct SessionAgentSwitchPayload {
+    pub session_id: String,
     pub agent_id: String,
 }
 
@@ -376,11 +345,13 @@ mod tests {
             "type": "agents.switch",
             "id": "req-3",
             "payload": {
+                "sessionId": "session-1",
                 "agentId": "nova"
             }
         }"#;
         let msg: GatewayMessage = serde_json::from_str(json).unwrap();
         if let MessageEnvelope::AgentsSwitch(payload) = msg.envelope {
+            assert_eq!(payload.session_id, "session-1");
             assert_eq!(payload.agent_id, "nova");
         } else {
             panic!("Wrong variant");

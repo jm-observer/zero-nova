@@ -1,7 +1,6 @@
 use crate::event::AgentEvent;
 use crate::gateway::protocol::{
-    Agent, AgentsSwitchResponse, ErrorPayload, GatewayMessage, InteractionOptionDTO, InteractionRequestPayload,
-    InteractionResolvedPayload, MessageEnvelope, ProgressEvent,
+    Agent, AgentsSwitchResponse, ErrorPayload, GatewayMessage, MessageEnvelope, ProgressEvent,
 };
 
 /// 将 AgentEvent 转换为 GatewayMessage。
@@ -105,37 +104,6 @@ pub fn agent_event_to_gateway(event: AgentEvent, request_id: &str, session_id: &
             },
             messages: vec![],
         }),
-        AgentEvent::InteractionRequest {
-            interaction_id,
-            kind,
-            subject,
-            prompt,
-            options,
-        } => {
-            MessageEnvelope::InteractionRequest(InteractionRequestPayload {
-                session_id: session_id.to_string(),
-                interaction_id,
-                kind,
-                subject,
-                prompt,
-                options: options
-                    .into_iter()
-                    .map(|o| InteractionOptionDTO {
-                        id: o.id,
-                        label: o.label,
-                        aliases: o.aliases,
-                    })
-                    .collect(),
-                risk_level: "low".to_string(), // Default for now
-            })
-        }
-        AgentEvent::InteractionResolved { interaction_id, result } => {
-            MessageEnvelope::InteractionResolved(InteractionResolvedPayload {
-                session_id: session_id.to_string(),
-                interaction_id,
-                result,
-            })
-        }
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

@@ -1,5 +1,6 @@
 use crate::app::conversation_service::ConversationService;
 use crate::config::AppConfig;
+use crate::message::{ContentBlock, Message, Role};
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -43,8 +44,19 @@ impl<C: LlmClient + 'static> GatewayApplication<C> {
         self.conversation_service.stop_turn(session_id).await
     }
 
+    pub async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<crate::gateway::protocol::Agent> {
+        let agent = self.conversation_service.switch_agent(session_id, agent_id).await?;
+        Ok(agent_to_protocol(&agent))
+    }
+
     pub async fn list_sessions(&self) -> Vec<crate::gateway::protocol::Session> {
-        self.conversation_service.sessions.list_sorted().await
+        self.conversation_service
+            .sessions
+            .list_sorted()
+            .await
+            .into_iter()
+            .map(|summary| session_summary_to_protocol(&summary))
+            .collect()
     }
 
     pub async fn session_messages(&self, session_id: &str) -> Result<Vec<crate::gateway::protocol::MessageDTO>> {
@@ -54,7 +66,7 @@ impl<C: LlmClient + 'static> GatewayApplication<C> {
             .get(session_id)
             .await?
             .context("Session not found")?;
-        Ok(session.get_messages_dto())
+        Ok(messages_to_protocol(&session.get_internal_messages()))
     }
 
     pub async fn create_session(
@@ -164,6 +176,59 @@ fn session_to_protocol(session: &Arc<crate::conversation::session::Session>) -> 
         updated_at: session.updated_at.load(std::sync::atomic::Ordering::SeqCst),
         message_count: session.history.read().unwrap().len(),
     }
+}
+
+fn session_summary_to_protocol(
+    summary: &crate::conversation::session::SessionSummary,
+) -> crate::gateway::protocol::Session {
+    crate::gateway::protocol::Session {
+        id: summary.id.clone(),
+        title: Some(summary.name.clone()),
+        agent_id: summary.agent_id.clone(),
+        created_at: summary.created_at,
+        updated_at: summary.updated_at,
+        message_count: summary.message_count,
+    }
+}
+
+fn messages_to_protocol(messages: &[Message]) -> Vec<crate::gateway::protocol::MessageDTO> {
+    messages
+        .iter()
+        .map(|message| crate::gateway::protocol::MessageDTO {
+            role: match message.role {
+                Role::System => "system".to_string(),
+                Role::User => "user".to_string(),
+                Role::Assistant => "assistant".to_string(),
+            },
+            content: message
+                .content
+                .iter()
+                .map(|block| match block {
+                    ContentBlock::Text { text } => {
+                        crate::gateway::protocol::ContentBlockDTO::Text { text: text.clone() }
+                    }
+                    ContentBlock::Thinking { thinking } => crate::gateway::protocol::ContentBlockDTO::Thinking {
+                        thinking: thinking.clone(),
+                    },
+                    ContentBlock::ToolUse { id, name, input } => crate::gateway::protocol::ContentBlockDTO::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    },
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        output,
+                        is_error,
+                    } => crate::gateway::protocol::ContentBlockDTO::ToolResult {
+                        tool_use_id: tool_use_id.clone(),
+                        content: output.clone(),
+                        is_error: *is_error,
+                    },
+                })
+                .collect(),
+            timestamp: 0,
+        })
+        .collect()
 }
 
 fn agent_to_protocol(agent: &crate::agent_catalog::AgentDescriptor) -> crate::gateway::protocol::Agent {

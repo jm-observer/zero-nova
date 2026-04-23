@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::select! {
         // Task 1: Run the server
         res = async {
-            bootstrap(AppConfig::from_origin(config, workspace), client, workspace).await
+            bootstrap(AppConfig::from_origin(config, workspace.clone()), client, workspace).await
         } => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);

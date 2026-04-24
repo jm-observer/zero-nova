@@ -87,6 +87,10 @@ pub struct ToolConfig {
     /// Prompts directory for agent template files. When None, defaults to `{workspace}/prompts`.
     #[serde(default)]
     pub prompts_dir: Option<String>,
+    /// 默认能力策略 ("minimal" | "full" | "workflow")。
+    /// Plan 1：基础扩展字段，不引入复杂嵌套。
+    #[serde(default)]
+    pub default_policy: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -120,6 +124,13 @@ pub struct GatewayConfig {
     pub subagent_timeout_secs: u64,
     #[serde(default)]
     pub agents: Vec<AgentSpec>,
+    /// 是否启用自动 skill 路由 (Plan 1 新增)。
+    #[serde(default)]
+    pub skill_routing_enabled: bool,
+    /// Skill 历史策略 ("global" | "per_skill" | "segments")。
+    /// 对应 Plan 1/2/3 的演进阶段。
+    #[serde(default = "default_skill_history_strategy")]
+    pub skill_history_strategy: String,
 }
 
 fn default_host() -> String {
@@ -135,6 +146,10 @@ fn default_subagent_timeout() -> u64 {
     300
 }
 
+fn default_skill_history_strategy() -> String {
+    "global".to_string()
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -144,6 +159,8 @@ impl Default for GatewayConfig {
             tool_timeout_secs: None,
             subagent_timeout_secs: default_subagent_timeout(),
             agents: Vec::new(),
+            skill_routing_enabled: false,
+            skill_history_strategy: default_skill_history_strategy(),
         }
     }
 }

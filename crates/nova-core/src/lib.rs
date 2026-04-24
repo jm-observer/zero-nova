@@ -20,7 +20,10 @@ pub use mcp::{McpClient, McpToolDef, ServerInfo};
 pub use message::{ContentBlock, Message, Role};
 pub use prompt::SystemPromptBuilder;
 pub use provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
-pub use skill::SkillRegistry;
+pub use skill::{
+    CapabilityPolicy, FileToolPriority, PolicySource, Skill, SkillPackage, SkillRegistry,
+    ToolPolicy,
+};
 pub use tool::{Tool, ToolContext, ToolDefinition, ToolRegistry};
 
 pub async fn run() -> anyhow::Result<()> {

@@ -1,4 +1,5 @@
 use crate::message::{ContentBlock, Message};
+use crate::prompt::{SkillInvocationLevel, SkillRouteDecision};
 use crate::provider::types::Usage;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -59,4 +60,39 @@ pub enum AgentEvent {
     BackgroundTaskComplete { id: String, name: String },
     /// A skill was loaded.
     SkillLoaded { skill_name: String },
+    /// Skill was activated during a turn.
+    SkillActivated {
+        skill_id: String,
+        skill_name: String,
+        sticky: bool,
+        // "auto" | "explicit" | "fallback"
+        reason: String,
+    },
+    /// Skill was switched from one to another.
+    SkillSwitched {
+        from_skill: String,
+        to_skill: String,
+        reason: String,
+    },
+    /// Skill was exited/deactivated.
+    SkillExited {
+        skill_id: String,
+        // Reason for deactivation
+        reason: String,
+    },
+    /// Skill route evaluation was done.
+    SkillRouteEvaluated {
+        result: SkillRouteDecision,
+        confidence: f64, // 0.0 - 1.0
+        // Free-text reasoning from LLM or rule engine
+        reasoning: String,
+    },
+    /// Tool was unlocked via deferred loading (e.g., ToolSearch).
+    ToolUnlocked { tool_name: String },
+    /// Skill invocation at a specific level (三层模型).
+    SkillInvocation {
+        skill_id: String,
+        skill_name: String,
+        level: SkillInvocationLevel,
+    },
 }

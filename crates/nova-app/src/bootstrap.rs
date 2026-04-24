@@ -43,6 +43,7 @@ pub async fn build_application<C: LlmClient + 'static>(
         max_iterations: config.gateway.max_iterations,
         model_config: config.llm.model_config.clone(),
         tool_timeout: std::time::Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
+        max_tokens: config.gateway.max_tokens,
     };
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());

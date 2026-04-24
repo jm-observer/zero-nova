@@ -1,4 +1,5 @@
 use nova_core::message::ContentBlock;
+use nova_core::prompt::SkillInvocationLevel;
 use nova_core::provider::types::Usage;
 use serde_json::Value;
 
@@ -86,6 +87,30 @@ pub enum AppEvent {
     SkillLoaded {
         skill_name: String,
     },
+    SkillActivated {
+        skill_id: String,
+        skill_name: String,
+        sticky: bool,
+    },
+    SkillSwitched {
+        from_skill: String,
+        to_skill: String,
+    },
+    SkillExited {
+        skill_id: String,
+    },
+    SkillRouteEvaluated {
+        confidence: f64,
+        reasoning: String,
+    },
+    ToolUnlocked {
+        tool_name: String,
+    },
+    SkillInvocation {
+        skill_id: String,
+        skill_name: String,
+        level: SkillInvocationLevel,
+    },
 }
 
 impl From<nova_core::event::AgentEvent> for AppEvent {
@@ -143,6 +168,33 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                 AppEvent::BackgroundTaskComplete { id, name }
             }
             nova_core::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
+            nova_core::event::AgentEvent::SkillActivated {
+                skill_id,
+                skill_name,
+                sticky,
+                ..
+            } => AppEvent::SkillActivated {
+                skill_id,
+                skill_name,
+                sticky,
+            },
+            nova_core::event::AgentEvent::SkillSwitched {
+                from_skill, to_skill, ..
+            } => AppEvent::SkillSwitched { from_skill, to_skill },
+            nova_core::event::AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
+            nova_core::event::AgentEvent::SkillRouteEvaluated {
+                confidence, reasoning, ..
+            } => AppEvent::SkillRouteEvaluated { confidence, reasoning },
+            nova_core::event::AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
+            nova_core::event::AgentEvent::SkillInvocation {
+                skill_id,
+                skill_name,
+                level,
+            } => AppEvent::SkillInvocation {
+                skill_id,
+                skill_name,
+                level,
+            },
         }
     }
 }

@@ -122,6 +122,8 @@ pub struct GatewayConfig {
     pub tool_timeout_secs: Option<u64>,
     #[serde(default = "default_subagent_timeout")]
     pub subagent_timeout_secs: u64,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: usize,
     #[serde(default)]
     pub agents: Vec<AgentSpec>,
     /// 是否启用自动 skill 路由 (Plan 1 新增)。
@@ -146,6 +148,10 @@ fn default_subagent_timeout() -> u64 {
     300
 }
 
+fn default_max_tokens() -> usize {
+    4096
+}
+
 fn default_skill_history_strategy() -> String {
     "global".to_string()
 }
@@ -158,6 +164,7 @@ impl Default for GatewayConfig {
             max_iterations: default_max_iterations(),
             tool_timeout_secs: None,
             subagent_timeout_secs: default_subagent_timeout(),
+            max_tokens: default_max_tokens(),
             agents: Vec::new(),
             skill_routing_enabled: false,
             skill_history_strategy: default_skill_history_strategy(),

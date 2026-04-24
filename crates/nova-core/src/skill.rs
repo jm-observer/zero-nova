@@ -113,9 +113,9 @@ pub struct CapabilityPolicy {
     pub source: PolicySource,
 
     // Cache 预算约束（基于 v1_messages 会话分析，102733 tokens 缓存）
-    pub cache_section_min_tokens: usize,    // 触发缓存创建的最小段（100）
-    pub cache_section_max_tokens: usize,    // 单个 cache section 上限（4000）
-    pub system_prompt_cache_target: usize,  // 目标缓存大小（98000）
+    pub cache_section_min_tokens: usize,      // 触发缓存创建的最小段（100）
+    pub cache_section_max_tokens: usize,      // 单个 cache section 上限（4000）
+    pub system_prompt_cache_target: usize,    // 目标缓存大小（98000）
     pub file_tool_priority: FileToolPriority, // 文件 vs Bash 优先级
 }
 
@@ -215,7 +215,11 @@ impl SkillRegistry {
                     return Ok(());
                 }
                 Err(e) => {
-                    log::warn!("Failed to parse skill.toml at {:?}, falling back to SKILL.md: {}", path, e);
+                    log::warn!(
+                        "Failed to parse skill.toml at {:?}, falling back to SKILL.md: {}",
+                        path,
+                        e
+                    );
                 }
             }
         }
@@ -268,15 +272,9 @@ impl SkillRegistry {
         for line in frontmatter.lines() {
             let line = line.trim();
             if let Some(stripped) = line.strip_prefix("name:") {
-                name = stripped
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
+                name = stripped.trim().trim_matches('"').to_string();
             } else if let Some(stripped) = line.strip_prefix("description:") {
-                description = stripped
-                    .trim()
-                    .trim_matches('"')
-                    .to_string();
+                description = stripped.trim().trim_matches('"').to_string();
             }
         }
 
@@ -289,11 +287,7 @@ impl SkillRegistry {
 
         let is_compat = name.is_empty();
         Ok(Skill {
-            name: if name.is_empty() {
-                fallback_name.clone()
-            } else {
-                name
-            },
+            name: if name.is_empty() { fallback_name.clone() } else { name },
             description,
             body: body.trim().to_string(),
             path: path.parent().unwrap().to_path_buf(),
@@ -303,7 +297,8 @@ impl SkillRegistry {
 
     /// 将旧 Skill 转换为兼容的 SkillPackage。
     fn to_skill_package(&self, skill: &Skill) -> SkillPackage {
-        let slug = skill.path
+        let slug = skill
+            .path
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or(&skill.name)
@@ -333,9 +328,7 @@ impl SkillRegistry {
             .get("slug")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .or_else(|| {
-                toml.get("id").and_then(|v| v.as_str()).map(|s| s.to_string())
-            })
+            .or_else(|| toml.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
             .unwrap_or_else(|| {
                 path.file_name()
                     .and_then(|s| s.to_str())
@@ -372,11 +365,7 @@ impl SkillRegistry {
                     .get("tool_policy")
                     .and_then(|t| t.get("allow_list"))
                     .and_then(|l| l.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                     .unwrap_or_default();
                 ToolPolicy::AllowList(list)
             }
@@ -385,38 +374,25 @@ impl SkillRegistry {
                     .get("tool_policy")
                     .and_then(|t| t.get("allow_list"))
                     .and_then(|l| l.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
                     .unwrap_or_default();
                 ToolPolicy::AllowListWithDeferred(list)
             }
             _ => ToolPolicy::InheritAll,
         };
 
-        let sticky = toml
-            .get("sticky")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let sticky = toml.get("sticky").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let aliases: Vec<String>;
         if let Some(arr) = toml.get("aliases").and_then(|v| v.as_array()) {
-            aliases = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
+            aliases = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
         } else {
             aliases = vec![];
         }
 
         let examples: Vec<String>;
         if let Some(arr) = toml.get("examples").and_then(|v| v.as_array()) {
-            examples = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
+            examples = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
         } else {
             examples = vec![];
         }
@@ -438,16 +414,12 @@ impl SkillRegistry {
 
     /// 通过 slug 查找 SkillPackage。
     pub fn find_by_slug(&self, slug: &str) -> Option<&SkillPackage> {
-        self.packages
-            .iter()
-            .find(|p| p.slug == slug || p.id == slug)
+        self.packages.iter().find(|p| p.slug == slug || p.id == slug)
     }
 
     /// 通过别名查找 SkillPackage。
     pub fn find_by_alias(&self, alias: &str) -> Option<&SkillPackage> {
-        self.packages
-            .iter()
-            .find(|p| p.aliases.iter().any(|a| a == alias))
+        self.packages.iter().find(|p| p.aliases.iter().any(|a| a == alias))
     }
 
     /// 按名称（name/slug）查找 SkillPackage。
@@ -459,15 +431,12 @@ impl SkillRegistry {
 
     /// 返回所有可用的 SkillPackage 列表（供路由器使用）。
     pub fn all_candidates(&self) -> Vec<&SkillPackage> {
-        self.packages
-            .iter()
-            .collect()
+        self.packages.iter().collect()
     }
 
     /// 获取指定 slug 的 instructions 文本（简化接口）。
     pub fn get_skill_prompt(&self, slug: &str) -> Option<String> {
-        self.find_by_slug(slug)
-            .map(|p| p.instructions.clone())
+        self.find_by_slug(slug).map(|p| p.instructions.clone())
     }
 
     /// 生成旧格式的整包 system prompt（向后兼容）。
@@ -487,7 +456,11 @@ impl SkillRegistry {
         }
         for skill in &self.skills {
             // 避免重复（兼容模式下 package 可能已包含）
-            if !self.packages.iter().any(|p| p.slug == skill.path.file_name().and_then(|s| s.to_str()).unwrap_or_default()) {
+            if !self
+                .packages
+                .iter()
+                .any(|p| p.slug == skill.path.file_name().and_then(|s| s.to_str()).unwrap_or_default())
+            {
                 prompt.push_str(&format!("## Skill: {}\n", skill.name));
                 prompt.push_str(&format!("Description: {}\n", skill.description));
                 prompt.push_str(&format!("Path: {}\n\n", skill.path.to_string_lossy()));
@@ -497,6 +470,117 @@ impl SkillRegistry {
             }
         }
         prompt
+    }
+
+    // -----------------------------------------------------------------------
+    //  Plan 2 — SkillRouter 辅助方法（阶段一：纯规则匹配）
+    // -----------------------------------------------------------------------
+
+    /// 通过 id 查找 SkillPackage（供路由决策使用）。
+    pub fn find_package_by_id(&self, skill_id: &str) -> Option<&SkillPackage> {
+        self.packages.iter().find(|p| p.id == skill_id || p.slug == skill_id)
+    }
+
+    /// 根据 SkillPolicy 生成当前轮次的 CapabilityPolicy。
+    pub fn policy_from_skill(&self, skill_id: &str) -> CapabilityPolicy {
+        let mut policy = CapabilityPolicy {
+            source: PolicySource::ActiveSkill,
+            ..CapabilityPolicy::default()
+        };
+
+        if let Some(pkg) = self.find_package_by_id(skill_id) {
+            match &pkg.tool_policy {
+                ToolPolicy::InheritAll => {
+                    // 全部继承，不需要额外调整
+                }
+                ToolPolicy::AllowList(tools) => {
+                    // 使用白名单模式：仅保留白名单工具 + 文件操作工具
+                    policy.always_enabled_tools.clear();
+                    for tool in tools {
+                        if !["Bash", "Read", "Write", "Edit"].contains(&tool.as_str()) {
+                            policy.deferred_tools.push(tool.clone());
+                        }
+                    }
+                }
+                ToolPolicy::AllowListWithDeferred(tools) => {
+                    // 白名单 + ToolSearch 可补充
+                    policy.always_enabled_tools.clear();
+                    for tool in tools {
+                        if !["Bash", "Read", "Write", "Edit"].contains(&tool.as_str()) {
+                            policy.deferred_tools.push(tool.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        policy
+    }
+
+    /// 检查用户输入是否为显式 skill 退出信号。
+    pub fn is_exit_signal(&self, input: &str) -> bool {
+        let trimmed = input.trim();
+        trimmed == "/exit-skill" || trimmed == "/reset-skill" || trimmed == "/skill-off"
+    }
+
+    /// 检查用户输入是否匹配某个 skill（/skill-name 模式）。
+    pub fn match_skill_by_input(&self, input: &str) -> Option<String> {
+        let trimmed = input.trim();
+
+        // 检查 /skill-name 模式
+        if let Some(suffix) = trimmed.strip_prefix("/skill-") {
+            if suffix.len() <= 50 {
+                if let Some(pkg) = self.find_by_slug(suffix) {
+                    return Some(pkg.id.clone());
+                }
+                if let Some(pkg) = self.find_by_alias(suffix) {
+                    return Some(pkg.id.clone());
+                }
+            }
+        }
+
+        // 检查 /skill-name 模式（带空格分隔）
+        if let Some(parts) = trimmed.strip_prefix("/skill ") {
+            let parts: Vec<&str> = parts.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let name = parts[1].to_string();
+                if let Some(pkg) = self.find_by_slug(&name) {
+                    return Some(pkg.id.clone());
+                }
+                if let Some(pkg) = self.find_by_name(&name) {
+                    return Some(pkg.id.clone());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// 根据工具策略生成 Tool 视图（裁剪后的工具集合）。
+    pub fn get_tool_view(&self, skill_id: &str) -> Vec<String> {
+        let mut tools = vec![
+            "Bash".to_string(),
+            "Read".to_string(),
+            "Write".to_string(),
+            "Edit".to_string(),
+        ];
+
+        if let Some(pkg) = self.find_package_by_id(skill_id) {
+            match &pkg.tool_policy {
+                ToolPolicy::AllowList(allow_list) | ToolPolicy::AllowListWithDeferred(allow_list) => {
+                    // 只保留白名单中的工具（加上文件操作）
+                    tools.clear();
+                    tools.extend(allow_list.clone());
+                }
+                ToolPolicy::InheritAll => {
+                    // 不调整，保留全部
+                }
+            }
+        }
+
+        tools.sort();
+        tools.dedup();
+        tools
     }
 }
 

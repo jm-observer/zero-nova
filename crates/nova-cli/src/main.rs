@@ -126,6 +126,7 @@ async fn main() -> Result<()> {
         max_iterations: 15,
         model_config: config.llm.model_config.clone(),
         tool_timeout: std::time::Duration::from_secs(300),
+        max_tokens: 4096,
     };
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);
@@ -421,6 +422,27 @@ impl EventPrinter {
                 }
                 AgentEvent::SkillLoaded { skill_name } => {
                     println!("\n{}", format!("[skill loaded] {skill_name}").bright_purple());
+                }
+                AgentEvent::SkillActivated { skill_name, .. } => {
+                    println!("\n{}", format!("[skill activated] {skill_name}").bright_green());
+                }
+                AgentEvent::SkillSwitched { to_skill, .. } => {
+                    println!("\n{}", format!("[skill switched] -> {to_skill}").bright_magenta());
+                }
+                AgentEvent::SkillExited { skill_id, .. } => {
+                    println!("\n{}", format!("[skill exited] {skill_id}").yellow());
+                }
+                AgentEvent::SkillRouteEvaluated { .. } => {
+                    // Debug event, silently handled
+                }
+                AgentEvent::ToolUnlocked { tool_name } => {
+                    println!("\n{}", format!("[tool unlocked] {tool_name}").bright_blue());
+                }
+                AgentEvent::SkillInvocation { skill_name, level, .. } => {
+                    println!(
+                        "\n{}",
+                        format!("[skill invoked:{:?}] {skill_name}", level).bright_cyan()
+                    );
                 }
             },
         }

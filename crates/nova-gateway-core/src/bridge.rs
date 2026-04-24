@@ -132,6 +132,50 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             stream: Some("stdout".to_string()),
             ..Default::default()
         }),
+        AppEvent::SkillActivated { skill_name, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "skill_activated".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(format!("Skill activated: {}", skill_name)),
+            stream: Some("stdout".to_string()),
+            ..Default::default()
+        }),
+        AppEvent::SkillSwitched {
+            from_skill, to_skill, ..
+        } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "skill_switched".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(format!("Skill switched: {} -> {}", from_skill, to_skill)),
+            stream: Some("stdout".to_string()),
+            ..Default::default()
+        }),
+        AppEvent::SkillExited { skill_id, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "skill_exited".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(format!("Skill exited: {}", skill_id)),
+            stream: Some("stdout".to_string()),
+            ..Default::default()
+        }),
+        AppEvent::SkillRouteEvaluated { confidence, reasoning } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "skill_route_evaluated".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(format!("Skill route evaluated: {:.2} - {}", confidence, reasoning)),
+            stream: Some("stdout".to_string()),
+            ..Default::default()
+        }),
+        AppEvent::ToolUnlocked { tool_name } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "tool_unlocked".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(format!("Tool unlocked: {}", tool_name)),
+            stream: Some("stdout".to_string()),
+            ..Default::default()
+        }),
+        AppEvent::SkillInvocation { skill_name, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "skill_invocation".to_string(),
+            session_id: Some(session_id.to_string()),
+            log: Some(format!("Skill invoked: {}", skill_name)),
+            stream: Some("stdout".to_string()),
+            ..Default::default()
+        }),
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

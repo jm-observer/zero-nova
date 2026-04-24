@@ -1,6 +1,7 @@
 use crate::tool::{Tool, ToolDefinition, ToolOutput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use log::warn;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
@@ -20,7 +21,10 @@ impl WebFetchTool {
                 .redirect(reqwest::redirect::Policy::limited(5))
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                 .build()
-                .unwrap_or_else(|_| Client::new()),
+                .unwrap_or_else(|e| {
+                    warn!("Failed to build HTTP client with custom settings: {e}, falling back to default");
+                    Client::new()
+                }),
         }
     }
 }
@@ -38,7 +42,7 @@ impl Tool for WebFetchTool {
     /// Returns the tool definition for web fetching.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "web_fetch".to_string(),
+            name: "WebFetch".to_string(),
             description: "Fetch a URL and extract its text content. Useful for reading web pages or documentation."
                 .to_string(),
             input_schema: json!({
@@ -101,10 +105,14 @@ impl Tool for WebFetchTool {
     }
 }
 
-/// Truncates a string to a maximum length, adding an ellipsis.
+/// Truncates a string to `max_len` bytes safely at a char boundary.
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
-        format!("{}... [truncated]", &s[..max_len])
+        let mut end = max_len;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}... [truncated]", &s[..end])
     } else {
         s.to_string()
     }

@@ -75,9 +75,12 @@ pub enum AppEvent {
     },
     TaskStatusChanged {
         id: String,
+        subject: String,
         status: String,
+        active_form: Option<String>,
     },
     BackgroundTaskComplete {
+        id: String,
         name: String,
     },
     SkillLoaded {
@@ -125,11 +128,19 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                 },
             },
             nova_core::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
-            nova_core::event::AgentEvent::TaskStatusChanged { id, status, .. } => {
-                AppEvent::TaskStatusChanged { id, status }
-            }
-            nova_core::event::AgentEvent::BackgroundTaskComplete { name, .. } => {
-                AppEvent::BackgroundTaskComplete { name }
+            nova_core::event::AgentEvent::TaskStatusChanged {
+                id,
+                subject,
+                status,
+                active_form,
+            } => AppEvent::TaskStatusChanged {
+                id,
+                subject,
+                status,
+                active_form,
+            },
+            nova_core::event::AgentEvent::BackgroundTaskComplete { id, name } => {
+                AppEvent::BackgroundTaskComplete { id, name }
             }
             nova_core::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
         }

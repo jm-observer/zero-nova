@@ -14,6 +14,13 @@ impl WriteTool {
         Self { root_dir }
     }
 
+    fn get_file_path<'a>(&self, input: &'a Value) -> Result<&'a str> {
+        input["file_path"]
+            .as_str()
+            .or_else(|| input["path"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'file_path'"))
+    }
+
     fn validate_path(&self, path_str: &str) -> Result<std::path::PathBuf, ToolOutput> {
         let path = Path::new(path_str);
         if let Some(root) = &self.root_dir {
@@ -60,9 +67,7 @@ impl Tool for WriteTool {
     }
 
     async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
-        let file_path_str = input["file_path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'file_path'"))?;
+        let file_path_str = self.get_file_path(&input)?;
         let content = input["content"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'content'"))?;
@@ -72,11 +77,13 @@ impl Tool for WriteTool {
             Err(out) => return Ok(out),
         };
 
-        // Pre-read enforcement for existing files
+        // Pre-read enforcement for existing files (using canonicalized path for reliable matching)
         if full_path.exists() {
             if let Some(ctx) = &context {
+                let canonical = full_path.canonicalize().unwrap_or_else(|_| full_path.clone());
+                let canonical_str = canonical.to_string_lossy();
                 let read_files = ctx.read_files.lock().await;
-                if !read_files.contains(file_path_str) {
+                if !read_files.contains(canonical_str.as_ref()) {
                     return Ok(ToolOutput {
                         content: format!(
                             "Error: You must read the file before writing to it. Use the Read tool first on {}",

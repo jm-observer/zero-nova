@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let final_config = nova_core::config::AppConfig::from_origin(origin_config, workspace.clone());
 
     let client = OpenAiCompatClient::new(final_config.llm.api_key.clone(), final_config.llm.base_url.clone());
-    let app = build_application(final_config, client, workspace).await?;
+    let app = build_application(final_config, client).await?;
 
     nova_server_stdio::run_stdio(app).await
 }

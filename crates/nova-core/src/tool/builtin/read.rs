@@ -14,6 +14,13 @@ impl ReadTool {
         Self { root_dir }
     }
 
+    fn get_file_path<'a>(&self, input: &'a Value) -> Result<&'a str> {
+        input["file_path"]
+            .as_str()
+            .or_else(|| input["path"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'file_path'"))
+    }
+
     fn validate_path(&self, path_str: &str) -> Result<std::path::PathBuf, ToolOutput> {
         let path = Path::new(path_str);
         if let Some(root) = &self.root_dir {
@@ -104,9 +111,7 @@ impl Tool for ReadTool {
     }
 
     async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
-        let file_path_str = input["file_path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'file_path'"))?;
+        let file_path_str = self.get_file_path(&input)?;
         let offset = input["offset"].as_u64().unwrap_or(1) as usize;
         let limit = input["limit"].as_u64().unwrap_or(2000).min(2000) as usize;
 
@@ -115,16 +120,21 @@ impl Tool for ReadTool {
             Err(out) => return Ok(out),
         };
 
-        // Track that this file has been read
-        if let Some(ctx) = &context {
-            ctx.read_files.lock().await.insert(file_path_str.to_string());
-        }
-
         if !full_path.exists() {
             return Ok(ToolOutput {
                 content: format!("File not found: {}", file_path_str),
                 is_error: true,
             });
+        }
+
+        // Track that this file has been read (after confirming existence).
+        // Use canonicalized path so Edit/Write pre-read checks work with equivalent paths.
+        if let Some(ctx) = &context {
+            let canonical = full_path.canonicalize().unwrap_or_else(|_| full_path.clone());
+            ctx.read_files
+                .lock()
+                .await
+                .insert(canonical.to_string_lossy().to_string());
         }
 
         let ext = full_path.extension().and_then(|e| e.to_str()).unwrap_or("");

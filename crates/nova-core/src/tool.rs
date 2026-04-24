@@ -1,11 +1,12 @@
 use anyhow::Result;
+use log::error;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 pub mod builtin;
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Context for tool execution, providing access to event channels and other runtime info.
 #[derive(Clone)]
@@ -67,16 +68,30 @@ impl ToolRegistry {
             deferred: Mutex::new(Vec::new()),
         }
     }
+
+    /// Acquires the tools lock, recovering from poison errors.
+    fn lock_tools(&self) -> MutexGuard<'_, Vec<Arc<dyn Tool>>> {
+        self.tools.lock().unwrap_or_else(|poisoned| {
+            error!("Tool registry tools lock was poisoned, recovering");
+            poisoned.into_inner()
+        })
+    }
+
+    /// Acquires the deferred lock, recovering from poison errors.
+    fn lock_deferred(&self) -> MutexGuard<'_, Vec<DeferredToolEntry>> {
+        self.deferred.lock().unwrap_or_else(|poisoned| {
+            error!("Tool registry deferred lock was poisoned, recovering");
+            poisoned.into_inner()
+        })
+    }
+
     /// Registers a single tool.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
-        self.tools
-            .lock()
-            .expect("tool registry lock poisoned")
-            .push(Arc::from(tool));
+        self.lock_tools().push(Arc::from(tool));
     }
     /// Registers multiple tools at once.
     pub fn register_many(&mut self, tools: Vec<Box<dyn Tool>>) {
-        let mut guard = self.tools.lock().expect("tool registry lock poisoned");
+        let mut guard = self.lock_tools();
         for tool in tools {
             guard.push(Arc::from(tool));
         }
@@ -89,22 +104,17 @@ impl ToolRegistry {
         input_schema: Value,
         factory: Box<dyn Fn() -> Arc<dyn Tool> + Send + Sync>,
     ) {
-        self.deferred
-            .lock()
-            .expect("tool registry lock poisoned")
-            .push(DeferredToolEntry {
-                name,
-                description,
-                input_schema,
-                factory,
-            });
+        self.lock_deferred().push(DeferredToolEntry {
+            name,
+            description,
+            input_schema,
+            factory,
+        });
     }
     /// Returns the definitions of all registered tools, including deferred ones as stubs.
     pub fn tool_definitions(&self) -> Vec<crate::provider::types::ToolDefinition> {
         let mut defs: Vec<_> = self
-            .tools
-            .lock()
-            .expect("tool registry lock poisoned")
+            .lock_tools()
             .iter()
             .map(|t| {
                 let d = t.definition();
@@ -116,7 +126,7 @@ impl ToolRegistry {
             })
             .collect();
 
-        if !self.deferred.lock().expect("tool registry lock poisoned").is_empty() {
+        if !self.lock_deferred().is_empty() {
             let d = builtin::tool_search::tool_definition();
             defs.push(crate::provider::types::ToolDefinition {
                 name: d.name,
@@ -129,18 +139,11 @@ impl ToolRegistry {
     }
 
     pub fn loaded_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .lock()
-            .expect("tool registry lock poisoned")
-            .iter()
-            .map(|tool| tool.definition())
-            .collect()
+        self.lock_tools().iter().map(|tool| tool.definition()).collect()
     }
 
     pub fn deferred_definitions(&self) -> Vec<ToolDefinition> {
-        self.deferred
-            .lock()
-            .expect("tool registry lock poisoned")
+        self.lock_deferred()
             .iter()
             .map(|entry| ToolDefinition {
                 name: entry.name.clone(),
@@ -152,17 +155,13 @@ impl ToolRegistry {
     }
 
     pub fn has_loaded_tool(&self, name: &str) -> bool {
-        self.tools
-            .lock()
-            .expect("tool registry lock poisoned")
-            .iter()
-            .any(|tool| tool.definition().name == name)
+        self.lock_tools().iter().any(|tool| tool.definition().name == name)
     }
 
     /// Resolves a deferred tool by name, loading it into the active tools list.
     pub fn resolve_deferred(&self, name: &str) -> bool {
         let entry = {
-            let mut deferred = self.deferred.lock().expect("tool registry lock poisoned");
+            let mut deferred = self.lock_deferred();
             deferred
                 .iter()
                 .position(|d| d.name == name)
@@ -171,7 +170,7 @@ impl ToolRegistry {
 
         if let Some(entry) = entry {
             let tool = (entry.factory)();
-            self.tools.lock().expect("tool registry lock poisoned").push(tool);
+            self.lock_tools().push(tool);
             return true;
         }
         false
@@ -192,13 +191,13 @@ impl ToolRegistry {
             "read_file" => "Read",
             "write_file" => "Write",
             "spawn_subagent" => "Agent",
+            "web_fetch" => "WebFetch",
+            "web_search" => "WebSearch",
             other => other,
         };
 
         let tool = self
-            .tools
-            .lock()
-            .expect("tool registry lock poisoned")
+            .lock_tools()
             .iter()
             .find(|tool| tool.definition().name == canonical_name)
             .cloned();

@@ -31,6 +31,17 @@ pub enum TaskStatus {
     Deleted,
 }
 
+impl TaskStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TaskUpdateRequest {
     pub status: Option<TaskStatus>,
@@ -225,6 +236,19 @@ impl TaskCreateTool {
     pub fn new(store: Arc<Mutex<TaskStore>>) -> Self {
         Self { store }
     }
+
+    pub fn input_schema() -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "subject": { "type": "string", "description": "Brief task title" },
+                "description": { "type": "string", "description": "What needs to be done" },
+                "activeForm": { "type": "string", "description": "Present continuous form for spinner display (e.g., 'Compiling code')" },
+                "metadata": { "type": "object", "description": "Arbitrary metadata" }
+            },
+            "required": ["subject", "description"]
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -233,16 +257,7 @@ impl Tool for TaskCreateTool {
         ToolDefinition {
             name: "TaskCreate".to_string(),
             description: "Creates a new task in the session's task store.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "subject": { "type": "string", "description": "Brief task title" },
-                    "description": { "type": "string", "description": "What needs to be done" },
-                    "activeForm": { "type": "string", "description": "Present continuous form for spinner display (e.g., 'Compiling code')" },
-                    "metadata": { "type": "object", "description": "Arbitrary metadata" }
-                },
-                "required": ["subject", "description"]
-            }),
+            input_schema: Self::input_schema(),
             defer_loading: false,
         }
     }
@@ -287,6 +302,13 @@ impl TaskListTool {
     pub fn new(store: Arc<Mutex<TaskStore>>) -> Self {
         Self { store }
     }
+
+    pub fn input_schema() -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {}
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -295,10 +317,7 @@ impl Tool for TaskListTool {
         ToolDefinition {
             name: "TaskList".to_string(),
             description: "Lists all tasks in the session's task store.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {}
-            }),
+            input_schema: Self::input_schema(),
             defer_loading: false,
         }
     }
@@ -321,6 +340,24 @@ impl TaskUpdateTool {
     pub fn new(store: Arc<Mutex<TaskStore>>) -> Self {
         Self { store }
     }
+
+    pub fn input_schema() -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "Task ID" },
+                "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "deleted"] },
+                "subject": { "type": "string" },
+                "description": { "type": "string" },
+                "activeForm": { "type": "string" },
+                "owner": { "type": "string" },
+                "metadata": { "type": "object" },
+                "addBlocks": { "type": "array", "items": { "type": "string" } },
+                "addBlockedBy": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["id"]
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -329,21 +366,7 @@ impl Tool for TaskUpdateTool {
         ToolDefinition {
             name: "TaskUpdate".to_string(),
             description: "Updates an existing task.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "description": "Task ID" },
-                    "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "deleted"] },
-                    "subject": { "type": "string" },
-                    "description": { "type": "string" },
-                    "activeForm": { "type": "string" },
-                    "owner": { "type": "string" },
-                    "metadata": { "type": "object" },
-                    "addBlocks": { "type": "array", "items": { "type": "string" } },
-                    "addBlockedBy": { "type": "array", "items": { "type": "string" } }
-                },
-                "required": ["id"]
-            }),
+            input_schema: Self::input_schema(),
             defer_loading: false,
         }
     }
@@ -381,7 +404,7 @@ impl Tool for TaskUpdateTool {
                 .send(crate::event::AgentEvent::TaskStatusChanged {
                     id: task.id.clone(),
                     subject: task.subject.clone(),
-                    status: serde_json::to_string(&task.status)?.trim_matches('"').to_string(),
+                    status: task.status.as_str().to_string(),
                     active_form: task.active_form.clone(),
                 })
                 .await;

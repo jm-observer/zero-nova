@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
 
     // 3. Setup Tool Registry
     let mut tools = ToolRegistry::new();
-    register_builtin_tools(&mut tools, &config, task_store.clone(), skill_registry.clone());
+    register_builtin_tools(&mut tools, &config, task_store.clone(), skill_registry.clone(), None);
 
     // Build system prompt including loaded tools and environment information
     let prompt_builder = SystemPromptBuilder::new();

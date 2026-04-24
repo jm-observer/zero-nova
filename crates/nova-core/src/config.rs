@@ -15,6 +15,12 @@ pub struct OriginAppConfig {
     pub tool: ToolConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    /// Application data directory. When None, defaults to `{workspace}/.nova/data`.
+    #[serde(default)]
+    pub data_dir: Option<String>,
+    /// Path to the configuration file relative to workspace. When None, defaults to `config.toml`.
+    #[serde(default)]
+    pub config_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -28,6 +34,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub gateway: GatewayConfig,
     pub workspace: PathBuf,
+    /// Application data directory. When None, defaults to `{workspace}/.nova/data`.
+    pub data_dir: Option<String>,
+    /// Path to the configuration file relative to workspace. When None, defaults to `config.toml`.
+    pub config_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -74,6 +84,9 @@ pub struct ToolConfig {
     #[serde(default)]
     pub bash: BashConfig,
     pub skills_dir: Option<String>,
+    /// Prompts directory for agent template files. When None, defaults to `{workspace}/prompts`.
+    #[serde(default)]
+    pub prompts_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -143,22 +156,52 @@ impl AppConfig {
             tool: origin.tool,
             gateway: origin.gateway,
             workspace,
+            data_dir: origin.data_dir,
+            config_path: origin.config_path,
         }
     }
 
-    pub fn skills_dir(&self) -> PathBuf {
-        self.tool
-            .skills_dir
-            .as_deref()
-            .map(|path| {
+    /// Resolve a path string against the workspace:
+    /// - `None` returns the given default.
+    /// - Absolute paths are returned as-is.
+    /// - Relative paths are joined to `workspace`.
+    fn resolve_path(&self, configured: Option<&str>, default: impl FnOnce() -> PathBuf) -> PathBuf {
+        match configured {
+            None => default(),
+            Some(path) => {
                 let path = PathBuf::from(path);
                 if path.is_absolute() {
                     path
                 } else {
                     self.workspace.join(path)
                 }
-            })
-            .unwrap_or_else(|| self.workspace.join(".nova").join("skills"))
+            }
+        }
+    }
+
+    /// Return the skills directory. Defaults to `{workspace}/.nova/skills`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.resolve_path(self.tool.skills_dir.as_deref(), || {
+            self.workspace.join(".nova").join("skills")
+        })
+    }
+
+    /// Return the data directory for application runtime data.
+    /// Defaults to `{workspace}/.nova/data`.
+    pub fn data_dir_path(&self) -> PathBuf {
+        self.resolve_path(self.data_dir.as_deref(), || self.workspace.join(".nova").join("data"))
+    }
+
+    /// Return the prompts directory for agent template files.
+    /// Defaults to `{workspace}/prompts`.
+    pub fn prompts_dir(&self) -> PathBuf {
+        self.resolve_path(self.tool.prompts_dir.as_deref(), || self.workspace.join("prompts"))
+    }
+
+    /// Return the path to the configuration file.
+    /// Defaults to `{workspace}/config.toml`.
+    pub fn config_path(&self) -> PathBuf {
+        self.resolve_path(self.config_path.as_deref(), || self.workspace.join("config.toml"))
     }
 }
 
@@ -187,5 +230,71 @@ mod tests {
         origin.tool.skills_dir = Some("skills".to_string());
         let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
         assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/skills"));
+    }
+
+    #[test]
+    fn data_dir_defaults_to_workspace_nova_data() {
+        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/.nova/data"));
+    }
+
+    #[test]
+    fn data_dir_uses_relative_override_from_workspace() {
+        let mut origin = OriginAppConfig::default();
+        origin.data_dir = Some("var".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/var"));
+    }
+
+    #[test]
+    fn data_dir_uses_absolute_path_directly() {
+        let mut origin = OriginAppConfig::default();
+        origin.data_dir = Some("D:/var/data".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.data_dir_path(), PathBuf::from("D:/var/data"));
+    }
+
+    #[test]
+    fn prompts_dir_defaults_to_workspace_prompts() {
+        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        assert_eq!(config.prompts_dir(), PathBuf::from("D:/workspace/prompts"));
+    }
+
+    #[test]
+    fn prompts_dir_uses_relative_override_from_workspace() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.prompts_dir = Some("templates".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.prompts_dir(), PathBuf::from("D:/workspace/templates"));
+    }
+
+    #[test]
+    fn prompts_dir_uses_absolute_path_directly() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.prompts_dir = Some("D:/etc/prompts".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.prompts_dir(), PathBuf::from("D:/etc/prompts"));
+    }
+
+    #[test]
+    fn config_path_defaults_to_workspace_config_toml() {
+        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        assert_eq!(config.config_path(), PathBuf::from("D:/workspace/config.toml"));
+    }
+
+    #[test]
+    fn config_path_uses_relative_override_from_workspace() {
+        let mut origin = OriginAppConfig::default();
+        origin.config_path = Some("conf.toml".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.config_path(), PathBuf::from("D:/workspace/conf.toml"));
+    }
+
+    #[test]
+    fn config_path_uses_absolute_path_directly() {
+        let mut origin = OriginAppConfig::default();
+        origin.config_path = Some("D:/etc/app.toml".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.config_path(), PathBuf::from("D:/etc/app.toml"));
     }
 }

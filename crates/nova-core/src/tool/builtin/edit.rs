@@ -14,6 +14,13 @@ impl EditTool {
         Self { root_dir }
     }
 
+    fn get_file_path<'a>(&self, input: &'a Value) -> Result<&'a str> {
+        input["file_path"]
+            .as_str()
+            .or_else(|| input["path"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'file_path'"))
+    }
+
     fn validate_path(&self, path_str: &str) -> Result<std::path::PathBuf, ToolOutput> {
         let path = Path::new(path_str);
 
@@ -73,9 +80,7 @@ impl Tool for EditTool {
     }
 
     async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
-        let file_path_str = input["file_path"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'file_path'"))?;
+        let file_path_str = self.get_file_path(&input)?;
         let old_string = input["old_string"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'old_string'"))?;
@@ -89,10 +94,20 @@ impl Tool for EditTool {
             Err(out) => return Ok(out),
         };
 
-        // Pre-read enforcement
+        // Check file existence first — clearer error than "must read first"
+        if !full_path.exists() {
+            return Ok(ToolOutput {
+                content: format!("File not found: {}", file_path_str),
+                is_error: true,
+            });
+        }
+
+        // Pre-read enforcement (using canonicalized path for reliable matching)
         if let Some(ctx) = &context {
+            let canonical = full_path.canonicalize().unwrap_or_else(|_| full_path.clone());
+            let canonical_str = canonical.to_string_lossy();
             let read_files = ctx.read_files.lock().await;
-            if !read_files.contains(file_path_str) {
+            if !read_files.contains(canonical_str.as_ref()) {
                 return Ok(ToolOutput {
                     content: format!(
                         "Error: You must read the file before editing it. Use the Read tool first on {}",
@@ -101,13 +116,6 @@ impl Tool for EditTool {
                     is_error: true,
                 });
             }
-        }
-
-        if !full_path.exists() {
-            return Ok(ToolOutput {
-                content: format!("File not found: {}", file_path_str),
-                is_error: true,
-            });
         }
 
         let content = match fs::read_to_string(&full_path).await {

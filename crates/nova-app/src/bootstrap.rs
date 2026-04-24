@@ -10,7 +10,6 @@ use nova_core::provider::LlmClient;
 use nova_core::skill::SkillRegistry;
 use nova_core::tool::ToolRegistry;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 pub struct BootstrapOptions {
@@ -20,7 +19,6 @@ pub struct BootstrapOptions {
 pub async fn build_application<C: LlmClient + 'static>(
     config: AppConfig,
     client: C,
-    workspace: PathBuf,
 ) -> Result<Arc<dyn AgentApplication>> {
     let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
@@ -33,7 +31,13 @@ pub async fn build_application<C: LlmClient + 'static>(
     let task_store = Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
 
     let mut tools = ToolRegistry::new();
-    nova_core::tool::builtin::register_builtin_tools(&mut tools, &config, task_store.clone(), skill_registry.clone());
+    nova_core::tool::builtin::register_builtin_tools(
+        &mut tools,
+        &config,
+        task_store.clone(),
+        skill_registry.clone(),
+        None,
+    );
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -43,18 +47,17 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
     for agent in &config.gateway.agents {
+        let prompt_file = format!("agent-{}.md", agent.id);
+        let prompt_path = config.prompts_dir().join(&prompt_file);
         let agent_prompt = match &agent.system_prompt_template {
             Some(prompt) => prompt.clone(),
-            None => {
-                let prompt_path = workspace.join("prompts").join(format!("agent-{}.md", agent.id));
-                match tokio::fs::read_to_string(&prompt_path).await {
-                    Ok(content) => content,
-                    Err(e) => {
-                        log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
-                        String::new()
-                    }
+            None => match tokio::fs::read_to_string(&prompt_path).await {
+                Ok(content) => content,
+                Err(e) => {
+                    log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
+                    String::new()
                 }
-            }
+            },
         };
 
         let behavior_guards = r#"
@@ -92,12 +95,12 @@ pub async fn build_application<C: LlmClient + 'static>(
     agent.skill_registry = Some(skill_registry);
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
-    let config_path = workspace.join("config.toml");
+    let config_path = config.config_path();
 
-    let data_dir = workspace.join(".nova").join("data");
-    let data_dir = data_dir
+    let data_dir_path = config.data_dir_path();
+    let data_dir = data_dir_path
         .to_str()
-        .context("Workspace data directory contains non-UTF8 characters")?;
+        .context("Data directory contains non-UTF8 characters")?;
     let sqlite_manager = SqliteManager::new(data_dir).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
     let session_cache = Arc::new(nova_conversation::SessionCache::new());

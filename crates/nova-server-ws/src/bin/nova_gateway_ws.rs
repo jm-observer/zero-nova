@@ -61,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Starting Nova Gateway WS with config: {:?}", final_config);
 
     let client = OpenAiCompatClient::new(final_config.llm.api_key.clone(), final_config.llm.base_url.clone());
-    let app = build_application(final_config, client, workspace).await?;
+    let app = build_application(final_config, client).await?;
 
     let addr = format!("{}:{}", args.host, args.port);
 

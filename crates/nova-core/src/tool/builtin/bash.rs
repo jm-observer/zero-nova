@@ -263,7 +263,7 @@ impl Tool for BashTool {
                                     if let Some(ctx) = &context {
                                         let _ = ctx.event_tx.send(AgentEvent::LogDelta {
                                             id: ctx.tool_use_id.clone(),
-                                            name: "bash".to_string(),
+                                            name: "Bash".to_string(),
                                             log: std::mem::take(&mut pending_stdout),
                                             stream: "stdout".to_string(),
                                         }).await;
@@ -290,7 +290,7 @@ impl Tool for BashTool {
                                     if let Some(ctx) = &context {
                                         let _ = ctx.event_tx.send(AgentEvent::LogDelta {
                                             id: ctx.tool_use_id.clone(),
-                                            name: "bash".to_string(),
+                                            name: "Bash".to_string(),
                                             log: std::mem::take(&mut pending_stderr),
                                             stream: "stderr".to_string(),
                                         }).await;
@@ -315,7 +315,7 @@ impl Tool for BashTool {
                         .event_tx
                         .send(AgentEvent::LogDelta {
                             id: ctx.tool_use_id.clone(),
-                            name: "bash".to_string(),
+                            name: "Bash".to_string(),
                             log: pending_stdout,
                             stream: "stdout".to_string(),
                         })
@@ -328,7 +328,7 @@ impl Tool for BashTool {
                         .event_tx
                         .send(AgentEvent::LogDelta {
                             id: ctx.tool_use_id.clone(),
-                            name: "bash".to_string(),
+                            name: "Bash".to_string(),
                             log: pending_stderr,
                             stream: "stderr".to_string(),
                         })

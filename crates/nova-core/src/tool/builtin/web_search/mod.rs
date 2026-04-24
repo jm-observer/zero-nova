@@ -111,7 +111,7 @@ impl Tool for WebSearchTool {
         };
 
         ToolDefinition {
-            name: "web_search".to_string(),
+            name: "WebSearch".to_string(),
             description: description.to_string(),
             input_schema: json!({
                 "type": "object",

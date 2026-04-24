@@ -111,14 +111,14 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             stream: Some("stdout".to_string()),
             ..Default::default()
         }),
-        AppEvent::TaskStatusChanged { id, status } => MessageEnvelope::ChatProgress(ProgressEvent {
+        AppEvent::TaskStatusChanged { id, status, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "tool_log".to_string(),
             session_id: Some(session_id.to_string()),
             log: Some(format!("Task {} status: {}", id, status)),
             stream: Some("stdout".to_string()),
             ..Default::default()
         }),
-        AppEvent::BackgroundTaskComplete { name } => MessageEnvelope::ChatProgress(ProgressEvent {
+        AppEvent::BackgroundTaskComplete { name, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "tool_log".to_string(),
             session_id: Some(session_id.to_string()),
             log: Some(format!("Background task '{}' complete", name)),

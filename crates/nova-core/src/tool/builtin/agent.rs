@@ -96,6 +96,7 @@ impl Tool for AgentTool {
                     &self.config,
                     task_store.clone(),
                     skill_registry.clone(),
+                    spec.and_then(|agent| agent.tool_whitelist.as_deref()),
                 );
             }
         }
@@ -124,7 +125,7 @@ impl Tool for AgentTool {
         }
 
         let agent_config = AgentConfig {
-            max_iterations: 15,
+            max_iterations: self.config.gateway.max_iterations,
             model_config,
             tool_timeout: std::time::Duration::from_secs(self.config.gateway.subagent_timeout_secs),
         };
@@ -220,8 +221,7 @@ impl Tool for AgentTool {
         let result = runtime.run_turn(&history, prompt, tx, None).await?;
 
         if let Some(handle) = forwarding_handle {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            handle.abort();
+            handle.await?;
         }
 
         let final_assistant_msg = result

@@ -45,8 +45,7 @@ impl SystemPromptBuilder {
     /// Appends descriptions of all registered tools to the prompt.
     pub fn with_tools(mut self, registry: &ToolRegistry) -> Self {
         let mut tool_desc = String::new();
-        for tool in &registry.tools {
-            let def = tool.definition();
+        for def in registry.loaded_definitions() {
             tool_desc.push_str(&format!(
                 "## {}\n\n{}\n\nInput schema:\n```json\n{}\n```\n\n---\n\n",
                 def.name,

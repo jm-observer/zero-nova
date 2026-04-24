@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "session_id": "f99d6322-2df0-4d72-941a-6d9e4511cdb4",
+  "message_id": 1176,
+  "direction": "response",
+  "timestamp": "2026-04-23T13:33:12.610131590Z",
+  "model": "claude-opus-4-7",
+  "response": {
+    "headers": {}
+  },
+  "body": {
+    "kind": "text",
+    "inline": false,
+    "file": "20260423T133312610Z_response.body.txt",
+    "sha256": null,
+    "size_bytes": 5272
+  },
+  "system_prompt": {
+    "present": false,
+    "file": null
+  }
+}

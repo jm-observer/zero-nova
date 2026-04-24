@@ -91,43 +91,46 @@ async fn main() -> Result<()> {
 
     log::info!("Starting Nova CLI with : {:?}", config);
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
-    let mut tools = ToolRegistry::new();
-    register_builtin_tools(&mut tools, &config);
 
-    // Build system prompt including loaded tools and environment information
-    let prompt_builder = SystemPromptBuilder::new();
-
-    let system_prompt_str = prompt_builder.with_tools(&tools).build();
-
-    let agent_config = AgentConfig {
-        max_iterations: 15, // Increase for skill evaluation tasks
-        model_config: config.llm.model_config.clone(),
-        tool_timeout: std::time::Duration::from_secs(300),
-    };
-
-    // Skills handling
-    let mut skill_registry = nova_core::skill::SkillRegistry::new();
-
-    // Load skills from the default workspace location
-    let skill_dir = workspace.join(".nova").join("skills");
-    if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
+    // 1. Initialize SkillRegistry and load skills
+    let mut skill_registry_raw = nova_core::skill::SkillRegistry::new();
+    let skill_dir = config.skills_dir();
+    if let Err(e) = skill_registry_raw.load_from_dir(&skill_dir) {
         if matches!(cli.output_format, OutputFormat::PlainText) {
             log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
         }
     }
-
-    // Additionally include a specific skill if provided via --include-skill
     if let Some(extra_skill_path) = &cli.include_skill {
         let path = std::path::Path::new(extra_skill_path);
-        if let Err(e) = skill_registry.load_single_skill(path) {
+        if let Err(e) = skill_registry_raw.load_single_skill(path) {
             log::error!("Failed to load included skill from {:?}: {}", path, e);
         }
     }
 
-    let skill_prompt = skill_registry.generate_system_prompt();
+    let skill_prompt = skill_registry_raw.generate_system_prompt();
+    let skill_registry = std::sync::Arc::new(skill_registry_raw);
+
+    // 2. Initialize TaskStore
+    let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
+
+    // 3. Setup Tool Registry
+    let mut tools = ToolRegistry::new();
+    register_builtin_tools(&mut tools, &config, task_store.clone(), skill_registry.clone());
+
+    // Build system prompt including loaded tools and environment information
+    let prompt_builder = SystemPromptBuilder::new();
+    let system_prompt_str = prompt_builder.with_tools(&tools).build();
     let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
 
+    let agent_config = AgentConfig {
+        max_iterations: 15,
+        model_config: config.llm.model_config.clone(),
+        tool_timeout: std::time::Duration::from_secs(300),
+    };
+
     let mut agent = AgentRuntime::new(client, tools, agent_config);
+    agent.task_store = Some(task_store);
+    agent.skill_registry = Some(skill_registry);
 
     match cli.command {
         Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose, cli.output_format).await?,
@@ -406,6 +409,18 @@ impl EventPrinter {
                 }
                 AgentEvent::AgentSwitched { agent_name, .. } => {
                     println!("\n{}", format!("[agent switched] {agent_name}").bright_black());
+                }
+                AgentEvent::TaskCreated { id, subject } => {
+                    println!("\n{}", format!("[task created] {id}: {subject}").bright_cyan());
+                }
+                AgentEvent::TaskStatusChanged { id, status, .. } => {
+                    println!("\n{}", format!("[task {id}] status -> {status}").bright_cyan());
+                }
+                AgentEvent::BackgroundTaskComplete { name, .. } => {
+                    println!("\n{}", format!("[bg task complete] {name}").bright_green());
+                }
+                AgentEvent::SkillLoaded { skill_name } => {
+                    println!("\n{}", format!("[skill loaded] {skill_name}").bright_purple());
                 }
             },
         }

@@ -128,21 +128,21 @@ fn select_shell(config: &crate::config::BashConfig) -> Box<dyn ShellBackend> {
 
 /// Tool for executing shell commands.
 pub struct BashTool {
-    shell: Box<dyn ShellBackend>,
+    shell: std::sync::Arc<dyn ShellBackend>,
     /// Optional workspace directory to execute commands in.
     workspace: Option<std::path::PathBuf>,
 }
 
 impl BashTool {
     pub fn new(config: &crate::config::BashConfig) -> Self {
-        let shell = select_shell(config);
+        let shell: std::sync::Arc<dyn ShellBackend> = select_shell(config).into();
         info!("BashTool initialized using shell: {}", shell.name());
         Self { shell, workspace: None }
     }
 
     /// Creates a new `BashTool` with a specific workspace directory.
     pub fn with_workspace(config: &crate::config::BashConfig, workspace: std::path::PathBuf) -> Self {
-        let shell = select_shell(config);
+        let shell: std::sync::Arc<dyn ShellBackend> = select_shell(config).into();
         Self {
             shell,
             workspace: Some(workspace),
@@ -156,7 +156,7 @@ impl Tool for BashTool {
     /// Returns the tool definition for BashTool.
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "bash".to_string(),
+            name: "Bash".to_string(),
             description: format!(
                 "Execute a shell command (using {}). Returns stdout, stderr and exit code.",
                 self.shell.name()
@@ -165,10 +165,14 @@ impl Tool for BashTool {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "The shell command to execute" },
-                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 3600000)" }
+                    "description": { "type": "string", "description": "Clear, concise description of what this command does" },
+                    "run_in_background": { "type": "boolean", "description": "Run in background, return immediately" },
+                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 3600000)" },
+                    "dangerouslyDisableSandbox": { "type": "boolean", "description": "Override sandbox mode" }
                 },
                 "required": ["command"]
             }),
+            defer_loading: false,
         }
     }
 
@@ -178,6 +182,36 @@ impl Tool for BashTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' field"))?;
         let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(3600000);
+        let run_in_background = input["run_in_background"].as_bool().unwrap_or(false);
+
+        if run_in_background {
+            let shell = self.shell.clone();
+            let command_str_owned = command_str.to_string();
+            let workspace = self.workspace.clone();
+            let ctx = context.clone();
+
+            tokio::spawn(async move {
+                let mut cmd = shell.build_command(&command_str_owned);
+                if let Some(ws) = workspace {
+                    cmd.current_dir(ws);
+                }
+                let _ = cmd.status().await;
+                if let Some(c) = ctx {
+                    let _ = c
+                        .event_tx
+                        .send(crate::event::AgentEvent::BackgroundTaskComplete {
+                            id: c.tool_use_id,
+                            name: "Bash".to_string(),
+                        })
+                        .await;
+                }
+            });
+
+            return Ok(ToolOutput {
+                content: "Command started in background. You will be notified when it completes.".to_string(),
+                is_error: false,
+            });
+        }
 
         let mut cmd = self.shell.build_command(command_str);
         if let Some(ws) = &self.workspace {

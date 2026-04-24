@@ -22,15 +22,18 @@ pub async fn build_application<C: LlmClient + 'static>(
     client: C,
     workspace: PathBuf,
 ) -> Result<Arc<dyn AgentApplication>> {
-    let mut tools = ToolRegistry::new();
-    nova_core::tool::builtin::register_builtin_tools(&mut tools, &config);
-
     let mut skill_registry = SkillRegistry::new();
-    let skill_dir = workspace.join("skills");
+    let skill_dir = config.skills_dir();
     if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
         log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
     }
     let skill_prompt = skill_registry.generate_system_prompt();
+    let skill_registry = Arc::new(skill_registry);
+
+    let task_store = Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
+
+    let mut tools = ToolRegistry::new();
+    nova_core::tool::builtin::register_builtin_tools(&mut tools, &config, task_store.clone(), skill_registry.clone());
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -84,7 +87,9 @@ pub async fn build_application<C: LlmClient + 'static>(
         agent_registry.register(agent);
     }
 
-    let agent = AgentRuntime::new(client, tools, agent_config);
+    let mut agent = AgentRuntime::new(client, tools, agent_config);
+    agent.task_store = Some(task_store);
+    agent.skill_registry = Some(skill_registry);
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
     let config_path = workspace.join("config.toml");

@@ -69,6 +69,20 @@ pub enum AppEvent {
         require_auth: bool,
         setup_required: bool,
     },
+    TaskCreated {
+        id: String,
+        subject: String,
+    },
+    TaskStatusChanged {
+        id: String,
+        status: String,
+    },
+    BackgroundTaskComplete {
+        name: String,
+    },
+    SkillLoaded {
+        skill_name: String,
+    },
 }
 
 impl From<nova_core::event::AgentEvent> for AppEvent {
@@ -110,6 +124,14 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                     description,
                 },
             },
+            nova_core::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
+            nova_core::event::AgentEvent::TaskStatusChanged { id, status, .. } => {
+                AppEvent::TaskStatusChanged { id, status }
+            }
+            nova_core::event::AgentEvent::BackgroundTaskComplete { name, .. } => {
+                AppEvent::BackgroundTaskComplete { name }
+            }
+            nova_core::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
         }
     }
 }

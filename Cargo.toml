@@ -38,7 +38,7 @@ toml = "0.8"
 sysinfo = "0.30"
 clap = { version = "4", features = ["derive"] }
 rustyline = { version = "15" }
-chrono = { version = "0.4" }
+chrono = { version = "0.4", features = ["serde"] }
 colored = { version = "3" }
 which = "8.0.2"
 

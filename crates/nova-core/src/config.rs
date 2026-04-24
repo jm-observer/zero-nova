@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct OriginAppConfig {
     #[serde(default)]
     pub llm: LlmConfig,
@@ -73,11 +73,13 @@ pub struct SearchConfig {
 pub struct ToolConfig {
     #[serde(default)]
     pub bash: BashConfig,
+    pub skills_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct BashConfig {
     pub shell: Option<String>,
+    pub sandbox: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -143,6 +145,21 @@ impl AppConfig {
             workspace,
         }
     }
+
+    pub fn skills_dir(&self) -> PathBuf {
+        self.tool
+            .skills_dir
+            .as_deref()
+            .map(|path| {
+                let path = PathBuf::from(path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.workspace.join(path)
+                }
+            })
+            .unwrap_or_else(|| self.workspace.join(".nova").join("skills"))
+    }
 }
 
 impl OriginAppConfig {
@@ -150,5 +167,25 @@ impl OriginAppConfig {
         let content = fs::read_to_string(path)?;
         let config: OriginAppConfig = toml::from_str(&content)?;
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppConfig, OriginAppConfig};
+    use std::path::PathBuf;
+
+    #[test]
+    fn skills_dir_defaults_to_workspace_nova_skills() {
+        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/.nova/skills"));
+    }
+
+    #[test]
+    fn skills_dir_uses_relative_override_from_workspace() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.skills_dir = Some("skills".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/skills"));
     }
 }

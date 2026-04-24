@@ -121,6 +121,7 @@ impl Tool for WebSearchTool {
                 },
                 "required": ["query"]
             }),
+            defer_loading: false,
         }
     }
 

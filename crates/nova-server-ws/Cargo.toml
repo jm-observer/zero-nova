@@ -29,5 +29,5 @@ cli = ["clap", "sysinfo"]
 prod = []
 
 [[bin]]
-name = "nova_gateway_ws"
+name = "nova-server-ws"
 path = "src/bin/nova_gateway_ws.rs"

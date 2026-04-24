@@ -46,4 +46,17 @@ pub enum AgentEvent {
         agent_name: String,
         description: Option<String>,
     },
+    /// A task was created.
+    TaskCreated { id: String, subject: String },
+    /// A task status changed.
+    TaskStatusChanged {
+        id: String,
+        subject: String,
+        status: String,
+        active_form: Option<String>,
+    },
+    /// A background task was completed.
+    BackgroundTaskComplete { id: String, name: String },
+    /// A skill was loaded.
+    SkillLoaded { skill_name: String },
 }

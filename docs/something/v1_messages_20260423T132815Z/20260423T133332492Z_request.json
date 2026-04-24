@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "session_id": "f99d6322-2df0-4d72-941a-6d9e4511cdb4",
+  "message_id": 1181,
+  "direction": "request",
+  "timestamp": "2026-04-23T13:33:32.492503480Z",
+  "model": "claude-opus-4-7",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages?beta=true",
+    "domain": "api.anthropic.com",
+    "headers": {}
+  },
+  "headers_parse_error": "invalid type: sequence, expected a map at line 1 column 0",
+  "headers_raw": "[[\"Accept\",\"application/json\"],[\"Authorization\",\"Bearer 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\"],[\"Content-Type\",\"application/json\"],[\"User-Agent\",\"claude-cli/2.1.118 (external, cli)\"],[\"X-Claude-Code-Session-Id\",\"a98aa6ec-5551-403b-940b-db66dc25dd68\"],[\"X-Stainless-Arch\",\"arm64\"],[\"X-Stainless-Lang\",\"js\"],[\"X-Stainless-OS\",\"Linux\"],[\"X-Stainless-Package-Version\",\"0.81.0\"],[\"X-Stainless-Retry-Count\",\"0\"],[\"X-Stainless-Runtime\",\"node\"],[\"X-Stainless-Runtime-Version\",\"v24.3.0\"],[\"X-Stainless-Timeout\",\"600\"],[\"anthropic-beta\",\"claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24\"],[\"anthropic-dangerous-direct-browser-access\",\"true\"],[\"anthropic-version\",\"2023-06-01\"],[\"x-app\",\"cli\"],[\"x-client-request-id\",\"08f49430-4d25-4b23-a9c7-49998e07493e\"],[\"Connection\",\"keep-alive\"],[\"Host\",\"api.anthropic.com\"],[\"Accept-Encoding\",\"gzip, deflate, br, zstd\"],[\"Content-Length\",\"242056\"]]",
+  "body": {
+    "kind": "json",
+    "inline": false,
+    "file": "20260423T133332492Z_request.body.json",
+    "sha256": null,
+    "size_bytes": 242056
+  },
+  "system_prompt": {
+    "present": true,
+    "file": "20260423T133332492Z_request.system_prompt.txt"
+  }
+}

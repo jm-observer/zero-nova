@@ -1,0 +1,575 @@
+{
+  "schema_version": 2,
+  "session": {
+    "id": "f99d6322-2df0-4d72-941a-6d9e4511cdb4",
+    "conversation_id": null,
+    "turn_index": 0,
+    "domain": "api.anthropic.com",
+    "path": "/v1/messages?beta=true",
+    "method": "POST",
+    "protocol": "HTTP",
+    "start_time": "2026-04-23T13:28:15.443293925Z",
+    "end_time": "2026-04-23T13:41:49.291831549Z",
+    "duration_ms": 813848,
+    "model": "claude-opus-4-7",
+    "message_count": 92
+  },
+  "messages": [
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:28:15.459163535Z",
+      "file": "20260423T132815459Z_request.json",
+      "body_file": "20260423T132815459Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:28:21.003997824Z",
+      "file": "20260423T132821003Z_response.json",
+      "body_file": "20260423T132821003Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:28:53.458921431Z",
+      "file": "20260423T132853458Z_request.json",
+      "body_file": "20260423T132853458Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:00.900354733Z",
+      "file": "20260423T132900900Z_response.json",
+      "body_file": "20260423T132900900Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:00.927204276Z",
+      "file": "20260423T132900927Z_request.json",
+      "body_file": "20260423T132900927Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:14.322927510Z",
+      "file": "20260423T132914322Z_response.json",
+      "body_file": "20260423T132914322Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:14.386887741Z",
+      "file": "20260423T132914386Z_request.json",
+      "body_file": "20260423T132914386Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:23.328453808Z",
+      "file": "20260423T132923328Z_response.json",
+      "body_file": "20260423T132923328Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:23.392900514Z",
+      "file": "20260423T132923392Z_request.json",
+      "body_file": "20260423T132923392Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:33.533239148Z",
+      "file": "20260423T132933533Z_response.json",
+      "body_file": "20260423T132933533Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:33.609503774Z",
+      "file": "20260423T132933609Z_request.json",
+      "body_file": "20260423T132933609Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:41.780790551Z",
+      "file": "20260423T132941780Z_response.json",
+      "body_file": "20260423T132941780Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:41.873358662Z",
+      "file": "20260423T132941873Z_request.json",
+      "body_file": "20260423T132941873Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:51.207205118Z",
+      "file": "20260423T132951207Z_response.json",
+      "body_file": "20260423T132951207Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:51.276822099Z",
+      "file": "20260423T132951276Z_request.json",
+      "body_file": "20260423T132951276Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:29:59.877500815Z",
+      "file": "20260423T132959877Z_response.json",
+      "body_file": "20260423T132959877Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:29:59.942104109Z",
+      "file": "20260423T132959942Z_request.json",
+      "body_file": "20260423T132959942Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:30:09.576381634Z",
+      "file": "20260423T133009576Z_response.json",
+      "body_file": "20260423T133009576Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:30:09.673905250Z",
+      "file": "20260423T133009673Z_request.json",
+      "body_file": "20260423T133009673Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:30:21.394318583Z",
+      "file": "20260423T133021394Z_response.json",
+      "body_file": "20260423T133021394Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:30:21.414336625Z",
+      "file": "20260423T133021414Z_request.json",
+      "body_file": "20260423T133021414Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:30:31.726860486Z",
+      "file": "20260423T133031726Z_response.json",
+      "body_file": "20260423T133031726Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:30:31.788937650Z",
+      "file": "20260423T133031788Z_request.json",
+      "body_file": "20260423T133031788Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:30:40.862160279Z",
+      "file": "20260423T133040862Z_response.json",
+      "body_file": "20260423T133040862Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:30:40.990736581Z",
+      "file": "20260423T133040990Z_request.json",
+      "body_file": "20260423T133040990Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:30:51.316065230Z",
+      "file": "20260423T133051316Z_response.json",
+      "body_file": "20260423T133051316Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:30:51.464183014Z",
+      "file": "20260423T133051464Z_request.json",
+      "body_file": "20260423T133051464Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:31:11.230413836Z",
+      "file": "20260423T133111230Z_response.json",
+      "body_file": "20260423T133111230Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:31:11.287156781Z",
+      "file": "20260423T133111287Z_request.json",
+      "body_file": "20260423T133111287Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:31:46.267529066Z",
+      "file": "20260423T133146267Z_response.json",
+      "body_file": "20260423T133146267Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:31:46.419327822Z",
+      "file": "20260423T133146419Z_request.json",
+      "body_file": "20260423T133146419Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:31:59.057698519Z",
+      "file": "20260423T133159057Z_response.json",
+      "body_file": "20260423T133159057Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:31:59.215743592Z",
+      "file": "20260423T133159215Z_request.json",
+      "body_file": "20260423T133159215Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:32:23.715556352Z",
+      "file": "20260423T133223715Z_response.json",
+      "body_file": "20260423T133223715Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:32:23.749955868Z",
+      "file": "20260423T133223749Z_request.json",
+      "body_file": "20260423T133223749Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:32:37.447672246Z",
+      "file": "20260423T133237447Z_response.json",
+      "body_file": "20260423T133237447Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:32:37.656790207Z",
+      "file": "20260423T133237656Z_request.json",
+      "body_file": "20260423T133237656Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:32:49.795759356Z",
+      "file": "20260423T133249795Z_response.json",
+      "body_file": "20260423T133249795Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:32:49.881808294Z",
+      "file": "20260423T133249881Z_request.json",
+      "body_file": "20260423T133249881Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:33:02.355777569Z",
+      "file": "20260423T133302355Z_response.json",
+      "body_file": "20260423T133302355Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:33:02.560679336Z",
+      "file": "20260423T133302560Z_request.json",
+      "body_file": "20260423T133302560Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:33:12.610131590Z",
+      "file": "20260423T133312610Z_response.json",
+      "body_file": "20260423T133312610Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:33:12.845579113Z",
+      "file": "20260423T133312845Z_request.json",
+      "body_file": "20260423T133312845Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:33:20.530986511Z",
+      "file": "20260423T133320530Z_response.json",
+      "body_file": "20260423T133320530Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:33:20.748763242Z",
+      "file": "20260423T133320748Z_request.json",
+      "body_file": "20260423T133320748Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:33:32.413437722Z",
+      "file": "20260423T133332413Z_response.json",
+      "body_file": "20260423T133332413Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:33:32.492503480Z",
+      "file": "20260423T133332492Z_request.json",
+      "body_file": "20260423T133332492Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:33:45.930528485Z",
+      "file": "20260423T133345930Z_response.json",
+      "body_file": "20260423T133345930Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:33:46.016239090Z",
+      "file": "20260423T133346016Z_request.json",
+      "body_file": "20260423T133346016Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:33:54.888635279Z",
+      "file": "20260423T133354888Z_response.json",
+      "body_file": "20260423T133354888Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:33:54.983542163Z",
+      "file": "20260423T133354983Z_request.json",
+      "body_file": "20260423T133354983Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:34:04.814297496Z",
+      "file": "20260423T133404814Z_response.json",
+      "body_file": "20260423T133404814Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:34:04.861966061Z",
+      "file": "20260423T133404861Z_request.json",
+      "body_file": "20260423T133404861Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:34:16.548464852Z",
+      "file": "20260423T133416548Z_response.json",
+      "body_file": "20260423T133416548Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:34:16.606351010Z",
+      "file": "20260423T133416606Z_request.json",
+      "body_file": "20260423T133416606Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:34:25.710264293Z",
+      "file": "20260423T133425710Z_response.json",
+      "body_file": "20260423T133425710Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:34:25.735259061Z",
+      "file": "20260423T133425735Z_request.json",
+      "body_file": "20260423T133425735Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:34:34.662030475Z",
+      "file": "20260423T133434662Z_response.json",
+      "body_file": "20260423T133434662Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:34:34.936643725Z",
+      "file": "20260423T133434936Z_request.json",
+      "body_file": "20260423T133434936Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:34:46.858290201Z",
+      "file": "20260423T133446858Z_response.json",
+      "body_file": "20260423T133446858Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:35:41.467544938Z",
+      "file": "20260423T133541467Z_request.json",
+      "body_file": "20260423T133541467Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:35:52.455377154Z",
+      "file": "20260423T133552455Z_response.json",
+      "body_file": "20260423T133552455Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:35:52.761124960Z",
+      "file": "20260423T133552761Z_request.json",
+      "body_file": "20260423T133552761Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:36:01.567278379Z",
+      "file": "20260423T133601567Z_response.json",
+      "body_file": "20260423T133601567Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:36:01.638272951Z",
+      "file": "20260423T133601638Z_request.json",
+      "body_file": "20260423T133601638Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:36:36.478765827Z",
+      "file": "20260423T133636478Z_response.json",
+      "body_file": "20260423T133636478Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:36:36.560469650Z",
+      "file": "20260423T133636560Z_request.json",
+      "body_file": "20260423T133636560Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:36:46.645335297Z",
+      "file": "20260423T133646645Z_response.json",
+      "body_file": "20260423T133646645Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:37:49.481823082Z",
+      "file": "20260423T133749481Z_request.json",
+      "body_file": "20260423T133749481Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:38:00.820365857Z",
+      "file": "20260423T133800820Z_response.json",
+      "body_file": "20260423T133800820Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:38:01.171645751Z",
+      "file": "20260423T133801171Z_request.json",
+      "body_file": "20260423T133801171Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:38:10.888949771Z",
+      "file": "20260423T133810888Z_response.json",
+      "body_file": "20260423T133810888Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:38:13.293997600Z",
+      "file": "20260423T133813293Z_request.json",
+      "body_file": "20260423T133813293Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:38:22.039061552Z",
+      "file": "20260423T133822039Z_response.json",
+      "body_file": "20260423T133822039Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:38:22.064367001Z",
+      "file": "20260423T133822064Z_request.json",
+      "body_file": "20260423T133822064Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:38:31.563816277Z",
+      "file": "20260423T133831563Z_response.json",
+      "body_file": "20260423T133831563Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:38:31.977405328Z",
+      "file": "20260423T133831977Z_request.json",
+      "body_file": "20260423T133831977Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:38:42.365789864Z",
+      "file": "20260423T133842365Z_response.json",
+      "body_file": "20260423T133842365Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:38:42.451177282Z",
+      "file": "20260423T133842451Z_request.json",
+      "body_file": "20260423T133842451Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:38:55.993218256Z",
+      "file": "20260423T133855993Z_response.json",
+      "body_file": "20260423T133855993Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:38:56.393979460Z",
+      "file": "20260423T133856393Z_request.json",
+      "body_file": "20260423T133856393Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:39:18.940027332Z",
+      "file": "20260423T133918940Z_response.json",
+      "body_file": "20260423T133918940Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:39:18.985272649Z",
+      "file": "20260423T133918985Z_request.json",
+      "body_file": "20260423T133918985Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:39:39.350659071Z",
+      "file": "20260423T133939350Z_response.json",
+      "body_file": "20260423T133939350Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:39:39.772942557Z",
+      "file": "20260423T133939772Z_request.json",
+      "body_file": "20260423T133939772Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:39:49.012264939Z",
+      "file": "20260423T133949012Z_response.json",
+      "body_file": "20260423T133949012Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:40:31.378460403Z",
+      "file": "20260423T134031378Z_request.json",
+      "body_file": "20260423T134031378Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:40:40.292532633Z",
+      "file": "20260423T134040292Z_response.json",
+      "body_file": "20260423T134040292Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:40:40.743152166Z",
+      "file": "20260423T134040743Z_request.json",
+      "body_file": "20260423T134040743Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:40:49.689797829Z",
+      "file": "20260423T134049689Z_response.json",
+      "body_file": "20260423T134049689Z_response.body.txt"
+    },
+    {
+      "direction": "request",
+      "timestamp": "2026-04-23T13:40:49.769797259Z",
+      "file": "20260423T134049769Z_request.json",
+      "body_file": "20260423T134049769Z_request.body.json"
+    },
+    {
+      "direction": "response",
+      "timestamp": "2026-04-23T13:41:49.291681054Z",
+      "file": "20260423T134149291Z_response.json",
+      "body_file": "20260423T134149291Z_response.body.txt"
+    }
+  ],
+  "export": {
+    "exported_at": "2026-04-23T23:50:40.163578095Z",
+    "exported_by": "sps-export 0.2.0"
+  }
+}

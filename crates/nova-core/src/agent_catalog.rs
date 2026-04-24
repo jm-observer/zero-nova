@@ -5,6 +5,8 @@ use std::collections::HashMap;
 pub struct ModelConfig {
     pub model: String,
     pub temperature: f32,
+    pub max_tokens: Option<u32>,
+    pub top_p: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

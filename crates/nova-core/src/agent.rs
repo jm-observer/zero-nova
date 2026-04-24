@@ -22,6 +22,9 @@ pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
     config: AgentConfig,
+    pub task_store: Option<std::sync::Arc<tokio::sync::Mutex<crate::tool::builtin::task::TaskStore>>>,
+    pub skill_registry: Option<std::sync::Arc<crate::skill::SkillRegistry>>,
+    pub read_files: std::sync::Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 /// Configuration for the zero-nova agent.
@@ -34,7 +37,14 @@ pub struct AgentConfig {
 impl<C: LlmClient> AgentRuntime<C> {
     /// Creates a new `AgentRuntime` instance.
     pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
-        Self { client, tools, config }
+        Self {
+            client,
+            tools,
+            config,
+            task_store: None,
+            skill_registry: None,
+            read_files: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+        }
     }
 
     /// Sets the tool registry for this runtime.
@@ -254,6 +264,9 @@ impl<C: LlmClient> AgentRuntime<C> {
                             Some(crate::tool::ToolContext {
                                 event_tx: tx.clone(),
                                 tool_use_id: id.clone(),
+                                task_store: self.task_store.clone(),
+                                skill_registry: self.skill_registry.clone(),
+                                read_files: self.read_files.clone(),
                             }),
                         ),
                     )

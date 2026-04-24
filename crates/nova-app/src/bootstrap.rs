@@ -30,14 +30,9 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let task_store = Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
 
-    let mut tools = ToolRegistry::new();
-    nova_core::tool::builtin::register_builtin_tools(
-        &mut tools,
-        &config,
-        task_store.clone(),
-        skill_registry.clone(),
-        None,
-    );
+    let tools = ToolRegistry::new();
+    // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
+    nova_core::tool::builtin::register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,

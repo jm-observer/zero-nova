@@ -173,19 +173,21 @@ async fn main() -> Result<()> {
     let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
 
     // 3. Setup Tool Registry
-    let mut tools = ToolRegistry::new();
-    register_builtin_tools(&mut tools, &config, task_store.clone(), skill_registry.clone(), None);
+    let tools = ToolRegistry::new();
+    register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
 
     // Build system prompt including loaded tools and environment information
     let prompt_builder = SystemPromptBuilder::new();
     let system_prompt_str = prompt_builder.with_tools(&tools).build();
     let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
 
+    // Use config defaults instead of hardcoded values (synchronizes with nova-app bootstrap)
+    let tool_timeout_secs = config.gateway.tool_timeout_secs.unwrap_or(300);
     let agent_config = AgentConfig {
-        max_iterations: 15,
+        max_iterations: config.gateway.max_iterations,
         model_config: config.llm.model_config.clone(),
-        tool_timeout: std::time::Duration::from_secs(300),
-        max_tokens: 4096,
+        tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
+        max_tokens: config.gateway.max_tokens,
     };
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);

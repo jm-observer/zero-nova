@@ -5,20 +5,36 @@ use crate::session::{Session, SessionSummary};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_core::message::{ContentBlock, Message, Role};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
+
+/// Guard for an in-flight session load, used to prevent race conditions.
+pub enum LoadingGuard {
+    /// A session is currently being loaded; join this to get the result.
+    InFlight(oneshot::Receiver<Arc<Session>>),
+    /// Session already exists in cache (fast path after insert).
+    Ready(Arc<Session>),
+}
 
 pub struct SessionService {
     cache: Arc<SessionCache>,
     repository: SqliteSessionRepository,
+    /// Tracks in-flight session loads. Used to de-duplicate concurrent cold loads
+    /// for the same session ID in read-through mode.
+    loading: Arc<RwLock<HashMap<String, oneshot::Sender<Arc<Session>>>>>,
 }
 
 impl SessionService {
     pub fn new(cache: Arc<SessionCache>, repository: SqliteSessionRepository) -> Self {
-        Self { cache, repository }
+        Self {
+            cache,
+            repository,
+            loading: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     /// 从数据库加载所有会话到内存 (仅启动阶段使用)
@@ -86,14 +102,53 @@ impl SessionService {
         Ok(session)
     }
 
-    /// 获取会话 (Read-Through)
+    /// 获取会话 (Read-Through with concurrency protection).
+    ///
+    /// Prevents a race condition where multiple concurrent callers load the same
+    /// session from the database simultaneously, creating duplicate `Arc<Session>` entries.
     pub async fn get(&self, id: &str) -> Result<Option<Arc<Session>>> {
-        // 1. 尝试缓存
+        // Fast path: check cache
         if let Some(s) = self.cache.get(id) {
             return Ok(Some(s));
         }
 
-        // 2. 尝试 DB
+        let id_owned: String = id.to_string();
+
+        // Try to register as the loader. If `tx` was already in the map, we lost the race.
+        let (wrapper_tx, wrapper_rx) = oneshot::channel();
+        let was_loaded = {
+            let mut loading = self.loading.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            // Wrap the real tx we'll use later
+            loading.insert(id_owned.clone(), wrapper_tx)
+        };
+
+        match was_loaded {
+            Some(_prev_tx) => {
+                // We lost the race: await the receiver from the first-ordered caller.
+                // The first-ordered caller will send via its `tx`, and our `rx` receives it.
+                if let Ok(s) = wrapper_rx.await {
+                    self.cache.insert(id_owned, s.clone());
+                    return Ok(Some(s));
+                }
+                // Cache check for second-ordered fallback
+                if let Some(s) = self.cache.get(id) {
+                    return Ok(Some(s));
+                }
+                Ok(None)
+            }
+            None => {
+                // We are the loader: load from DB
+                let session = self.load_session_from_db(id).await?;
+                if let Some(ref s) = session {
+                    self.cache.insert(id_owned, s.clone());
+                }
+                Ok(session)
+            }
+        }
+    }
+
+    /// Load a single session from the database.
+    async fn load_session_from_db(&self, id: &str) -> Result<Option<Arc<Session>>> {
         if let Ok(Some((id, title, agent_id, created_at, updated_at, history))) = self.repository.load_session(id).await
         {
             let session = Arc::new(Session {
@@ -106,12 +161,10 @@ impl SessionService {
                 chat_lock: Mutex::new(()),
                 cancellation_token: RwLock::new(None),
             });
-
-            self.cache.insert(id, session.clone());
-            return Ok(Some(session));
+            Ok(Some(session))
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
     pub async fn append_message(&self, session_id: &str, role: Role, content: Vec<ContentBlock>) -> Result<()> {
@@ -120,7 +173,7 @@ impl SessionService {
 
         // 1. 更新内存
         {
-            let mut history = session.history.write().unwrap();
+            let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             history.push(Message {
                 role: role.clone(),
                 content: content.clone(),
@@ -132,7 +185,12 @@ impl SessionService {
         self.repository.save_message(session_id, role, content, now).await?;
 
         // 3. 更新会话元数据
-        let active_agent = session.control.read().unwrap().active_agent.clone();
+        let active_agent = session
+            .control
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .active_agent
+            .clone();
         self.repository
             .save_session(
                 &session.id,
@@ -159,10 +217,15 @@ impl SessionService {
             .map(|s| SessionSummary {
                 id: s.id.clone(),
                 name: s.name.clone(),
-                agent_id: s.control.read().unwrap().active_agent.clone(),
+                agent_id: s
+                    .control
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .active_agent
+                    .clone(),
                 created_at: s.created_at,
                 updated_at: s.updated_at.load(Ordering::SeqCst),
-                message_count: s.history.read().unwrap().len(),
+                message_count: s.history.read().unwrap_or_else(|poisoned| poisoned.into_inner()).len(),
             })
             .collect()
     }
@@ -171,7 +234,7 @@ impl SessionService {
         let session = self.get(session_id).await?.context("Session not found")?;
 
         {
-            let mut control = session.control.write().unwrap();
+            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             control.active_agent = agent_id.to_string();
         }
 

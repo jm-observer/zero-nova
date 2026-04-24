@@ -61,7 +61,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     /// Registers a new tool with the registry.
-    pub fn register_tool(&mut self, tool: Box<dyn crate::tool::Tool>) {
+    pub fn register_tool(&self, tool: Box<dyn crate::tool::Tool>) {
         self.tools.register(tool);
     }
 

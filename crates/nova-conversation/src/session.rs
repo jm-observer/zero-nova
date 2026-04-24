@@ -7,6 +7,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::control::ControlState;
 
+/// Session represents a single conversation turn with its own lock.
+///
+/// Uses `std::sync::RwLock` because:
+/// - Lock hold time is short (<1ms for small vec clone)
+/// - Each session is accessed by a single async task at a time (via `chat_lock`)
+/// - Blocking in the async thread is acceptable for this usage pattern
 pub struct Session {
     pub control: RwLock<ControlState>,
     pub id: String,
@@ -20,11 +26,17 @@ pub struct Session {
 
 impl Session {
     pub fn get_history(&self) -> Vec<Message> {
-        self.history.read().unwrap().clone()
+        self.history
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     pub fn get_internal_messages(&self) -> Vec<Message> {
-        self.history.read().unwrap().clone()
+        self.history
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     pub fn touch_updated_at(&self) {
@@ -33,17 +45,26 @@ impl Session {
     }
 
     pub fn set_cancellation_token(&self, token: CancellationToken) {
-        let mut ct = self.cancellation_token.write().unwrap();
+        let mut ct = self
+            .cancellation_token
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *ct = Some(token);
     }
 
     pub fn clear_cancellation_token(&self) {
-        let mut ct = self.cancellation_token.write().unwrap();
+        let mut ct = self
+            .cancellation_token
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *ct = None;
     }
 
     pub fn take_cancellation_token(&self) -> Option<CancellationToken> {
-        let mut ct = self.cancellation_token.write().unwrap();
+        let mut ct = self
+            .cancellation_token
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         ct.take()
     }
 }

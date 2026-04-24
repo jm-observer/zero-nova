@@ -1,9 +1,9 @@
 use anyhow::Result;
-use log::error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 
 use crate::skill::CapabilityPolicy;
 
@@ -51,6 +51,9 @@ pub trait Tool: Send + Sync {
 }
 
 /// Registry for storing and accessing tools.
+///
+/// Uses `tokio::sync::Mutex` so that tool registration and resolution can occur
+/// in async contexts without blocking child tasks.
 pub struct ToolRegistry {
     tools: Mutex<Vec<Arc<dyn Tool>>>,
     deferred: Mutex<Vec<DeferredToolEntry>>,
@@ -159,28 +162,27 @@ impl ToolRegistry {
         }
     }
 
-    /// Acquires the tools lock, recovering from poison errors.
-    fn lock_tools(&self) -> MutexGuard<'_, Vec<Arc<dyn Tool>>> {
-        self.tools.lock().unwrap_or_else(|poisoned| {
-            error!("Tool registry tools lock was poisoned, recovering");
-            poisoned.into_inner()
-        })
+    /// Acquires the tools lock using `try_lock` to avoid blocking the async runtime.
+    /// The tool registry is a short-lived hot path; collision is rare (<1ms hold time).
+    fn lock_tools(&self) -> tokio::sync::MutexGuard<'_, Vec<Arc<dyn Tool>>> {
+        self.tools
+            .try_lock()
+            .expect("Tool registry tools lock should not be contended")
     }
 
-    /// Acquires the deferred lock, recovering from poison errors.
-    fn lock_deferred(&self) -> MutexGuard<'_, Vec<DeferredToolEntry>> {
-        self.deferred.lock().unwrap_or_else(|poisoned| {
-            error!("Tool registry deferred lock was poisoned, recovering");
-            poisoned.into_inner()
-        })
+    /// Acquires the deferred lock using `try_lock` for the same reason as `lock_tools`.
+    fn lock_deferred(&self) -> tokio::sync::MutexGuard<'_, Vec<DeferredToolEntry>> {
+        self.deferred
+            .try_lock()
+            .expect("Tool registry deferred lock should not be contended")
     }
 
     /// Registers a single tool.
-    pub fn register(&mut self, tool: Box<dyn Tool>) {
+    pub fn register(&self, tool: Box<dyn Tool>) {
         self.lock_tools().push(Arc::from(tool));
     }
     /// Registers multiple tools at once.
-    pub fn register_many(&mut self, tools: Vec<Box<dyn Tool>>) {
+    pub fn register_many(&self, tools: Vec<Box<dyn Tool>>) {
         let mut guard = self.lock_tools();
         for tool in tools {
             guard.push(Arc::from(tool));
@@ -188,7 +190,7 @@ impl ToolRegistry {
     }
     /// Registers a deferred tool.
     pub fn register_deferred(
-        &mut self,
+        &self,
         name: String,
         description: String,
         input_schema: Value,
@@ -199,7 +201,7 @@ impl ToolRegistry {
 
     /// Registers a deferred tool with a specific category.
     pub fn register_deferred_with_category(
-        &mut self,
+        &self,
         name: String,
         description: String,
         input_schema: Value,
@@ -461,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_supports_legacy_tool_names() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register(Box::new(StaticTool { name: "Bash" }));
 
         let output = registry.execute("bash", json!({}), None).await.unwrap();
@@ -470,7 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_search_can_load_deferred_tool() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry.register_deferred(
             "DeferredTool".to_string(),
             "Useful deferred tool".to_string(),

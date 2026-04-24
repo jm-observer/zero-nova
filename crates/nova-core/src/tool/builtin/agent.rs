@@ -88,11 +88,11 @@ impl Tool for AgentTool {
         let client = OpenAiCompatClient::new(self.config.llm.api_key.clone(), self.config.llm.base_url.clone());
 
         // 3. Setup Tool Registry for subagent
-        let mut sub_registry = ToolRegistry::new();
+        let sub_registry = ToolRegistry::new();
         if let Some(ctx) = &context {
             if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
                 register_builtin_tools(
-                    &mut sub_registry,
+                    &sub_registry,
                     &self.config,
                     task_store.clone(),
                     skill_registry.clone(),

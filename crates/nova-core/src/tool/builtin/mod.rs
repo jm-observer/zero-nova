@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
 pub fn register_builtin_tools(
-    registry: &mut ToolRegistry,
+    registry: &ToolRegistry,
     config: &crate::config::AppConfig,
     task_store: std::sync::Arc<tokio::sync::Mutex<task::TaskStore>>,
     skill_registry: std::sync::Arc<crate::skill::SkillRegistry>,

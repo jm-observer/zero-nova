@@ -61,3 +61,91 @@ pub struct ChatCompletePayload {
     pub output: Option<String>,
     pub usage: Option<Usage>,
 }
+
+// ============================================================
+// Plan 4: Skill/Tool 事件扩展 payload 类型
+// ============================================================
+
+/// Skill 激活事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillActivatedPayload {
+    pub session_id: Option<String>,
+    pub skill_id: String,
+    pub skill_name: String,
+    pub sticky: bool,
+    pub reason: String,
+}
+
+/// Skill 切换事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSwitchedPayload {
+    pub session_id: Option<String>,
+    pub from_skill: String,
+    pub to_skill: String,
+    pub reason: String,
+}
+
+/// Skill 退出事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillExitedPayload {
+    pub session_id: Option<String>,
+    pub skill_id: String,
+    pub skill_name: String,
+    pub reason: String,
+}
+
+/// Tool 解锁事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolUnlockedPayload {
+    pub session_id: Option<String>,
+    pub tool_name: String,
+    pub source: String, // "tool_search" | "skill_activation" | "manual"
+}
+
+/// Task 状态变化事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStatusChangedPayload {
+    pub session_id: Option<String>,
+    pub task_id: String,
+    pub task_subject: String,
+    pub status: String,
+    pub active_form: Option<String>,
+    pub is_main_task: bool,
+}
+
+/// Skill 路由评估事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillRouteEvaluatedPayload {
+    pub session_id: Option<String>,
+    pub skill_id: String,
+    pub confidence: f64,  // 0.0 - 1.0
+    pub decision: String, // "activate", "keep", "fallback", etc.
+    pub reasoning: String,
+}
+
+/// Skill 调用事件 payload
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillInvocationPayload {
+    pub session_id: Option<String>,
+    pub skill_id: String,
+    pub skill_name: String,
+    pub level: String, // "auto", "explicit", "fallback"
+}
+
+/// 工具结果 payload (结构化输出)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolResultPayload {
+    pub tool_name: String,
+    pub tool_use_id: String,
+    pub output: Value,
+    pub is_error: bool,
+    pub output_type: String, // "text", "json", "error"
+}

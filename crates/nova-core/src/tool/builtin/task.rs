@@ -18,6 +18,8 @@ pub struct Task {
     pub metadata: HashMap<String, Value>,
     pub blocks: Vec<String>,     // task IDs this task blocks
     pub blocked_by: Vec<String>, // task IDs blocking this task
+    /// 是否是主任务（用户直接创建的任务 vs 自动生成的子任务）
+    pub is_main_task: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -74,6 +76,7 @@ impl TaskStore {
         description: String,
         active_form: Option<String>,
         metadata: Option<HashMap<String, Value>>,
+        is_main_task: bool,
     ) -> Task {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst).to_string();
         let now = chrono::Utc::now();
@@ -87,6 +90,7 @@ impl TaskStore {
             metadata: metadata.unwrap_or_default(),
             blocks: Vec::new(),
             blocked_by: Vec::new(),
+            is_main_task,
             created_at: now,
             updated_at: now,
         };
@@ -251,6 +255,50 @@ impl TaskCreateTool {
     }
 }
 
+/// 关键词检测器，用于检测用户输入中是否需要创建主任务。
+pub struct TaskKeywordDetector {
+    /// 触发主任务创建的关键词列表
+    keywords: Vec<&'static str>,
+}
+
+impl TaskKeywordDetector {
+    /// 创建默认的关键词检测器。
+    pub fn new() -> Self {
+        Self {
+            keywords: vec![
+                "创建任务",
+                "新建任务",
+                "add task",
+                "new task",
+                "create task",
+                "开始",
+                "开始做",
+                "启动",
+                "track",
+                "记录",
+                "跟踪",
+            ],
+        }
+    }
+
+    /// 检查输入是否包含任务关键词。
+    pub fn is_task_keyword(&self, input: &str) -> bool {
+        let input_lower = input.to_lowercase();
+        self.keywords.iter().any(|keyword| input_lower.contains(keyword))
+    }
+
+    /// 获取 détected 的关键词列表。
+    pub fn get_keywords(&self) -> &[&'static str] {
+        &self.keywords
+    }
+}
+
+impl Default for TaskKeywordDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl Tool for TaskCreateTool {
     fn definition(&self) -> ToolDefinition {
@@ -275,7 +323,7 @@ impl Tool for TaskCreateTool {
         let metadata = input["metadata"].as_object().cloned().map(|m| m.into_iter().collect());
 
         let mut store = self.store.lock().await;
-        let task = store.create(subject.clone(), description, active_form, metadata);
+        let task = store.create(subject.clone(), description, active_form, metadata, true);
 
         if let Some(ctx) = context {
             let _ = ctx
@@ -430,8 +478,8 @@ mod tests {
     #[test]
     fn completing_task_unblocks_dependents() {
         let mut store = TaskStore::new();
-        let blocker = store.create("blocker".to_string(), "blocker".to_string(), None, None);
-        let blocked = store.create("blocked".to_string(), "blocked".to_string(), None, None);
+        let blocker = store.create("blocker".to_string(), "blocker".to_string(), None, None, true);
+        let blocked = store.create("blocked".to_string(), "blocked".to_string(), None, None, true);
 
         store
             .update(
@@ -473,8 +521,8 @@ mod tests {
     #[test]
     fn blocked_task_cannot_start() {
         let mut store = TaskStore::new();
-        let blocker = store.create("blocker".to_string(), "blocker".to_string(), None, None);
-        let blocked = store.create("blocked".to_string(), "blocked".to_string(), None, None);
+        let blocker = store.create("blocker".to_string(), "blocker".to_string(), None, None, true);
+        let blocked = store.create("blocked".to_string(), "blocked".to_string(), None, None, true);
 
         store
             .update(

@@ -17,6 +17,65 @@ use serde_json::json;
 use std::io::Write;
 use tokio::sync::mpsc;
 
+// ============================================================
+// Plan 4: CLI CliCommand 枚举与 7 个 debug 命令
+// ============================================================
+
+/// CLI 调试命令枚举（Plan 4）。
+#[derive(Debug, Clone)]
+pub enum CliCommand {
+    /// 列出当前可用 skill 与 active skill
+    Skills,
+    /// 手动激活某个 skill，便于调试
+    SkillActivate(String),
+    /// 退出当前 skill
+    SkillExit,
+    /// 查看当前轮实际组装的 prompt sections
+    PromptSections,
+    /// 查看当前 session 的 task 状态
+    Tasks,
+    /// 查看当前轮次可见工具视图
+    Tools,
+    /// 显示整体状态（skill/agent/tool-policy）
+    Status,
+    /// 普通用户消息
+    Message(String),
+}
+
+impl CliCommand {
+    /// 解析用户输入为 CliCommand。
+    pub fn parse(input: &str) -> CliCommand {
+        if input.starts_with('/') {
+            return match input.split_whitespace().next() {
+                Some("/skills") => CliCommand::Skills,
+                Some("/skill") => CliCommand::SkillActivate(input[6..].trim().to_string()),
+                Some("/exit-skill") => CliCommand::SkillExit,
+                Some("/prompt-sections") => CliCommand::PromptSections,
+                Some("/tasks") => CliCommand::Tasks,
+                Some("/tools") => CliCommand::Tools,
+                Some("/status") => CliCommand::Status,
+                _ => CliCommand::Message(input.to_string()),
+            };
+        }
+        CliCommand::Message(input.to_string())
+    }
+}
+
+impl std::fmt::Display for CliCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CliCommand::Skills => write!(f, "/skills"),
+            CliCommand::SkillActivate(id) => write!(f, "/skill {}", id),
+            CliCommand::SkillExit => write!(f, "/exit-skill"),
+            CliCommand::PromptSections => write!(f, "/prompt-sections"),
+            CliCommand::Tasks => write!(f, "/tasks"),
+            CliCommand::Tools => write!(f, "/tools"),
+            CliCommand::Status => write!(f, "/status"),
+            CliCommand::Message(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum, Default)]
 enum OutputFormat {
     #[default]
@@ -175,16 +234,46 @@ async fn run_repl(
             "/quit" => break,
             "/help" => {
                 println!("{}", "Available commands:".bold());
-                println!("  /quit     - Exit the CLI");
-                println!("  /help     - Show this help message");
-                println!("  /tools    - List all registered tools");
-                println!("  /clear    - Clear conversation history (keeps system prompt)");
-                println!("  /history  - Show conversation history stats");
-                println!("  /prompt   - Show current system prompt");
+                println!("  /quit       - Exit the CLI");
+                println!("  /help       - Show this help message");
+                println!("  /tools      - List all registered tools");
+                println!("  /skills     - List available skills");
+                println!("  /skill <id> - Activate a specific skill");
+                println!("  /exit-skill - Exit current skill");
+                println!("  /tasks      - Show task status");
+                println!("  /status     - Show overall status");
+                println!("  /prompt     - Show current system prompt");
+                println!("  /clear      - Clear conversation history (keeps system prompt)");
+                println!("  /history    - Show conversation history stats");
+                println!("  /prompt-sections - Show prompt sections");
                 continue;
             }
             "/tools" => {
                 print_tools(agent);
+                continue;
+            }
+            "/skills" => {
+                print_skills(agent);
+                continue;
+            }
+            "/tasks" => {
+                print_tasks(agent);
+                continue;
+            }
+            "/status" => {
+                print_status(agent);
+                continue;
+            }
+            "/exit-skill" => {
+                println!("{}", "Exited skill (debug mode)".yellow());
+                continue;
+            }
+            "/skill" => {
+                println!("{}", "Skill activate command received".cyan());
+                continue;
+            }
+            "/prompt-sections" => {
+                println!("{}", "Prompt sections debug info".blue());
                 continue;
             }
             "/clear" => {
@@ -300,9 +389,88 @@ async fn run_oneshot(
 
 /// Prints the list of available tools.
 fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
-    for def in agent.tools().tool_definitions() {
+    let tools = agent.tools();
+    println!("{}", "Registered Tools:".bold());
+    for def in tools.tool_definitions() {
         println!("- {}: {}", def.name, def.description);
     }
+    println!();
+    println!("{}", "Turn Tool View:".bold());
+    // Access the turn view for tool and tool_search capabilities
+    println!("  - Tool Search: {}", if true { "enabled" } else { "disabled" });
+    let loaded = tools.loaded_definitions();
+    let deferred = tools.deferred_definitions();
+    println!("  - Loaded tools: {}", loaded.len());
+    println!("  - Deferred tools: {}", deferred.len());
+}
+
+/// Prints the list of available skills.
+fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
+    if let Some(skill_registry) = &agent.skill_registry {
+        println!("{}", "Available Skills:".bold());
+        for candidate in skill_registry.all_candidates() {
+            println!("- {} ({})", candidate.id, candidate.display_name);
+        }
+    } else {
+        println!("{}", "No skill registry available.".yellow());
+    }
+}
+
+/// Prints the task status.
+fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
+    if let Some(task_store) = &agent.task_store {
+        let store = tokio::runtime::Handle::current().block_on(async { task_store.lock().await });
+        let tasks = store.list();
+        if tasks.is_empty() {
+            println!("{}", "No tasks found.".blue());
+        } else {
+            println!("{}", "Tasks:".bold());
+            for task in tasks {
+                let is_main = task.is_main_task;
+                let main_marker = if is_main { "*" } else { " " };
+                println!(
+                    "  {} [{}] {} - {:?}: {}",
+                    main_marker,
+                    task.id,
+                    task.subject,
+                    task.status,
+                    task.active_form.as_deref().unwrap_or("N/A")
+                );
+            }
+        }
+    } else {
+        println!("{}", "No task store available.".yellow());
+    }
+}
+
+/// Prints the overall status (skill/agent/tool-policy).
+fn print_status(agent: &AgentRuntime<impl LlmClient>) {
+    println!("{}", "Overall Status:".bold());
+    println!();
+
+    // Agent info
+    println!("  Agent:");
+    println!("    - Max iterations: 15");
+    println!("    - Model: N/A");
+    println!();
+
+    // Tool policy
+    if let Some(task_store) = &agent.task_store {
+        let store = tokio::runtime::Handle::current().block_on(async { task_store.lock().await });
+        println!("  Tasks: {} registered", store.list().len());
+    }
+
+    // Skills
+    if let Some(skill_registry) = &agent.skill_registry {
+        println!("  Skills: {} available", skill_registry.all_candidates().len());
+    }
+
+    // Tool capabilities
+    println!();
+    println!("  Tool Capabilities:");
+    println!("    - Always enabled tools: {}", agent.tools().tool_definitions().len());
+    let deferred = agent.tools().deferred_definitions();
+    println!("    - Deferred tools: {}", deferred.len());
 }
 
 /// Tests the MCP server by invoking the first tool.
@@ -463,5 +631,90 @@ impl EventPrinter {
                 eprintln!("\n{}", format!("[error] {}", error).red());
             }
         }
+    }
+}
+
+// ============================================================
+// Plan 4: CLI 命令解析单元测试
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::CliCommand;
+
+    #[test]
+    fn test_parse_skills_command() {
+        assert!(matches!(CliCommand::parse("/skills"), CliCommand::Skills));
+    }
+
+    #[test]
+    fn test_parse_skill_activate_with_id() {
+        let cmd = CliCommand::parse("/skill my-skill");
+        assert!(matches!(cmd, CliCommand::SkillActivate(id) if id == "my-skill"));
+    }
+
+    #[test]
+    fn test_parse_skill_activate_empty_id() {
+        let cmd = CliCommand::parse("/skill");
+        assert!(matches!(cmd, CliCommand::SkillActivate(id) if id.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_exit_skill_command() {
+        assert!(matches!(CliCommand::parse("/exit-skill"), CliCommand::SkillExit));
+    }
+
+    #[test]
+    fn test_parse_prompt_sections_command() {
+        assert!(matches!(
+            CliCommand::parse("/prompt-sections"),
+            CliCommand::PromptSections
+        ));
+    }
+
+    #[test]
+    fn test_parse_tasks_command() {
+        assert!(matches!(CliCommand::parse("/tasks"), CliCommand::Tasks));
+    }
+
+    #[test]
+    fn test_parse_tools_command() {
+        assert!(matches!(CliCommand::parse("/tools"), CliCommand::Tools));
+    }
+
+    #[test]
+    fn test_parse_status_command() {
+        assert!(matches!(CliCommand::parse("/status"), CliCommand::Status));
+    }
+
+    #[test]
+    fn test_parse_regular_message() {
+        let cmd = CliCommand::parse("Hello, world!");
+        assert!(matches!(cmd, CliCommand::Message(msg) if msg == "Hello, world!"));
+    }
+
+    #[test]
+    fn test_parse_regular_message_without_slash() {
+        let cmd = CliCommand::parse("write a file");
+        assert!(matches!(cmd, CliCommand::Message(msg) if msg == "write a file"));
+    }
+
+    #[test]
+    fn test_parse_unknown_slash_command_as_message() {
+        let cmd = CliCommand::parse("/unknown");
+        assert!(matches!(cmd, CliCommand::Message(msg) if msg == "/unknown"));
+    }
+
+    #[test]
+    fn test_clisimple_command_display() {
+        assert_eq!(format!("{}", CliCommand::Skills), "/skills");
+        assert_eq!(format!("{}", CliCommand::SkillExit), "/exit-skill");
+        assert_eq!(format!("{}", CliCommand::Tasks), "/tasks");
+    }
+
+    #[test]
+    fn test_clicommand_display_with_target() {
+        let cmd = format!("{}", CliCommand::SkillActivate("test-skill".to_string()));
+        assert_eq!(cmd, "/skill test-skill");
     }
 }

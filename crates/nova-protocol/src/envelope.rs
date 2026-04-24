@@ -1,5 +1,9 @@
 use crate::agent::{AgentsListResponse, AgentsSwitchResponse, SessionAgentSwitchPayload};
-use crate::chat::{ChatCompletePayload, ChatIntentPayload, ChatPayload, ProgressEvent};
+use crate::chat::{
+    ChatCompletePayload, ChatIntentPayload, ChatPayload, ProgressEvent, SkillActivatedPayload, SkillExitedPayload,
+    SkillInvocationPayload, SkillRouteEvaluatedPayload, SkillSwitchedPayload, TaskStatusChangedPayload,
+    ToolUnlockedPayload,
+};
 use crate::session::{
     SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload, SessionsListResponse,
     SessionsMessagesResponse, SuccessResponse,
@@ -98,6 +102,22 @@ pub enum MessageEnvelope {
     ConfigUpdate(serde_json::Value),
     #[serde(rename = "config.update.response")]
     ConfigUpdateResponse(SuccessResponse),
+
+    // --- Skill Events (Plan 4) ---
+    #[serde(rename = "skill.activated")]
+    SkillActivated(SkillActivatedPayload),
+    #[serde(rename = "skill.switched")]
+    SkillSwitched(SkillSwitchedPayload),
+    #[serde(rename = "skill.exited")]
+    SkillExited(SkillExitedPayload),
+    #[serde(rename = "tool.unlocked")]
+    ToolUnlocked(ToolUnlockedPayload),
+    #[serde(rename = "task.status_changed")]
+    TaskStatusChanged(TaskStatusChangedPayload),
+    #[serde(rename = "skill.route_evaluated")]
+    SkillRouteEvaluated(SkillRouteEvaluatedPayload),
+    #[serde(rename = "skill.invocation")]
+    SkillInvocation(SkillInvocationPayload),
 
     #[serde(other)]
     Unknown,

@@ -2,7 +2,8 @@ use nova_app::types::{AppAgent, AppEvent, AppMessage, AppSession};
 use nova_core::message::ContentBlock;
 use nova_protocol::{
     Agent, AgentsSwitchResponse, ContentBlockDTO, ErrorPayload, GatewayMessage, MessageDTO, MessageEnvelope,
-    ProgressEvent, Session as SessionProtocol, WelcomePayload,
+    ProgressEvent, Session as SessionProtocol, SkillActivatedPayload, SkillExitedPayload, SkillInvocationPayload,
+    SkillRouteEvaluatedPayload, SkillSwitchedPayload, TaskStatusChangedPayload, ToolUnlockedPayload, WelcomePayload,
 };
 
 /// 将 AppEvent 转换为 GatewayMessage。
@@ -104,20 +105,30 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             require_auth,
             setup_required,
         }),
-        AppEvent::TaskCreated { id, subject } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "tool_log".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Task created: {} ({})", subject, id)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
-        AppEvent::TaskStatusChanged { id, status, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "tool_log".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Task {} status: {}", id, status)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
+        AppEvent::TaskCreated { id, subject } => {
+            // 结构化任务创建事件 (Plan 4)
+            let payload = TaskStatusChangedPayload {
+                task_id: id.clone(),
+                task_subject: subject.clone(),
+                status: "pending".to_string(),
+                is_main_task: true,
+                ..Default::default()
+            };
+            MessageEnvelope::TaskStatusChanged(payload)
+        }
+        AppEvent::TaskStatusChanged {
+            id, status, subject, ..
+        } => {
+            // 结构化任务状态变化事件 (Plan 4)
+            let payload = TaskStatusChangedPayload {
+                task_id: id,
+                task_subject: subject,
+                status,
+                is_main_task: false,
+                ..Default::default()
+            };
+            MessageEnvelope::TaskStatusChanged(payload)
+        }
         AppEvent::BackgroundTaskComplete { name, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
             kind: "tool_log".to_string(),
             session_id: Some(session_id.to_string()),
@@ -132,50 +143,75 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             stream: Some("stdout".to_string()),
             ..Default::default()
         }),
-        AppEvent::SkillActivated { skill_name, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "skill_activated".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Skill activated: {}", skill_name)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
-        AppEvent::SkillSwitched {
-            from_skill, to_skill, ..
-        } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "skill_switched".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Skill switched: {} -> {}", from_skill, to_skill)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
-        AppEvent::SkillExited { skill_id, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "skill_exited".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Skill exited: {}", skill_id)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
-        AppEvent::SkillRouteEvaluated { confidence, reasoning } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "skill_route_evaluated".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Skill route evaluated: {:.2} - {}", confidence, reasoning)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
-        AppEvent::ToolUnlocked { tool_name } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "tool_unlocked".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Tool unlocked: {}", tool_name)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
-        AppEvent::SkillInvocation { skill_name, .. } => MessageEnvelope::ChatProgress(ProgressEvent {
-            kind: "skill_invocation".to_string(),
-            session_id: Some(session_id.to_string()),
-            log: Some(format!("Skill invoked: {}", skill_name)),
-            stream: Some("stdout".to_string()),
-            ..Default::default()
-        }),
+        AppEvent::SkillActivated {
+            skill_id,
+            skill_name,
+            sticky,
+        } => {
+            // 结构化 Skill 激活事件 (Plan 4)
+            let payload = SkillActivatedPayload {
+                session_id: Some(session_id.to_string()),
+                skill_id,
+                skill_name,
+                sticky,
+                reason: "manual".to_string(),
+            };
+            MessageEnvelope::SkillActivated(payload)
+        }
+        AppEvent::SkillSwitched { from_skill, to_skill } => {
+            // 结构化 Skill 切换事件 (Plan 4)
+            let payload = SkillSwitchedPayload {
+                session_id: Some(session_id.to_string()),
+                from_skill,
+                to_skill,
+                reason: "manual".to_string(),
+            };
+            MessageEnvelope::SkillSwitched(payload)
+        }
+        AppEvent::SkillExited { skill_id } => {
+            // 结构化 Skill 退出事件 (Plan 4)
+            let payload = SkillExitedPayload {
+                session_id: Some(session_id.to_string()),
+                skill_id,
+                skill_name: String::new(),
+                reason: "manual".to_string(),
+            };
+            MessageEnvelope::SkillExited(payload)
+        }
+        AppEvent::SkillRouteEvaluated { confidence, reasoning } => {
+            // 结构化 Skill 路由评估事件 (Plan 4)
+            let payload = SkillRouteEvaluatedPayload {
+                session_id: Some(session_id.to_string()),
+                skill_id: "unknown".to_string(),
+                confidence,
+                decision: "route".to_string(),
+                reasoning,
+            };
+            MessageEnvelope::SkillRouteEvaluated(payload)
+        }
+        AppEvent::ToolUnlocked { tool_name } => {
+            // 结构化 Tool 解锁事件 (Plan 4)
+            let payload = ToolUnlockedPayload {
+                session_id: Some(session_id.to_string()),
+                tool_name,
+                source: "tool_search".to_string(),
+            };
+            MessageEnvelope::ToolUnlocked(payload)
+        }
+        AppEvent::SkillInvocation {
+            skill_id,
+            skill_name,
+            level,
+        } => {
+            // 结构化 Skill 调用事件 (Plan 4)
+            let payload = SkillInvocationPayload {
+                session_id: Some(session_id.to_string()),
+                skill_id,
+                skill_name,
+                level: format!("{:?}", level),
+            };
+            MessageEnvelope::SkillInvocation(payload)
+        }
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

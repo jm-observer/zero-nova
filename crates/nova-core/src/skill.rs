@@ -92,6 +92,65 @@ pub enum PolicySource {
     UserOverride,
 }
 
+/// 工具状态枚举，描述工具在特定 Policy 下的启用状态。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ToolStatus {
+    /// 始终可用的工具
+    AlwaysEnabled,
+    /// 通过 ToolSearch 延迟加载的工具
+    Deferred,
+    /// 当前不可用的工具
+    Disabled,
+}
+
+impl CapabilityPolicy {
+    /// 获取当前 Policy 下所有工具的完整状态映射。
+    pub fn get_enabled_tools(&self, all_tools: &[String]) -> Vec<(String, ToolStatus)> {
+        let mut result = Vec::with_capacity(all_tools.len());
+
+        for tool_name in all_tools {
+            let status = if self.always_enabled_tools.contains(tool_name) {
+                ToolStatus::AlwaysEnabled
+            } else if self.deferred_tools.contains(tool_name) {
+                ToolStatus::Deferred
+            } else {
+                ToolStatus::Disabled
+            };
+            result.push((tool_name.clone(), status));
+        }
+
+        // 添加能力开关状态
+        if self.tool_search_enabled {
+            result.push(("ToolSearch".to_string(), ToolStatus::Deferred));
+        }
+        if self.skill_tool_enabled {
+            result.push(("Skill".to_string(), ToolStatus::Deferred));
+        }
+        if self.task_tools_enabled {
+            for task_tool in &["TaskCreate", "TaskList", "TaskUpdate"] {
+                if !result.iter().any(|(name, _)| name == task_tool) {
+                    result.push((task_tool.to_string(), ToolStatus::Deferred));
+                }
+            }
+        }
+        if self.agent_tools_enabled && !result.iter().any(|(name, _)| name == "Agent") {
+            result.push(("Agent".to_string(), ToolStatus::Deferred));
+        }
+
+        result
+    }
+
+    /// 检查指定工具是否启用（无论状态类型）。
+    pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
+        self.always_enabled_tools.iter().any(|t| t == tool_name) || self.deferred_tools.iter().any(|t| t == tool_name)
+    }
+
+    /// 获取已启用工具的数量。
+    pub fn enabled_tool_count(&self) -> usize {
+        self.always_enabled_tools.len() + self.deferred_tools.len()
+    }
+}
+
 /// CapabilityPolicy 描述当前轮次可见能力。
 ///
 /// 基于 v1_messages 会话分析，增加了 cache 预算约束。

@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let skill_prompt = skill_registry_raw.generate_system_prompt();
+    let skill_prompt = skill_registry_raw.generate_contextual_prompt(None);
     let skill_registry = std::sync::Arc::new(skill_registry_raw);
 
     // 2. Initialize TaskStore
@@ -188,6 +188,7 @@ async fn main() -> Result<()> {
         model_config: config.llm.model_config.clone(),
         tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
         max_tokens: config.gateway.max_tokens,
+        use_turn_context: config.gateway.use_turn_context,
     };
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);

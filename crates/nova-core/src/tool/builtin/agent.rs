@@ -129,6 +129,7 @@ impl Tool for AgentTool {
             model_config,
             tool_timeout: std::time::Duration::from_secs(self.config.gateway.subagent_timeout_secs),
             max_tokens: self.config.gateway.max_tokens,
+            use_turn_context: self.config.gateway.use_turn_context,
         };
 
         let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);

@@ -67,6 +67,19 @@ impl Session {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         ct.take()
     }
+
+    pub fn get_active_agent(&self) -> String {
+        self.control
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .active_agent
+            .clone()
+    }
+
+    pub fn set_active_agent(&self, agent_id: &str) {
+        let mut control = self.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        control.active_agent = agent_id.to_string();
+    }
 }
 
 #[derive(Debug, Clone)]

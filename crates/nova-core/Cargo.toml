@@ -22,6 +22,8 @@ toml = { workspace = true }
 sysinfo = { workspace = true }
 which = { workspace = true }
 chrono = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
 
 [features]
 default = []

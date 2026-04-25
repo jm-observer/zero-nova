@@ -41,6 +41,8 @@ rustyline = { version = "15" }
 chrono = { version = "0.4", features = ["serde"] }
 colored = { version = "3" }
 which = "8.0.2"
+once_cell = "1"
+regex = "1"
 tempfile = "3"
 
 # Internal crates

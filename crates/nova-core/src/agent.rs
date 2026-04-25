@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use crate::prompt::{ActiveSkillState, TurnContext};
+use crate::prompt::{ActiveSkillState, HistoryTrimmer, TrimmerConfig, TurnContext};
 use crate::skill::CapabilityPolicy;
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,10 +27,12 @@ pub struct TurnResult {
 pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
-    config: AgentConfig,
+    pub config: AgentConfig,
     pub task_store: Option<std::sync::Arc<tokio::sync::Mutex<crate::tool::builtin::task::TaskStore>>>,
     pub skill_registry: Option<std::sync::Arc<crate::skill::SkillRegistry>>,
     pub read_files: std::sync::Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    /// 侧信道注入器（Phase 3 新增）
+    pub side_channel_injector: Option<crate::prompt::SideChannelInjector>,
 }
 
 /// Configuration for the zero-nova agent.
@@ -40,6 +42,8 @@ pub struct AgentConfig {
     pub tool_timeout: Duration,
     /// 最大 token 限制
     pub max_tokens: usize,
+    /// Phase 3：是否启用新的 prepare_turn + run_turn_with_context 路径
+    pub use_turn_context: bool,
 }
 
 impl<C: LlmClient> AgentRuntime<C> {
@@ -52,6 +56,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             task_store: None,
             skill_registry: None,
             read_files: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            side_channel_injector: None,
         }
     }
 
@@ -68,6 +73,92 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// Returns a reference to the tool registry.
     pub fn tools(&self) -> &ToolRegistry {
         &self.tools
+    }
+
+    /// 设置侧信道注入器。
+    pub fn set_side_channel_injector(&mut self, injector: crate::prompt::SideChannelInjector) {
+        self.side_channel_injector = Some(injector);
+    }
+
+    /// 执行一组工具调用并返回格式化结果。
+    ///
+    /// 这是 `run_turn()` 和 `run_turn_with_context()` 共享的工具执行逻辑。
+    async fn execute_tool_calls(
+        &self,
+        parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
+        event_tx: &mpsc::Sender<crate::event::AgentEvent>,
+        cancellation_token: &Option<CancellationToken>,
+    ) -> Result<Vec<ContentBlock>> {
+        let mut tool_results_fut = FuturesUnordered::new();
+
+        for (call_idx, (id, name, input_val)) in parsed_tool_calls.into_iter().enumerate() {
+            let tool_registry = &self.tools;
+            let tx = event_tx.clone();
+            let tool_timeout_duration = self.config.tool_timeout;
+
+            tool_results_fut.push(async move {
+                let _ = tx
+                    .send(crate::event::AgentEvent::ToolStart {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input_val.clone(),
+                    })
+                    .await;
+
+                let result = timeout(
+                    tool_timeout_duration,
+                    tool_registry.execute(
+                        &name,
+                        input_val,
+                        Some(crate::tool::ToolContext {
+                            event_tx: tx.clone(),
+                            tool_use_id: id.clone(),
+                            task_store: self.task_store.clone(),
+                            skill_registry: self.skill_registry.clone(),
+                            read_files: self.read_files.clone(),
+                        }),
+                    ),
+                )
+                .await;
+
+                let (content, is_error) = match result {
+                    Ok(Ok(out)) => (out.content, out.is_error),
+                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true),
+                    Err(_) => ("Tool execution timed out".to_string(), true),
+                };
+
+                let _ = tx
+                    .send(crate::event::AgentEvent::ToolEnd {
+                        id: id.clone(),
+                        name: name.clone(),
+                        output: content.clone(),
+                        is_error,
+                    })
+                    .await;
+
+                (
+                    call_idx,
+                    ContentBlock::ToolResult {
+                        tool_use_id: id,
+                        output: content,
+                        is_error,
+                    },
+                )
+            });
+        }
+
+        let mut indexed_results = Vec::new();
+        while let Some(res) = tool_results_fut.next().await {
+            if let Some(token) = cancellation_token {
+                if token.is_cancelled() {
+                    break;
+                }
+            }
+            indexed_results.push(res);
+        }
+        indexed_results.sort_by_key(|&(idx, _)| idx);
+
+        Ok(indexed_results.into_iter().map(|(_, b)| b).collect())
     }
 
     /// Executes a single turn of the agent, handling LLM streaming and tool execution.
@@ -218,7 +309,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
-            // 3.4 MaxTokens 自动续写
+            // 3.4 MaxTokens 自动续写（run_turn 路径）
             if last_stop_reason == Some(crate::provider::types::StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
                     true
@@ -247,80 +338,10 @@ impl<C: LlmClient> AgentRuntime<C> {
                 break;
             }
 
-            // 3.6 Tool 执行超时 & 3.1 Tool 结果顺序保持
-            let mut tool_results_fut = FuturesUnordered::new();
-
-            for (call_idx, (id, name, input_val)) in parsed_tool_calls.into_iter().enumerate() {
-                let tool_registry = &self.tools;
-                let tx = event_tx.clone();
-                let tool_timeout_duration = self.config.tool_timeout;
-
-                tool_results_fut.push(async move {
-                    let _ = tx
-                        .send(crate::event::AgentEvent::ToolStart {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: input_val.clone(),
-                        })
-                        .await;
-
-                    let result = timeout(
-                        tool_timeout_duration,
-                        tool_registry.execute(
-                            &name,
-                            input_val,
-                            Some(crate::tool::ToolContext {
-                                event_tx: tx.clone(),
-                                tool_use_id: id.clone(),
-                                task_store: self.task_store.clone(),
-                                skill_registry: self.skill_registry.clone(),
-                                read_files: self.read_files.clone(),
-                            }),
-                        ),
-                    )
-                    .await;
-
-                    let (content, is_error) = match result {
-                        Ok(Ok(out)) => (out.content, out.is_error),
-                        Ok(Err(e)) => (format!("Internal execution error: {}", e), true),
-                        Err(_) => ("Tool execution timed out".to_string(), true),
-                    };
-
-                    let _ = tx
-                        .send(crate::event::AgentEvent::ToolEnd {
-                            id: id.clone(),
-                            name: name.clone(),
-                            output: content.clone(),
-                            is_error,
-                        })
-                        .await;
-
-                    (
-                        call_idx,
-                        ContentBlock::ToolResult {
-                            tool_use_id: id,
-                            output: content,
-                            is_error,
-                        },
-                    )
-                });
-            }
-
-            let mut indexed_results = Vec::new();
-            while let Some(res) = tool_results_fut.next().await {
-                if let Some(token) = &cancellation_token {
-                    if token.is_cancelled() {
-                        return Ok(TurnResult {
-                            messages: turn_messages,
-                            usage: cumulative_usage,
-                        });
-                    }
-                }
-                indexed_results.push(res);
-            }
-            indexed_results.sort_by_key(|&(idx, _)| idx);
-
-            let tool_result_blocks: Vec<ContentBlock> = indexed_results.into_iter().map(|(_, b)| b).collect();
+            // 工具执行 — 使用共享方法
+            let tool_result_blocks = self
+                .execute_tool_calls(parsed_tool_calls, &event_tx, &cancellation_token)
+                .await?;
 
             let tool_res_msg = Message {
                 role: Role::User,
@@ -356,7 +377,15 @@ impl<C: LlmClient> AgentRuntime<C> {
 
     /// 准备 turn 上下文：决定 active skill、生成 system prompt sections、
     /// 过滤工具定义、裁剪历史、构造 `TurnContext`。
-    pub fn prepare_turn(&self, input: &str, current_history: Arc<Vec<Message>>) -> Result<TurnContext> {
+    ///
+    /// `prompt_config` 由外部（bootstrap/CLI）统一创建，携带 agent prompt 文件和
+    /// 模板变量等配置。
+    pub fn prepare_turn(
+        &self,
+        input: &str,
+        current_history: Arc<Vec<Message>>,
+        prompt_config: &crate::prompt::PromptConfig,
+    ) -> Result<TurnContext> {
         // 1. 决定 active skill
         let active_skill = self.decide_active_skill(input, &current_history)?;
 
@@ -371,8 +400,12 @@ impl<C: LlmClient> AgentRuntime<C> {
             CapabilityPolicy::default()
         };
 
-        // 3. 生成 system prompt sections
-        let system_prompt = self.build_system_prompt(&capability_policy, &active_skill);
+        // 3. 构建 system prompt — 通过统一入口
+        let mut config = prompt_config.clone();
+        if let Some(ref skill) = active_skill {
+            config.active_skill = Some(skill.skill_id.clone());
+        }
+        let system_prompt = self.build_system_prompt(&config);
 
         // 4. 过滤工具定义
         let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill);
@@ -397,11 +430,14 @@ impl<C: LlmClient> AgentRuntime<C> {
     ///
     /// 接收已经通过 `prepare_turn()` 准备好的上下文，
     /// CLI / app / gateway 共用同一套准备逻辑。
+    ///
+    /// Phase 3 重写：补全工具执行逻辑和 usage 统计。
     pub async fn run_turn_with_context(
         &self,
         ctx: TurnContext,
         _message: Message,
         event_tx: mpsc::Sender<crate::event::AgentEvent>,
+        cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
         let mut all_messages = Arc::try_unwrap(ctx.history)
             .unwrap_or_else(|h| (*h).clone())
@@ -410,11 +446,28 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         // 使用 TurnContext 提供的工具定义流
         let mut turn_messages = Vec::new();
-        let cumulative_usage = crate::provider::types::Usage::default();
-        let mut _completed_naturally = false;
+        let mut cumulative_usage = crate::provider::types::Usage::default();
+        let mut completed_naturally = false;
 
-        for _iteration in 0..ctx.iteration_budget {
+        for iteration in 0..ctx.iteration_budget {
+            // 检查取消
+            if let Some(ref token) = cancellation_token {
+                if token.is_cancelled() {
+                    return Ok(TurnResult {
+                        messages: turn_messages,
+                        usage: cumulative_usage,
+                    });
+                }
+            }
+
             // LLM 流 — 使用 TurnContext 中的 tool_definitions
+            let _ = event_tx
+                .send(crate::event::AgentEvent::Iteration {
+                    current: iteration + 1,
+                    total: ctx.iteration_budget,
+                })
+                .await;
+
             let mut receiver = self
                 .client
                 .stream(&all_messages, &ctx.tool_definitions[..], &self.config.model_config)
@@ -423,13 +476,23 @@ impl<C: LlmClient> AgentRuntime<C> {
             let mut current_text = String::new();
             let mut current_thinking = String::new();
             let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-            let mut _iter_usage = crate::provider::types::Usage::default();
+            let mut iter_usage = crate::provider::types::Usage::default();
+            let mut last_stop_reason: Option<crate::provider::types::StopReason> = None;
 
             while let Some(event) = receiver
                 .next_event()
                 .await
                 .inspect_err(|e| log::error!("Error receiving event: {}", e))?
             {
+                if let Some(ref token) = cancellation_token {
+                    if token.is_cancelled() {
+                        return Ok(TurnResult {
+                            messages: turn_messages,
+                            usage: cumulative_usage,
+                        });
+                    }
+                }
+
                 match event {
                     ProviderStreamEvent::ThinkingDelta(delta) => {
                         current_thinking.push_str(&delta);
@@ -447,12 +510,19 @@ impl<C: LlmClient> AgentRuntime<C> {
                             last.2.push_str(&delta);
                         }
                     }
-                    ProviderStreamEvent::MessageComplete { usage, stop_reason: _ } => {
-                        _iter_usage = usage;
+                    ProviderStreamEvent::MessageComplete { usage, stop_reason } => {
+                        iter_usage = usage;
+                        last_stop_reason = stop_reason;
                     }
                     _ => {}
                 }
             }
+
+            // 累计 usage（run_turn_with_context 的关键修复）
+            cumulative_usage.input_tokens += iter_usage.input_tokens;
+            cumulative_usage.output_tokens += iter_usage.output_tokens;
+            cumulative_usage.cache_creation_input_tokens += iter_usage.cache_creation_input_tokens;
+            cumulative_usage.cache_read_input_tokens += iter_usage.cache_read_input_tokens;
 
             // 构建 assistant message blocks
             let mut current_blocks = Vec::new();
@@ -465,11 +535,26 @@ impl<C: LlmClient> AgentRuntime<C> {
                 current_blocks.push(ContentBlock::Text { text: current_text });
             }
 
-            for (id, name, input_json) in &tool_calls {
+            // Parse tool call JSON once
+            let parsed_tool_calls: Vec<(String, String, serde_json::Value)> = tool_calls
+                .into_iter()
+                .map(|(id, name, input_json)| {
+                    let input_val: serde_json::Value = match serde_json::from_str(&input_json) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
+                            serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
+                        }
+                    };
+                    (id, name, input_val)
+                })
+                .collect();
+
+            for (id, name, input_val) in &parsed_tool_calls {
                 current_blocks.push(ContentBlock::ToolUse {
                     id: id.clone(),
                     name: name.clone(),
-                    input: serde_json::from_str(input_json).unwrap_or(serde_json::json!({})),
+                    input: input_val.clone(),
                 });
             }
 
@@ -480,10 +565,50 @@ impl<C: LlmClient> AgentRuntime<C> {
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
-            if tool_calls.is_empty() {
-                _completed_naturally = true;
+            // MaxTokens 自动续写
+            if last_stop_reason == Some(crate::provider::types::StopReason::MaxTokens) {
+                let is_truncated = if parsed_tool_calls.is_empty() {
+                    true
+                } else {
+                    let (_, _, last_val) = parsed_tool_calls.last().unwrap();
+                    last_val.get("__error").is_some()
+                };
+
+                if is_truncated {
+                    all_messages.push(Message {
+                        role: Role::User,
+                        content: vec![ContentBlock::Text {
+                            text: "Please continue your last tool call or response.".to_string(),
+                        }],
+                    });
+                    continue;
+                }
+            }
+
+            if parsed_tool_calls.is_empty() {
+                completed_naturally = true;
                 break;
             }
+
+            // 工具执行 — 使用共享方法
+            let tool_result_blocks = self
+                .execute_tool_calls(parsed_tool_calls, &event_tx, &cancellation_token)
+                .await?;
+
+            let tool_res_msg = Message {
+                role: Role::User,
+                content: tool_result_blocks,
+            };
+            all_messages.push(tool_res_msg.clone());
+            turn_messages.push(tool_res_msg);
+        }
+
+        if !completed_naturally {
+            let _ = event_tx
+                .send(crate::event::AgentEvent::IterationLimitReached {
+                    iterations: ctx.iteration_budget,
+                })
+                .await;
         }
 
         Ok(TurnResult {
@@ -510,39 +635,16 @@ impl<C: LlmClient> AgentRuntime<C> {
         Ok(None)
     }
 
-    /// 构建系统提示词（基于已组装的 `SystemPromptBuilder` 和 active skill）。
-    fn build_system_prompt(
-        &self,
-        _capability_policy: &CapabilityPolicy,
-        active_skill: &Option<ActiveSkillState>,
-    ) -> String {
-        let mut builder = crate::prompt::SystemPromptBuilder::new();
+    /// 构建系统提示词。
+    ///
+    /// 接收 PromptConfig 参数，通过 SystemPromptBuilder::from_config 统一构建。
+    fn build_system_prompt(&self, config: &crate::prompt::PromptConfig) -> String {
+        let empty: crate::skill::SkillRegistry = crate::skill::SkillRegistry::new();
+        let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
 
-        // Base + Agent sections
-        builder = builder
-            .base_section("Zero-Nova Agent")
-            .agent_section("AI Assistant with tool support");
-
-        // Environment
-        builder = builder.environment_agent();
-
-        // 如果有 active skill，添加 skill section
-        if let Some(ref skill) = active_skill {
-            if let Some(ref sr) = self.skill_registry {
-                if let Some(instructions) = sr.get_skill_prompt(&skill.skill_id) {
-                    builder = builder.skill_section(&instructions);
-                }
-            }
-        }
-
-        // Tools 和 Workflow
-        builder = builder
-            .tool_guidance_section("")
-            .workflow_section("")
+        crate::prompt::SystemPromptBuilder::from_config(config, skills)
             .with_tools(&self.tools)
-            .history_section("");
-
-        builder.build()
+            .build()
     }
 
     /// 过滤工具定义（基于 `CapabilityPolicy` 和 `active skill`）。
@@ -573,12 +675,46 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     /// 裁剪历史（如果 active skill 切换了则裁剪）。
+    ///
+    /// Phase 3：接入 `HistoryTrimmer` 进行 token 预算感知的裁剪。
     fn trim_history(
         &self,
         current_history: &Arc<Vec<Message>>,
-        _active_skill: &Option<ActiveSkillState>,
+        active_skill: &Option<ActiveSkillState>,
     ) -> Result<Arc<Vec<Message>>> {
-        // 阶段一：不进行历史切片，返回完整历史
-        Ok(current_history.clone())
+        // 如果 active skill 切换了，总是重新裁剪
+        let should_trim = active_skill.is_some();
+        if !should_trim {
+            return Ok(current_history.clone());
+        }
+
+        // 构建 trimmer 配置（从 agent 配置推断）
+        let trimmer_config = TrimmerConfig {
+            context_window: self.config.max_tokens.saturating_mul(16), // 粗略估算
+            output_reserve: 4096,
+            min_recent_messages: 10,
+            enable_summary: false,
+        };
+
+        let trimmer = HistoryTrimmer::new(trimmer_config);
+
+        // 使用当前系统 prompt（可以通过 builder 获取）进行裁剪
+        // 这里使用一个简化的路径：先构建系统 prompt
+        let mut prompt_config =
+            crate::prompt::PromptConfig::new("agent".to_string(), String::new(), std::path::PathBuf::from("."));
+        if let Some(skill) = active_skill {
+            prompt_config = prompt_config.with_active_skill(skill.skill_id.clone());
+        }
+        let system_prompt = self.build_system_prompt(&prompt_config);
+        let result = trimmer.trim(current_history, &system_prompt);
+
+        if result.was_trimmed {
+            log::info!(
+                "History trimmed: removed {} messages to fit context window",
+                result.removed_count
+            );
+        }
+
+        Ok(Arc::new(result.messages))
     }
 }

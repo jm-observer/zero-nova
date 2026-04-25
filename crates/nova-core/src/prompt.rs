@@ -2,6 +2,10 @@ use crate::message::Message;
 use crate::provider::types::ToolDefinition;
 use crate::skill::CapabilityPolicy;
 use crate::tool::ToolRegistry;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -9,16 +13,309 @@ use std::time::Instant;
 //  Section-based prompt building (Plan 1 升级)
 // ---------------------------------------------------------------------------
 
+/// 项目上下文文件名（按优先级排列）
+const PROJECT_CONTEXT_FILES: &[&str] = &["PROJECT.md", "NOVA.md"];
+
+/// 项目上下文最大字符数（约 4000 token）
+const MAX_PROJECT_CONTEXT_CHARS: usize = 16000;
+
+/// 内置行为约束文本。
+///
+/// 与 bootstrap.rs 中原始硬编码字符串语义一致，Phase 1 不做内容变更。
+pub const BEHAVIOR_GUARDS: &str = r#"
+## CRITICAL: Action Consistency
+- You are a physical entity with real-world capabilities.
+- If you state that you are going to perform an action (e.g., "running a command", "writing a file", "searching the web"), you MUST generate the corresponding tool_use block in the SAME response.
+- NEVER claim you are doing something "in the background" or "internally" without an actual tool call.
+- Textual confirmation of an action is only valid AFTER the tool has been invoked.
+"#;
+
+/// Prompt 构建所需的完整配置。
+///
+/// 由 bootstrap / CLI / ConversationService 统一创建。
+#[derive(Debug, Clone)]
+pub struct PromptConfig {
+    /// Agent 标识（用于日志和调试）
+    pub agent_id: String,
+    /// 从文件加载的 agent prompt 内容（已读取为字符串）
+    pub agent_prompt: String,
+    /// 工作区路径（用于加载项目上下文文件等）
+    pub workspace_path: PathBuf,
+    /// 当前活跃的 skill id（如果有）
+    pub active_skill: Option<String>,
+    /// 模板变量键值对（用于替换 {{key}} 占位符）
+    pub template_vars: HashMap<String, String>,
+    /// 运行时环境快照
+    pub environment: Option<EnvironmentSnapshot>,
+}
+
+impl PromptConfig {
+    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, workspace_path: PathBuf) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            agent_prompt: agent_prompt.into(),
+            workspace_path,
+            active_skill: None,
+            template_vars: HashMap::new(),
+            environment: None,
+        }
+    }
+
+    pub fn with_active_skill(mut self, skill_id: impl Into<String>) -> Self {
+        self.active_skill = Some(skill_id.into());
+        self
+    }
+
+    pub fn with_template_var(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.template_vars.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_template_vars(mut self, vars: HashMap<String, String>) -> Self {
+        self.template_vars = vars;
+        self
+    }
+
+    pub fn with_environment(mut self, env: EnvironmentSnapshot) -> Self {
+        self.environment = Some(env);
+        self
+    }
+}
+
+/// 模板变量正则匹配
+static TEMPLATE_VAR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap());
+
+/// 预定义模板变量名称。
+pub mod template_vars {
+    /// 当前 workflow 阶段
+    pub const WORKFLOW_STAGE: &str = "workflow_stage";
+    /// 当前挂起交互
+    pub const PENDING_INTERACTION: &str = "pending_interaction";
+    /// 当前话题
+    pub const TOPIC: &str = "topic";
+    /// 约束条件
+    pub const CONSTRAINTS: &str = "constraints";
+    /// 候选方案列表
+    pub const CANDIDATES: &str = "candidates";
+    /// 已选方案
+    pub const SELECTED_CANDIDATE: &str = "selected_candidate";
+    /// 当前活跃 agent
+    pub const ACTIVE_AGENT: &str = "active_agent";
+}
+
+/// 简单的 `{{key}}` 模板变量替换。
+pub struct TemplateContext;
+
+impl TemplateContext {
+    /// 替换模板中的 `{{key}}` 占位符。
+    ///
+    /// - 已匹配的变量替换为对应值
+    /// - 未匹配的占位符替换为空字符串（清理模式）
+    pub fn render(template: &str, vars: &HashMap<String, String>) -> String {
+        TEMPLATE_VAR_RE
+            .replace_all(template, |caps: &regex::Captures| {
+                let key = &caps[1];
+                vars.get(key).cloned().unwrap_or_default()
+            })
+            .to_string()
+    }
+
+    /// 替换模板中的 `{{key}}` 占位符（保留模式）。
+    ///
+    /// 已匹配的变量替换为对应值，未匹配的保持原样。
+    pub fn render_partial(template: &str, vars: &HashMap<String, String>) -> String {
+        TEMPLATE_VAR_RE
+            .replace_all(template, |caps: &regex::Captures| {
+                let key = &caps[1];
+                match vars.get(key) {
+                    Some(value) => value.clone(),
+                    None => caps[0].to_string(),
+                }
+            })
+            .to_string()
+    }
+
+    /// 提取模板中所有占位符的名称。
+    pub fn extract_vars(template: &str) -> Vec<String> {
+        TEMPLATE_VAR_RE
+            .captures_iter(template)
+            .map(|cap| cap[1].to_string())
+            .collect()
+    }
+}
+
+/// 运行时环境快照，在会话创建时采集一次。
+#[derive(Debug, Clone, Default)]
+pub struct EnvironmentSnapshot {
+    /// 当前工作目录
+    pub working_directory: String,
+    /// 操作系统平台
+    pub platform: String,
+    /// Shell 类型
+    pub shell: String,
+    /// Git 当前分支（非 git 目录时为 None）
+    pub git_branch: Option<String>,
+    /// Git 状态摘要
+    pub git_status_summary: Option<String>,
+    /// 最近提交摘要（oneline 格式，最多 5 条）
+    pub recent_commits: Option<String>,
+    /// 当前使用的模型 ID
+    pub model_id: Option<String>,
+    /// 当前日期
+    pub current_date: String,
+}
+
+impl EnvironmentSnapshot {
+    /// 采集当前运行环境信息。
+    ///
+    /// git 命令失败时（非 git 目录或无 git 可执行文件）静默跳过，
+    /// 确保在任何环境下都能正常工作。
+    pub async fn collect() -> Self {
+        let working_directory = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let platform = std::env::consts::OS.to_string();
+
+        let shell = std::env::var("SHELL")
+            .or_else(|_| std::env::var("COMSPEC"))
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let git_branch = Self::run_git(&["rev-parse", "--abbrev-ref", "HEAD"]).await;
+
+        let git_status_summary = Self::run_git(&["status", "--short"]).await.map(|s| {
+            let count = s.lines().filter(|l| !l.is_empty()).count();
+            if count == 0 {
+                "clean".to_string()
+            } else {
+                format!("{} changed files", count)
+            }
+        });
+
+        let recent_commits = Self::run_git(&["log", "--oneline", "-5"]).await;
+
+        let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+        Self {
+            working_directory,
+            platform,
+            shell,
+            git_branch,
+            git_status_summary,
+            recent_commits,
+            model_id: None,
+            current_date,
+        }
+    }
+
+    /// 运行 git 命令并返回 stdout 输出。
+    /// 失败时返回 None（不报错）。
+    async fn run_git(args: &[&str]) -> Option<String> {
+        let result = tokio::process::Command::new("git")
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await;
+
+        match result {
+            Ok(output) if output.status.success() => {
+                let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(text)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// 生成 prompt section 文本。
+    pub fn to_prompt_text(&self) -> String {
+        let mut lines = vec![
+            format!("Working directory: {}", self.working_directory),
+            format!("Platform: {}", self.platform),
+            format!("Shell: {}", self.shell),
+            format!("Date: {}", self.current_date),
+        ];
+
+        if let Some(branch) = &self.git_branch {
+            lines.push(format!("Git branch: {}", branch));
+        }
+        if let Some(status) = &self.git_status_summary {
+            lines.push(format!("Git status: {}", status));
+        }
+        if let Some(commits) = &self.recent_commits {
+            lines.push(String::new()); // 空行分隔
+            lines.push("Recent commits:".to_string());
+            lines.push(commits.clone());
+        }
+        if let Some(model) = &self.model_id {
+            lines.push(format!("Model: {}", model));
+        }
+
+        lines.join("\n")
+    }
+}
+
+/// 从工作区加载项目上下文文件。
+///
+/// 按优先级查找 PROJECT.md → NOVA.md，找到第一个非空文件即返回。
+/// 所有文件都不存在或为空时返回 None。
+pub fn load_project_context(workspace: &Path) -> Option<String> {
+    for filename in PROJECT_CONTEXT_FILES {
+        let path = workspace.join(filename);
+        match std::fs::read_to_string(&path) {
+            Ok(content) if !content.trim().is_empty() => {
+                log::info!("Loaded project context from {:?} ({} chars)", path, content.len());
+                if content.len() > MAX_PROJECT_CONTEXT_CHARS {
+                    let truncated = &content[..MAX_PROJECT_CONTEXT_CHARS];
+                    let last_newline = truncated.rfind('\n').unwrap_or(MAX_PROJECT_CONTEXT_CHARS);
+                    let mut result = truncated[..last_newline].to_string();
+                    result.push_str("\n\n[... truncated due to size limit ...]");
+                    return Some(result);
+                }
+                return Some(content);
+            }
+            Ok(_) => {
+                log::debug!("Project context file {:?} is empty, skipping", path);
+            }
+            Err(_) => {}
+        }
+    }
+    None
+}
+
 /// 系统提示词具名 section 名称。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SectionName {
     Base,
     Agent,
     Skill,
+    ProjectContext,
+    BehaviorGuards,
     Environment,
     Workflow,
     ToolGuidance,
     History,
+}
+
+impl SectionName {
+    /// 返回该 section 在最终 prompt 中的标题。
+    pub fn heading(&self) -> &str {
+        match self {
+            Self::Base => "Identity & Role",
+            Self::Agent => "Agent Configuration",
+            Self::Skill => "Available Skills",
+            Self::ProjectContext => "Project Context",
+            Self::BehaviorGuards => "Behavior Constraints",
+            Self::Environment => "Environment",
+            Self::Workflow => "Workflow State",
+            Self::ToolGuidance => "Tool Capabilities",
+            Self::History => "Conversation Summary",
+        }
+    }
 }
 
 /// Section 注入优先级。
@@ -187,6 +484,25 @@ impl SystemPromptBuilder {
         self
     }
 
+    /// 添加行为约束 section。
+    pub fn behavior_guards_section(self) -> Self {
+        self.add_section(
+            SectionName::BehaviorGuards,
+            BEHAVIOR_GUARDS.trim(),
+            PromptPriority::High,
+        )
+    }
+
+    /// 添加项目上下文 section（Phase 2 使用）。
+    pub fn project_context_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::ProjectContext, content, PromptPriority::Medium)
+    }
+
+    /// 添加环境快照 section。
+    pub fn environment_snapshot(self, env: &EnvironmentSnapshot) -> Self {
+        self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
+    }
+
     /// 追加工具描述到现有的 ToolGuidance section。
     pub fn with_tools(mut self, registry: &ToolRegistry) -> Self {
         let mut tool_desc = String::new();
@@ -220,22 +536,55 @@ impl SystemPromptBuilder {
         self
     }
 
-    /// 构建最终 prompt 字符串，按 section 顺序拼接，跳过空值和低优先级的可选 section。
+    /// 从配置创建完整的 system prompt builder（Phase 2 版本）。
+    ///
+    /// 构建的 section 顺序：
+    ///   Base (agent prompt) → BehaviorGuards → Skill → ProjectContext → Environment
+    pub fn from_config(config: &PromptConfig, skills: &crate::skill::SkillRegistry) -> Self {
+        let mut builder = Self::new();
+
+        // L0: 平台身份（agent prompt 文件内容，经模板替换）
+        let rendered_prompt = if config.template_vars.is_empty() {
+            config.agent_prompt.clone()
+        } else {
+            TemplateContext::render(&config.agent_prompt, &config.template_vars)
+        };
+        if !rendered_prompt.is_empty() {
+            builder = builder.base_section(&rendered_prompt);
+        }
+
+        // L1: 行为约束
+        builder = builder.behavior_guards_section();
+
+        // L2: Skills（按需注入）
+        let skill_prompt = skills.generate_contextual_prompt(config.active_skill.as_deref());
+        if !skill_prompt.is_empty() {
+            builder = builder.skill_section(&skill_prompt);
+        }
+
+        // L3: 项目上下文
+        if let Some(content) = load_project_context(&config.workspace_path) {
+            builder = builder.project_context_section(&content);
+        }
+
+        // L5: 环境快照
+        if let Some(env) = &config.environment {
+            builder = builder.environment_snapshot(env);
+        }
+
+        builder
+    }
+
+    /// 构建最终 prompt 字符串，按 section 顺序拼接，跳过空值 section。
+    ///
+    /// 每个 section 输出为 `## heading\n\ncontent` 格式，用 `\n\n---\n\n` 分隔。
     pub fn build(&self) -> String {
         self.sections
             .iter()
-            .filter(|(_, section)| {
-                // 跳过空内容
-                if section.content.is_empty() {
-                    return false;
-                }
-                // 低优先级 section 仅在非空时包含
-                section.priority != PromptPriority::Low || !section.content.is_empty()
-            })
-            .map(|(_, section)| &section.content)
-            .cloned()
+            .filter(|(_, section)| !section.content.is_empty())
+            .map(|(name, section)| format!("## {}\n\n{}", name.heading(), section.content))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n\n---\n\n")
     }
 
     /// 返回当前所有 section 的调试信息（用于 CLI `/prompt-sections` 命令）。
@@ -384,6 +733,340 @@ pub struct SkillSwitchResult {
     pub level: SkillInvocationLevel,
 }
 
+// ---------------------------------------------------------------------------
+//  G9 — 历史裁剪（History Trimming）
+// ---------------------------------------------------------------------------
+
+/// 历史裁剪配置。
+#[derive(Debug, Clone)]
+pub struct TrimmerConfig {
+    /// 模型上下文窗口大小（token 数）
+    pub context_window: usize,
+    /// 输出预留 token 数
+    pub output_reserve: usize,
+    /// 最少保留的最近消息数（不被裁剪）
+    pub min_recent_messages: usize,
+    /// 是否启用历史摘要（替代简单截断）
+    pub enable_summary: bool,
+}
+
+impl Default for TrimmerConfig {
+    fn default() -> Self {
+        Self {
+            context_window: 128_000,
+            output_reserve: 8_192,
+            min_recent_messages: 10,
+            enable_summary: false,
+        }
+    }
+}
+
+/// 历史裁剪器。
+pub struct HistoryTrimmer {
+    config: TrimmerConfig,
+}
+
+/// 裁剪结果。
+pub struct TrimResult {
+    /// 裁剪后的消息列表
+    pub messages: Vec<Message>,
+    /// 是否发生了裁剪
+    pub was_trimmed: bool,
+    /// 被移除的消息数量
+    pub removed_count: usize,
+    /// 摘要文本（如果启用了摘要）
+    pub summary: Option<String>,
+}
+
+impl HistoryTrimmer {
+    pub fn new(config: TrimmerConfig) -> Self {
+        Self { config }
+    }
+
+    /// 估算消息列表的 token 数。
+    ///
+    /// 使用字符数 / 3 的粗略估算（英文约 4 chars/token，中文约 1.5 chars/token）。
+    /// 取折中值 3 chars/token。
+    fn estimate_tokens(messages: &[crate::message::Message]) -> usize {
+        let total_chars: usize = messages
+            .iter()
+            .map(|m| {
+                m.content
+                    .iter()
+                    .map(|block| match block {
+                        crate::message::ContentBlock::Text { text } => text.len(),
+                        crate::message::ContentBlock::Thinking { thinking } => thinking.len(),
+                        crate::message::ContentBlock::ToolUse { name, input, .. } => {
+                            name.len() + input.to_string().len()
+                        }
+                        crate::message::ContentBlock::ToolResult { output, .. } => output.len(),
+                    })
+                    .sum::<usize>()
+            })
+            .sum();
+
+        total_chars / 3
+    }
+
+    /// 估算系统提示词的 token 数。
+    fn estimate_system_prompt_tokens(system_prompt: &str) -> usize {
+        system_prompt.len() / 3
+    }
+
+    /// 对历史消息进行裁剪。
+    ///
+    /// 策略：
+    /// 1. 保留第一条 system 消息（如果存在）
+    /// 2. 保留最近 min_recent_messages 条消息
+    /// 3. 从最旧的非 system 消息开始移除，直到总 token 在预算内
+    /// 4. 确保 tool_use 和对应的 tool_result 成对移除（不留孤立的 tool_result）
+    pub fn trim(&self, messages: &[Message], system_prompt: &str) -> TrimResult {
+        let system_tokens = Self::estimate_system_prompt_tokens(system_prompt);
+        let history_budget = self
+            .config
+            .context_window
+            .saturating_sub(system_tokens)
+            .saturating_sub(self.config.output_reserve);
+
+        let current_tokens = Self::estimate_tokens(messages);
+
+        // 如果在预算内，不裁剪
+        if current_tokens <= history_budget {
+            return TrimResult {
+                messages: messages.to_vec(),
+                was_trimmed: false,
+                removed_count: 0,
+                summary: None,
+            };
+        }
+
+        // 分离 system 消息和对话消息
+        let (system_msgs, conversation_msgs): (Vec<_>, Vec<_>) = messages
+            .iter()
+            .enumerate()
+            .partition(|(_, m)| m.role == crate::message::Role::System);
+
+        let system_msgs: Vec<_> = system_msgs.into_iter().map(|(_, m)| m.clone()).collect();
+        let conversation_msgs: Vec<_> = conversation_msgs.into_iter().map(|(_, m)| m.clone()).collect();
+
+        // 保护最近 N 条消息
+        let protected_count = self.config.min_recent_messages.min(conversation_msgs.len());
+        let trimmable = &conversation_msgs[..conversation_msgs.len() - protected_count];
+        let protected = &conversation_msgs[conversation_msgs.len() - protected_count..];
+
+        // 从前往后移除消息，直到总 token 在预算内
+        let protected_tokens = Self::estimate_tokens(protected) + Self::estimate_tokens(&system_msgs);
+        let mut remaining_budget = history_budget.saturating_sub(protected_tokens);
+
+        let mut kept_trimmable = Vec::new();
+        let mut removed_count = 0;
+        let mut keeping = false; // 一旦开始保留，后续都保留（避免中间断开）
+
+        // 从后往前扫描可裁剪消息，保留尽可能多的最近消息
+        for msg in trimmable.iter().rev() {
+            let msg_tokens = Self::estimate_tokens(&[msg.clone()]);
+            if !keeping && msg_tokens <= remaining_budget {
+                remaining_budget -= msg_tokens;
+                kept_trimmable.push(msg.clone());
+            } else if keeping {
+                kept_trimmable.push(msg.clone());
+            } else {
+                removed_count += 1;
+                keeping = false;
+            }
+        }
+        kept_trimmable.reverse();
+
+        // 重新组装
+        let mut result = system_msgs;
+        // 如果有裁剪，插入一条摘要提示
+        if removed_count > 0 {
+            result.push(crate::message::Message {
+                role: crate::message::Role::User,
+                content: vec![crate::message::ContentBlock::Text {
+                    text: format!(
+                        "[System: {} earlier messages were trimmed to fit context window. \
+                         The conversation continues from the most recent messages below.]",
+                        removed_count
+                    ),
+                }],
+            });
+        }
+        result.extend(kept_trimmable);
+        result.extend(protected.to_vec());
+
+        TrimResult {
+            messages: result,
+            was_trimmed: removed_count > 0,
+            removed_count,
+            summary: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  G10 — 侧信道注入（Side Channel Injection）
+// ---------------------------------------------------------------------------
+
+/// 侧信道注入配置。
+#[derive(Debug, Clone)]
+pub struct SideChannelConfig {
+    /// 是否启用侧信道
+    pub enabled: bool,
+    /// 注入 skill 列表的间隔（每 N 次 tool result 注入一次）
+    pub skill_reminder_interval: usize,
+    /// 是否注入当前日期
+    pub inject_date: bool,
+    /// 自定义注入内容
+    pub custom_reminders: Vec<String>,
+}
+
+impl Default for SideChannelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // 默认关闭，逐步启用
+            skill_reminder_interval: 5,
+            inject_date: true,
+            custom_reminders: vec![],
+        }
+    }
+}
+
+/// 侧信道注入器。
+pub struct SideChannelInjector {
+    config: SideChannelConfig,
+    tool_result_counter: std::sync::atomic::AtomicUsize,
+}
+
+impl SideChannelInjector {
+    pub fn new(config: SideChannelConfig) -> Self {
+        Self {
+            config,
+            tool_result_counter: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// 生成要附加到 tool result 后的侧信道内容。
+    ///
+    /// 返回 None 表示本次不注入。
+    pub fn generate_injection(&self, skills: &crate::skill::SkillRegistry) -> Option<String> {
+        if !self.config.enabled {
+            return None;
+        }
+
+        let count = self
+            .tool_result_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // 检查是否到了注入间隔
+        if count % self.config.skill_reminder_interval != 0 {
+            return None;
+        }
+
+        let mut parts = Vec::new();
+
+        // Skill 列表提醒
+        if !skills.packages.is_empty() {
+            let skill_list: Vec<String> = skills
+                .packages
+                .iter()
+                .map(|p| format!("- {}: {}", p.slug, p.description))
+                .collect();
+            parts.push(format!(
+                "<system-reminder>\nAvailable skills:\n{}\n\nUse /skill-<name> to activate.\n</system-reminder>",
+                skill_list.join("\n")
+            ));
+        }
+
+        // 日期提醒
+        if self.config.inject_date {
+            let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+            parts.push(format!("<system-reminder>\nCurrent date: {}\n</system-reminder>", date));
+        }
+
+        // 自定义提醒
+        for reminder in &self.config.custom_reminders {
+            parts.push(format!("<system-reminder>\n{}\n</system-reminder>", reminder));
+        }
+
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("\n"))
+        }
+    }
+
+    /// 将侧信道内容附加到 tool result 输出后面。
+    pub fn inject_into_tool_result(&self, tool_output: &str, skills: &crate::skill::SkillRegistry) -> String {
+        match self.generate_injection(skills) {
+            Some(injection) => format!("{}\n\n{}", tool_output, injection),
+            None => tool_output.to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+//  附加 — Workflow Stage Prompts
+// ---------------------------------------------------------------------------
+
+/// 工作流阶段 prompt 集合。
+pub struct WorkflowStagePrompts {
+    /// 阶段名称 → prompt 内容
+    stages: HashMap<String, String>,
+}
+
+impl WorkflowStagePrompts {
+    /// 从 workflow-stages.md 文件加载。
+    pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let mut stages = HashMap::new();
+        let mut current_stage: Option<String> = None;
+        let mut current_content = String::new();
+        let mut in_code_block = false;
+
+        for line in content.lines() {
+            if line.starts_with("## ") && !in_code_block {
+                // 保存上一个阶段
+                if let Some(stage) = current_stage.take() {
+                    let trimmed = current_content.trim().to_string();
+                    if !trimmed.is_empty() {
+                        stages.insert(stage, trimmed);
+                    }
+                }
+                current_stage = Some(line[3..].trim().to_string());
+                current_content.clear();
+            } else {
+                if line.starts_with("```") {
+                    in_code_block = !in_code_block;
+                    // 不包含 ``` 围栏本身
+                } else if in_code_block {
+                    current_content.push_str(line);
+                    current_content.push('\n');
+                }
+            }
+        }
+        // 保存最后一个阶段
+        if let Some(stage) = current_stage {
+            let trimmed = current_content.trim().to_string();
+            if !trimmed.is_empty() {
+                stages.insert(stage, trimmed);
+            }
+        }
+
+        Ok(Self { stages })
+    }
+
+    /// 获取指定阶段的 prompt 模板。
+    pub fn get(&self, stage: &str) -> Option<&str> {
+        self.stages.get(stage).map(|s| s.as_str())
+    }
+
+    /// 获取指定阶段的 prompt，并用变量替换占位符。
+    pub fn render(&self, stage: &str, vars: &HashMap<String, String>) -> Option<String> {
+        self.get(stage).map(|template| TemplateContext::render(template, vars))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,8 +1083,8 @@ mod tests {
             .base_section("Base content")
             .agent_section("Agent content");
         let result = builder.build();
-        assert!(result.contains("Base content"));
-        assert!(result.contains("Agent content"));
+        assert!(result.contains("## Identity & Role\n\nBase content"));
+        assert!(result.contains("## Agent Configuration\n\nAgent content"));
     }
 
     #[test]
@@ -440,5 +1123,68 @@ mod tests {
         assert_eq!(builder.get_section(&SectionName::Base), Some("Base content"));
         assert_eq!(builder.get_section(&SectionName::Agent), Some("Agent content"));
         assert_eq!(builder.get_section(&SectionName::Skill), None);
+    }
+
+    #[test]
+    fn build_includes_heading() {
+        let builder = SystemPromptBuilder::new().base_section("Content");
+        let result = builder.build();
+        assert!(result.contains("## Identity & Role"));
+    }
+
+    #[test]
+    fn build_separates_with_divider() {
+        let builder = SystemPromptBuilder::new().base_section("Base").agent_section("Agent");
+        let result = builder.build();
+        assert!(result.contains("\n\n---\n\n"));
+    }
+
+    #[test]
+    fn behavior_guards_constant_exists() {
+        assert!(BEHAVIOR_GUARDS.contains("CRITICAL: Action Consistency"));
+        assert!(BEHAVIOR_GUARDS.contains("tool_use block"));
+    }
+
+    #[test]
+    fn template_context_render_replaces_vars() {
+        let mut vars = HashMap::new();
+        vars.insert("workflow_stage".into(), "idle".into());
+        vars.insert("pending_interaction".into(), "none".into());
+        let result = TemplateContext::render("Stage: {{workflow_stage}}, Pending: {{pending_interaction}}", &vars);
+        assert_eq!(result, "Stage: idle, Pending: none");
+    }
+
+    #[test]
+    fn template_context_render_clears_unknown() {
+        let vars = HashMap::new();
+        let result = TemplateContext::render("Hello {{name}}, today is {{unknown}}", &vars);
+        // Phase 2 清理模式：未匹配的占位符替换为空字符串
+        assert_eq!(result, "Hello , today is ");
+    }
+
+    #[test]
+    fn template_context_render_partial_keeps_unknown() {
+        let vars = HashMap::new();
+        let result = TemplateContext::render_partial("Hello {{name}}, today is {{unknown}}", &vars);
+        // partial 模式：未知占位符保持原样
+        assert!(result.contains("Hello {{name}}, today is {{unknown}}"));
+    }
+
+    #[test]
+    fn template_extract_vars() {
+        let template = "Stage: {{workflow_stage}}, Pending: {{pending_interaction}}, Topic: {{topic}}";
+        let vars = TemplateContext::extract_vars(template);
+        assert!(vars.contains(&"workflow_stage".to_string()));
+        assert!(vars.contains(&"pending_interaction".to_string()));
+        assert!(vars.contains(&"topic".to_string()));
+        assert_eq!(vars.len(), 3);
+    }
+
+    #[test]
+    fn context_render_with_regex_replaces_multiple_occurrences() {
+        let empty = HashMap::new();
+        let result = TemplateContext::render("{{x}} {{x}} {{x}}", &empty);
+        // 多次出现的同一变量应被正确替换（即使为空）
+        assert_eq!(result, "  ");
     }
 }

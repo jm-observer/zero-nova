@@ -6,9 +6,11 @@ use nova_conversation::sqlite_manager::SqliteManager;
 use nova_core::agent::{AgentConfig, AgentRuntime};
 use nova_core::agent_catalog::{AgentDescriptor, AgentRegistry};
 use nova_core::config::AppConfig;
+use nova_core::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder};
 use nova_core::provider::LlmClient;
 use nova_core::skill::SkillRegistry;
 use nova_core::tool::ToolRegistry;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
@@ -25,8 +27,15 @@ pub async fn build_application<C: LlmClient + 'static>(
     if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
         log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
     }
-    let skill_prompt = skill_registry.generate_system_prompt();
     let skill_registry = Arc::new(skill_registry);
+
+    // 在 agent 循环之前采集一次环境快照
+    let env_snapshot = EnvironmentSnapshot::collect().await;
+    let env_snapshot = {
+        let mut e = env_snapshot;
+        e.model_id = Some(config.llm.model_config.model.clone());
+        e
+    };
 
     let task_store = Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
 
@@ -39,6 +48,7 @@ pub async fn build_application<C: LlmClient + 'static>(
         model_config: config.llm.model_config.clone(),
         tool_timeout: std::time::Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
         max_tokens: config.gateway.max_tokens,
+        use_turn_context: config.gateway.use_turn_context,
     };
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
@@ -56,15 +66,16 @@ pub async fn build_application<C: LlmClient + 'static>(
             },
         };
 
-        let behavior_guards = r#"
-## CRITICAL: Action Consistency
-- You are a physical entity with real-world capabilities.
-- If you state that you are going to perform an action (e.g., "running a command", "writing a file", "searching the web"), you MUST generate the corresponding tool_use block in the SAME response.
-- NEVER claim you are doing something "in the background" or "internally" without an actual tool call.
-- Textual confirmation of an action is only valid AFTER the tool has been invoked.
-"#;
+        // 统一通过 SystemPromptBuilder 构建
+        let mut template_vars = HashMap::new();
+        template_vars.insert("workflow_stage".to_string(), "idle".to_string());
+        template_vars.insert("pending_interaction".to_string(), "none".to_string());
+        template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let full_system_prompt = format!("{}\n\n{}\n\n{}", agent_prompt, skill_prompt, behavior_guards);
+        let prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt, config.workspace.clone())
+            .with_environment(env_snapshot.clone())
+            .with_template_vars(template_vars);
+        let full_system_prompt = SystemPromptBuilder::from_config(&prompt_config, &skill_registry).build();
 
         agents.push(AgentDescriptor {
             id: agent.id.clone(),
@@ -89,6 +100,17 @@ pub async fn build_application<C: LlmClient + 'static>(
     let mut agent = AgentRuntime::new(client, tools, agent_config);
     agent.task_store = Some(task_store);
     agent.skill_registry = Some(skill_registry);
+
+    // 侧信道注入器（Phase 3 G10）
+    if config.gateway.side_channel.enabled {
+        let si = nova_core::prompt::SideChannelConfig {
+            enabled: config.gateway.side_channel.enabled,
+            skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
+            inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
+            custom_reminders: vec![],
+        };
+        agent.set_side_channel_injector(nova_core::prompt::SideChannelInjector::new(si));
+    }
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
     let config_path = config.config_path();

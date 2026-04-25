@@ -3,7 +3,10 @@ use nova_conversation::SessionService;
 use nova_core::agent::AgentRuntime;
 use nova_core::agent_catalog::AgentRegistry;
 use nova_core::event::AgentEvent;
+use nova_core::message::{ContentBlock, Message, Role};
+use nova_core::prompt::PromptConfig;
 use nova_core::provider::LlmClient;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -75,15 +78,51 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         session.set_cancellation_token(token.clone());
 
         let history = session.get_history();
-        let history_for_turn = &history[..history.len() - 1];
+        let history_for_turn: Arc<Vec<Message>> = Arc::new(history[..history.len() - 1].to_vec());
 
-        let turn_result = self
-            .agent
-            .run_turn(history_for_turn, input, event_tx, Some(token))
-            .await?;
+        // 获取当前活跃 agent
+        let agent_id = session.get_active_agent();
+        let agent_descriptor = self
+            .agent_registry
+            .get(&agent_id)
+            .cloned()
+            .with_context(|| format!("Agent '{}' not found", agent_id))?;
 
-        for msg in turn_result.messages {
-            self.sessions.append_message(session_id, msg.role, msg.content).await?;
+        // 渐进切换策略（Phase 3 G11）
+        let use_turn_context = self.agent.config.use_turn_context;
+        if use_turn_context {
+            // 新路径：prepare_turn + run_turn_with_context
+            let prompt_config = PromptConfig::new(
+                agent_descriptor.id.clone(),
+                agent_descriptor.system_prompt_template.clone(),
+                std::path::PathBuf::from("."),
+            );
+            let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config)?;
+            let user_message = Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
+                    text: input.to_string(),
+                }],
+            };
+            let turn_result = self
+                .agent
+                .run_turn_with_context(turn_ctx, user_message, event_tx, Some(token))
+                .await?;
+
+            for msg in turn_result.messages {
+                self.sessions.append_message(session_id, msg.role, msg.content).await?;
+            }
+        } else {
+            // 旧路径：run_turn（默认）
+            let history_for_turn: &[Message] = &history[..history.len() - 1];
+            let turn_result = self
+                .agent
+                .run_turn(history_for_turn, input, event_tx, Some(token))
+                .await?;
+
+            for msg in turn_result.messages {
+                self.sessions.append_message(session_id, msg.role, msg.content).await?;
+            }
         }
 
         session.clear_cancellation_token();

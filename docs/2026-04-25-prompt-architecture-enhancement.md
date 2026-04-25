@@ -646,66 +646,82 @@ impl TemplateContext {
 
 ## 五、实施计划
 
+每个 Phase 有独立的详细设计文档，包含完整的代码变更方案、变更清单、测试计划和风险分析。
+
 ### Phase 1 — 统一与修复（P0）
 
-1. 修复 `prompt.rs` build() 过滤逻辑（G2）
-2. 修复 `skill.rs` AllowList 模式下工具消失问题（G3）
-3. 新增 `SectionName::ProjectContext` 和 `SectionName::BehaviorGuards`（G4）
-4. 为 `SectionName` 实现 `heading()` 方法（G4）
-5. 重构 `build()` 输出格式（G4）
-6. 新增 `PromptConfig` 和 `EnvironmentSnapshot` 结构体（G1）
-7. 新增 `SystemPromptBuilder::from_config()` 方法（G1）
-8. 重构 `bootstrap.rs` 使用 `from_config()`（G1）
-9. 同步更新 `agent.rs` 中的 `build_system_prompt()` 使用相同路径（G1）
+**详细设计**：[`2026-04-25-prompt-phase1-unify-and-fix.md`](./2026-04-25-prompt-phase1-unify-and-fix.md)
+
+| 目标 | 内容 | 涉及文件 |
+|------|------|----------|
+| G1 — 统一构建管道 | 新增 `PromptConfig`、`from_config()`，重构 bootstrap.rs 和 agent.rs | prompt.rs, bootstrap.rs, agent.rs |
+| G2 — 修复 build() 过滤 | 简化 Low 优先级恒真式 bug | prompt.rs |
+| G3 — 修复 AllowList 工具消失 | 保留白名单中的基础工具到 always_enabled | skill.rs |
+| G4 — 结构化 section 输出 | 添加 `## heading` 标题和 `---` 分隔符 | prompt.rs |
+
+关键决策：Phase 1 **不改变 prompt 语义内容**，仅统一构建路径和修复 bug。Skill 全量注入行为暂时保持不变，确保行为一致性。
 
 ### Phase 2 — 核心增强（P1）
 
-1. 实现 `EnvironmentSnapshot::collect()`（G5）
-2. 实现 `load_project_context()`（G6）
-3. 重构 `SkillRegistry::generate_contextual_prompt()`（G7）
-4. 实现 `TemplateContext::render()`（G8）
+**详细设计**：[`2026-04-25-prompt-phase2-core-enhancement.md`](./2026-04-25-prompt-phase2-core-enhancement.md)
+
+| 目标 | 内容 | 涉及文件 |
+|------|------|----------|
+| G5 — 环境快照注入 | `EnvironmentSnapshot::collect()` 采集 CWD/git/平台信息 | prompt.rs, bootstrap.rs |
+| G6 — 项目上下文加载 | 自动加载 PROJECT.md / NOVA.md，支持大小限制和截断 | prompt.rs, config.rs |
+| G7 — Skill 按需注入 | `generate_contextual_prompt()` 替代全量注入，节省 75-96% token | skill.rs |
+| G8 — 模板变量替换增强 | 正则替换 + 清理模式 + 变量提取 + 预定义变量集 | prompt.rs, bootstrap.rs |
+
+关键决策：`generate_system_prompt()` 保留但标记 `#[deprecated]`，新代码统一使用 `generate_contextual_prompt()`。
 
 ### Phase 3 — 高级功能（P2）
 
-1. 接入 `workflow-stages.md` 的加载和注入
-2. 实现 token 预算感知的历史裁剪（独立设计文档）
-3. 修复 `run_turn_with_context()` 的工具执行和 usage 统计（B8）
-4. 让 `prepare_turn()` + `TurnContext` 成为主流程（G11）
+**详细设计**：[`2026-04-25-prompt-phase3-advanced-features.md`](./2026-04-25-prompt-phase3-advanced-features.md)
 
----
-
-## 六、风险与缓解
-
-| 风险 | 影响 | 缓解措施 |
+| 目标 | 内容 | 涉及文件 |
 |------|------|----------|
-| 统一管道后 prompt 内容变化导致行为回归 | 高 | 对比新旧 prompt 输出，增加集成测试验证语义等价 |
-| 环境快照的 git 命令在非 git 目录或无 git 环境失败 | 中 | 所有 git 信息设为 `Option<String>`，失败时跳过 |
-| 按需 skill 注入可能影响 LLM 对可用 skill 的认知 | 中 | 保留名称+描述索引确保 LLM 知道 skill 存在 |
-| 历史裁剪涉及 token 计数 | 中 | 先用字符数估算（1 token ≈ 4 chars），后续接入精确 tokenizer |
-| 模板替换引入 regex 依赖 | 低 | workspace 已有 regex 依赖 |
+| G9 — 历史管理策略 | `HistoryTrimmer` + token 估算 + 预算分配 + 裁剪提示插入 | prompt.rs, agent.rs, config.rs |
+| G10 — 侧信道注入 | `SideChannelInjector` 在 tool result 中嵌入 `<system-reminder>` | prompt.rs, agent.rs |
+| G11 — prepare_turn 接入 | 修复 `run_turn_with_context()` 工具执行缺陷，切换主流程 | agent.rs, conversation_service.rs |
+| 附加 — Workflow 阶段加载 | `WorkflowStagePrompts` 解析 workflow-stages.md 并注入 | prompt.rs |
+
+关键决策：通过 `use_turn_context` 配置开关渐进切换到新路径，降低回归风险。
 
 ---
 
-## 七、测试用例
+## 六、风险总览
 
-### 单元测试
+| 风险 | Phase | 影响 | 缓解措施 |
+|------|-------|------|----------|
+| 统一管道后 prompt 内容变化导致行为回归 | 1 | 高 | Phase 1 不改变语义，对比新旧 prompt 输出 |
+| 修改 build() 输出格式影响现有测试 | 1 | 中 | 同步更新测试断言 |
+| AllowList 修复改变工具可见性 | 1 | 中 | 新增针对性测试覆盖 |
+| git 命令在非 git 环境失败 | 2 | 中 | 所有 git 信息为 `Option<String>`，失败静默跳过 |
+| 项目上下文文件非 UTF-8 编码 | 2 | 低 | `read_to_string` 报错时静默跳过 |
+| Skill 按需注入后 LLM 不知道如何激活 | 2 | 中 | 索引表包含 `/skill-<name>` 使用提示 |
+| Token 估算误差导致裁剪不准 | 3 | 中 | 保守估算（chars/3），后续接入精确 tokenizer |
+| 裁剪破坏 tool_use/tool_result 配对 | 3 | 高 | 以完整消息为裁剪单位，保护最近 N 条 |
+| 切换 run_turn_with_context 行为回归 | 3 | 高 | `use_turn_context` 配置开关渐进切换 |
+| `<system-reminder>` 标签被非 Anthropic 模型忽略 | 3 | 中 | agent prompt 中显式说明标签含义 |
 
-- `SystemPromptBuilder::from_config()` 产生包含所有非空 section 的结构化输出，每个 section 有 `## 标题`
-- `build()` 空 section 被跳过
-- `EnvironmentSnapshot::collect()` 在 git 目录返回 branch 信息
-- `EnvironmentSnapshot::collect()` 在非 git 目录 branch 为 None，不报错
-- `load_project_context()` 找到 PROJECT.md 时返回内容
-- `load_project_context()` 无文件时返回 None
-- `generate_contextual_prompt(None)` 只输出 skill 索引，无完整 instructions
-- `generate_contextual_prompt(Some("id"))` 输出该 skill 完整内容 + 其余索引
-- `TemplateContext::render()` 正确替换已知变量
-- `TemplateContext::render()` 清理未知占位符为空字符串
-- `policy_from_skill()` AllowList 包含 "Bash" 时，Bash 保留在 always_enabled_tools 中
+---
 
-### 集成测试
+## 七、测试用例总览
 
-- bootstrap 完整流程产生的 system prompt 包含 `## Identity & Role`、`## Environment` 等标题
-- 带 PROJECT.md 的工作区启动后 prompt 包含 `## Project Context`
-- 不带 PROJECT.md 的工作区启动后无 `## Project Context` section
-- Skill 激活前后 prompt 的 skill section 内容不同
-- agent-nova.md 中的 `{{workflow_stage}}` 被替换为实际值
+详细测试用例见各 Phase 文档。以下是跨 Phase 的关键验证点：
+
+### 端到端验证
+
+1. **Phase 1 完成后**：bootstrap 产生的 prompt 包含 `## Identity & Role`、`## Behavior Constraints`、`## Available Skills`，内容与修改前语义等价
+2. **Phase 2 完成后**：prompt 新增 `## Environment`（含 git/CWD）、`## Project Context`（如存在 PROJECT.md）；skill section 仅含索引（无活跃 skill 时）
+3. **Phase 3 完成后**：长对话自动裁剪历史并插入提示；`run_turn_with_context()` 正确执行工具；tool result 附带 `<system-reminder>` 信息
+
+### 回归验证
+
+每个 Phase 合并后必须通过完整检查周期：
+
+```bash
+cargo clippy --workspace -- -D warnings
+cargo fmt --all
+cargo test --workspace
+```

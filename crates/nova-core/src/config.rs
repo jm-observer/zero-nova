@@ -133,6 +133,15 @@ pub struct GatewayConfig {
     /// 对应 Plan 1/2/3 的演进阶段。
     #[serde(default = "default_skill_history_strategy")]
     pub skill_history_strategy: String,
+    /// 是否启用新的 prepare_turn + run_turn_with_context 路径。
+    #[serde(default)]
+    pub use_turn_context: bool,
+    /// 历史裁剪配置（Phase 3 新增）。
+    #[serde(default)]
+    pub trimmer: TrimmerConfigToml,
+    /// 侧信道注入配置（Phase 3 新增）。
+    #[serde(default)]
+    pub side_channel: SideChannelConfigToml,
 }
 
 fn default_host() -> String {
@@ -155,6 +164,54 @@ fn default_max_tokens() -> usize {
 fn default_skill_history_strategy() -> String {
     "global".to_string()
 }
+fn default_trimmer_enabled() -> bool {
+    true
+}
+fn default_context_window() -> usize {
+    128_000
+}
+fn default_output_reserve() -> usize {
+    8_192
+}
+fn default_min_recent() -> usize {
+    10
+}
+fn default_side_channel_enabled() -> bool {
+    false
+}
+fn default_skill_reminder_interval() -> usize {
+    5
+}
+
+/// 历史裁剪配置（TOML 序列化版本）。
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct TrimmerConfigToml {
+    /// 是否启用历史裁剪
+    #[serde(default = "default_trimmer_enabled")]
+    pub enabled: bool,
+    /// 模型上下文窗口大小
+    #[serde(default = "default_context_window")]
+    pub context_window: usize,
+    /// 输出预留 token 数
+    #[serde(default = "default_output_reserve")]
+    pub output_reserve: usize,
+    /// 最少保留的最近消息数
+    #[serde(default = "default_min_recent")]
+    pub min_recent_messages: usize,
+}
+
+/// 侧信道注入配置（TOML 序列化版本）。
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct SideChannelConfigToml {
+    /// 是否启用侧信道
+    #[serde(default = "default_side_channel_enabled")]
+    pub enabled: bool,
+    /// 注入 skill 列表的间隔
+    #[serde(default = "default_skill_reminder_interval")]
+    pub skill_reminder_interval: usize,
+    /// 是否注入当前日期
+    pub inject_date: Option<bool>,
+}
 
 impl Default for GatewayConfig {
     fn default() -> Self {
@@ -168,6 +225,9 @@ impl Default for GatewayConfig {
             agents: Vec::new(),
             skill_routing_enabled: false,
             skill_history_strategy: default_skill_history_strategy(),
+            use_turn_context: false,
+            trimmer: TrimmerConfigToml::default(),
+            side_channel: SideChannelConfigToml::default(),
         }
     }
 }

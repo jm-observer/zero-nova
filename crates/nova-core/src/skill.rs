@@ -498,7 +498,64 @@ impl SkillRegistry {
         self.find_by_slug(slug).map(|p| p.instructions.clone())
     }
 
+    /// 生成上下文感知的 skill prompt。
+    ///
+    /// - 无 active skill 时：仅输出 skill 名称 + 描述的索引表
+    /// - 有 active skill 时：输出该 skill 的完整 instructions + 其余 skill 的名称列表
+    ///
+    /// 替代 `generate_system_prompt()` 的全量注入。
+    pub fn generate_contextual_prompt(&self, active_skill_id: Option<&str>) -> String {
+        if self.packages.is_empty() {
+            return String::new();
+        }
+
+        let mut parts = Vec::new();
+
+        // 活跃 skill：完整注入 instructions
+        if let Some(active_id) = active_skill_id {
+            if let Some(pkg) = self.find_package_by_id(active_id) {
+                parts.push(format!(
+                    "### Active Skill: {}\n\n{}\n",
+                    pkg.display_name, pkg.instructions,
+                ));
+            }
+        }
+
+        // 其余 skill：仅名称 + 描述
+        let other_skills: Vec<String> = self
+            .packages
+            .iter()
+            .filter(|p| active_skill_id.map(|id| id != p.id && id != p.slug).unwrap_or(true))
+            .map(|p| {
+                let aliases = if p.aliases.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (aliases: {})", p.aliases.join(", "))
+                };
+                format!("- **{}**{}: {}", p.display_name, aliases, p.description)
+            })
+            .collect();
+
+        if !other_skills.is_empty() {
+            let header = if active_skill_id.is_some() {
+                "### Other Available Skills"
+            } else {
+                "### Available Skills"
+            };
+            parts.push(format!(
+                "{}\n\n{}\n\nUse `/skill-<name>` to activate a skill.",
+                header,
+                other_skills.join("\n"),
+            ));
+        }
+
+        parts.join("\n\n")
+    }
+
     /// 生成旧格式的整包 system prompt（向后兼容）。
+    ///
+    /// 请改用 `generate_contextual_prompt()` 以减少 token 消耗。
+    #[deprecated(note = "Use generate_contextual_prompt() instead")]
     pub fn generate_system_prompt(&self) -> String {
         if self.packages.is_empty() && self.skills.is_empty() {
             return String::new();
@@ -552,22 +609,29 @@ impl SkillRegistry {
                 ToolPolicy::InheritAll => {
                     // 全部继承，不需要额外调整
                 }
-                ToolPolicy::AllowList(tools) => {
-                    // 使用白名单模式：仅保留白名单工具 + 文件操作工具
-                    policy.always_enabled_tools.clear();
-                    for tool in tools {
-                        if !["Bash", "Read", "Write", "Edit"].contains(&tool.as_str()) {
-                            policy.deferred_tools.push(tool.clone());
-                        }
-                    }
-                }
-                ToolPolicy::AllowListWithDeferred(tools) => {
-                    // 白名单 + ToolSearch 可补充
-                    policy.always_enabled_tools.clear();
-                    for tool in tools {
-                        if !["Bash", "Read", "Write", "Edit"].contains(&tool.as_str()) {
-                            policy.deferred_tools.push(tool.clone());
-                        }
+                ToolPolicy::AllowList(tools) | ToolPolicy::AllowListWithDeferred(tools) => {
+                    let base_tool_names: std::collections::HashSet<&str> =
+                        ["Bash", "Read", "Write", "Edit"].iter().cloned().collect();
+
+                    // 白名单中的基础工具保留在 always_enabled
+                    policy.always_enabled_tools = tools
+                        .iter()
+                        .filter(|t| base_tool_names.contains(t.as_str()))
+                        .cloned()
+                        .collect();
+
+                    // 白名单中的非基础工具放入 deferred
+                    policy.deferred_tools = tools
+                        .iter()
+                        .filter(|t| !base_tool_names.contains(t.as_str()))
+                        .cloned()
+                        .collect();
+
+                    // AllowListWithDeferred 保留 ToolSearch
+                    if matches!(&pkg.tool_policy, ToolPolicy::AllowListWithDeferred(_)) {
+                        policy.tool_search_enabled = true;
+                    } else {
+                        policy.tool_search_enabled = false;
                     }
                 }
             }
@@ -688,5 +752,145 @@ mod tests {
         assert!(policy.tool_search_enabled);
         assert!(policy.skill_tool_enabled);
         assert!(policy.agent_tools_enabled);
+    }
+
+    #[test]
+    fn policy_from_skill_allow_list_preserves_base_tools() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "test".to_string(),
+            slug: "test".to_string(),
+            display_name: "Test".to_string(),
+            description: "test".to_string(),
+            instructions: "test".to_string(),
+            tool_policy: ToolPolicy::AllowList(vec!["Bash".to_string(), "Read".to_string(), "CustomTool".to_string()]),
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("test"),
+            compat_mode: false,
+        });
+
+        let policy = registry.policy_from_skill("test");
+        // 基础工具应保留在 always_enabled
+        assert!(policy.always_enabled_tools.contains(&"Bash".to_string()));
+        assert!(policy.always_enabled_tools.contains(&"Read".to_string()));
+        // Write 和 Edit 不在白名单中，不应出现
+        assert!(!policy.always_enabled_tools.contains(&"Write".to_string()));
+        // 非基础工具应在 deferred
+        assert!(policy.deferred_tools.contains(&"CustomTool".to_string()));
+    }
+
+    #[test]
+    fn policy_from_skill_allow_list_empty_keeps_no_base_tools() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "test".to_string(),
+            slug: "test".to_string(),
+            display_name: "Test".to_string(),
+            description: "test".to_string(),
+            instructions: "test".to_string(),
+            tool_policy: ToolPolicy::AllowList(vec!["CustomTool".to_string()]),
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("test"),
+            compat_mode: false,
+        });
+
+        let policy = registry.policy_from_skill("test");
+        // 白名单不含基础工具 → always_enabled 应为空
+        assert!(policy.always_enabled_tools.is_empty());
+    }
+
+    #[test]
+    fn contextual_prompt_no_active_shows_index() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "skill-1".to_string(),
+            slug: "skill-1".to_string(),
+            display_name: "Skill One".to_string(),
+            description: "First skill".to_string(),
+            instructions: "Full instructions for skill one".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec!["s1".to_string()],
+            examples: vec![],
+            source_path: PathBuf::from("skill-1"),
+            compat_mode: false,
+        });
+        registry.packages.push(SkillPackage {
+            id: "skill-2".to_string(),
+            slug: "skill-2".to_string(),
+            display_name: "Skill Two".to_string(),
+            description: "Second skill".to_string(),
+            instructions: "Full instructions for skill two".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("skill-2"),
+            compat_mode: false,
+        });
+
+        let prompt = registry.generate_contextual_prompt(None);
+        assert!(prompt.contains("### Available Skills"));
+        assert!(prompt.contains("**Skill One** (aliases: s1): First skill"));
+        assert!(prompt.contains("**Skill Two**: Second skill"));
+        assert!(
+            !prompt.contains("Full instructions"),
+            "无活跃 skill 时不应包含完整 instructions"
+        );
+    }
+
+    #[test]
+    fn contextual_prompt_with_active_shows_full() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "skill-1".to_string(),
+            slug: "skill-1".to_string(),
+            display_name: "Skill One".to_string(),
+            description: "First skill".to_string(),
+            instructions: "### Instructions for Skill One\nFull instructions content".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec!["s1".to_string()],
+            examples: vec![],
+            source_path: PathBuf::from("skill-1"),
+            compat_mode: false,
+        });
+        registry.packages.push(SkillPackage {
+            id: "skill-2".to_string(),
+            slug: "skill-2".to_string(),
+            display_name: "Skill Two".to_string(),
+            description: "Second skill".to_string(),
+            instructions: "### Instructions for Skill Two\nFull instructions content for two".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("skill-2"),
+            compat_mode: false,
+        });
+
+        let prompt = registry.generate_contextual_prompt(Some("skill-1"));
+        assert!(prompt.contains("### Active Skill: Skill One"));
+        assert!(
+            prompt.contains("Full instructions content"),
+            "活跃 skill 应包含完整 instructions"
+        );
+        assert!(prompt.contains("### Other Available Skills"));
+        assert!(prompt.contains("**Skill Two**: Second skill"));
+        assert!(
+            !prompt.contains("Full instructions content for two"),
+            "非活跃 skill 不应包含完整 instructions"
+        );
+    }
+
+    #[test]
+    fn contextual_prompt_empty_registry() {
+        let registry = SkillRegistry::new();
+        let prompt = registry.generate_contextual_prompt(None);
+        assert!(prompt.is_empty());
     }
 }

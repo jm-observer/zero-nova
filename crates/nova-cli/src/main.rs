@@ -151,6 +151,12 @@ async fn main() -> Result<()> {
     log::info!("Starting Nova CLI with : {:?}", config);
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
 
+    let env_snapshot = {
+        let mut snapshot = nova_core::prompt::EnvironmentSnapshot::collect().await;
+        snapshot.model_id = Some(config.llm.model_config.model.clone());
+        snapshot
+    };
+
     // 1. Initialize SkillRegistry and load skills
     let mut skill_registry_raw = nova_core::skill::SkillRegistry::new();
     let skill_dir = config.skills_dir();
@@ -198,7 +204,7 @@ async fn main() -> Result<()> {
         workspace: config.workspace.clone(),
         prompts_dir: config.prompts_dir(),
         project_context_file: config.project_context_file(),
-        initial_env_snapshot: None, // CLI 暂不采集环境快照或在启动处添加
+        initial_env_snapshot: Some(env_snapshot),
     };
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);

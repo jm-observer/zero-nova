@@ -418,15 +418,15 @@ impl<C: LlmClient> AgentRuntime<C> {
             CapabilityPolicy::default()
         };
 
-        // 3. 构建 system prompt — 通过统一入口
+        // 3. 过滤工具定义
+        let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill);
+
+        // 4. 构建 system prompt — 使用当前轮实际可见工具
         let mut config = prompt_config.clone();
         if let Some(ref skill) = active_skill {
             config.active_skill = Some(skill.skill_id.clone());
         }
-        let system_prompt = self.build_system_prompt(&config);
-
-        // 4. 过滤工具定义
-        let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill);
+        let system_prompt = self.build_system_prompt(&config, &tool_definitions);
 
         // 5. 裁剪历史（如果 active skill 切换了则裁剪）
         let history = self.trim_history(&current_history, &system_prompt, &active_skill)?;
@@ -684,12 +684,12 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// 构建系统提示词。
     ///
     /// 接收 PromptConfig 参数，通过 SystemPromptBuilder::from_config 统一构建。
-    fn build_system_prompt(&self, config: &crate::prompt::PromptConfig) -> String {
+    fn build_system_prompt(&self, config: &crate::prompt::PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
         let empty: crate::skill::SkillRegistry = crate::skill::SkillRegistry::new();
         let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
 
         crate::prompt::SystemPromptBuilder::from_config(config, skills)
-            .with_tools(&self.tools)
+            .with_tool_definitions(tool_definitions)
             .build()
     }
 
@@ -703,7 +703,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         if let Some(ref skill) = active_skill {
             if let Some(ref sr) = self.skill_registry {
-                // 根据 skill 的 tool_policy 裁剪工具
+                // 情况 A：处于活跃技能中，遵循技能的工具策略
                 if let Some(pkg) = sr.find_package_by_id(&skill.skill_id) {
                     match &pkg.tool_policy {
                         ToolPolicy::AllowList(allow_list) | ToolPolicy::AllowListWithDeferred(allow_list) => {
@@ -711,10 +711,16 @@ impl<C: LlmClient> AgentRuntime<C> {
                                 allow_list.contains(&t.name) || capability_policy.always_enabled_tools.contains(&t.name)
                             });
                         }
-                        ToolPolicy::InheritAll => {}
+                        ToolPolicy::InheritAll => {
+                            // 继承全部，但仍受限于 CapabilityPolicy 的 always_enabled 范围
+                            tools.retain(|t| capability_policy.always_enabled_tools.contains(&t.name));
+                        }
                     }
                 }
             }
+        } else {
+            // 情况 B：无活跃技能，仅显示 CapabilityPolicy 中指定的始终开启工具
+            tools.retain(|t| capability_policy.always_enabled_tools.contains(&t.name));
         }
 
         tools

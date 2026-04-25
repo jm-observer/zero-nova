@@ -592,10 +592,9 @@ impl SystemPromptBuilder {
         self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
     }
 
-    /// 追加工具描述到现有的 ToolGuidance section。
-    pub fn with_tools(mut self, registry: &ToolRegistry) -> Self {
+    fn with_tool_definitions_internal(mut self, definitions: &[ToolDefinition]) -> Self {
         let mut tool_desc = String::new();
-        for def in registry.loaded_definitions() {
+        for def in definitions {
             tool_desc.push_str(&format!(
                 "## {}\n\n{}\n\nInput schema:\n```json\n{}\n```\n\n---\n\n",
                 def.name,
@@ -603,7 +602,7 @@ impl SystemPromptBuilder {
                 serde_json::to_string_pretty(&def.input_schema).unwrap_or_else(|_| "{}".to_string())
             ));
         }
-        // 追加到 ToolGuidance section 而不是创建新的 section
+
         if let Some((_, section)) = self
             .sections
             .iter_mut()
@@ -623,6 +622,25 @@ impl SystemPromptBuilder {
             ));
         }
         self
+    }
+
+    /// 追加工具描述到现有的 ToolGuidance section。
+    pub fn with_tools(self, registry: &ToolRegistry) -> Self {
+        let definitions: Vec<ToolDefinition> = registry
+            .loaded_definitions()
+            .into_iter()
+            .map(|def| ToolDefinition {
+                name: def.name,
+                description: def.description,
+                input_schema: def.input_schema,
+            })
+            .collect();
+        self.with_tool_definitions(&definitions)
+    }
+
+    /// 追加当前轮次实际可见的工具定义，确保 prompt 与 API tools 参数一致。
+    pub fn with_tool_definitions(self, definitions: &[ToolDefinition]) -> Self {
+        self.with_tool_definitions_internal(definitions)
     }
 
     /// 从配置创建完整的 system prompt builder（Phase 2 版本）。
@@ -1246,6 +1264,23 @@ mod tests {
         let builder = SystemPromptBuilder::new().base_section("Base").agent_section("Agent");
         let result = builder.build();
         assert!(result.contains("\n\n---\n\n"));
+    }
+
+    #[test]
+    fn with_tool_definitions_includes_only_provided_tools() {
+        let defs = vec![ToolDefinition {
+            name: "Read".to_string(),
+            description: "Read a file".to_string(),
+            input_schema: serde_json::json!({"type":"object"}),
+        }];
+
+        let prompt = SystemPromptBuilder::new()
+            .tool_guidance_section("Tool usage")
+            .with_tool_definitions(&defs)
+            .build();
+
+        assert!(prompt.contains("## Read"));
+        assert!(!prompt.contains("## Write"));
     }
 
     #[test]

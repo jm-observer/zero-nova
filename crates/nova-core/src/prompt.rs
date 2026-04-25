@@ -47,6 +47,12 @@ pub struct PromptConfig {
     pub template_vars: HashMap<String, String>,
     /// 运行时环境快照
     pub environment: Option<EnvironmentSnapshot>,
+    /// 自定义项目上下文文件路径
+    pub project_context_path: Option<PathBuf>,
+    /// 已预加载的项目上下文内容（用于消除同步 I/O）
+    pub project_context_content: Option<String>,
+    /// workflow-stages.md 路径
+    pub workflow_prompt_path: Option<PathBuf>,
 }
 
 impl PromptConfig {
@@ -58,6 +64,9 @@ impl PromptConfig {
             active_skill: None,
             template_vars: HashMap::new(),
             environment: None,
+            project_context_path: None,
+            project_context_content: None,
+            workflow_prompt_path: None,
         }
     }
 
@@ -78,6 +87,26 @@ impl PromptConfig {
 
     pub fn with_environment(mut self, env: EnvironmentSnapshot) -> Self {
         self.environment = Some(env);
+        self
+    }
+
+    pub fn with_project_context_path(mut self, path: PathBuf) -> Self {
+        self.project_context_path = Some(path);
+        self
+    }
+
+    pub fn with_project_context_path_opt(mut self, path: Option<PathBuf>) -> Self {
+        self.project_context_path = path;
+        self
+    }
+
+    pub fn with_project_context_content(mut self, content: String) -> Self {
+        self.project_context_content = Some(content);
+        self
+    }
+
+    pub fn with_workflow_prompt_path(mut self, path: PathBuf) -> Self {
+        self.workflow_prompt_path = Some(path);
         self
     }
 }
@@ -263,28 +292,88 @@ impl EnvironmentSnapshot {
 ///
 /// 按优先级查找 PROJECT.md → NOVA.md，找到第一个非空文件即返回。
 /// 所有文件都不存在或为空时返回 None。
-pub fn load_project_context(workspace: &Path) -> Option<String> {
+/// 异步从工作区加载项目上下文文件（Plan 2 规范建议修复）。
+pub async fn load_project_context_async(workspace: &Path) -> Option<String> {
+    load_project_context_with_config_async(workspace, None).await
+}
+
+/// 异步从工作区加载项目上下文文件，支持显式路径。
+pub async fn load_project_context_with_config_async(
+    workspace: &Path,
+    configured_path: Option<&Path>,
+) -> Option<String> {
+    if let Some(path) = configured_path {
+        return load_single_project_context_async(path).await;
+    }
+
     for filename in PROJECT_CONTEXT_FILES {
         let path = workspace.join(filename);
-        match std::fs::read_to_string(&path) {
-            Ok(content) if !content.trim().is_empty() => {
-                log::info!("Loaded project context from {:?} ({} chars)", path, content.len());
-                if content.len() > MAX_PROJECT_CONTEXT_CHARS {
-                    let truncated = &content[..MAX_PROJECT_CONTEXT_CHARS];
-                    let last_newline = truncated.rfind('\n').unwrap_or(MAX_PROJECT_CONTEXT_CHARS);
-                    let mut result = truncated[..last_newline].to_string();
-                    result.push_str("\n\n[... truncated due to size limit ...]");
-                    return Some(result);
-                }
-                return Some(content);
-            }
-            Ok(_) => {
-                log::debug!("Project context file {:?} is empty, skipping", path);
-            }
-            Err(_) => {}
+        if let Some(content) = load_single_project_context_async(&path).await {
+            return Some(content);
         }
     }
     None
+}
+
+async fn load_single_project_context_async(path: &Path) -> Option<String> {
+    match tokio::fs::read_to_string(path).await {
+        Ok(content) if !content.trim().is_empty() => {
+            log::info!(
+                "Loaded project context from {:?} ({} chars) [async]",
+                path,
+                content.len()
+            );
+            if content.len() > MAX_PROJECT_CONTEXT_CHARS {
+                let truncated = &content[..MAX_PROJECT_CONTEXT_CHARS];
+                let last_newline = truncated.rfind('\n').unwrap_or(MAX_PROJECT_CONTEXT_CHARS);
+                let mut result = truncated[..last_newline].to_string();
+                result.push_str("\n\n[... truncated due to size limit ...]");
+                return Some(result);
+            }
+            Some(content)
+        }
+        _ => None,
+    }
+}
+
+pub fn load_project_context(workspace: &Path) -> Option<String> {
+    load_project_context_with_config(workspace, None)
+}
+
+/// 从工作区加载项目上下文文件，支持显式配置文件路径。
+pub fn load_project_context_with_config(workspace: &Path, configured_path: Option<&Path>) -> Option<String> {
+    if let Some(path) = configured_path {
+        return load_single_project_context(path);
+    }
+
+    for filename in PROJECT_CONTEXT_FILES {
+        let path = workspace.join(filename);
+        if let Some(content) = load_single_project_context(&path) {
+            return Some(content);
+        }
+    }
+    None
+}
+
+fn load_single_project_context(path: &Path) -> Option<String> {
+    match std::fs::read_to_string(path) {
+        Ok(content) if !content.trim().is_empty() => {
+            log::info!("Loaded project context from {:?} ({} chars)", path, content.len());
+            if content.len() > MAX_PROJECT_CONTEXT_CHARS {
+                let truncated = &content[..MAX_PROJECT_CONTEXT_CHARS];
+                let last_newline = truncated.rfind('\n').unwrap_or(MAX_PROJECT_CONTEXT_CHARS);
+                let mut result = truncated[..last_newline].to_string();
+                result.push_str("\n\n[... truncated due to size limit ...]");
+                return Some(result);
+            }
+            Some(content)
+        }
+        Ok(_) => {
+            log::debug!("Project context file {:?} is empty, skipping", path);
+            None
+        }
+        Err(_) => None,
+    }
 }
 
 /// 系统提示词具名 section 名称。
@@ -563,13 +652,29 @@ impl SystemPromptBuilder {
         }
 
         // L3: 项目上下文
-        if let Some(content) = load_project_context(&config.workspace_path) {
+        if let Some(content) = &config.project_context_content {
+            builder = builder.project_context_section(content);
+        } else if let Some(content) =
+            load_project_context_with_config(&config.workspace_path, config.project_context_path.as_deref())
+        {
             builder = builder.project_context_section(&content);
         }
 
         // L5: 环境快照
         if let Some(env) = &config.environment {
             builder = builder.environment_snapshot(env);
+        }
+
+        if let Some(stage) = config.template_vars.get(template_vars::WORKFLOW_STAGE) {
+            if stage != "idle" {
+                if let Some(path) = &config.workflow_prompt_path {
+                    if let Ok(workflow_prompts) = WorkflowStagePrompts::load_from_file(path) {
+                        if let Some(prompt) = workflow_prompts.render(stage, &config.template_vars) {
+                            builder = builder.workflow_section(prompt);
+                        }
+                    }
+                }
+            }
         }
 
         builder
@@ -828,9 +933,16 @@ impl HistoryTrimmer {
             .saturating_sub(system_tokens)
             .saturating_sub(self.config.output_reserve);
 
-        let current_tokens = Self::estimate_tokens(messages);
+        // 分离 system 消息和对话消息
+        let (system_msgs, conversation_msgs): (Vec<_>, Vec<_>) = messages
+            .iter()
+            .enumerate()
+            .partition(|(_, m)| m.role == crate::message::Role::System);
 
-        // 如果在预算内，不裁剪
+        let system_msgs: Vec<_> = system_msgs.into_iter().map(|(_, m)| m.clone()).collect();
+        let conversation_msgs: Vec<_> = conversation_msgs.into_iter().map(|(_, m)| m.clone()).collect();
+        let current_tokens = Self::estimate_tokens(&conversation_msgs);
+
         if current_tokens <= history_budget {
             return TrimResult {
                 messages: messages.to_vec(),
@@ -840,42 +952,28 @@ impl HistoryTrimmer {
             };
         }
 
-        // 分离 system 消息和对话消息
-        let (system_msgs, conversation_msgs): (Vec<_>, Vec<_>) = messages
-            .iter()
-            .enumerate()
-            .partition(|(_, m)| m.role == crate::message::Role::System);
-
-        let system_msgs: Vec<_> = system_msgs.into_iter().map(|(_, m)| m.clone()).collect();
-        let conversation_msgs: Vec<_> = conversation_msgs.into_iter().map(|(_, m)| m.clone()).collect();
-
         // 保护最近 N 条消息
         let protected_count = self.config.min_recent_messages.min(conversation_msgs.len());
         let trimmable = &conversation_msgs[..conversation_msgs.len() - protected_count];
         let protected = &conversation_msgs[conversation_msgs.len() - protected_count..];
 
         // 从前往后移除消息，直到总 token 在预算内
-        let protected_tokens = Self::estimate_tokens(protected) + Self::estimate_tokens(&system_msgs);
+        let protected_tokens = Self::estimate_tokens(protected);
         let mut remaining_budget = history_budget.saturating_sub(protected_tokens);
 
         let mut kept_trimmable = Vec::new();
-        let mut removed_count = 0;
-        let mut keeping = false; // 一旦开始保留，后续都保留（避免中间断开）
-
-        // 从后往前扫描可裁剪消息，保留尽可能多的最近消息
+        // 从后往前扫描可裁剪消息，保留连续的最近消息，避免中间断裂
         for msg in trimmable.iter().rev() {
-            let msg_tokens = Self::estimate_tokens(&[msg.clone()]);
-            if !keeping && msg_tokens <= remaining_budget {
+            let msg_tokens = Self::estimate_tokens(std::slice::from_ref(msg));
+            if msg_tokens <= remaining_budget {
                 remaining_budget -= msg_tokens;
                 kept_trimmable.push(msg.clone());
-            } else if keeping {
-                kept_trimmable.push(msg.clone());
             } else {
-                removed_count += 1;
-                keeping = false;
+                break;
             }
         }
         kept_trimmable.reverse();
+        let removed_count = trimmable.len().saturating_sub(kept_trimmable.len());
 
         // 重新组装
         let mut result = system_msgs;
@@ -959,7 +1057,7 @@ impl SideChannelInjector {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // 检查是否到了注入间隔
-        if count % self.config.skill_reminder_interval != 0 {
+        if !count.is_multiple_of(self.config.skill_reminder_interval) {
             return None;
         }
 
@@ -1017,6 +1115,8 @@ pub struct WorkflowStagePrompts {
 
 impl WorkflowStagePrompts {
     /// 从 workflow-stages.md 文件加载。
+    ///
+    /// 当前实现仅提取 fenced code block 内的内容，围栏外说明文本会被忽略。
     pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let mut stages = HashMap::new();
@@ -1070,6 +1170,15 @@ impl WorkflowStagePrompts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("zero-nova-{}-{}", prefix, suffix));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn empty_builder_produces_empty_string() {
@@ -1186,5 +1295,314 @@ mod tests {
         let result = TemplateContext::render("{{x}} {{x}} {{x}}", &empty);
         // 多次出现的同一变量应被正确替换（即使为空）
         assert_eq!(result, "  ");
+    }
+
+    #[test]
+    fn env_snapshot_to_prompt_includes_cwd() {
+        let snapshot = EnvironmentSnapshot {
+            working_directory: "D:/workspace".to_string(),
+            platform: "windows".to_string(),
+            shell: "powershell".to_string(),
+            git_branch: None,
+            git_status_summary: None,
+            recent_commits: None,
+            model_id: None,
+            current_date: "2026-04-26".to_string(),
+        };
+
+        let prompt = snapshot.to_prompt_text();
+        assert!(prompt.contains("Working directory: D:/workspace"));
+        assert!(prompt.contains("Date: 2026-04-26"));
+    }
+
+    #[test]
+    fn env_snapshot_to_prompt_optional_git() {
+        let snapshot = EnvironmentSnapshot {
+            working_directory: "D:/workspace".to_string(),
+            platform: "windows".to_string(),
+            shell: "powershell".to_string(),
+            git_branch: Some("main".to_string()),
+            git_status_summary: Some("clean".to_string()),
+            recent_commits: None,
+            model_id: None,
+            current_date: "2026-04-26".to_string(),
+        };
+
+        let prompt = snapshot.to_prompt_text();
+        assert!(prompt.contains("Git branch: main"));
+        assert!(prompt.contains("Git status: clean"));
+    }
+
+    #[test]
+    fn env_snapshot_to_prompt_with_commits() {
+        let snapshot = EnvironmentSnapshot {
+            working_directory: "D:/workspace".to_string(),
+            platform: "windows".to_string(),
+            shell: "powershell".to_string(),
+            git_branch: None,
+            git_status_summary: None,
+            recent_commits: Some("abc123 first\nbcd234 second".to_string()),
+            model_id: Some("gpt-oss".to_string()),
+            current_date: "2026-04-26".to_string(),
+        };
+
+        let prompt = snapshot.to_prompt_text();
+        assert!(prompt.contains("Recent commits:"));
+        assert!(prompt.contains("abc123 first"));
+        assert!(prompt.contains("Model: gpt-oss"));
+    }
+
+    #[test]
+    fn load_project_context_finds_file() {
+        let dir = create_temp_dir("project-context-find");
+        fs::write(dir.join("PROJECT.md"), "hello project").unwrap();
+
+        let content = load_project_context(&dir);
+        assert_eq!(content.as_deref(), Some("hello project"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_project_context_none_when_missing() {
+        let dir = create_temp_dir("project-context-missing");
+        assert!(load_project_context(&dir).is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_project_context_skips_empty() {
+        let dir = create_temp_dir("project-context-empty");
+        fs::write(dir.join("PROJECT.md"), "   \n").unwrap();
+        fs::write(dir.join("NOVA.md"), "fallback").unwrap();
+
+        let content = load_project_context(&dir);
+        assert_eq!(content.as_deref(), Some("fallback"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_project_context_truncates_large() {
+        let dir = create_temp_dir("project-context-large");
+        let large = format!("{}\nend", "a".repeat(MAX_PROJECT_CONTEXT_CHARS + 128));
+        fs::write(dir.join("PROJECT.md"), large).unwrap();
+
+        let content = load_project_context(&dir).unwrap();
+        assert!(content.contains("[... truncated due to size limit ...]"));
+        assert!(content.len() <= MAX_PROJECT_CONTEXT_CHARS + 64);
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_project_context_with_config_prefers_configured_path() {
+        let dir = create_temp_dir("project-context-config");
+        let custom = dir.join("docs").join("ctx.md");
+        fs::create_dir_all(custom.parent().unwrap()).unwrap();
+        fs::write(&custom, "configured context").unwrap();
+
+        let content = load_project_context_with_config(&dir, Some(&custom));
+        assert_eq!(content.as_deref(), Some("configured context"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn trim_no_op_when_under_budget() {
+        let trimmer = HistoryTrimmer::new(TrimmerConfig {
+            context_window: 1_000,
+            output_reserve: 100,
+            min_recent_messages: 2,
+            enable_summary: false,
+        });
+        let messages = vec![
+            Message {
+                role: crate::message::Role::System,
+                content: vec![crate::message::ContentBlock::Text {
+                    text: "system".to_string(),
+                }],
+            },
+            Message {
+                role: crate::message::Role::User,
+                content: vec![crate::message::ContentBlock::Text {
+                    text: "short".to_string(),
+                }],
+            },
+        ];
+
+        let result = trimmer.trim(&messages, "system");
+        assert!(!result.was_trimmed);
+        assert_eq!(result.messages.len(), 2);
+    }
+
+    #[test]
+    fn trim_preserves_contiguous_recent_messages() {
+        let trimmer = HistoryTrimmer::new(TrimmerConfig {
+            context_window: 25,
+            output_reserve: 10,
+            min_recent_messages: 1,
+            enable_summary: false,
+        });
+        let messages = vec![
+            Message {
+                role: crate::message::Role::System,
+                content: vec![crate::message::ContentBlock::Text {
+                    text: "system prompt".to_string(),
+                }],
+            },
+            Message {
+                role: crate::message::Role::User,
+                content: vec![crate::message::ContentBlock::Text { text: "1".repeat(40) }],
+            },
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![crate::message::ContentBlock::Text { text: "2".repeat(5) }],
+            },
+            Message {
+                role: crate::message::Role::User,
+                content: vec![crate::message::ContentBlock::Text { text: "3".repeat(5) }],
+            },
+        ];
+
+        let result = trimmer.trim(&messages, "system prompt");
+        assert!(result.was_trimmed);
+        assert_eq!(result.removed_count, 1);
+        assert_eq!(result.messages.len(), 4);
+        assert!(matches!(result.messages[2].role, crate::message::Role::Assistant));
+        assert!(matches!(result.messages[3].role, crate::message::Role::User));
+    }
+
+    #[test]
+    fn trim_ignores_system_messages_in_history_budget() {
+        let trimmer = HistoryTrimmer::new(TrimmerConfig {
+            context_window: 100,
+            output_reserve: 10,
+            min_recent_messages: 2,
+            enable_summary: false,
+        });
+        let messages = vec![
+            Message {
+                role: crate::message::Role::System,
+                content: vec![crate::message::ContentBlock::Text { text: "s".repeat(120) }],
+            },
+            Message {
+                role: crate::message::Role::User,
+                content: vec![crate::message::ContentBlock::Text {
+                    text: "small".to_string(),
+                }],
+            },
+            Message {
+                role: crate::message::Role::Assistant,
+                content: vec![crate::message::ContentBlock::Text {
+                    text: "small".to_string(),
+                }],
+            },
+        ];
+
+        let result = trimmer.trim(&messages, &"s".repeat(120));
+        assert!(!result.was_trimmed);
+    }
+
+    #[test]
+    fn side_channel_disabled_returns_original() {
+        let injector = SideChannelInjector::new(SideChannelConfig {
+            enabled: false,
+            skill_reminder_interval: 1,
+            inject_date: false,
+            custom_reminders: vec![],
+        });
+        let registry = crate::skill::SkillRegistry::new();
+
+        assert_eq!(
+            injector.inject_into_tool_result("tool output", &registry),
+            "tool output"
+        );
+    }
+
+    #[test]
+    fn side_channel_injects_skill_and_custom_reminder() {
+        let injector = SideChannelInjector::new(SideChannelConfig {
+            enabled: true,
+            skill_reminder_interval: 1,
+            inject_date: false,
+            custom_reminders: vec!["Remember policy".to_string()],
+        });
+        let mut registry = crate::skill::SkillRegistry::new();
+        registry.packages.push(crate::skill::SkillPackage {
+            id: "skill-1".to_string(),
+            slug: "skill-1".to_string(),
+            display_name: "Skill One".to_string(),
+            description: "First".to_string(),
+            instructions: "Do work".to_string(),
+            tool_policy: crate::skill::ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: std::path::PathBuf::from("skill-1"),
+            compat_mode: false,
+        });
+
+        let result = injector.inject_into_tool_result("tool output", &registry);
+        assert!(result.contains("tool output"));
+        assert!(result.contains("Available skills:"));
+        assert!(result.contains("Remember policy"));
+    }
+
+    #[test]
+    fn side_channel_respects_interval() {
+        let injector = SideChannelInjector::new(SideChannelConfig {
+            enabled: true,
+            skill_reminder_interval: 2,
+            inject_date: false,
+            custom_reminders: vec!["interval".to_string()],
+        });
+        let registry = crate::skill::SkillRegistry::new();
+
+        let first = injector.inject_into_tool_result("tool output", &registry);
+        let second = injector.inject_into_tool_result("tool output", &registry);
+        assert!(first.contains("interval"));
+        assert_eq!(second, "tool output");
+    }
+
+    #[test]
+    fn workflow_stage_prompts_loads_code_blocks_only() {
+        let dir = create_temp_dir("workflow-prompts");
+        let file = dir.join("workflow-stages.md");
+        fs::write(
+            &file,
+            "## analyze\noutside\n```md\ninside {{topic}}\n```\n## idle\n```md\nidle prompt\n```",
+        )
+        .unwrap();
+
+        let prompts = WorkflowStagePrompts::load_from_file(&file).unwrap();
+        let mut vars = HashMap::new();
+        vars.insert("topic".to_string(), "prompt".to_string());
+
+        assert_eq!(prompts.render("analyze", &vars).as_deref(), Some("inside prompt"));
+        assert_eq!(prompts.get("idle"), Some("idle prompt"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn from_config_includes_workflow_section_when_stage_active() {
+        let dir = create_temp_dir("workflow-section");
+        let workflow_file = dir.join("workflow-stages.md");
+        fs::write(&workflow_file, "## draft\n```md\nDraft {{topic}}\n```").unwrap();
+
+        let mut vars = HashMap::new();
+        vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "draft".to_string());
+        vars.insert(template_vars::TOPIC.to_string(), "plan".to_string());
+        let config = PromptConfig::new("agent", "base", dir.clone())
+            .with_template_vars(vars)
+            .with_workflow_prompt_path(workflow_file);
+        let skills = crate::skill::SkillRegistry::new();
+
+        let prompt = SystemPromptBuilder::from_config(&config, &skills).build();
+        assert!(prompt.contains("## Workflow State"));
+        assert!(prompt.contains("Draft plan"));
+
+        fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -1,6 +1,7 @@
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::config::{AgentSpec, AppConfig};
 use crate::message::{ContentBlock, Message, Role};
+use crate::prompt::TrimmerConfig;
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
@@ -130,6 +131,16 @@ impl Tool for AgentTool {
             tool_timeout: std::time::Duration::from_secs(self.config.gateway.subagent_timeout_secs),
             max_tokens: self.config.gateway.max_tokens,
             use_turn_context: self.config.gateway.use_turn_context,
+            trimmer: TrimmerConfig {
+                context_window: self.config.gateway.trimmer.context_window,
+                output_reserve: self.config.gateway.trimmer.output_reserve,
+                min_recent_messages: self.config.gateway.trimmer.min_recent_messages,
+                enable_summary: false,
+            },
+            workspace: self.config.workspace.clone(),
+            prompts_dir: self.config.prompts_dir(),
+            project_context_file: self.config.project_context_file(),
+            initial_env_snapshot: context.as_ref().and_then(|ctx| ctx.environment.clone()),
         };
 
         let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);

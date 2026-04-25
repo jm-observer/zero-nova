@@ -14,10 +14,12 @@ pub struct AgentDescriptor {
     pub id: String,
     pub display_name: String,
     pub description: String,
-    pub aliases: Vec<String>,                // "OpenClaw", "oc", "open-claw"
-    pub system_prompt_template: String,      // 该 agent 的 system prompt 模板
-    pub tool_whitelist: Option<Vec<String>>, // None = 全部工具
-    pub model_config: Option<ModelConfig>,   // None = 使用默认
+    pub aliases: Vec<String>,                           // "OpenClaw", "oc", "open-claw"
+    pub system_prompt_template: String,                 // 完整构建后的提示词（用于旧路径或初始会话）
+    pub system_prompt_base: String,                     // 基础提示词模板（用于新路径下的 prepare_turn）
+    pub initial_template_vars: HashMap<String, String>, // 初始模板变量
+    pub tool_whitelist: Option<Vec<String>>,            // None = 全部工具
+    pub model_config: Option<ModelConfig>,              // None = 使用默认
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +86,8 @@ mod tests {
             description: "Default agent".to_string(),
             aliases: vec!["oc".to_string(), "open-claw".to_string()],
             system_prompt_template: "You are OpenClaw".to_string(),
+            system_prompt_base: "You are OpenClaw".to_string(),
+            initial_template_vars: HashMap::new(),
             tool_whitelist: None,
             model_config: None,
         };

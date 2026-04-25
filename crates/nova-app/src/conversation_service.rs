@@ -91,12 +91,31 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         // 渐进切换策略（Phase 3 G11）
         let use_turn_context = self.agent.config.use_turn_context;
         if use_turn_context {
+            // 预加载项目上下文（R2 修复）
+            let project_context = nova_core::prompt::load_project_context_with_config_async(
+                &self.agent.config.workspace,
+                self.agent.config.project_context_file.as_deref(),
+            )
+            .await;
+
             // 新路径：prepare_turn + run_turn_with_context
-            let prompt_config = PromptConfig::new(
+            let mut prompt_config = PromptConfig::new(
                 agent_descriptor.id.clone(),
-                agent_descriptor.system_prompt_template.clone(),
-                std::path::PathBuf::from("."),
-            );
+                agent_descriptor.system_prompt_base.clone(),
+                self.agent.config.workspace.clone(),
+            )
+            .with_project_context_path_opt(self.agent.config.project_context_file.clone())
+            .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
+            .with_template_vars(agent_descriptor.initial_template_vars.clone());
+
+            if let Some(env) = &self.agent.config.initial_env_snapshot {
+                prompt_config = prompt_config.with_environment(env.clone());
+            }
+
+            if let Some(content) = project_context {
+                prompt_config = prompt_config.with_project_context_content(content);
+            }
+
             let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config)?;
             let user_message = Message {
                 role: Role::User,

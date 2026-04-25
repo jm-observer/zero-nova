@@ -122,16 +122,13 @@ where
                     warn!("Failed to parse request from {}: {}. Text: {}", peer_id, e, text);
                 }
             },
-            Ok(WsMessage::Ping(data)) => {
-                if internal_tx
-                    .send(InternalMessage::Raw(WsMessage::Pong(data)))
-                    .await
-                    .is_err()
-                {
+            Ok(WsMessage::Ping(data)) => match internal_tx.send(InternalMessage::Raw(WsMessage::Pong(data))).await {
+                Ok(()) => {}
+                Err(_) => {
                     trace!("Failed to queue pong for {}", peer_id);
                     break;
                 }
-            }
+            },
             Ok(WsMessage::Close(_)) => break,
             Err(e) => {
                 error!("WS read error from {}: {}", peer_id, e);

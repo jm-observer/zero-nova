@@ -6,7 +6,7 @@ use nova_conversation::sqlite_manager::SqliteManager;
 use nova_core::agent::{AgentConfig, AgentRuntime};
 use nova_core::agent_catalog::{AgentDescriptor, AgentRegistry};
 use nova_core::config::AppConfig;
-use nova_core::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder};
+use nova_core::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder, TrimmerConfig};
 use nova_core::provider::LlmClient;
 use nova_core::skill::SkillRegistry;
 use nova_core::tool::ToolRegistry;
@@ -39,6 +39,13 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let task_store = Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
 
+    // 预加载项目上下文（R2 修复）
+    let project_context = nova_core::prompt::load_project_context_with_config_async(
+        &config.workspace,
+        config.project_context_file().as_deref(),
+    )
+    .await;
+
     let tools = ToolRegistry::new();
     // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
     nova_core::tool::builtin::register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
@@ -49,6 +56,16 @@ pub async fn build_application<C: LlmClient + 'static>(
         tool_timeout: std::time::Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
         max_tokens: config.gateway.max_tokens,
         use_turn_context: config.gateway.use_turn_context,
+        trimmer: TrimmerConfig {
+            context_window: config.gateway.trimmer.context_window,
+            output_reserve: config.gateway.trimmer.output_reserve,
+            min_recent_messages: config.gateway.trimmer.min_recent_messages,
+            enable_summary: false,
+        },
+        workspace: config.workspace.clone(),
+        prompts_dir: config.prompts_dir(),
+        project_context_file: config.project_context_file(),
+        initial_env_snapshot: Some(env_snapshot.clone()),
     };
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
@@ -72,9 +89,16 @@ pub async fn build_application<C: LlmClient + 'static>(
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt, config.workspace.clone())
+        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), config.workspace.clone())
             .with_environment(env_snapshot.clone())
-            .with_template_vars(template_vars);
+            .with_project_context_path_opt(config.project_context_file())
+            .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))
+            .with_template_vars(template_vars.clone());
+
+        if let Some(content) = &project_context {
+            prompt_config = prompt_config.with_project_context_content(content.clone());
+        }
+
         let full_system_prompt = SystemPromptBuilder::from_config(&prompt_config, &skill_registry).build();
 
         agents.push(AgentDescriptor {
@@ -83,6 +107,8 @@ pub async fn build_application<C: LlmClient + 'static>(
             description: agent.description.clone(),
             aliases: agent.aliases.clone(),
             system_prompt_template: full_system_prompt,
+            system_prompt_base: agent_prompt,
+            initial_template_vars: template_vars,
             tool_whitelist: agent.tool_whitelist.clone(),
             model_config: agent.model_config.clone(),
         });

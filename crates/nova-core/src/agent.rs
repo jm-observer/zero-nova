@@ -44,6 +44,16 @@ pub struct AgentConfig {
     pub max_tokens: usize,
     /// Phase 3：是否启用新的 prepare_turn + run_turn_with_context 路径
     pub use_turn_context: bool,
+    /// 历史裁剪配置
+    pub trimmer: TrimmerConfig,
+    /// 工作区路径
+    pub workspace: std::path::PathBuf,
+    /// 提示词目录 (AppConfig::prompts_dir)
+    pub prompts_dir: std::path::PathBuf,
+    /// 项目上下文文件路径
+    pub project_context_file: Option<std::path::PathBuf>,
+    /// 启动时采集的环境快照
+    pub initial_env_snapshot: Option<crate::prompt::EnvironmentSnapshot>,
 }
 
 impl<C: LlmClient> AgentRuntime<C> {
@@ -116,6 +126,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                             task_store: self.task_store.clone(),
                             skill_registry: self.skill_registry.clone(),
                             read_files: self.read_files.clone(),
+                            environment: self.config.initial_env_snapshot.clone(),
                         }),
                     ),
                 )
@@ -125,6 +136,13 @@ impl<C: LlmClient> AgentRuntime<C> {
                     Ok(Ok(out)) => (out.content, out.is_error),
                     Ok(Err(e)) => (format!("Internal execution error: {}", e), true),
                     Err(_) => ("Tool execution timed out".to_string(), true),
+                };
+                let content = if let (Some(injector), Some(skill_registry)) =
+                    (self.side_channel_injector.as_ref(), self.skill_registry.as_ref())
+                {
+                    injector.inject_into_tool_result(&content, skill_registry.as_ref())
+                } else {
+                    content
                 };
 
                 let _ = tx
@@ -411,7 +429,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill);
 
         // 5. 裁剪历史（如果 active skill 切换了则裁剪）
-        let history = self.trim_history(&current_history, &active_skill)?;
+        let history = self.trim_history(&current_history, &system_prompt, &active_skill)?;
 
         // 6. 构造 TurnContext
         Ok(TurnContext {
@@ -435,7 +453,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     pub async fn run_turn_with_context(
         &self,
         ctx: TurnContext,
-        _message: Message,
+        message: Message,
         event_tx: mpsc::Sender<crate::event::AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
@@ -443,6 +461,34 @@ impl<C: LlmClient> AgentRuntime<C> {
             .unwrap_or_else(|h| (*h).clone())
             .into_iter()
             .collect::<Vec<_>>();
+
+        // 注入最新的系统提示词（N1 关键修复）
+        if let Some(first) = all_messages.get_mut(0) {
+            if first.role == Role::System {
+                first.content = vec![ContentBlock::Text {
+                    text: ctx.system_prompt.clone(),
+                }];
+            } else {
+                all_messages.insert(
+                    0,
+                    Message {
+                        role: Role::System,
+                        content: vec![ContentBlock::Text {
+                            text: ctx.system_prompt.clone(),
+                        }],
+                    },
+                );
+            }
+        } else {
+            all_messages.push(Message {
+                role: Role::System,
+                content: vec![ContentBlock::Text {
+                    text: ctx.system_prompt.clone(),
+                }],
+            });
+        }
+
+        all_messages.push(message);
 
         // 使用 TurnContext 提供的工具定义流
         let mut turn_messages = Vec::new();
@@ -680,33 +726,15 @@ impl<C: LlmClient> AgentRuntime<C> {
     fn trim_history(
         &self,
         current_history: &Arc<Vec<Message>>,
+        system_prompt: &str,
         active_skill: &Option<ActiveSkillState>,
     ) -> Result<Arc<Vec<Message>>> {
-        // 如果 active skill 切换了，总是重新裁剪
-        let should_trim = active_skill.is_some();
-        if !should_trim {
+        if active_skill.is_none() {
             return Ok(current_history.clone());
         }
 
-        // 构建 trimmer 配置（从 agent 配置推断）
-        let trimmer_config = TrimmerConfig {
-            context_window: self.config.max_tokens.saturating_mul(16), // 粗略估算
-            output_reserve: 4096,
-            min_recent_messages: 10,
-            enable_summary: false,
-        };
-
-        let trimmer = HistoryTrimmer::new(trimmer_config);
-
-        // 使用当前系统 prompt（可以通过 builder 获取）进行裁剪
-        // 这里使用一个简化的路径：先构建系统 prompt
-        let mut prompt_config =
-            crate::prompt::PromptConfig::new("agent".to_string(), String::new(), std::path::PathBuf::from("."));
-        if let Some(skill) = active_skill {
-            prompt_config = prompt_config.with_active_skill(skill.skill_id.clone());
-        }
-        let system_prompt = self.build_system_prompt(&prompt_config);
-        let result = trimmer.trim(current_history, &system_prompt);
+        let trimmer = HistoryTrimmer::new(self.config.trimmer.clone());
+        let result = trimmer.trim(current_history, system_prompt);
 
         if result.was_trimmed {
             log::info!(

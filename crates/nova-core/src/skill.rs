@@ -552,42 +552,6 @@ impl SkillRegistry {
         parts.join("\n\n")
     }
 
-    /// 生成旧格式的整包 system prompt（向后兼容）。
-    ///
-    /// 请改用 `generate_contextual_prompt()` 以减少 token 消耗。
-    #[deprecated(note = "Use generate_contextual_prompt() instead")]
-    pub fn generate_system_prompt(&self) -> String {
-        if self.packages.is_empty() && self.skills.is_empty() {
-            return String::new();
-        }
-
-        let mut prompt = String::from("\n\n# Available Skills\n\n");
-        for pkg in &self.packages {
-            prompt.push_str(&format!("## Skill: {}\n", pkg.display_name));
-            prompt.push_str(&format!("Description: {}\n", pkg.description));
-            prompt.push_str(&format!("Path: {}\n\n", pkg.source_path.to_string_lossy()));
-            prompt.push_str(&format!("### Instructions for {}\n", pkg.display_name));
-            prompt.push_str(&pkg.instructions);
-            prompt.push_str("\n\n---\n\n");
-        }
-        for skill in &self.skills {
-            // 避免重复（兼容模式下 package 可能已包含）
-            if !self
-                .packages
-                .iter()
-                .any(|p| p.slug == skill.path.file_name().and_then(|s| s.to_str()).unwrap_or_default())
-            {
-                prompt.push_str(&format!("## Skill: {}\n", skill.name));
-                prompt.push_str(&format!("Description: {}\n", skill.description));
-                prompt.push_str(&format!("Path: {}\n\n", skill.path.to_string_lossy()));
-                prompt.push_str(&format!("### Instructions for {}\n", skill.name));
-                prompt.push_str(&skill.body);
-                prompt.push_str("\n\n---\n\n");
-            }
-        }
-        prompt
-    }
-
     // -----------------------------------------------------------------------
     //  Plan 2 — SkillRouter 辅助方法（阶段一：纯规则匹配）
     // -----------------------------------------------------------------------
@@ -628,11 +592,7 @@ impl SkillRegistry {
                         .collect();
 
                     // AllowListWithDeferred 保留 ToolSearch
-                    if matches!(&pkg.tool_policy, ToolPolicy::AllowListWithDeferred(_)) {
-                        policy.tool_search_enabled = true;
-                    } else {
-                        policy.tool_search_enabled = false;
-                    }
+                    policy.tool_search_enabled = matches!(&pkg.tool_policy, ToolPolicy::AllowListWithDeferred(_));
                 }
             }
         }

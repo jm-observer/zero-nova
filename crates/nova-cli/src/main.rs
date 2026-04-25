@@ -8,7 +8,7 @@ use nova_core::agent::{AgentConfig, AgentRuntime};
 use nova_core::event::AgentEvent;
 use nova_core::mcp::client::McpClient;
 use nova_core::message::Message;
-use nova_core::prompt::SystemPromptBuilder;
+use nova_core::prompt::{SystemPromptBuilder, TrimmerConfig};
 use nova_core::provider::openai_compat::OpenAiCompatClient;
 use nova_core::provider::LlmClient;
 use nova_core::tool::{builtin::register_builtin_tools, ToolRegistry};
@@ -189,6 +189,16 @@ async fn main() -> Result<()> {
         tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
         max_tokens: config.gateway.max_tokens,
         use_turn_context: config.gateway.use_turn_context,
+        trimmer: TrimmerConfig {
+            context_window: config.gateway.trimmer.context_window,
+            output_reserve: config.gateway.trimmer.output_reserve,
+            min_recent_messages: config.gateway.trimmer.min_recent_messages,
+            enable_summary: false,
+        },
+        workspace: config.workspace.clone(),
+        prompts_dir: config.prompts_dir(),
+        project_context_file: config.project_context_file(),
+        initial_env_snapshot: None, // CLI 暂不采集环境快照或在启动处添加
     };
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);

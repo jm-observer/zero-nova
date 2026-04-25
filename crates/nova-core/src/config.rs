@@ -87,6 +87,9 @@ pub struct ToolConfig {
     /// Prompts directory for agent template files. When None, defaults to `{workspace}/prompts`.
     #[serde(default)]
     pub prompts_dir: Option<String>,
+    /// 项目上下文文件路径。为空时按默认候选文件自动查找。
+    #[serde(default)]
+    pub project_context_file: Option<String>,
     /// 默认能力策略 ("minimal" | "full" | "workflow")。
     /// Plan 1：基础扩展字段，不引入复杂嵌套。
     #[serde(default)]
@@ -282,6 +285,18 @@ impl AppConfig {
         self.resolve_path(self.tool.prompts_dir.as_deref(), || self.workspace.join("prompts"))
     }
 
+    /// Return the configured project context file path when provided.
+    pub fn project_context_file(&self) -> Option<PathBuf> {
+        self.tool.project_context_file.as_deref().map(|path| {
+            let path = PathBuf::from(path);
+            if path.is_absolute() {
+                path
+            } else {
+                self.workspace.join(path)
+            }
+        })
+    }
+
     /// Return the path to the configuration file.
     /// Defaults to `{workspace}/config.toml`.
     pub fn config_path(&self) -> PathBuf {
@@ -358,6 +373,25 @@ mod tests {
         origin.tool.prompts_dir = Some("D:/etc/prompts".to_string());
         let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
         assert_eq!(config.prompts_dir(), PathBuf::from("D:/etc/prompts"));
+    }
+
+    #[test]
+    fn project_context_file_uses_relative_override_from_workspace() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.project_context_file = Some("docs/PROJECT.md".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(
+            config.project_context_file(),
+            Some(PathBuf::from("D:/workspace/docs/PROJECT.md"))
+        );
+    }
+
+    #[test]
+    fn project_context_file_uses_absolute_path_directly() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.project_context_file = Some("D:/etc/PROJECT.md".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.project_context_file(), Some(PathBuf::from("D:/etc/PROJECT.md")));
     }
 
     #[test]

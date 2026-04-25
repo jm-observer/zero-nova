@@ -24,6 +24,8 @@ pub struct ToolContext {
     pub skill_registry: Option<Arc<crate::skill::SkillRegistry>>,
     /// Session-level state: files that have been read (for Write pre-read enforcement).
     pub read_files: Arc<tokio::sync::Mutex<HashSet<String>>>,
+    /// 运行时环境快照
+    pub environment: Option<crate::prompt::EnvironmentSnapshot>,
 }
 
 /// Definition of a tool, including name, description, and input schema.

@@ -74,11 +74,11 @@ async function init() {
 
                 console.log('[Main] Fetching agents...');
                 const agents = await gatewayClient.getAgents();
-                state.setAgents(agents as any);
+                state.setAgents(agents as Array<{ id: string; name: string; description?: string; icon?: string; color?: string; default?: boolean; systemPrompt?: string; createdAt: number; updatedAt: number }>);
 
                 console.log('[Main] Fetching sessions...');
                 const sessions = await gatewayClient.getSessions();
-                state.setSessions(sessions as any);
+                state.setSessions(sessions as Session[]);
 
                 // Initial session selection (only if not already set)
                 if (!state.currentSessionId) {
@@ -148,7 +148,7 @@ async function init() {
                     }
                 }
 
-                state.setMessages(messages as any);
+                state.setMessages(messages as any[]);
              } catch (err) {
                 console.error('[Main] Failed to load messages:', err);
              }

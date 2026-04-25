@@ -1,6 +1,7 @@
 import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
 import { GatewayClient } from '../gateway-client';
+import type { Session } from '../core/types';
 
 export class ChatService {
     constructor(private state: AppState, private bus: EventBus, private client: GatewayClient) {}
@@ -36,7 +37,7 @@ export class ChatService {
              // Refresh messages to get persistent IDs and updated state
              if (this.state.currentSessionId) {
                  const messages = await this.client.getMessages(this.state.currentSessionId);
-                 this.state.setMessages(messages as any);
+                 this.state.setMessages(messages as any[]);
              }
         });
 
@@ -49,7 +50,7 @@ export class ChatService {
             const agentId = this.state.currentAgentId || 'default';
             try {
                 const session = await this.client.createSession({ title, agentId }); 
-                this.state.addSession(session as any);
+                this.state.addSession(session as Session);
                 this.state.setCurrentSession(session.id);
             } catch (err) {
                 this.bus.emit('toast', { message: 'Failed to create session: ' + err });
@@ -69,7 +70,7 @@ export class ChatService {
         this.bus.on(Events.SESSION_COPY, async (payload: { id: string, index?: number }) => {
             try {
                 const session = await this.client.copySession(payload.id, payload.index);
-                this.state.addSession(session as any);
+                this.state.addSession(session as Session);
                 this.state.setCurrentSession(session.id);
             } catch (err) {
                 this.bus.emit('toast', { message: 'Failed to clone session: ' + err });
@@ -82,7 +83,7 @@ export class ChatService {
              const title = text.length > 20 ? text.substring(0, 20) + '...' : text;
              const agentId = this.state.currentAgentId || 'default';
              const session = await this.client.createSession({ title, agentId });
-             this.state.addSession(session as any);
+             this.state.addSession(session as Session);
              this.state.setCurrentSession(session.id);
         }
         
@@ -105,7 +106,7 @@ export class ChatService {
             if (event.sessionId) {
                 const messages = await this.client.getMessages(event.sessionId);
                 if (event.sessionId === this.state.currentSessionId) {
-                    this.state.setMessages(messages as any);
+                    this.state.setMessages(messages as any[]);
                 }
             }
         } else if (event.type === 'tool_start') {

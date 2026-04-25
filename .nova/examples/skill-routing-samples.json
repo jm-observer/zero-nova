@@ -1,0 +1,48 @@
+{
+  "version": "1.0",
+  "description": "Skill routing samples for testing skill activation decisions",
+  "samples": [
+    {
+      "message": "Create a skill for code review",
+      "expected_route": "Activate(skill-creator)",
+      "confidence_expected": 0.9,
+      "active_skill_after_action": true
+    },
+    {
+      "message": "Review this Python code",
+      "expected_route": "KeepCurrent",
+      "active_skill_id": "code-review",
+      "sticky": true
+    },
+    {
+      "message": "Write unit tests for the authentication module",
+      "expected_route": "Activate(test-skills)",
+      "confidence_expected": 0.85,
+      "active_skill_after_action": true
+    },
+    {
+      "message": "Debug the connection timeout issue",
+      "expected_route": "Activate(debug-mode)",
+      "confidence_expected": 0.75,
+      "active_skill_after_action": true
+    },
+    {
+      "message": "Build the application",
+      "expected_route": "KeepCurrent",
+      "active_skill_id": null,
+      "sticky": false
+    },
+    {
+      "message": "Create a new skill to handle file operations",
+      "expected_route": "Activate(skill-creator)",
+      "confidence_expected": 0.95,
+      "active_skill_after_action": true
+    },
+    {
+      "message": "Test the implementation",
+      "expected_route": "KeepCurrent",
+      "active_skill_id": "test-skills",
+      "sticky": true
+    }
+  ]
+}

@@ -104,8 +104,8 @@ export class GatewayClient {
 
                         // 保存首次运行标志
                         if (payload.setupRequired) {
-                            (this as any)._setupRequired = true;
-                        }
+                        (this as unknown as { _setupRequired: boolean })._setupRequired = true;
+                    }
 
                         if (payload.requireAuth && this.token) {
                             this.authenticate().then(() => {
@@ -234,7 +234,7 @@ export class GatewayClient {
                 // 兼容性与规范化处理
                 if (event.toolName && !event.tool) event.tool = event.toolName;
                 if (!event.toolName && event.tool) event.toolName = event.tool;
-                if (event.toolUseId && !(event as any).tool_use_id) (event as any).tool_use_id = event.toolUseId;
+                if (event.toolUseId && !(event as Record<string, unknown>).tool_use_id) (event as Record<string, unknown>).tool_use_id = event.toolUseId;
                 
                 this.progressHandlers.forEach(handler => handler(event));
             }
@@ -574,7 +574,17 @@ export class GatewayClient {
     }) => void): () => void {
         const messageHandler = (msg: GatewayMessage) => {
             if (msg.type === 'collaboration_result') {
-                handler(msg as any);
+                handler(msg.payload as {
+                    sessionId: string;
+                    agentId: string;
+                    agentType: string;
+                    task: string;
+                    status: string;
+                    mode: string;
+                    output?: string;
+                    error?: string;
+                    duration?: number;
+                });
             }
         };
         this.addMessageHandler(messageHandler);
@@ -705,7 +715,7 @@ export class GatewayClient {
     }
 
     isSetupRequired(): boolean {
-        return !!(this as any)._setupRequired;
+        return !!(this as unknown as { _setupRequired: boolean })._setupRequired;
     }
 
     /**
@@ -726,7 +736,7 @@ export class GatewayClient {
         };
     }): Promise<{ success: boolean; message?: string }> {
         const result = await this.request<{ message?: string }>('setup.complete', config);
-        (this as any)._setupRequired = false;
+        (this as unknown as { _setupRequired: boolean })._setupRequired = false;
         return { success: true, message: result?.message };
     }
 
@@ -878,7 +888,7 @@ export class GatewayClient {
     onForgeSuggestion(callback: (suggestion: { id: string; title: string; content: string; category: string; reasoning: string }) => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
             if (msg.type === 'evolution.forge.suggest' && msg.payload) {
-                callback(msg.payload as any);
+                callback(msg.payload as { id: string; title: string; content: string; category: string; reasoning: string });
             }
         });
     }

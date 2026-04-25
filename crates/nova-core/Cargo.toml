@@ -26,3 +26,7 @@ chrono = { workspace = true }
 [features]
 default = []
 mcp-websocket = ["dep:tokio-tungstenite"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["full", "macros"] }

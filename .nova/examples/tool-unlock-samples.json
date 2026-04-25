@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "description": "ToolSearch unlock samples for testing deferred tool loading",
+  "samples": [
+    {
+      "query": "select:TaskCreate,TaskList",
+      "expected_tools": ["TaskCreate", "TaskList"],
+      "tool_search_enabled": true,
+      "description": "Select specific deferred tools by name"
+    },
+    {
+      "query": "select:category:task",
+      "expected_tools": ["TaskCreate", "TaskList", "TaskUpdate"],
+      "tool_search_enabled": true,
+      "description": "Load all task-related deferred tools"
+    },
+    {
+      "query": "select:category:skill",
+      "expected_tools": ["SkillActivate", "SkillExit"],
+      "tool_search_enabled": true,
+      "description": "Load all skill-related deferred tools"
+    },
+    {
+      "query": "search:task management",
+      "expected_tools": ["TaskCreate", "TaskList", "TaskUpdate"],
+      "tool_search_enabled": true,
+      "description": "Search for tools matching 'task management' keyword"
+    },
+    {
+      "query": "load:skill",
+      "expected_tools": ["SkillActivate", "SkillExit", "SkillStatus"],
+      "tool_search_enabled": true,
+      "description": "Load all skill category tools"
+    }
+  ]
+}

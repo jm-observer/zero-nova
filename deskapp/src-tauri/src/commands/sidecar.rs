@@ -212,12 +212,23 @@ pub async fn stop_gateway(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn restart_gateway(app: AppHandle) -> Result<(), String> {
+    // Phase 3: 使用 spawn_blocking 避免阻塞异步运行时
     let config = app.state::<AppConfig>();
     if config.sidecar.mode == SidecarManagementMode::Manual {
         return Err("Restart not supported in manual mode.".to_string());
     }
-
     stop_gateway_sidecar(&app)?;
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    tokio::task::spawn_blocking(|| {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    })
+    .await
+    .map_err(|e| format!("Sleep task error: {}", e))?;
     start_gateway_sidecar(&app)
+}
+
+/// 获取当前 Gateway 状态（Phase 3: 使用枚举类型返回）
+#[tauri::command]
+pub async fn get_gateway_status(app: AppHandle) -> Result<String, String> {
+    let state = app.state::<crate::GatewayStateManager>();
+    Ok(format!("{:?}", state.get_status()))
 }

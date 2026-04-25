@@ -5,6 +5,49 @@ pub mod tray;
 use log::info;
 use std::sync::Mutex;
 use tauri::Manager;
+use tokio::sync::watch;
+
+/// Gateway 状态枚举（用于 watch channel 实时更新 UI）
+#[derive(Debug, Clone, PartialEq)]
+pub enum GatewayStatus {
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+}
+
+/// Gateway 状态管理器（支持同步监听）
+pub struct GatewayStateManager {
+    status: GatewayStatus,
+    /// watch sender — 前端可订阅状态变化
+    sender: watch::Sender<GatewayStatus>,
+}
+
+impl GatewayStateManager {
+    pub fn new() -> (Self, watch::Receiver<GatewayStatus>) {
+        let (sender, receiver) = watch::channel(GatewayStatus::Stopped);
+        (
+            Self {
+                status: GatewayStatus::Stopped,
+                sender,
+            },
+            receiver,
+        )
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<GatewayStatus> {
+        self.sender.clone().subscribe()
+    }
+
+    pub fn set_status(&mut self, status: GatewayStatus) {
+        self.status = status.clone();
+        let _ = self.sender.send(status);
+    }
+
+    pub fn get_status(&self) -> &GatewayStatus {
+        &self.status
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,7 +77,12 @@ pub fn run() {
             app.manage(config);
 
             // 初始化 Gateway sidecar 状态
-            app.manage(Mutex::new(commands::gateway::GatewaySidecar::new()));
+            let gateway_sidecar = Mutex::new(commands::gateway::GatewaySidecar::new());
+            app.manage(gateway_sidecar);
+
+            // 初始化 Gateway 状态管理系统（支持 watch channel 订阅）
+            let (gateway_manager, _) = GatewayStateManager::new();
+            app.manage(gateway_manager);
 
             // 自动启动 Gateway sidecar（异步，不阻塞 UI 线程）
             let app_handle = app.handle().clone();
@@ -81,10 +129,14 @@ pub fn run() {
             commands::window::window_flash_frame,
             commands::file::file_exists,
             commands::file::file_read,
+            commands::file::file_read_large,
+            commands::file::file_read_text,
+            commands::file::file_stat,
             commands::file::file_open,
             commands::file::file_reveal,
             commands::file::file_save_as,
             commands::gateway::get_gateway_config,
+            commands::gateway::get_gateway_status,
             commands::gateway::start_gateway,
             commands::gateway::stop_gateway,
             commands::gateway::restart_gateway,

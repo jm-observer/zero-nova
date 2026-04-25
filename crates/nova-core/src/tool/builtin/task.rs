@@ -247,7 +247,7 @@ impl TaskCreateTool {
             "properties": {
                 "subject": { "type": "string", "description": "Brief task title" },
                 "description": { "type": "string", "description": "What needs to be done" },
-                "activeForm": { "type": "string", "description": "Present continuous form for spinner display (e.g., 'Compiling code')" },
+                "active_form": { "type": "string", "description": "Present continuous form for spinner display (e.g., 'Compiling code')" },
                 "metadata": { "type": "object", "description": "Arbitrary metadata" }
             },
             "required": ["subject", "description"]
@@ -319,7 +319,7 @@ impl Tool for TaskCreateTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'description'"))?
             .to_string();
-        let active_form = input["activeForm"].as_str().map(|s| s.to_string());
+        let active_form = input["active_form"].as_str().map(|s| s.to_string());
         let metadata = input["metadata"].as_object().cloned().map(|m| m.into_iter().collect());
 
         let mut store = self.store.lock().await;
@@ -397,7 +397,7 @@ impl TaskUpdateTool {
                 "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "deleted"] },
                 "subject": { "type": "string" },
                 "description": { "type": "string" },
-                "activeForm": { "type": "string" },
+                "active_form": { "type": "string" },
                 "owner": { "type": "string" },
                 "metadata": { "type": "object" },
                 "addBlocks": { "type": "array", "items": { "type": "string" } },
@@ -432,7 +432,7 @@ impl Tool for TaskUpdateTool {
             }),
             subject: input["subject"].as_str().map(|s| s.to_string()),
             description: input["description"].as_str().map(|s| s.to_string()),
-            active_form: input["activeForm"].as_str().map(|s| s.to_string()),
+            active_form: input["active_form"].as_str().map(|s| s.to_string()),
             owner: input["owner"].as_str().map(|s| s.to_string()),
             metadata: input["metadata"].as_object().cloned().map(|m| m.into_iter().collect()),
             add_blocks: input["addBlocks"]

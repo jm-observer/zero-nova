@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "description": "Complete workflow with skill activation, task management and tool unlocking",
+  "workflow": "code-review",
+  "stages": [
+    {
+      "name": "setup",
+      "skill": "code-review",
+      "tools": ["Read", "Write", "Edit"],
+      "expected_duration": "short",
+      "expected_events": ["SkillActivated", "TaskCreated"]
+    },
+    {
+      "name": "review",
+      "skill": "code-review",
+      "tools": ["Bash", "Read", "Skill"],
+      "expected_duration": "medium",
+      "expected_events": ["ToolUnlocked", "SkillInvocation"]
+    },
+    {
+      "name": "report",
+      "skill": "code-review",
+      "tools": ["Write", "Edit"],
+      "expected_duration": "short",
+      "expected_events": ["TaskStatusChanged", "SkillExited"]
+    }
+  ],
+  "events": [
+    {
+      "position": 1,
+      "type": "SkillActivated",
+      "data": {"skill_id": "code-review", "skill_name": "Code Review", "sticky": true}
+    },
+    {
+      "position": 2,
+      "type": "TaskCreated",
+      "data": {"task_id": "1", "subject": "Review PR #1234", "is_main_task": true}
+    },
+    {
+      "position": 3,
+      "type": "ToolUnlocked",
+      "data": {"tool_name": "TaskCreate", "source": "skill_activation"}
+    },
+    {
+      "position": 4,
+      "type": "SkillInvocation",
+      "data": {"skill_id": "code-review", "level": "explicit"}
+    },
+    {
+      "position": 5,
+      "type": "TaskStatusChanged",
+      "data": {"task_id": "1", "status": "completed", "is_main_task": true}
+    },
+    {
+      "position": 6,
+      "type": "SkillExited",
+      "data": {"skill_id": "code-review", "reason": "workflow_complete"}
+    }
+  ]
+}

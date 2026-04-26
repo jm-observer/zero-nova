@@ -300,7 +300,10 @@ pub async fn handle_session_runs(
     match app.list_session_runs(&payload.session_id).await {
         Ok(res) => {
             let _ = outbound_tx
-                .send_async(GatewayMessage::new(request_id, MessageEnvelope::SessionRunsResponse(res)))
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionRunsResponse(res),
+                ))
                 .await;
         }
         Err(e) => {
@@ -357,7 +360,10 @@ pub async fn handle_session_artifacts(
     match app.list_session_artifacts(&payload.session_id).await {
         Ok(res) => {
             let _ = outbound_tx
-                .send_async(GatewayMessage::new(request_id, MessageEnvelope::SessionArtifactsResponse(res)))
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionArtifactsResponse(res),
+                ))
                 .await;
         }
         Err(e) => {
@@ -375,7 +381,10 @@ pub async fn handle_permission_pending(
     match app.list_pending_permissions(Some(payload.session_id.as_str())).await {
         Ok(res) => {
             let _ = outbound_tx
-                .send_async(GatewayMessage::new(request_id, MessageEnvelope::PermissionPendingResponse(res)))
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::PermissionPendingResponse(res),
+                ))
                 .await;
         }
         Err(e) => {
@@ -395,7 +404,9 @@ pub async fn handle_permission_respond(
             let _ = outbound_tx
                 .send_async(GatewayMessage::new(
                     request_id,
-                    MessageEnvelope::PermissionRespondResponse(nova_protocol::session::SuccessResponse { success: true }),
+                    MessageEnvelope::PermissionRespondResponse(nova_protocol::session::SuccessResponse {
+                        success: true,
+                    }),
                 ))
                 .await;
         }
@@ -432,7 +443,10 @@ pub async fn handle_diagnostics_current(
     match app.get_diagnostics(&payload.session_id).await {
         Ok(res) => {
             let _ = outbound_tx
-                .send_async(GatewayMessage::new(request_id, MessageEnvelope::DiagnosticsResponse(res)))
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::DiagnosticsResponse(res),
+                ))
                 .await;
         }
         Err(e) => {
@@ -450,7 +464,10 @@ pub async fn handle_workspace_restore(
     match app.restore_workspace().await {
         Ok(res) => {
             let _ = outbound_tx
-                .send_async(GatewayMessage::new(request_id, MessageEnvelope::WorkspaceRestoreResponse(res)))
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::WorkspaceRestoreResponse(res),
+                ))
                 .await;
         }
         Err(e) => {

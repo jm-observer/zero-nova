@@ -76,8 +76,14 @@ pub trait AgentApplication: Send + Sync {
     async fn list_session_runs(&self, session_id: &str) -> Result<nova_protocol::observability::SessionRunsResponse>;
     async fn get_run_detail(&self, run_id: &str) -> Result<nova_protocol::observability::RunRecord>;
     async fn control_run(&self, run_id: &str, req: nova_protocol::observability::RunControlRequest) -> Result<()>;
-    async fn list_session_artifacts(&self, session_id: &str) -> Result<nova_protocol::observability::SessionArtifactsResponse>;
-    async fn list_pending_permissions(&self, session_id: Option<&str>) -> Result<nova_protocol::observability::PermissionPendingResponse>;
+    async fn list_session_artifacts(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionArtifactsResponse>;
+    async fn list_pending_permissions(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<nova_protocol::observability::PermissionPendingResponse>;
     async fn respond_to_permission(&self, req: nova_protocol::observability::PermissionRespondRequest) -> Result<()>;
     async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse>;
     async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse>;
@@ -407,11 +413,17 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         self.workspace_service.control_run(run_id, req).await
     }
 
-    async fn list_session_artifacts(&self, session_id: &str) -> Result<nova_protocol::observability::SessionArtifactsResponse> {
+    async fn list_session_artifacts(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionArtifactsResponse> {
         self.workspace_service.list_session_artifacts(session_id).await
     }
 
-    async fn list_pending_permissions(&self, session_id: Option<&str>) -> Result<nova_protocol::observability::PermissionPendingResponse> {
+    async fn list_pending_permissions(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<nova_protocol::observability::PermissionPendingResponse> {
         self.workspace_service.list_pending_permissions(session_id).await
     }
 

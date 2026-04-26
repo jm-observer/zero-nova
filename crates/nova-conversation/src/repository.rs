@@ -390,13 +390,12 @@ impl SqliteSessionRepository {
         }
     }
 
-    pub async fn get_last_workspace_restore_state(
-        &self,
-    ) -> Result<Option<crate::model::WorkspaceRestoreState>> {
-        let row =
-            sqlx::query("SELECT session_id, snapshot, updated_at FROM workspace_restore_state ORDER BY updated_at DESC LIMIT 1")
-                .fetch_optional(&self.pool)
-                .await?;
+    pub async fn get_last_workspace_restore_state(&self) -> Result<Option<crate::model::WorkspaceRestoreState>> {
+        let row = sqlx::query(
+            "SELECT session_id, snapshot, updated_at FROM workspace_restore_state ORDER BY updated_at DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
 
         if let Some(row) = row {
             let snapshot_json: String = row.get("snapshot");
@@ -410,12 +409,15 @@ impl SqliteSessionRepository {
         }
     }
 
-    pub async fn list_permission_requests(&self, session_id: &str) -> Result<Vec<crate::model::PermissionRequestRecord>> {
+    pub async fn list_permission_requests(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::model::PermissionRequestRecord>> {
         let rows = sqlx::query("SELECT id, session_id, run_id, capability, resource, status, reason, created_at FROM permission_requests WHERE session_id = ? ORDER BY created_at DESC")
             .bind(session_id)
             .fetch_all(&self.pool)
             .await?;
-        
+
         let mut requests = Vec::new();
         for row in rows {
             requests.push(crate::model::PermissionRequestRecord {
@@ -437,7 +439,7 @@ impl SqliteSessionRepository {
             .bind(session_id)
             .fetch_all(&self.pool)
             .await?;
-        
+
         let mut logs = Vec::new();
         for row in rows {
             let details_json: String = row.get("details");
@@ -458,7 +460,7 @@ impl SqliteSessionRepository {
             .bind(session_id)
             .fetch_all(&self.pool)
             .await?;
-        
+
         let mut issues = Vec::new();
         for row in rows {
             let details_json: Option<String> = row.get("details");
@@ -479,7 +481,7 @@ impl SqliteSessionRepository {
             .bind(session_id)
             .fetch_all(&self.pool)
             .await?;
-        
+
         let mut runs = Vec::new();
         for row in rows {
             runs.push(crate::model::RunRecord {
@@ -498,7 +500,7 @@ impl SqliteSessionRepository {
             .bind(run_id)
             .fetch_optional(&self.pool)
             .await?;
-        
+
         if let Some(row) = row {
             Ok(Some(crate::model::RunRecord {
                 id: row.get("id"),

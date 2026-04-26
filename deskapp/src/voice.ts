@@ -617,7 +617,6 @@ class StreamingTTSManager {
     private isSynthesizing = false;
     private isPlaying = false;
     private cancelled = true;               // 初始为 cancelled
-    private messageId = '';
     private currentAudio: HTMLAudioElement | null = null;
     private onStateChange: StreamingTTSStateCallback | null = null;
 
@@ -633,9 +632,8 @@ class StreamingTTSManager {
     /**
      * 开始流式 TTS（新消息开始流式输出时调用）
      */
-    startStreaming(messageId: string): void {
+    startStreaming(_messageId: string): void {
         this.cancel();
-        this.messageId = messageId;
         this.cancelled = false;
         this.pendingText = '';
         this.onStateChange?.('buffering');

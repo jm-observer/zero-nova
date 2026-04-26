@@ -72,4 +72,7 @@
    PROGRESS_UPDATE: 'progress:update',     // { event: any }
    GATEWAY_STATUS: 'gateway:status',       // { status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
    CHAT_INTENT: 'chat:intent',             // { sessionId: string, intent: string, agentId?: string }
+   CONSOLE_TOGGLED: 'console:toggled',     // { visible: boolean }
+   CONSOLE_TAB_CHANGED: 'console:tab',     // { tab: string }
+   CONSOLE_DATA_UPDATED: 'console:data',   // { key: string, data: any }
  } as const;

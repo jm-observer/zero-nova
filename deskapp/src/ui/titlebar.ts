@@ -11,7 +11,7 @@ export class TitleBarView {
     private btnClose: HTMLButtonElement;
     private themeToggle: HTMLButtonElement;
 
-    constructor(private state: AppState, private bus: EventBus) {
+    constructor(_state: AppState, private bus: EventBus) {
         this.statusIndicator = document.getElementById('status-indicator') as HTMLDivElement;
         this.btnMinimize = document.getElementById('btn-minimize') as HTMLButtonElement;
         this.btnMaximize = document.getElementById('btn-maximize') as HTMLButtonElement;

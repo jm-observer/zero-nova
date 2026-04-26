@@ -14,13 +14,24 @@ import type { ProgressEvent, GatewayMessage } from '../gateway-client';
  * 支持动态验证 event 的 type 字段值
  */
 export function isProgressEvent(value: unknown): value is ProgressEvent {
+  const validTypes: ProgressEvent['type'][] = [
+    'iteration',
+    'thinking',
+    'tool_start',
+    'tool_result',
+    'token',
+    'complete',
+    'turn_complete',
+    'iteration_limit',
+    'tool_log',
+    'system_log',
+  ];
+
   return (
     typeof value === 'object' &&
     value !== null &&
     'type' in value &&
-    ['iteration', 'thinking', 'tool_start', 'tool_result', 'token', 'complete', 'turn_complete', 'iteration_limit', 'tool_log'].includes(
-      (value as ProgressEvent).type
-    )
+    validTypes.includes((value as ProgressEvent).type)
   );
 }
 
@@ -68,7 +79,7 @@ export function isCompleteEvent(event: ProgressEvent): boolean {
  * 检查是否是错误相关事件（isError 或 type 包含 'error'）
  */
 export function isErrorEvent(event: ProgressEvent): boolean {
-  return event.isError === true || event.type.endsWith('.error') || event.type === 'error';
+  return event.isError === true || (event.type as string).endsWith('.error');
 }
 
 // ============================================================
@@ -90,8 +101,9 @@ export function normalizeProgressEvent(event: ProgressEvent): ProgressEvent {
     normalized.toolName = normalized.tool;
   }
   // toolUseId 标准化
-  if (normalized.toolUseId && !('tool_use_id' in (normalized as Record<string, unknown>))) {
-    (normalized as Record<string, unknown>).tool_use_id = normalized.toolUseId;
+  const normalizedRecord = normalized as unknown as Record<string, unknown>;
+  if (normalized.toolUseId && !('tool_use_id' in normalizedRecord)) {
+    normalizedRecord.tool_use_id = normalized.toolUseId;
   }
 
   return normalized;
@@ -112,7 +124,7 @@ export function toNumber(value: unknown, fallback: number = 0): number {
 /**
  * 安全的布尔转换
  */
-export function toBoolean(value: unknown, fallback: boolean = false): boolean {
+export function toBoolean(value: unknown): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') {
     return value.toLowerCase() === 'true';

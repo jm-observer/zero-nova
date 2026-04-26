@@ -55,7 +55,7 @@ interface ModelBindingDetailView {
 
 **与已有类型的对齐**：
 
-当前 `ServerConfigView.llm` 已有 `{ provider: string; model: string }` 结构用于全局模型，`ServerConfigView.agents.list` 中每个 Agent 已有 `model?: { provider: string; model: string }` 字段。`ModelBindingView` 应复用相同的 `{ provider, model }` 二元组格式，确保与 `config.update` 和 `agents.update` 的数据结构一致。
+当前 `ServerConfigView.llm` 已有 `{ provider: string; model: string }` 结构用于全局模型，`ServerConfigView.agents.list` 中每个 Agent 已有 `model?: { provider: string; model: string }` 字段。`ModelBindingView` 应复用相同的 `{ provider, model }` 二元组格式，确保与 `config.update` 的数据结构一致。
 
 **presetModels 的利用**：`ServerConfigView.presetModels` 已有 `Record<string, { value, label, multimodal }[]>` 按 provider 分组的预设模型列表，模型选择器应直接复用此数据，避免前端硬编码模型列表。
 
@@ -145,18 +145,18 @@ interface SessionTokenUsageView {
 
 **与原设计的差异说明**：
 
-- 移除了 `orchestrationInput/orchestrationOutput/executionInput/executionOutput` 的拆分。原因：当前后端 `ChatCompletePayload` 只返回一个聚合 `Usage` 对象，不区分 orchestration / execution 两类模型调用。要实现拆分统计需要后端在 `ConversationService::execute_agent_turn()` 中分别记录两类调用的 usage，工作量较大。
+- 移除了 `orchestrationInput/orchestrationOutput/executionInput/executionOutput` 的拆分。原因：当前后端完成态只返回一个聚合 `Usage` 对象，不区分 orchestration / execution 两类模型调用。要实现拆分统计需要后端在 `ConversationService::execute_agent_turn()` 中分别记录两类调用的 usage，工作量较大。
 - **首期策略**：展示聚合值（input_tokens / output_tokens / cache tokens），不做 orchestration/execution 拆分。
 - **后续扩展**：如果后端支持分类 usage 推送，只需在 `UsageView` 中增加 `category?: 'orchestration' | 'execution'` 字段。
 - 新增了 `cacheCreationInputTokens` / `cacheReadInputTokens`，因为这两个字段已在后端 `Usage` 中存在且影响实际成本计算。
 
 ### 4. 数据来源
 
-- 首选后端在 `ChatComplete` payload 中已有的 `usage` 字段。
-- 会话累计值首期由前端本地累加（从 `ChatComplete` 事件中提取），后续可改为后端维护。
+- 会话累计值以 `session.runtime` / `sessions.token_usage` 返回的后端聚合结果为真源。
+- 前端在收到完成态消息时，可根据 payload 中的 `usage` 做当前界面的增量刷新，但刷新后或重新进入会话时必须以 runtime 快照回填，避免双源状态漂移。
 - 成本估算只在后端掌握模型单价映射时返回；前端不自行硬编码价格表。
 
-**已有事件结构**（`ChatCompletePayload`）：
+**已有完成态消息结构**（WebSocket `chat.complete` payload）：
 
 ```json
 {
@@ -171,14 +171,14 @@ interface SessionTokenUsageView {
 }
 ```
 
-**前端累加逻辑**：在 `AppState` 中维护 `sessionTokenUsageStates`，每次收到 `ChatComplete` 事件时：
+**前端归并逻辑**：在 `AppState` 中维护 `sessionTokenUsageStates`，每次收到完成态消息时：
 
 1. 提取 `usage` 字段
-2. 累加到对应 sessionId 的 `totalUsage`
-3. `turnCount++`
+2. 若当前会话已有 runtime 快照，则基于该快照做界面增量更新
+3. 若当前会话尚未拉到 runtime 快照，则先写入临时值，并在随后一次 `session.runtime` 拉取后覆盖
 4. 触发 `CONSOLE_DATA_UPDATED` 事件
 
-**注意**：前端累加值在页面刷新后丢失。若需持久化，应通过 `session.runtime` 接口从后端获取。前端累加仅作为实时展示优化。
+**注意**：前端临时累加仅用于实时展示优化，不作为持久状态来源。页面刷新、切换会话、复制会话后，均应重新读取 `session.runtime` 或 `sessions.token_usage`。
 
 ### 4.1 前端归并规则
 
@@ -216,7 +216,7 @@ interface SessionTokenUsageView {
 2. 在 `gateway-client.ts` 增加：
    - `getSessionRuntime(sessionId)` → 返回 `SessionRuntimeSnapshot`（含模型绑定和 token 累计）
    - `overrideSessionModel(sessionId, override)` → 返回更新后的 `SessionRuntimeSnapshot`
-3. 在 `AppState` 中增加 token 累加逻辑（监听 `ChatComplete` 事件）和模型绑定缓存。
+3. 在 `AppState` 中增加 runtime/token usage 缓存，并在完成态消息到达时做增量刷新；缓存真源仍为 `session.runtime` / `sessions.token_usage`。
 4. 在控制台 `模型` 标签渲染当前绑定与来源（`ModelBindingCard`）。
 5. 在聊天消息区接入本轮 token 摘要展示（`TokenUsageBadge`）。
 6. 增加会话级覆盖交互，并实现"恢复继承"。

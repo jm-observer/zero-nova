@@ -8,7 +8,7 @@ export class ChatView {
     private messagesContainer: HTMLElement;
     private messageInput: HTMLTextAreaElement;
     private sendBtn: HTMLButtonElement;
-    private stopBtn: HTMLButtonElement;
+    private inspectBtn: HTMLButtonElement;
     
     private streamingMessageEl: HTMLElement | null = null;
     private streamingContent = '';
@@ -19,7 +19,7 @@ export class ChatView {
         this.messagesContainer = document.getElementById('messages') as HTMLElement;
         this.messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
         this.sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
-        this.stopBtn = document.getElementById('stop-btn') as HTMLButtonElement;
+        this.inspectBtn = document.getElementById('inspect-btn') as HTMLButtonElement;
     }
 
     init() {
@@ -33,8 +33,10 @@ export class ChatView {
             });
             this.layoutObserver.observe(this.messagesContainer);
         }
-        console.log('[ChatView] Initializing...');
-        this.bindEvents();
+        
+        this.bus.on(Events.SESSION_SELECTED, () => {
+            this.updateHeaderTitle();
+        });
         
         this.bus.on(Events.SESSION_CHANGED, (payload: any) => {
              console.log('[ChatView] Session changed:', payload.previousSessionId, '->', payload.sessionId);
@@ -111,6 +113,9 @@ export class ChatView {
 
     private bindEvents() {
         this.sendBtn.addEventListener('click', () => this.sendMessage());
+        this.inspectBtn?.addEventListener('click', () => {
+            this.state.setConsoleVisible(!this.state.consoleVisible);
+        });
         this.messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -592,8 +597,6 @@ export class ChatView {
 
         const messagesContainer = this.messagesContainer;
         const scrollHeight = messagesContainer.scrollHeight;
-        const clientHeight = messagesContainer.clientHeight;
-        
         // 如果内容不需要滚动，可以隐藏或仍保留。按比例的话，不超出一满屏会显得比较稀疏。
         // if (scrollHeight <= clientHeight && messagesContainer.children.length < 2) {
         //    minimap.style.display = 'none';
@@ -649,6 +652,15 @@ export class ChatView {
             minimap.classList.add('has-error');
         } else {
             minimap.classList.remove('has-error');
+        }
+    }
+
+    private updateHeaderTitle() {
+        const titleEl = document.getElementById('chat-header-title');
+        if (titleEl) {
+            const session = this.state.sessions.find(s => s.id === this.state.currentSessionId);
+            const agent = this.state.agentsList.find(a => a.id === this.state.currentAgentId);
+            titleEl.textContent = session?.title || agent?.name || 'Chat';
         }
     }
 }

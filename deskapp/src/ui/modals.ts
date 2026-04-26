@@ -1,8 +1,6 @@
 import { t } from '../i18n/index';
-import { AppState } from '../core/state';
 import { EventBus } from '../core/event-bus';
 import { invoke } from '@tauri-apps/api/core';
-import { renderMarkdown } from '../markdown';
 
 export class ModalsView {
     // Confirm Modal
@@ -14,7 +12,6 @@ export class ModalsView {
 
     // File Preview Modal
     private filePreviewModal: HTMLDivElement;
-    private filePreviewIcon: HTMLSpanElement;
     private filePreviewName: HTMLSpanElement;
     private filePreviewSize: HTMLSpanElement;
     private filePreviewBody: HTMLDivElement;
@@ -31,14 +28,13 @@ export class ModalsView {
     private toolDetailOk: HTMLButtonElement;
     private toolDetailCopy: HTMLButtonElement;
 
-    constructor(private state: AppState, private bus: EventBus) {
+    constructor(private bus: EventBus) {
         this.confirmModal = document.getElementById('confirm-modal') as HTMLDivElement;
         this.confirmMessage = document.getElementById('confirm-message') as HTMLParagraphElement;
         this.confirmYes = document.getElementById('confirm-yes') as HTMLButtonElement;
         this.confirmNo = document.getElementById('confirm-no') as HTMLButtonElement;
 
         this.filePreviewModal = document.getElementById('file-preview-modal') as HTMLDivElement;
-        this.filePreviewIcon = document.getElementById('file-preview-icon') as HTMLSpanElement;
         this.filePreviewName = document.getElementById('file-preview-name') as HTMLSpanElement;
         this.filePreviewSize = document.getElementById('file-preview-size') as HTMLSpanElement;
         this.filePreviewBody = document.getElementById('file-preview-body') as HTMLDivElement;

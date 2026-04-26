@@ -1,19 +1,34 @@
-import type { 
-    ProgressEvent, 
-    ChatIntentPayload, 
-    Session, 
-    McpServerView, 
-    ServerConfigView, 
-    ServerConfigUpdate, 
+import type {
+    ProgressEvent,
+    ChatIntentPayload,
+    Session,
+    McpServerView,
+    ServerConfigView,
+    ServerConfigUpdate,
+    AgentRuntimeSnapshot,
+    SessionRuntimeSnapshot,
+    TokenUsageView,
+    PromptPreviewView,
+    ToolDescriptorView,
+    MemoryHitView,
+    SkillBindingView,
+    ToolUnlockedEvent,
+    SkillActivatedEvent,
+    SkillSwitchedEvent,
+    SkillExitedEvent,
+    DebugLogEntry,
+    EvolutionConfirmRequest,
 } from './core/types';
 
 export type {
-    ProgressEvent, 
-    ChatIntentPayload, 
-    Session, 
-    McpServerView, 
-    ServerConfigView, 
+    ProgressEvent,
+    ChatIntentPayload,
+    Session,
+    McpServerView,
+    ServerConfigView,
     ServerConfigUpdate,
+    DebugLogEntry,
+    EvolutionConfirmRequest,
 };
 
 
@@ -54,6 +69,75 @@ export class GatewayClient {
     private maxReconnectAttempts = 10;
     private reconnectDelay = 1000;
     private shouldReconnect = true;
+
+    private normalizeToolUnlockedEvent(payload: unknown): ToolUnlockedEvent {
+        const record = (payload ?? {}) as Record<string, unknown>;
+
+        return {
+            toolName: String(record.toolName ?? record.tool_name ?? ''),
+            description: typeof record.description === 'string' ? record.description : undefined,
+            source: this.normalizeUnlockedSource(record.source),
+            reason: typeof record.reason === 'string' ? record.reason : undefined,
+            timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        };
+    }
+
+    private normalizeSkillActivatedEvent(payload: unknown): SkillActivatedEvent {
+        const record = (payload ?? {}) as Record<string, unknown>;
+
+        return {
+            skillId: String(record.skillId ?? record.skill_id ?? ''),
+            title: typeof record.title === 'string'
+                ? record.title
+                : (typeof record.skill_name === 'string' ? record.skill_name : undefined),
+            content: typeof record.content === 'string' ? record.content : undefined,
+            source: this.normalizeSkillSource(record.source),
+            sticky: typeof record.sticky === 'boolean' ? record.sticky : undefined,
+            timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        };
+    }
+
+    private normalizeSkillSwitchedEvent(payload: unknown): SkillSwitchedEvent {
+        const record = (payload ?? {}) as Record<string, unknown>;
+
+        return {
+            previousSkillId: typeof record.previousSkillId === 'string'
+                ? record.previousSkillId
+                : (typeof record.from_skill === 'string' ? record.from_skill : undefined),
+            currentSkillId: String(record.currentSkillId ?? record.to_skill ?? ''),
+            currentSkillTitle: typeof record.currentSkillTitle === 'string'
+                ? record.currentSkillTitle
+                : (typeof record.to_skill === 'string' ? record.to_skill : undefined),
+            timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        };
+    }
+
+    private normalizeSkillExitedEvent(payload: unknown): SkillExitedEvent {
+        const record = (payload ?? {}) as Record<string, unknown>;
+
+        return {
+            skillId: String(record.skillId ?? record.skill_id ?? ''),
+            title: typeof record.title === 'string'
+                ? record.title
+                : (typeof record.skill_name === 'string' ? record.skill_name : undefined),
+            sticky: typeof record.sticky === 'boolean' ? record.sticky : undefined,
+            timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        };
+    }
+
+    private normalizeUnlockedSource(source: unknown): ToolUnlockedEvent['source'] {
+        if (source === 'tool_search' || source === 'skill_activation' || source === 'manual') {
+            return source;
+        }
+        return undefined;
+    }
+
+    private normalizeSkillSource(source: unknown): SkillActivatedEvent['source'] {
+        if (source === 'global' || source === 'agent' || source === 'runtime') {
+            return source;
+        }
+        return undefined;
+    }
 
     constructor(url: string, token?: string) {
         this.url = url;
@@ -234,7 +318,11 @@ export class GatewayClient {
                 // 兼容性与规范化处理
                 if (event.toolName && !event.tool) event.tool = event.toolName;
                 if (!event.toolName && event.tool) event.toolName = event.tool;
-                if (event.toolUseId && !(event as Record<string, unknown>).tool_use_id) (event as Record<string, unknown>).tool_use_id = event.toolUseId;
+
+                const eventRecord = event as unknown as Record<string, unknown>;
+                if (event.toolUseId && !eventRecord.tool_use_id) {
+                    eventRecord.tool_use_id = event.toolUseId;
+                }
                 
                 this.progressHandlers.forEach(handler => handler(event));
             }
@@ -248,13 +336,28 @@ export class GatewayClient {
 
             // 处理聊天完成事件
             if (message.type === 'chat.complete') {
-                const payload = message.payload as { output?: string; sessionId?: string };
+                const payload = message.payload as { output?: string; sessionId?: string; usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
                 const completeEvent: ProgressEvent = {
                     type: 'complete',
                     output: payload?.output,
                     sessionId: payload?.sessionId,
                 };
                 this.progressHandlers.forEach(handler => handler(completeEvent));
+
+                // 前端 token 累加：发送 usage 更新事件
+                if (payload?.usage && payload?.sessionId) {
+                    const usageUpdate = {
+                        sessionId: payload.sessionId,
+                        usage: {
+                            inputTokens: payload.usage.input_tokens ?? 0,
+                            outputTokens: payload.usage.output_tokens ?? 0,
+                            cacheCreationInputTokens: payload.usage.cache_creation_input_tokens,
+                            cacheReadInputTokens: payload.usage.cache_read_input_tokens,
+                        },
+                    };
+                    // 通知所有消息处理器（包括 AppState）
+                    this.messageHandlers.forEach(handler => handler({ type: 'chat.token_usage', payload: usageUpdate }));
+                }
             }
 
             // 处理客户端 MCP 工具调用请求
@@ -902,6 +1005,189 @@ export class GatewayClient {
                 callback();
             }
         });
+    }
+
+    // ========================
+    // Plan 3: Skill/Tool Event Handlers
+    // ========================
+
+    /**
+     * 监听工具解锁事件
+     */
+    onToolUnlocked(callback: (event: ToolUnlockedEvent) => void): void {
+        this.addMessageHandler((msg: GatewayMessage) => {
+            if (msg.type === 'tool_unlocked' && msg.payload) {
+                callback(this.normalizeToolUnlockedEvent(msg.payload));
+            }
+        });
+    }
+
+    /**
+     * 监听技能激活事件
+     */
+    onSkillActivated(callback: (event: SkillActivatedEvent) => void): void {
+        this.addMessageHandler((msg: GatewayMessage) => {
+            if (msg.type === 'skill_activated' && msg.payload) {
+                callback(this.normalizeSkillActivatedEvent(msg.payload));
+            }
+        });
+    }
+
+    /**
+     * 监听技能切换事件
+     */
+    onSkillSwitched(callback: (event: SkillSwitchedEvent) => void): void {
+        this.addMessageHandler((msg: GatewayMessage) => {
+            if (msg.type === 'skill_switched' && msg.payload) {
+                callback(this.normalizeSkillSwitchedEvent(msg.payload));
+            }
+        });
+    }
+
+    /**
+     * 监听技能退出事件
+     */
+    onSkillExited(callback: (event: SkillExitedEvent) => void): void {
+        this.addMessageHandler((msg: GatewayMessage) => {
+            if (msg.type === 'skill_exited' && msg.payload) {
+                callback(this.normalizeSkillExitedEvent(msg.payload));
+            }
+        });
+    }
+
+    /**
+     * 获取当前会话的技能绑定列表
+     */
+    async getSessionSkillBindings(sessionId?: string): Promise<SkillBindingView[]> {
+        const result = await this.request<{ skills: SkillBindingView[] }>('session.skill.bindings', { sessionId });
+        return result.skills || [];
+    }
+
+    /**
+     * 获取 Agent 的运行态大小写（含 Skill/Tool 信息）
+     */
+    async getAgentInspect(runtime: boolean = true): Promise<AgentRuntimeSnapshot> {
+        return this.request<AgentRuntimeSnapshot>('agent.inspect', { runtime });
+    }
+
+    /**
+     * 获取会话的 Token 使用统计
+     */
+    async getSessionTokenUsage(sessionId: string): Promise<TokenUsageView> {
+        return this.request<TokenUsageView>('sessions.token_usage', { sessionId });
+    }
+
+    // ========================
+    // Session Runtime API (Plan 2)
+    // ========================
+
+    /**
+     * 获取会话的运行时快照（含模型绑定和 token 累计）
+     */
+    async getSessionRuntime(sessionId: string): Promise<SessionRuntimeSnapshot> {
+        return this.request<SessionRuntimeSnapshot>('session.runtime', { sessionId });
+    }
+
+    /**
+     * 获取会话运行态快照列表（用于会话选择器中显示模型信息）
+     */
+    async getAllSessionRuntimes(): Promise<SessionRuntimeSnapshot[]> {
+        const result = await this.request<{ sessions: SessionRuntimeSnapshot[] }>('session.runtimes');
+        return result.sessions || [];
+    }
+
+    // ========================
+    // Agent Console API (Plan 1)
+    // ========================
+
+    /**
+     * 获取会话的 Prompt 预览视图
+     */
+    async getSessionPromptPreview(sessionId: string): Promise<PromptPreviewView> {
+        return this.request<PromptPreviewView>('session.prompt.preview', { sessionId });
+    }
+
+    /**
+     * 获取会话当前可用工具快照
+     */
+    async getSessionTools(sessionId: string): Promise<ToolDescriptorView[]> {
+        const result = await this.request<{ tools: ToolDescriptorView[] }>('session.tools.list', { sessionId });
+        return result.tools || [];
+    }
+
+    /**
+     * 获取会话记忆命中结果
+     */
+    async getSessionMemoryHits(sessionId: string, turnId?: string): Promise<MemoryHitView[]> {
+        const result = await this.request<{ hits: MemoryHitView[] }>('session.memory.hits', { sessionId, turnId });
+        return result.hits || [];
+    }
+
+    /**
+     * 设置会话级模型覆盖
+     */
+    async setSessionModelOverride(sessionId: string, overrides: {
+        orchestration?: { provider: string; model: string };
+        execution?: { provider: string; model: string };
+    }): Promise<SessionRuntimeSnapshot> {
+        return this.request('session.model.override', { sessionId, ...overrides });
+    }
+
+    /**
+     * 重置会话级模型覆盖
+     */
+    async resetSessionModelOverride(sessionId: string): Promise<SessionRuntimeSnapshot> {
+        return this.request('session.model.override', { sessionId, reset: true });
+    }
+
+    /**
+     * 获取会话执行历史列表
+     */
+    async getSessionRuns(sessionId: string, page = 1, pageSize = 20): Promise<{ runs: any[]; total: number }> {
+        return this.request('session.runs', { sessionId, page, pageSize });
+    }
+
+    /**
+     * 获取某次执行的详细步骤信息
+     */
+    async getRunDetail(runId: string): Promise<any> {
+        return this.request('run.detail', { runId });
+    }
+
+    /**
+     * 获取待确认的权限请求列表
+     */
+    async getPendingPermissions(sessionId?: string): Promise<any[]> {
+        const result = await this.request<{ requests: any[] }>('permission.pending', { sessionId });
+        return result.requests || [];
+    }
+
+    /**
+     * 响应权限确认请求
+     */
+    async respondPermission(requestId: string, approved: boolean, remember = false): Promise<any> {
+        return this.request('permission.respond', { requestId, approved, remember });
+    }
+
+    /**
+     * 获取审计日志
+     */
+    async getAuditLogs(sessionId?: string, type?: string, page = 1, pageSize = 20): Promise<{ logs: any[]; total: number }> {
+        return this.request('audit.logs', { sessionId, type, page, pageSize });
+    }
+
+    /**
+     * 获取当前会话诊断摘要
+     */
+    async getDiagnosticsCurrent(sessionId?: string): Promise<any> {
+        return this.request('diagnostics.current', { sessionId });
+    }
+
+    /**
+     * 获取工作区恢复信息
+     */
+    async getWorkspaceRestore(): Promise<any> {
+        return this.request('workspace.restore');
     }
 
 }

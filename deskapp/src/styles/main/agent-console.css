@@ -1,0 +1,764 @@
+/* Agent Console 样式 */
+
+.agent-console {
+    position: absolute;
+    top: var(--title-bar-height);
+    right: 0;
+    bottom: 0;
+    width: 360px;
+    background: var(--color-bg-secondary);
+    border-left: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s;
+    box-shadow: var(--shadow-lg);
+}
+
+.agent-console.hidden {
+    transform: translateX(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* 宽屏下的布局调整 */
+@media (min-width: 1024px) {
+    #workspace.console-open {
+        margin-right: 360px;
+    }
+}
+
+/* 窄屏覆盖层 */
+@media (max-width: 1023px) {
+    .agent-console {
+        width: 100%;
+        max-width: 500px;
+        box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* 增加遮罩层效果 (通过伪元素实现，或者由 JS 控制外部容器) */
+    .agent-console:not(.hidden)::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: -1;
+        pointer-events: none;
+    }
+}
+
+.agent-console-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Header */
+.agent-console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg-tertiary);
+    flex-shrink: 0;
+}
+
+.agent-console-title-group {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.agent-console-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.agent-console-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-success);
+}
+
+.agent-console-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+.agent-console-actions .agent-console-refresh,
+.agent-console-actions .agent-console-close {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+
+.agent-console-actions .agent-console-refresh:hover,
+.agent-console-actions .agent-console-close:hover {
+    background: var(--color-bg-secondary);
+    color: var(--color-text);
+}
+
+/* Tabs */
+.agent-console-tabs {
+    display: flex;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--color-bg-secondary);
+    border-bottom: 1px solid var(--color-border);
+    gap: 2px;
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.agent-console-tab {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s, color 0.2s;
+}
+
+.agent-console-tab:hover {
+    background: var(--color-bg-tertiary);
+    color: var(--color-text);
+}
+
+.agent-console-tab.active {
+    background: var(--color-primary);
+    color: #fff;
+}
+
+/* Body */
+.agent-console-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--spacing-md);
+    background: var(--color-bg);
+}
+
+.console-tab-content {
+    display: none;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+.console-tab-content.active {
+    display: flex;
+}
+
+/* Section Style */
+.console-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.console-section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    letter-spacing: 0.5px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+/* Summary Grid */
+.console-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-sm);
+}
+
+.summary-card {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: border-color 0.2s, transform 0.1s;
+}
+
+.summary-card.clickable {
+    cursor: pointer;
+}
+
+.summary-card.clickable:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-1px);
+}
+
+.summary-card-label {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary);
+}
+
+.summary-card-value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Status Card */
+.console-status-card {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    min-height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Footer */
+.agent-console-footer {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+}
+
+.agent-console-footer .data-source.stale {
+    color: var(--color-warning);
+}
+
+/* Chat Header Style */
+.chat-header {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--spacing-md);
+    background: var(--color-bg-secondary);
+    border-bottom: 1px solid var(--color-border);
+    z-index: 10;
+    flex-shrink: 0;
+}
+
+.chat-header-info {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.chat-header-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.chat-header-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* Helpers */
+.empty-hint {
+    color: var(--color-text-secondary);
+    font-style: italic;
+    font-size: 0.8rem;
+    text-align: center;
+    padding: var(--spacing-xl) 0;
+}
+
+.skeleton-text {
+    width: 100%;
+    height: 1em;
+    background: var(--color-bg-tertiary);
+    border-radius: 2px;
+    animation: skeleton-pulse 1.5s infinite;
+}
+
+@keyframes skeleton-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 0.8; }
+}
+
+/* Scrollbar */
+.agent-console-body::-webkit-scrollbar {
+    width: 6px;
+}
+
+.agent-console-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.agent-console-body::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+}
+
+.agent-console-body::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-secondary);
+}
+
+/* Runtime Status Badge */
+.runtime-status-display {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.status-badge {
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-badge.running {
+    background: var(--color-primary);
+    color: #fff;
+}
+
+.status-badge.idle {
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+}
+
+.status-badge.paused {
+    background: var(--color-warning);
+    color: #fff;
+}
+
+.status-badge.error {
+    background: var(--color-error);
+    color: #fff;
+}
+
+.agent-id-small {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+}
+
+/* Token Usage Panel */
+.token-usage-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.token-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 0.8rem;
+}
+
+.token-label {
+    color: var(--color-text-secondary);
+}
+
+.token-value {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-weight: 600;
+}
+
+.token-row.cache-row {
+    color: var(--color-success);
+}
+
+.token-row.cost-row {
+    border-top: 1px solid var(--color-border);
+    padding-top: 6px;
+    color: var(--color-primary);
+}
+
+/* Tool Item */
+.tool-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.8rem;
+}
+
+.tool-item:last-child {
+    border-bottom: none;
+}
+
+.tool-name {
+    font-weight: 600;
+    flex: 1;
+}
+
+.tool-source-badge {
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+}
+
+.tool-desc {
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Skill Item */
+.skill-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.8rem;
+}
+
+.skill-item:last-child {
+    border-bottom: none;
+}
+
+.skill-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
+.skill-item.enabled .skill-status-dot {
+    background: var(--color-success);
+}
+
+.skill-item.disabled .skill-status-dot {
+    background: var(--color-text-secondary);
+}
+
+.skill-name {
+    font-weight: 600;
+    flex: 1;
+}
+
+.skill-source-badge {
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+}
+
+/* Model Config Panel */
+.model-config-panel {
+    padding: var(--spacing-sm);
+}
+
+.model-item {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.model-item > * {
+    font-size: 0.8rem;
+}
+
+.model-label {
+    color: var(--color-text-secondary);
+    font-weight: 600;
+}
+
+.model-value {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-weight: 600;
+}
+
+.model-source-badge {
+    font-size: 0.7rem;
+    color: var(--color-primary);
+}
+
+/* Model Binding Panel (Plan 2) */
+.model-binding-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.model-binding-item {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.model-binding-item .model-label {
+    min-width: 60px;
+    margin: 0;
+}
+
+.model-binding-item .model-value {
+    flex: 1;
+}
+
+.model-binding-item .model-source-badge {
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+}
+
+.model-binding-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    margin-top: var(--spacing-xs);
+    padding-left: 60px;
+}
+
+.model-switch-btn,
+.model-reset-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-secondary);
+    color: var(--color-text);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.model-switch-btn:hover,
+.model-reset-btn:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-primary);
+}
+
+/* Prompt Preview */
+.prompt-segment {
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.prompt-segment:last-child {
+    border-bottom: none;
+}
+
+.segment-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+    letter-spacing: 0.5px;
+    margin-bottom: var(--spacing-xs);
+}
+
+.segment-content {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.skill-fragment {
+    margin-bottom: var(--spacing-xs);
+    padding-left: var(--spacing-sm);
+    border-left: 2px solid var(--color-border);
+}
+
+.memory-fragment {
+    margin-bottom: var(--spacing-xs);
+    font-size: 0.8rem;
+    padding: 4px 8px;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-sm);
+}
+
+/* Memory Hit Item */
+.memory-hit-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.8rem;
+}
+
+.memory-hit-item:last-child {
+    border-bottom: none;
+}
+
+.memory-hit-score {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-weight: 600;
+    color: var(--color-primary);
+    min-width: 45px;
+}
+
+.memory-hit-content {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.memory-hit-source {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary);
+}
+
+/* Run List */
+.console-run-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.run-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+}
+
+.run-status {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+}
+
+.run-status.completed {
+    color: var(--color-success);
+}
+
+.run-status.failed {
+    color: var(--color-error);
+}
+
+.run-duration {
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.7rem;
+    color: var(--color-text-secondary);
+}
+
+/* ==============================
+   Plan 3: Tool/Skill Enhancements
+   ============================== */
+
+/* Tool Summary Bar */
+.tool-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+}
+
+.tool-running-badge {
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+.tool-unlocked-badge {
+    color: var(--color-success);
+    font-weight: 600;
+}
+
+/* Tool Status Indicators */
+.tool-item.tool-success {
+    border-left: 2px solid var(--color-success);
+}
+
+.tool-item.tool-error {
+    border-left: 2px solid var(--color-error);
+}
+
+.tool-item.tool-running {
+    animation: tool-running-pulse 2s infinite;
+}
+
+/* New/Unlocked Tool Badge */
+.tool-new-badge {
+    display: inline-block;
+    padding: 1px 4px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: #fff;
+    background: var(--color-success);
+    border-radius: var(--radius-sm);
+    margin-left: 4px;
+    animation: new-badge-pulse 1.5s infinite;
+}
+
+@keyframes tool-running-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes new-badge-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+/* Skill Summary Bar */
+.skill-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+}
+
+.skill-runtime-badge {
+    color: var(--color-warning);
+    font-weight: 600;
+}
+
+.skill-sticky-badge {
+    font-size: 0.8rem;
+}
+
+.skill-sticky {
+    background: var(--color-bg-tertiary);
+    border: 1px dashed var(--color-border);
+}
+
+/* Memory Hit Summary */
+.memory-hit-summary {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+}
+    color: var(--color-text-secondary);
+}

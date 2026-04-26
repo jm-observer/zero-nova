@@ -41,7 +41,7 @@ interface ToolDescriptorView {
 **与后端的对齐说明**：
 
 - `parameterSchema` 对应后端 `ToolDefinition.input_schema`（JSON Schema 格式），前端展示时应简化为参数名 + 类型列表，不需要完整渲染 JSON Schema。
-- `source: 'skill_unlocked'` 对应后端已有的 `ToolUnlockedPayload`，记录工具解锁来源（`tool_search` / `skill_activation` / `manual`）。`unlockedBy` 和 `unlockedReason` 字段直接映射 `ToolUnlockedPayload.source` 和 `ToolUnlockedPayload.reason`。
+- 当前运行时事件里的 `ToolUnlocked` 仅稳定提供 `tool_name`。因此 `source: 'skill_unlocked'`、`unlockedBy`、`unlockedReason` 不能只靠事件直接推导，首期应由 `session.tools.list` / `getAgentInspect()` 返回完整快照作为真源，事件只负责触发刷新或临时高亮。
 - `lastCallStatus` 可从已有的 `ProgressEvent`（`tool_start` → `running`，`tool_result` + `isError` → `error`/`success`）推导，无需新增后端接口。
 
 **与已有 MCP 类型的关系**：
@@ -77,7 +77,7 @@ interface SkillBindingView {
 
 - 全局配置（`.nova/config.toml` 中的 skills）
 - Agent 默认配置（Agent 定义中绑定的 skills）
-- 某次运行临时注入（通过 SkillActivated 事件动态加载）
+- 某次运行临时注入（由 `session.skill.bindings` 或聚合 inspect 接口返回）
 
 **与已有 Skill 事件的关联**：
 
@@ -85,9 +85,14 @@ interface SkillBindingView {
 
 | 事件 | 前端动作 |
 |------|---------|
-| `SkillActivated` | 向列表新增条目，`source: 'runtime'`，展示 `sticky` 标记 |
-| `SkillSwitched` | 更新当前活跃技能高亮 |
-| `SkillExited` | 将对应条目标记为"已退出"（非 sticky 的移除，sticky 的保留但灰显） |
+| `SkillActivated` | 触发重新拉取 `session.skill.bindings`，并对新条目做高亮；若本地已有同 id 条目，可先乐观标记 `source: 'runtime'` |
+| `SkillSwitched` | 更新当前活跃技能高亮；必要时重新拉取快照校正 |
+| `SkillExited` | 触发重新拉取 `session.skill.bindings`；退出后的保留/移除策略以快照返回结果为准 |
+
+**约束补充**：
+
+- 当前前端可见的 Skill 事件不足以直接构造 `contentPreview`、`loadedFrom`、`activatedAt` 等完整字段，因此 `SkillBindingView[]` 必须由 `session.skill.bindings` 或聚合 inspect 接口提供。
+- `sticky` 可用于辅助展示，但 `SkillExited` 事件本身不足以单独决定“保留灰显还是直接移除”，该行为必须以刷新后的快照为准。
 
 **与已有 SkillItem 类型的关系**：
 
@@ -229,7 +234,7 @@ interface PromptPreviewView {
   - Console 中的"查看来源"可跳转到 Settings 的技能安装列表
 - Memory 命中不替代设置页 memory 浏览，只增加"命中解释层"。
   - Console 中的 memory hit 点击后，调用已有的 `memory.search` 在 Settings 中定位
-- **Skill 事件的实时更新**：前端已有 `onSkillsUpdated` 回调注册，Agent Console 应订阅此回调以及 `SkillActivated`/`SkillSwitched`/`SkillExited` 事件，实时刷新技能列表。
+- **Skill 事件的实时更新**：前端已有 `onSkillsUpdated` 回调注册，Agent Console 应订阅此回调以及 `SkillActivated`/`SkillSwitched`/`SkillExited` 事件；这些事件主要用于触发重新拉取和局部高亮，不应替代运行态快照本身。
 
 ### 8. 实施步骤
 
@@ -243,7 +248,7 @@ interface PromptPreviewView {
 4. 在 `agent-console-view.ts` 中实现"工具"标签页：只读列表 + 来源筛选。
 5. 在 `agent-console-view.ts` 中实现"技能"标签页：绑定列表 + 内容预览展开。
 6. 在 `agent-console-view.ts` 中实现"Prompt/Memory"标签页：分段折叠 + memory hits。
-7. 接入已有 Skill 事件（`SkillActivated`/`SkillSwitched`/`SkillExited`）和 Tool 事件（`ToolUnlocked`）的实时刷新。
+7. 接入已有 Skill 事件（`SkillActivated`/`SkillSwitched`/`SkillExited`）和 Tool 事件（`ToolUnlocked`）的实时刷新；事件只触发重新拉取或局部高亮，完整数据以运行态快照为准。
 8. 实现 `ProgressEvent`（`tool_start`/`tool_result`）到 `lastCallStatus` 的推导逻辑。
 9. 补工具筛选、技能详情展开、Prompt 分段复制交互。
 10. 接入 memory hit 到 Settings memory 搜索结果的跳转链路。
@@ -252,20 +257,20 @@ interface PromptPreviewView {
 
 - 用户能从当前会话看到实际可用工具，而不是系统总表。
 - 技能内容展示的是运行绑定结果，不是安装仓库总表。
-- runtime 动态加载的技能和工具有明确的视觉区分。
+- runtime 动态加载的技能和工具有明确的视觉区分；若事件信息不足，则至少通过刷新后的快照准确展示最终状态。
 - Prompt 预览按片段展示，且默认脱敏。
 - Memory 命中与当前回复有明确关联，不是孤立列表。
-- `ToolUnlocked`/`SkillActivated` 等事件到达后，对应标签页内容实时更新。
+- `ToolUnlocked`/`SkillActivated` 等事件到达后，对应标签页会实时触发刷新，且最终展示与快照一致。
 
 ## 测试案例
 
 - Tool 视图：MCP 工具、内建工具、自定义工具、技能解锁工具能正确分组展示。
 - Tool 筛选：选择"MCP"筛选后，只显示 MCP 来源的工具。
 - Tool 运行态：工具被调用后，`lastCallStatus` 从 `running` 变为 `success` 或 `error`。
-- Tool 动态解锁：收到 `ToolUnlocked` 事件后，新工具出现在列表中并带"新"标签。
+- Tool 动态解锁：收到 `ToolUnlocked` 事件后，工具列表触发刷新；若刷新结果包含新工具，则该工具带"新"标签。
 - Skill 视图：某个 Agent 未绑定技能时显示空态；绑定多来源技能时来源标记正确。
-- Skill 动态：收到 `SkillActivated` 事件后，技能列表新增 runtime 来源的条目。
-- Skill 退出：收到 `SkillExited` 事件后，非 sticky 技能从列表移除，sticky 技能灰显。
+- Skill 动态：收到 `SkillActivated` 事件后，技能列表触发刷新，刷新结果中新增 runtime 来源条目。
+- Skill 退出：收到 `SkillExited` 事件后，技能列表触发刷新，最终保留/移除状态与刷新结果一致。
 - Memory 命中：本轮没有命中记忆时显示"未引用记忆"，不是空白。
 - Memory 近似：在后端未实现精确命中前，近似搜索结果有明确的"近似"标注。
 - Prompt 预览：脱敏字段不会暴露 API key、环境变量、原始密钥内容。

@@ -33,14 +33,6 @@ export class ChatService {
             await this.sendMessage(payload.text);
         });
 
-        this.bus.on(Events.SESSION_CHANGED, async () => {
-             // Refresh messages to get persistent IDs and updated state
-             if (this.state.currentSessionId) {
-                 const messages = await this.client.getMessages(this.state.currentSessionId);
-                 this.state.setMessages(messages as any[]);
-             }
-        });
-
         // Handle manual session creation from UI
         this.bus.on(Events.SESSION_CREATE, async (payload: { title?: string }) => {
             // 立即清空当前工作区，提升响应感

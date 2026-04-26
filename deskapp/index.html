@@ -32,22 +32,13 @@
   <div id="app-loading-overlay" class="app-loading-overlay">
     <div class="app-loading-content">
       <div class="app-loading-spinner">
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
+        <div></div><div></div><div></div><div></div><div></div><div></div>
+        <div></div><div></div><div></div><div></div><div></div><div></div>
       </div>
       <p class="app-loading-text" data-i18n="app.loading">Agent initializing…</p>
     </div>
   </div>
+
   <!-- 首次启动设置向导 -->
   <div id="setup-wizard" class="setup-wizard" style="display:none">
     <div class="setup-wizard-bg"></div>
@@ -57,131 +48,57 @@
         <h1 data-i18n="setup.welcome">欢迎使用 OpenFlux</h1>
         <p class="setup-wizard-subtitle" data-i18n="setup.subtitle">完成以下设置，即可开始使用你的 AI 助手</p>
         <div class="setup-wizard-steps">
-          <div class="setup-step active" data-step="1"><span class="step-num">1</span><span class="step-label"
-              data-i18n="setup.step_assistant">AI 助手</span></div>
+          <div class="setup-step active" data-step="1"><span class="step-num">1</span><span class="step-label" data-i18n="setup.step_assistant">AI 助手</span></div>
           <div class="setup-step-line"></div>
-          <div class="setup-step" data-step="2"><span class="step-num">2</span><span class="step-label"
-              data-i18n="setup.step_brain">AI 大脑</span></div>
+          <div class="setup-step" data-step="2"><span class="step-num">2</span><span class="step-label" data-i18n="setup.step_brain">AI 大脑</span></div>
           <div class="setup-step-line"></div>
-          <div class="setup-step" data-step="3"><span class="step-num">3</span><span class="step-label"
-              data-i18n="setup.step_cloud">企业端</span></div>
+          <div class="setup-step" data-step="3"><span class="step-num">3</span><span class="step-label" data-i18n="setup.step_cloud">企业端</span></div>
           <div class="setup-step-line"></div>
-          <div class="setup-step" data-step="4"><span class="step-num">4</span><span class="step-label"
-              data-i18n="setup.step_remote">远程操控</span></div>
+          <div class="setup-step" data-step="4"><span class="step-num">4</span><span class="step-label" data-i18n="setup.step_remote">远程操控</span></div>
         </div>
       </div>
-
-      <!-- 步骤1：AI 助手设定 -->
       <div class="setup-page active" data-page="1">
         <h2 data-i18n="setup.name_title">给你的 AI 助手起个名字</h2>
         <div class="setup-field">
           <label for="setup-agent-name" data-i18n="setup.name_label">助手名称</label>
-          <input type="text" id="setup-agent-name" value="OpenFlux 助手" data-i18n-placeholder="setup.name_placeholder"
-            placeholder="例如：小助、Jarvis..." />
-        </div>
-        <div class="setup-field">
-          <label for="setup-agent-prompt" data-i18n="setup.persona_label">人设（可选）</label>
-          <textarea id="setup-agent-prompt" rows="4" data-i18n-placeholder="setup.persona_placeholder"
-            placeholder="描述你的 AI 助手的性格特点..."></textarea>
-          <span class="setup-hint" data-i18n="setup.persona_hint">不设置则使用默认人设，安装后可随时修改</span>
+          <input type="text" id="setup-agent-name" value="OpenFlux 助手" placeholder="例如：小助、Jarvis..." />
         </div>
       </div>
-
-      <!-- 步骤2：AI 大脑 -->
       <div class="setup-page" data-page="2">
         <h2 data-i18n="setup.brain_title">选择 AI 大脑</h2>
         <div class="setup-field">
           <label for="setup-provider" data-i18n="setup.provider_label">模型供应商</label>
           <select id="setup-provider">
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI (GPT)</option>
-            <option value="deepseek">DeepSeek</option>
-            <option value="minimax">MiniMax</option>
-            <option value="google">Google (Gemini)</option>
-            <option value="moonshot">Moonshot (Kimi)</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama (Local)</option>
           </select>
         </div>
         <div class="setup-field">
-          <label for="setup-apikey">API Key <span class="setup-required"
-              data-i18n="setup.apikey_required">*必填</span></label>
-          <input type="password" id="setup-apikey" data-i18n-placeholder="setup.apikey_placeholder"
-            placeholder="输入你的 API Key" />
-        </div>
-        <div class="setup-field">
-          <label for="setup-model" data-i18n="setup.model_label">模型名称</label>
-          <select id="setup-model" class="settings-select">
-            <!-- 由 JS 根据供应商动态填充 -->
-          </select>
-          <input type="text" id="setup-model-custom" class="settings-input hidden"
-            data-i18n-placeholder="setup.model_custom_placeholder" placeholder="输入自定义模型名称" style="margin-top:6px;" />
-        </div>
-        <div class="setup-field">
-          <label for="setup-baseurl" data-i18n="setup.baseurl_label">Base URL（可选）</label>
-          <input type="text" id="setup-baseurl" data-i18n-placeholder="setup.baseurl_placeholder"
-            placeholder="自定义 API 地址" />
+          <label for="setup-api-key" data-i18n="setup.apikey_label">API Key</label>
+          <input type="password" id="setup-api-key" placeholder="输入你的 API Key" />
         </div>
       </div>
-
-      <!-- 步骤3：企业端 -->
       <div class="setup-page" data-page="3">
-        <h2 data-i18n="setup.cloud_title">企业端连接（可选）</h2>
-        <p class="setup-page-desc" data-i18n="setup.cloud_desc">连接 OpenFlux 云端可使用云端智能体。不连接也可正常使用所有本地功能。</p>
+        <h2 data-i18n="setup.cloud_title">企业端 (可选)</h2>
         <div class="setup-field">
-          <label class="setup-checkbox">
-            <input type="checkbox" id="setup-cloud-enabled" />
-            <span data-i18n="setup.cloud_enable">连接 OpenFlux 云端</span>
-          </label>
+          <label for="setup-cloud-url">NexusAI 地址</label>
+          <input type="text" id="setup-cloud-url" placeholder="https://nexusai.example.com" />
         </div>
-        <div id="setup-cloud-fields" style="display:none">
-          <div class="setup-field">
-            <label for="setup-cloud-user" data-i18n="setup.cloud_user_label">账号</label>
-            <input type="text" id="setup-cloud-user" data-i18n-placeholder="setup.cloud_user_placeholder"
-              placeholder="云端账号" />
-          </div>
-          <div class="setup-field">
-            <label for="setup-cloud-pass" data-i18n="setup.cloud_pass_label">密码</label>
-            <input type="password" id="setup-cloud-pass" data-i18n-placeholder="setup.cloud_pass_placeholder"
-              placeholder="云端密码" />
-          </div>
-        </div>
-        <span class="setup-hint" data-i18n="setup.cloud_hint">跳过可在安装后随时在设置中配置</span>
       </div>
-
-      <!-- 步骤4：远程操控 -->
       <div class="setup-page" data-page="4">
-        <h2 data-i18n="setup.remote_title">远程操控（可选）</h2>
-        <p class="setup-page-desc" data-i18n="setup.remote_desc">启用后可通过飞书、微信等平台远程与 AI 对话。</p>
+        <h2 data-i18n="setup.remote_title">远程操控 (可选)</h2>
         <div class="setup-field">
-          <label class="setup-checkbox">
-            <input type="checkbox" id="setup-router-enabled" />
+          <label class="checkbox-label">
+            <input type="checkbox" id="setup-remote-enable" />
             <span data-i18n="setup.remote_enable">启用 OpenFluxRouter 远程操控</span>
           </label>
         </div>
-        <div id="setup-router-fields" style="display:none">
-          <div class="setup-field">
-            <label for="setup-router-url" data-i18n="setup.router_url_label">Router 地址</label>
-            <input type="text" id="setup-router-url" value="ws://localhost:8080/ws/app" />
-          </div>
-          <div class="setup-field setup-field-row">
-            <div>
-              <label for="setup-router-appid">App ID</label>
-              <input type="text" id="setup-router-appid" placeholder="App ID" />
-            </div>
-            <div>
-              <label for="setup-router-secret">App Secret</label>
-              <input type="password" id="setup-router-secret" placeholder="App Secret" />
-            </div>
-          </div>
-        </div>
-        <span class="setup-hint" data-i18n="setup.remote_hint">跳过可在安装后随时在设置中配置</span>
       </div>
-
-      <!-- 底部按钮 -->
       <div class="setup-wizard-footer">
         <button id="setup-btn-skip" class="setup-btn setup-btn-ghost" data-i18n="setup.skip">跳过设置</button>
         <div class="setup-footer-right">
-          <button id="setup-btn-prev" class="setup-btn setup-btn-secondary" style="display:none"
-            data-i18n="setup.prev">上一步</button>
+          <button id="setup-btn-prev" class="setup-btn setup-btn-secondary" style="display:none" data-i18n="setup.prev">上一步</button>
           <button id="setup-btn-next" class="setup-btn setup-btn-primary" data-i18n="setup.next">下一步</button>
         </div>
       </div>
@@ -189,7 +106,6 @@
   </div>
 
   <div id="app">
-    <!-- 标题栏 -->
     <header class="title-bar" data-tauri-drag-region>
       <div class="title-bar-left">
         <img src="./icon.png" alt="OpenFlux" class="title-bar-icon" />
@@ -202,604 +118,96 @@
         </div>
       </div>
       <div class="title-bar-right">
-        <!-- 深色/浅色主题切换 -->
-        <button id="theme-toggle" class="icon-btn title-bar-btn" data-i18n-title="titlebar.theme_toggle" title="切换主题">
-          <!-- 太阳图标（深色模式下显示，点击切换到浅色） -->
-          <svg class="theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2">
-            <circle cx="12" cy="12" r="5" />
-            <line x1="12" y1="1" x2="12" y2="3" />
-            <line x1="12" y1="21" x2="12" y2="23" />
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-            <line x1="1" y1="12" x2="3" y2="12" />
-            <line x1="21" y1="12" x2="23" y2="12" />
-            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-          </svg>
-          <!-- 月亮图标（浅色模式下显示，点击切换到深色） -->
-          <svg class="theme-icon-moon hidden" width="16" height="16" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-          </svg>
+        <button id="theme-toggle" class="icon-btn title-bar-btn" title="切换主题">
+          <svg class="theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" /><line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" /><line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" /><line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" /></svg>
+          <svg class="theme-icon-moon hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
         </button>
-        <!-- App 绑定二维码 -->
-        <div id="qr-bind-topbar-wrap" class="qr-bind-topbar-wrap" style="display:none">
-          <button id="qr-bind-topbar-btn" class="icon-btn title-bar-btn" title="App 绑定">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="2" width="8" height="8" rx="1"/>
-              <rect x="14" y="2" width="8" height="8" rx="1"/>
-              <rect x="2" y="14" width="8" height="8" rx="1"/>
-              <rect x="14" y="14" width="4" height="4"/>
-              <line x1="22" y1="14" x2="22" y2="18"/>
-              <line x1="18" y1="22" x2="22" y2="22"/>
-            </svg>
-          </button>
-          <!-- QR 绑定弹窗 -->
-          <div id="qr-bind-popup" class="qr-bind-popup hidden">
-            <div class="qr-bind-popup-arrow"></div>
-            <div class="qr-bind-popup-header">
-              <span>📱 App 绑定</span>
-              <button id="qr-bind-popup-close" class="qr-bind-popup-close">&times;</button>
-            </div>
-            <div class="qr-bind-popup-body">
-              <div id="qr-bind-popup-initial">
-                <p class="qr-bind-popup-desc">生成二维码，使用 OpenFlux App 扫码绑定</p>
-                <button id="qr-bind-popup-generate" class="btn btn-primary btn-sm">生成绑定二维码</button>
-              </div>
-              <div id="qr-bind-popup-display" class="hidden">
-                <div class="qr-bind-popup-canvas-wrap">
-                  <canvas id="qr-bind-popup-canvas"></canvas>
-                </div>
-                <div class="qr-bind-popup-timer-row">
-                  <span id="qr-bind-popup-timer"></span>
-                  <button id="qr-bind-popup-refresh" class="btn btn-sm" style="display:none">刷新</button>
-                </div>
-                <p id="qr-bind-popup-hint" class="qr-bind-popup-hint">使用 OpenFlux App 扫描</p>
-              </div>
-              <div id="qr-bind-popup-success" class="hidden">
-                <span class="qr-bind-success-icon">✅</span>
-                <span class="qr-bind-success-text">App 已绑定</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- 反馈 -->
-        <button id="feedback-btn" class="icon-btn title-bar-btn" data-i18n-title="titlebar.feedback" title="反馈">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
+        <button id="feedback-btn" class="icon-btn title-bar-btn" title="反馈">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         </button>
-        <!-- 窗口控制按钮 -->
         <div class="window-controls">
-          <button id="btn-minimize" class="window-btn" data-i18n-title="titlebar.minimize" title="最小化">
-            <svg width="12" height="12" viewBox="0 0 12 12">
-              <rect y="5" width="12" height="1" fill="currentColor" />
-            </svg>
-          </button>
-          <button id="btn-maximize" class="window-btn" data-i18n-title="titlebar.maximize" title="最大化">
-            <svg width="12" height="12" viewBox="0 0 12 12">
-              <rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1" fill="none" />
-            </svg>
-          </button>
-          <button id="btn-close" class="window-btn window-btn-close" data-i18n-title="titlebar.close" title="关闭">
-            <svg width="12" height="12" viewBox="0 0 12 12">
-              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" />
-            </svg>
-          </button>
+          <button id="btn-minimize" class="window-btn"><svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1" fill="currentColor" /></svg></button>
+          <button id="btn-maximize" class="window-btn"><svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1" fill="none" /></svg></button>
+          <button id="btn-close" class="window-btn window-btn-close"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" /></svg></button>
         </div>
       </div>
     </header>
 
-    <!-- 三栏主布局 -->
     <div class="main-layout">
-      <!-- 左侧：会话列表 -->
       <aside class="sidebar" id="sidebar">
-        <!-- 顶部：控制区 -->
         <div class="sidebar-top">
-          <button id="sidebar-toggle" class="icon-btn" data-i18n-title="sidebar.collapse" title="收起侧边栏">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
-            </svg>
+          <button id="sidebar-toggle" class="icon-btn" title="收起侧边栏">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 19l-7-7 7-7M18 19l-7-7 7-7" /></svg>
           </button>
           <div class="sidebar-top-title">Zero-Nova</div>
-          <button id="new-session-btn" class="icon-btn" data-i18n-title="sidebar.new_chat" title="发起新对话">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+          <button id="new-session-btn" class="icon-btn" title="发起新对话">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
         </div>
-        
-        <!-- Agent 列表切换（两级结构中的第一级） -->
-        <div id="agent-list" class="agent-list">
-          <!-- Agent 列表由 JS 动态生成 -->
-        </div>
-
-        <!-- Agent 列表（默认显示，Agent = 会话） -->
-        <div id="session-list" class="session-list">
-          <!-- Agent 列表动态生成 -->
-        </div>
-
-        <!-- NexusAi 云端列表（默认隐藏） -->
-        <div id="sidebar-agent-list" class="session-list hidden">
-          <!-- 未登录提示 -->
-          <div id="agent-list-login-prompt" class="agent-list-login-prompt">
-            <div class="agent-login-icon">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <circle cx="12" cy="12" r="3" />
-                <path
-                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4" />
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            </div>
-            <p class="agent-login-text" data-i18n-html="sidebar.agent_login_text">登录 Nexus Ai 云端<br />获取团队级 Agent
-              和标准业务流程</p>
-            <button id="agent-list-login-btn" class="agent-login-btn" data-i18n="sidebar.agent_login_btn">登录</button>
-          </div>
-          <!-- NexusAi Agent 列表动态生成 -->
-        </div>
-
-
-        <!-- 底部：用户区 + 设置 -->
+        <div id="agent-list" class="agent-list"></div>
+        <div id="session-list" class="session-list"></div>
         <div class="sidebar-footer">
-          <!-- 设置按钮 -->
-          <button id="settings-btn" class="icon-btn" data-i18n-title="sidebar.settings" title="设置">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3" />
-              <path
-                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
+          <button id="settings-btn" class="icon-btn" title="设置">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
           </button>
         </div>
       </aside>
       <div class="resize-handle" id="sidebar-resize-handle"></div>
 
-      <!-- 中间：工作区（聊天） -->
       <main class="workspace" id="workspace">
-        <!-- 竖向时间轴导航 Minimap -->
+        <header class="chat-header">
+          <div class="chat-header-info"><span id="chat-header-title" class="chat-header-title"></span></div>
+          <div class="chat-header-actions">
+            <button id="inspect-btn" class="icon-btn" data-i18n-title="chat.inspect" title="查看运行态">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            </button>
+          </div>
+        </header>
         <div id="chat-minimap" class="chat-minimap">
           <div class="chat-minimap-track"></div>
           <div id="chat-minimap-markers" class="chat-minimap-markers"></div>
         </div>
-
-        <!-- 消息列表 -->
-        <div id="messages" class="messages">
-          <div class="welcome-message">
-            <div class="welcome-icon"><img src="./icon.png" alt="OpenFlux" /></div>
-            <h3 data-i18n="chat.welcome_title">欢迎使用 OpenFlux</h3>
-            <p data-i18n="chat.welcome_desc">我是你的 AI 助手，可以帮你完成各种任务</p>
-          </div>
-        </div>
-
-        <!-- Agent 设定视图（默认隐藏，显示在中部区域） -->
-        <div id="agent-edit-view" class="agent-edit-view hidden">
-          <div class="agent-edit-inner">
-            <div class="agent-edit-header">
-              <button id="agent-edit-back" class="agent-edit-back-btn" data-i18n-title="agent.back" title="返回">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-              </button>
-              <h3 id="agent-edit-title" data-i18n="agent.create_title">创建 Agent</h3>
-            </div>
-
-            <div class="agent-edit-body">
-              <!-- 基本信息 -->
-              <div class="settings-section-title" style="margin-top:0; padding-top:0; border-top:none;"
-                data-i18n="agent.section_basic">基本信息</div>
-
-              <!-- ID -->
-              <div class="settings-item settings-item-column">
-                <div class="settings-item-info">
-                  <span class="settings-item-label" data-i18n="agent.id_label">ID</span>
-                  <span class="settings-item-desc" data-i18n="agent.id_hint">唯一标识，创建后不可修改</span>
-                </div>
-                <input type="text" id="agent-edit-id" class="settings-input" placeholder="my-agent"
-                  autocomplete="off" style="margin-top:6px;" />
-              </div>
-
-              <!-- 名称 -->
-              <div class="settings-item settings-item-column">
-                <div class="settings-item-info">
-                  <span class="settings-item-label" data-i18n="agent.name_label">名称</span>
-                </div>
-                <input type="text" id="agent-edit-name" class="settings-input" placeholder="My Agent"
-                  autocomplete="off" style="margin-top:6px;" />
-              </div>
-
-              <!-- 描述 -->
-              <div class="settings-item settings-item-column">
-                <div class="settings-item-info">
-                  <span class="settings-item-label" data-i18n="agent.desc_label">描述</span>
-                </div>
-                <input type="text" id="agent-edit-desc" class="settings-input"
-                  data-i18n-placeholder="agent.desc_placeholder" placeholder="Agent 的简短描述"
-                  autocomplete="off" style="margin-top:6px;" />
-              </div>
-
-              <!-- 外观 -->
-              <div class="settings-section-title" data-i18n="agent.section_appearance">外观</div>
-
-              <!-- 图标 + 主题色 -->
-              <div class="settings-item settings-item-column">
-                <div style="display:flex;gap:var(--spacing-lg);width:100%;">
-                  <!-- 图标 -->
-                  <div style="flex:1;">
-                    <div class="settings-item-info" style="margin-bottom:8px;">
-                      <span class="settings-item-label" data-i18n="agent.icon_label">图标</span>
-                    </div>
-                    <input type="hidden" id="agent-edit-icon" value="🤖" />
-                    <div class="agent-icon-picker">
-                      <div class="agent-icon-preview" id="agent-icon-preview">🤖</div>
-                      <div class="agent-icon-grid" id="agent-icon-grid">
-                        <button type="button" class="agent-icon-grid-item active" data-icon="🤖">🤖</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="💬">💬</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🧠">🧠</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="💡">💡</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🎨">🎨</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🔧">🔧</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="💻">💻</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="📊">📊</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="📝">📝</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🔍">🔍</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🚀">🚀</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="⚡">⚡</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🎯">🎯</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🛡️">🛡️</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="📚">📚</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🎵">🎵</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🌐">🌐</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🤝">🤝</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="👨‍💻">👨‍💻</button>
-                        <button type="button" class="agent-icon-grid-item" data-icon="🦾">🦾</button>
-                      </div>
-                      <button type="button" class="agent-icon-upload-btn" id="agent-icon-upload-btn">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                          stroke-width="2">
-                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                          <polyline points="17 8 12 3 7 8" />
-                          <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        <span data-i18n="agent.upload_photo">上传照片</span>
-                      </button>
-                      <input type="file" id="agent-icon-file-input" accept="image/*" style="display:none" />
-                    </div>
-                  </div>
-                  <!-- 主题色 -->
-                  <div style="flex:1;">
-                    <div class="settings-item-info" style="margin-bottom:8px;">
-                      <span class="settings-item-label" data-i18n="agent.color_label">主题色</span>
-                    </div>
-                    <input type="hidden" id="agent-edit-color" value="#6366f1" />
-                    <div class="agent-color-swatches" id="agent-color-swatches">
-                      <div class="color-swatch active" data-color="#6366f1" style="background:#6366f1" title="Indigo">
-                      </div>
-                      <div class="color-swatch" data-color="#3b82f6" style="background:#3b82f6" title="Blue"></div>
-                      <div class="color-swatch" data-color="#06b6d4" style="background:#06b6d4" title="Cyan"></div>
-                      <div class="color-swatch" data-color="#10b981" style="background:#10b981" title="Emerald"></div>
-                      <div class="color-swatch" data-color="#f59e0b" style="background:#f59e0b" title="Amber"></div>
-                      <div class="color-swatch" data-color="#f97316" style="background:#f97316" title="Orange"></div>
-                      <div class="color-swatch" data-color="#ef4444" style="background:#ef4444" title="Red"></div>
-                      <div class="color-swatch" data-color="#ec4899" style="background:#ec4899" title="Pink"></div>
-                      <div class="color-swatch" data-color="#a855f7" style="background:#a855f7" title="Purple"></div>
-                      <div class="color-swatch" data-color="#64748b" style="background:#64748b" title="Slate"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- System Prompt -->
-              <div class="settings-section-title" data-i18n="agent.section_prompt">System Prompt</div>
-              <div class="settings-item settings-item-column">
-                <div class="settings-item-info">
-                  <span class="settings-item-label">System Prompt</span>
-                  <span class="settings-item-desc" data-i18n="agent.prompt_desc">可选：定义 Agent 的角色、行为和能力范围</span>
-                </div>
-                <textarea id="agent-edit-prompt" class="settings-input" rows="8"
-                  data-i18n-placeholder="agent.prompt_placeholder_agent"
-                  placeholder="可选：定义 Agent 的角色、行为和能力范围"
-                  style="margin-top:6px;resize:vertical;min-height:120px;font-family:'Cascadia Code','Fira Code',monospace;font-size:0.82rem;line-height:1.6;"></textarea>
-              </div>
-
-              <!-- 操作按钮 -->
-              <div class="settings-save-row">
-                <span id="agent-edit-hint" class="settings-save-hint"></span>
-                <button id="agent-edit-cancel" class="secondary-btn settings-save-btn"
-                  data-i18n="common.cancel" style="margin-right:8px;">取消</button>
-                <button id="agent-edit-save" class="primary-btn settings-save-btn"
-                  data-i18n="common.save">保存</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 设置视图（默认隐藏，显示在中部区域） -->
-        <div id="settings-view" class="settings-view hidden">
-          <!-- Settins Template Injected here --></div>
-
-        <!-- 通用确认弹窗 -->
-        <div id="confirm-dialog-overlay" class="confirm-dialog-overlay hidden">
-          <div class="confirm-dialog">
-            <div class="confirm-dialog-icon">⚠️</div>
-            <div id="confirm-dialog-message" class="confirm-dialog-message"></div>
-            <div class="confirm-dialog-actions">
-              <button id="confirm-dialog-cancel" class="confirm-dialog-btn confirm-dialog-cancel">取消</button>
-              <button id="confirm-dialog-ok" class="confirm-dialog-btn confirm-dialog-ok">确定</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Router 绑定区域（未绑定时显示在输入框位置） -->
-        <div id="router-bind-area" class="router-bind-area hidden">
-          <div class="router-bind-container">
-            <div class="router-bind-info">
-              <span class="router-bind-icon">🔗</span>
-              <span class="router-bind-text" data-i18n="router.bind_text">需要绑定后才能接收消息</span>
-            </div>
-            <div class="router-bind-form">
-              <input type="text" id="router-bind-code" class="router-bind-input"
-                data-i18n-placeholder="router.bind_placeholder" placeholder="输入配对码" maxlength="32" />
-              <button id="router-bind-btn" class="router-bind-btn" data-i18n="router.bind_btn">绑定</button>
-            </div>
-            <div id="router-bind-status" class="router-bind-status"></div>
-          </div>
-        </div>
-
-        <!-- 输入区 - Gemini 风格悬浮 -->
+        <div id="messages" class="messages"></div>
+        <div id="agent-edit-view" class="agent-edit-view hidden"></div>
+        <div id="settings-view" class="settings-view hidden"></div>
+        <div id="confirm-dialog-overlay" class="confirm-dialog-overlay hidden"></div>
+        <div id="router-bind-area" class="router-bind-area hidden"></div>
         <div class="input-area">
           <div class="input-container">
-            <!-- 附件预览区（拖拽文件后显示） -->
             <div id="attachment-preview" class="attachment-preview hidden"></div>
             <div class="input-row">
-              <textarea id="message-input" data-i18n-placeholder="chat.input_placeholder" placeholder="问问 OpenFlux..."
-                rows="1"></textarea>
-              <!-- 麦克风按钮（文字输入辅助） -->
-              <button id="mic-btn" class="mic-btn" data-i18n-title="chat.mic" title="语音输入">
-                <svg class="mic-icon-default" width="18" height="18" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
-                </svg>
-                <svg class="mic-icon-recording hidden" width="18" height="18" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2">
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              </button>
-              <!-- 实时语音对话模式按钮 -->
-              <button id="voice-mode-btn" class="voice-mode-btn" data-i18n-title="chat.voice_mode" title="实时语音对话">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round">
-                  <line x1="4" y1="8" x2="4" y2="16" />
-                  <line x1="8" y1="5" x2="8" y2="19" />
-                  <line x1="12" y1="2" x2="12" y2="22" />
-                  <line x1="16" y1="5" x2="16" y2="19" />
-                  <line x1="20" y1="8" x2="20" y2="16" />
-                </svg>
-              </button>
-              <button id="send-btn" class="send-btn" data-i18n-title="chat.send" title="发送">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-                </svg>
-              </button>
-            </div>
-            <!-- 录音状态指示器 -->
-            <div id="recording-indicator" class="recording-indicator hidden">
-              <span class="recording-dot"></span>
-              <span id="recording-text" data-i18n="chat.recording">录音中...</span>
+              <textarea id="message-input" placeholder="问问 OpenFlux..." rows="1"></textarea>
+              <button id="mic-btn" class="mic-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /></svg></button>
+              <button id="send-btn" class="send-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg></button>
             </div>
           </div>
         </div>
       </main>
 
+      <aside id="agent-console" class="agent-console hidden"></aside>
     </div>
 
-    <!-- Debug 面板（底部日志窗口，参与 flex 布局，不遮盖上方内容） -->
+    <!-- 模态框组 -->
+    <div id="file-preview-modal" class="modal hidden"></div>
+    <div id="confirm-modal" class="modal hidden"></div>
+    <div id="openflux-login-modal" class="modal hidden"></div>
+    <div id="voice-overlay" class="voice-overlay hidden"></div>
+    <div id="tool-detail-modal" class="modal hidden"></div>
+
+    <!-- Debug 面板 -->
     <div id="debug-panel" class="debug-panel hidden">
-      <!-- 拖拽条 -->
       <div id="debug-resize-handle" class="debug-resize-handle"></div>
       <div class="debug-panel-header">
-        <span class="debug-panel-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="4 17 10 11 4 5" />
-            <line x1="12" y1="19" x2="20" y2="19" />
-          </svg>
-          Debug Log
-        </span>
+        <span class="debug-panel-title">Debug Log</span>
         <div class="debug-panel-actions">
-          <button id="debug-copy-btn" class="icon-btn-sm" data-i18n-title="debug.copy_all" title="复制所有日志">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          </button>
-          <button id="debug-clear-btn" class="icon-btn-sm" data-i18n-title="debug.clear" title="清空日志">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
-          </button>
-          <button id="debug-close-btn" class="icon-btn-sm" data-i18n-title="common.close" title="关闭">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
+          <button id="debug-clear-btn" class="icon-btn-sm" title="清空日志"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg></button>
+          <button id="debug-close-btn" class="icon-btn-sm" title="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
         </div>
       </div>
-      <div id="debug-log-container" class="debug-log-container">
-        <!-- 日志条目动态生成 -->
-      </div>
-    </div>
-
-    <!-- 文件预览弹窗 -->
-    <div id="file-preview-modal" class="modal hidden">
-      <div class="modal-content file-preview-modal-content">
-        <div class="file-preview-header">
-          <div class="file-preview-title">
-            <span id="file-preview-icon" class="file-preview-icon"></span>
-            <span id="file-preview-name" class="file-preview-name"></span>
-            <span id="file-preview-size" class="file-preview-size-badge"></span>
-          </div>
-          <div class="file-preview-actions">
-            <button id="file-preview-open" class="icon-btn-sm" title="用默认应用打开">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
-            </button>
-            <button id="file-preview-reveal" class="icon-btn-sm" title="在文件夹中显示">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-              </svg>
-            </button>
-            <button id="file-preview-copy" class="icon-btn-sm" title="复制内容">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-            </button>
-            <button id="file-preview-close" class="icon-btn" title="关闭">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div id="file-preview-body" class="file-preview-body">
-          <!-- 动态加载内容 -->
-        </div>
-      </div>
-    </div>
-
-    <!-- 确认弹窗 -->
-    <div id="confirm-modal" class="modal hidden">
-      <div class="modal-content">
-        <h3 data-i18n="confirm.title">操作确认</h3>
-        <p id="confirm-message" data-i18n="confirm.message">确认执行此操作？</p>
-        <div class="modal-actions">
-          <button id="confirm-yes" class="primary-btn" data-i18n="common.confirm">确认</button>
-          <button id="confirm-no" class="secondary-btn" data-i18n="common.cancel">取消</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- OpenFlux 登录弹窗 -->
-    <div id="openflux-login-modal" class="modal hidden">
-      <div class="modal-content openflux-login-modal-content">
-        <div class="openflux-login-modal-header">
-          <h3 data-i18n="login.title">OpenFlux 云端登录</h3>
-          <button id="openflux-login-modal-close" class="openflux-login-modal-close" title="关闭">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-        <div class="openflux-login-modal-body">
-          <div class="settings-model-field">
-            <label class="settings-model-field-label" data-i18n="login.username_label">用户名 / 邮箱</label>
-            <input type="text" id="openflux-modal-username" class="settings-input"
-              data-i18n-placeholder="login.username_placeholder" placeholder="输入 OpenFlux 账号" />
-          </div>
-          <div class="settings-model-field">
-            <label class="settings-model-field-label" data-i18n="login.password_label">密码</label>
-            <div class="settings-provider-key-input-row">
-              <input type="password" id="openflux-modal-password" class="settings-provider-key-input"
-                placeholder="输入密码" />
-              <button id="openflux-modal-pwd-toggle" class="settings-provider-key-toggle" title="显示/隐藏">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="openflux-login-modal-footer">
-            <span id="openflux-modal-hint" class="settings-save-hint"></span>
-            <button id="openflux-modal-login-btn" class="primary-btn" data-i18n="login.btn">登录</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 设置弹窗已移至 workspace 中部区域（settings-view） -->
-  </div>
-
-  <!-- 语音对话模式全屏覆盖层 -->
-  <div id="voice-overlay" class="voice-overlay hidden">
-    <div class="voice-overlay-bg"></div>
-    <div class="voice-overlay-content">
-      <!-- 顶部控制栏 -->
-      <div class="voice-overlay-header">
-        <span class="voice-overlay-title" data-i18n="voice.title">语音对话</span>
-        <button id="voice-overlay-close" class="voice-overlay-close" data-i18n-title="voice.exit" title="退出语音对话">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-
-      <!-- 中部：动态波纹 + 状态 -->
-      <div class="voice-visual-area">
-        <div class="voice-ripple-container" id="voice-ripple">
-          <div class="voice-ripple-ring ring-1"></div>
-          <div class="voice-ripple-ring ring-2"></div>
-          <div class="voice-ripple-ring ring-3"></div>
-          <div class="voice-ripple-core">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <line x1="12" y1="19" x2="12" y2="23" />
-              <line x1="8" y1="23" x2="16" y2="23" />
-            </svg>
-          </div>
-        </div>
-        <div class="voice-status-text" id="voice-status-text" data-i18n="voice.click_start">点击开始对话</div>
-        <div class="voice-transcript" id="voice-transcript"></div>
-      </div>
-
-      <!-- 底部控制按钮 -->
-      <div class="voice-controls">
-        <button id="voice-main-btn" class="voice-main-btn" title="开始/停止">
-          <svg class="voice-btn-mic" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2">
-            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            <line x1="12" y1="19" x2="12" y2="23" />
-            <line x1="8" y1="23" x2="16" y2="23" />
-          </svg>
-          <svg class="voice-btn-stop hidden" width="28" height="28" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2">
-            <rect x="6" y="6" width="12" height="12" rx="2" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 工具执行详情弹窗 -->
-  <div id="tool-detail-modal" class="confirm-modal hidden">
-    <div class="confirm-modal-content tool-detail-modal-content">
-      <div class="confirm-modal-header">
-        <h3 id="tool-detail-title">工具详情</h3>
-        <button id="tool-detail-close" class="confirm-modal-close">&times;</button>
-      </div>
-      <div class="confirm-modal-body tool-detail-modal-body">
-        <pre id="tool-detail-content"></pre>
-      </div>
-      <div class="confirm-modal-footer">
-        <button id="tool-detail-copy" class="secondary-btn btn-sm" data-i18n="common.copy">复制</button>
-        <button id="tool-detail-ok" class="primary-btn btn-sm" data-i18n="common.close">关闭</button>
-      </div>
+      <div id="debug-log-container" class="debug-log-container"></div>
     </div>
   </div>
 
   <script type="module" src="./src/main.ts"></script>
 </body>
-
 </html>

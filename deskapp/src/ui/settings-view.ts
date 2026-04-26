@@ -1,7 +1,6 @@
 import { t } from '../i18n/index';
 import { AppState } from '../core/state';
 import { EventBus } from '../core/event-bus';
-import { open as tauriDialogOpen } from '@tauri-apps/plugin-dialog';
 
 import { SETTINGS_TEMPLATE } from './templates/settings-template';
 
@@ -12,8 +11,6 @@ export class SettingsView {
     private saveBtn!: HTMLButtonElement;
     private saveHint!: HTMLElement;
     
-    private activeView = false;
-
     constructor(private state: AppState, private bus: EventBus) {
         this.view = document.getElementById('settings-view') as HTMLElement;
         if (this.view) {
@@ -46,7 +43,6 @@ export class SettingsView {
     }
 
     toggle(active: boolean) {
-        this.activeView = active;
         this.view.classList.toggle('hidden', !active);
         if (active) {
             this.loadConfig();

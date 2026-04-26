@@ -64,7 +64,7 @@ export type WorkingMode = 'standalone' | 'router' | 'managed';
 // 注意：为了避免循环依赖，这里只放纯 Interface/Type，不放 Class 实现
 
 export interface ProgressEvent {
-    type: 'iteration' | 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'turn_complete' | 'iteration_limit' | 'tool_log';
+    type: 'iteration' | 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'turn_complete' | 'iteration_limit' | 'tool_log' | 'system_log';
     iteration?: number;
     tool?: string;
     toolName?: string;
@@ -195,6 +195,8 @@ export interface SessionArtifactView {
     language?: string;
     size?: number;
     timestamp: number;
+    runId?: string;      // 来源任务 ID
+    turnId?: string;     // 来源轮次 ID
 }
 
 export interface McpServerView {
@@ -311,10 +313,226 @@ export interface TaskRunView {
     id: string;
     taskId: string;
     taskName: string;
-    status: 'running' | 'completed' | 'failed';
+    status: 'running' | 'completed' | 'failed' | 'paused' | 'waiting_user';
     startedAt: number;
     completedAt?: number;
     duration?: number;
     output?: string;
     error?: string;
+}
+
+// --- Agent Console 状态模型 ---
+
+/**
+ * 资源状态包装器，用于处理异步加载的数据
+ */
+export interface ResourceState<T> {
+    loaded: boolean;
+    loading: boolean;
+    error?: string;
+    data?: T;
+    updatedAt?: number;
+}
+
+/**
+ * Agent 运行态快照 (agent.inspect)
+ */
+export interface AgentRuntimeSnapshot {
+    agentId: string;
+    name: string;
+    model: { provider: string; model: string; source: 'global' | 'agent' | 'session_override' };
+    systemPrompt: string;
+    status?: 'idle' | 'running' | 'paused' | 'error';
+    activeSkills: string[];
+    availableTools: string[];
+    skills?: Array<{ id: string; title: string; enabled: boolean }>;
+    capabilityPolicy: Record<string, unknown>;
+}
+
+/**
+ * 会话运行态快照 (session.runtime)
+ */
+export interface SessionRuntimeSnapshot {
+    sessionId: string;
+    modelOverride?: { orchestration?: { provider: string; model: string }; execution?: { provider: string; model: string } };
+    /** 模型绑定详细视图（Plan 2 扩展） */
+    orchestrationDetail?: ModelBindingDetailView;
+    executionDetail?: ModelBindingDetailView;
+    totalUsage: TokenUsageView;
+    turnCount?: number;
+    lastRunId?: string;
+    lastStatus?: string;
+}
+
+/**
+ * Prompt 预览视图 (session.prompt.preview)
+ */
+export interface PromptPreviewView {
+    systemPrompt: string;
+    skillFragments: Array<{ title: string; content: string }>;
+    memoryFragments: Array<{ content: string; source: string }>;
+    toolFragments: Array<{ name: string; description: string }>;
+    contextSummary: string;
+    toolDescriptions?: Array<{ name: string; description: string }>;
+    conversationFragments?: Array<{ role: string; summary: string }>;
+    capabilityPolicy?: string;
+    activeSkill?: { id: string; title: string };
+    tokenBudget?: { maxTokens: number; iterationBudget: number };
+    redacted?: boolean;
+}
+
+/**
+ * 工具详情视图 (session.tools.list)
+ * Plan 3 扩展：添加运行时字段
+ */
+export interface ToolDescriptorView {
+    name: string;
+    description: string;
+    source: 'builtin' | 'mcp_server' | 'mcp_client' | 'skill' | 'evolution' | 'manual' | 'skill_unlocked';
+    sourceName?: string;
+    inputSchema: Record<string, unknown>;
+    enabled: boolean;
+    /** Plan 3 扩展：最近调用时间 */
+    lastUsedAt?: number;
+    /** Plan 3 扩展：最近调用状态 */
+    lastCallStatus?: 'success' | 'error' | 'running';
+    /** Plan 3 扩展：工具解锁来源 */
+    unlockedBy?: string;
+    /** Plan 3 扩展：工具解锁原因 */
+    unlockedReason?: string;
+}
+
+/**
+ * 记忆命中视图 (session.memory.hits)
+ * Plan 3 扩展：添加 sourceType 和 turnId
+ */
+export interface MemoryHitView {
+    content: string;
+    score: number;
+    reason?: string;
+    source: string;
+    timestamp: number;
+    /** Plan 3 扩展：命中来源类型 */
+    sourceType?: 'semantic' | 'keyword' | 'distillation';
+    /** Plan 3 扩展：命中的轮次 ID */
+    turnId?: string;
+}
+
+/**
+ * 技能绑定视图 (Plan 3 新增)
+ * 用于 Agent Console 中的运行态技能展示
+ */
+export interface SkillBindingView {
+    id: string;
+    title: string;
+    source: 'global' | 'agent' | 'runtime';
+    enabled: boolean;
+    summary?: string;
+    contentPreview?: string;
+    loadedFrom?: string;
+    activatedAt?: number;
+    sticky?: boolean;
+}
+
+/**
+ * 工具解锁事件 (Plan 3 新增)
+ * 对应后端 ToolUnlockedPayload
+ */
+export interface ToolUnlockedEvent {
+    toolName: string;
+    description?: string;
+    source?: 'tool_search' | 'skill_activation' | 'manual';
+    reason?: string;
+    timestamp?: number;
+}
+
+/**
+ * 技能激活事件 (Plan 3 新增)
+ */
+export interface SkillActivatedEvent {
+    skillId: string;
+    title?: string;
+    content?: string;
+    source?: 'global' | 'agent' | 'runtime';
+    sticky?: boolean;
+    timestamp?: number;
+}
+
+/**
+ * 技能切换事件 (Plan 3 新增)
+ */
+export interface SkillSwitchedEvent {
+    previousSkillId?: string;
+    currentSkillId: string;
+    currentSkillTitle?: string;
+    timestamp?: number;
+}
+
+/**
+ * 技能退出事件 (Plan 3 新增)
+ */
+export interface SkillExitedEvent {
+    skillId: string;
+    title?: string;
+    sticky?: boolean;
+    timestamp?: number;
+}
+
+/**
+ * Token 使用情况视图 (session.token.usage)
+ */
+export interface TokenUsageView {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+    totalCost?: number; // 估算成本
+}
+
+/**
+ * 对齐后端 nova-protocol::Usage 结构
+ * 用于单轮 token 统计的聚合视图
+ */
+export interface UsageView {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+}
+
+/**
+ * 单轮 token 统计
+ */
+export interface TurnTokenUsageView {
+    turnId: string;
+    usage: UsageView;
+    estimatedCostUsd?: number;
+}
+
+/**
+ * 会话累计 token 统计
+ */
+export interface SessionTokenUsageView {
+    sessionId: string;
+    totalUsage: UsageView;
+    turnCount: number;
+    estimatedCostUsd?: number;
+    lastUpdatedAt: number;
+}
+
+/**
+ * 模型绑定视图，用于展示 orchestration / execution 绑定及其来源
+ */
+export interface ModelBindingView {
+    provider: string;
+    model: string;
+    source: 'global' | 'agent' | 'session_override';
+}
+
+/**
+ * 模型绑定详细视图，扩展了继承和可编辑作用域信息
+ */
+export interface ModelBindingDetailView extends ModelBindingView {
+    inheritedFrom?: string;
+    editableScopes: Array<'global' | 'agent' | 'session_override'>;
 }

@@ -7,6 +7,8 @@ import { EventBus, Events } from './core/event-bus';
 import { AppState } from './core/state';
 import { ChatService } from './services/chat-service';
 
+import type { Session } from './core/types';
+
 // UI Components
 import { TitleBarView } from './ui/titlebar';
 import { SidebarView } from './ui/sidebar-view';
@@ -14,6 +16,7 @@ import { ChatView } from './ui/chat-view';
 import { SettingsView } from './ui/settings-view';
 import { ModalsView } from './ui/modals';
 import { VoiceOverlayView } from './ui/voice-overlay';
+import { AgentConsoleView } from './ui/agent-console-view';
 
 // 1. Initialize i18n
 initI18n(zhPack, enPack);
@@ -32,6 +35,10 @@ async function init() {
         
         const gatewayClient = new GatewayClient(config.url, config.token);
         state.setGatewayClient(gatewayClient);
+        // 初始化前端 token 追踪（Plan 2）
+        state.initTokenTracking();
+        // 初始化 Skill/Tool 事件追踪（Plan 3）
+        state.initSkillToolTracking();
 
         // Forward connection status to EventBus
         gatewayClient.onConnectionChange((status) => {
@@ -45,8 +52,9 @@ async function init() {
             sidebar: new SidebarView(state, bus),
             chat: new ChatView(state, bus),
             settings: new SettingsView(state, bus),
-            modals: new ModalsView(state, bus),
-            voiceOverlay: new VoiceOverlayView(state, bus)
+            modals: new ModalsView(bus),
+            voiceOverlay: new VoiceOverlayView(bus),
+            agentConsole: new AgentConsoleView(state, bus)
         };
 
         // 5. Initialize Components
@@ -61,7 +69,6 @@ async function init() {
         // 7. Initial Data Load & Connection Handling
         console.log('[Main] Establishing WebSocket connection...');
         
-        let dataLoaded = false;
         const loadInitialData = async () => {
             console.log('[Main] Loading application data...');
             try {
@@ -96,8 +103,6 @@ async function init() {
                     bus.emit(Events.SESSION_SELECTED, { sessionId: state.currentSessionId });
                 }
 
-                dataLoaded = true;
-                
                 // Hide loading overlay
                 console.log('[Main] Data loaded. Hiding overlay.');
                 const overlay = document.getElementById('app-loading-overlay');

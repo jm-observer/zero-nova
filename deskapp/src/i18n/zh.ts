@@ -681,6 +681,54 @@ const zh: Record<string, string> = {
     'artifact.cat_media': '媒体',
     'artifact.cat_other': '其他',
     'chat.error_iteration_limit': '由于超过最大迭代次数（{0}次），对话已中止。这通常是因为 Agent 陷入了无限循环。',
+
+    // ========================
+    // Agent Console
+    // ========================
+    'console.title': 'Agent 控制台',
+    'console.tab_overview': '概览',
+    'console.tab_model': '模型',
+    'console.tab_tools': '工具',
+    'console.tab_skills': '技能',
+    'console.tab_prompt_memory': 'Prompt',
+    'console.last_updated': '上次更新',
+    'console.runtime_status': '运行状态',
+    'console.status_running': '运行中',
+    'console.status_idle': '空闲',
+    'console.current_model': '当前模型',
+    'console.tokens_total': 'Token 总量',
+    'console.tools_count': '可用工具',
+    'console.skills_count': '加载技能',
+    'console.recent_run': '近期任务',
+    'console.no_runs': '暂无运行记录',
+    'console.model_override': '模型覆盖',
+    'console.token_usage_detail': '用量详情',
+    'console.memory_hits': '近期记忆命中',
+    'console.live_data': '实时运行态数据',
+    'console.data_stale': '连接断开，显示缓存数据',
+    'console.prompt_preview': '当前 Prompt 预览',
+    'console.no_data': '暂无数据',
+    'chat.inspect': '查看运行态',
+    // Plan 2: 模型绑定与 Token 统计
+    'console.source_global': '全局',
+    'console.source_agent': 'Agent 默认',
+    'console.source_session': '会话覆盖',
+    'console.binding_orchestration': '编排模型',
+    'console.binding_execution': '执行模型',
+    'console.switch_model': '切换',
+    'console.restore_inherit': '恢复继承',
+    'console.model_switched': '模型切换成功',
+    'console.model_switch_failed': '模型切换失败',
+    'console.model_reset': '已恢复继承默认模型',
+    'console.model_reset_failed': '恢复继承失败',
+
+    // Plan 3: Tool / Skill / Memory / Prompt
+    'tools.running': '运行中',
+    'tools.unlocked': '已解锁',
+    'memory.semantic': '语义',
+    'memory.keyword': '关键词',
+    'memory.distillation': '蒸馏',
+    'skills.runtime': '运行中',
 };
 
 export default zh;

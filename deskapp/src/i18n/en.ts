@@ -677,6 +677,54 @@ const en: Record<string, string> = {
     'artifact.cat_data': 'Data',
     'artifact.cat_media': 'Media',
     'artifact.cat_other': 'Other',
+
+    // ========================
+    // Agent Console
+    // ========================
+    'console.title': 'Agent Console',
+    'console.tab_overview': 'Overview',
+    'console.tab_model': 'Model',
+    'console.tab_tools': 'Tools',
+    'console.tab_skills': 'Skills',
+    'console.tab_prompt_memory': 'Prompt',
+    'console.last_updated': 'Last Updated',
+    'console.runtime_status': 'Runtime Status',
+    'console.status_running': 'Running',
+    'console.status_idle': 'Idle',
+    'console.current_model': 'Current Model',
+    'console.tokens_total': 'Total Tokens',
+    'console.tools_count': 'Available Tools',
+    'console.skills_count': 'Loaded Skills',
+    'console.recent_run': 'Recent Tasks',
+    'console.no_runs': 'No Run History',
+    'console.model_override': 'Model Override',
+    'console.token_usage_detail': 'Usage Detail',
+    'console.memory_hits': 'Recent Memory Hits',
+    'console.live_data': 'Live Runtime Data',
+    'console.data_stale': 'Disconnected, showing cached data',
+    'console.prompt_preview': 'Current Prompt Preview',
+    'console.no_data': 'No Data',
+    'chat.inspect': 'Inspect Runtime',
+    // Plan 2: Model Binding & Token Stats
+    'console.source_global': 'Global',
+    'console.source_agent': 'Agent Default',
+    'console.source_session': 'Session Override',
+    'console.binding_orchestration': 'Orchestration',
+    'console.binding_execution': 'Execution',
+    'console.switch_model': 'Switch',
+    'console.restore_inherit': 'Restore',
+    'console.model_switched': 'Model switched successfully',
+    'console.model_switch_failed': 'Failed to switch model',
+    'console.model_reset': 'Inheritance restored',
+    'console.model_reset_failed': 'Failed to restore inheritance',
+
+    // Plan 3: Tool / Skill / Memory / Prompt
+    'tools.running': 'running',
+    'tools.unlocked': 'unlocked',
+    'memory.semantic': 'semantic',
+    'memory.keyword': 'keyword',
+    'memory.distillation': 'distillation',
+    'skills.runtime': 'runtime',
 };
 
 export default en;

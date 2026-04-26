@@ -212,6 +212,20 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             };
             MessageEnvelope::SkillInvocation(payload)
         }
+        // --- Observability & Control (Plan 1 & 2) ---
+        AppEvent::SessionRuntimeUpdated(payload) => MessageEnvelope::SessionRuntimeUpdated(payload),
+        AppEvent::SessionTokenUsageUpdated(payload) => MessageEnvelope::SessionTokenUsageUpdated(payload),
+        AppEvent::SessionToolsUpdated(payload) => MessageEnvelope::SessionToolsUpdated(payload),
+        AppEvent::SessionSkillBindingsUpdated(payload) => MessageEnvelope::SessionSkillBindingsUpdated(payload),
+        AppEvent::SessionMemoryHit(payload) => MessageEnvelope::SessionMemoryHit(payload),
+        AppEvent::RunStatusUpdated(payload) => MessageEnvelope::RunStatusUpdated(payload),
+        AppEvent::RunStepUpdated(payload) => MessageEnvelope::RunStepUpdated(payload),
+        AppEvent::SessionArtifactsUpdated(payload) => MessageEnvelope::SessionArtifactsUpdated(payload),
+        AppEvent::PermissionRequested(payload) => MessageEnvelope::PermissionRequested(payload),
+        AppEvent::PermissionResolved(payload) => MessageEnvelope::PermissionResolved(payload),
+        AppEvent::AuditLogsUpdated(payload) => MessageEnvelope::AuditLogsUpdated(payload),
+        AppEvent::DiagnosticsUpdated(payload) => MessageEnvelope::DiagnosticsUpdated(payload),
+        AppEvent::WorkspaceRestoreAvailable(payload) => MessageEnvelope::WorkspaceRestoreAvailable(payload),
     };
 
     GatewayMessage::new(request_id.to_string(), envelope)

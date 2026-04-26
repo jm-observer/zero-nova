@@ -20,6 +20,7 @@ pub enum LoadingGuard {
     Ready(Arc<Session>),
 }
 
+#[derive(Clone)]
 pub struct SessionService {
     cache: Arc<SessionCache>,
     repository: SqliteSessionRepository,
@@ -37,15 +38,19 @@ impl SessionService {
         }
     }
 
+    pub fn get_repository(&self) -> SqliteSessionRepository {
+        self.repository.clone()
+    }
+
     /// 从数据库加载所有会话到内存 (仅启动阶段使用)
     pub async fn load_all(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
-        for (id, _title, _agent_id, _created_at, _updated_at) in rows {
-            if let Ok(Some((id, title, agent_id, created_at, updated_at, history))) =
+        for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control) in rows {
+            if let Ok(Some((id, title, _agent_id, created_at, updated_at, runtime_control, history))) =
                 self.repository.load_session(&id).await
             {
                 let session = Arc::new(Session {
-                    control: std::sync::RwLock::new(ControlState::new(&agent_id)),
+                    control: std::sync::RwLock::new(runtime_control),
                     id: id.clone(),
                     name: title,
                     history: RwLock::new(history),
@@ -87,8 +92,12 @@ impl SessionService {
         });
 
         // 持久化到 DB
+        let rc = {
+            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.clone()
+        };
         self.repository
-            .save_session(&session.id, &session.name, &agent_id, session.created_at, now)
+            .save_session(&session.id, &session.name, &agent_id, session.created_at, now, &rc)
             .await?;
 
         // 持久化初始消息
@@ -149,10 +158,11 @@ impl SessionService {
 
     /// Load a single session from the database.
     async fn load_session_from_db(&self, id: &str) -> Result<Option<Arc<Session>>> {
-        if let Ok(Some((id, title, agent_id, created_at, updated_at, history))) = self.repository.load_session(id).await
+        if let Ok(Some((id, title, _agent_id, created_at, updated_at, runtime_control, history))) =
+            self.repository.load_session(id).await
         {
             let session = Arc::new(Session {
-                control: std::sync::RwLock::new(ControlState::new(&agent_id)),
+                control: std::sync::RwLock::new(runtime_control),
                 id: id.clone(),
                 name: title,
                 history: RwLock::new(history),
@@ -185,19 +195,18 @@ impl SessionService {
         self.repository.save_message(session_id, role, content, now).await?;
 
         // 3. 更新会话元数据
-        let active_agent = session
-            .control
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .active_agent
-            .clone();
+        let rc = {
+            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtime_control.clone()
+        };
         self.repository
             .save_session(
                 &session.id,
                 &session.name,
-                &active_agent,
+                &rc.active_agent,
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
+                &rc,
             )
             .await?;
 
@@ -238,6 +247,10 @@ impl SessionService {
             control.active_agent = agent_id.to_string();
         }
 
+        let rc = {
+            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtime_control.clone()
+        };
         self.repository
             .save_session(
                 &session.id,
@@ -245,6 +258,7 @@ impl SessionService {
                 agent_id,
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
+                &rc,
             )
             .await?;
 
@@ -273,10 +287,15 @@ impl SessionService {
         let new_id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
         let agent_id = source.control.read().unwrap().active_agent.clone();
+        let mut new_control = ControlState::new(&agent_id);
+        {
+            let source_control = source.control.read().unwrap();
+            new_control.model_override = source_control.model_override.clone();
+        }
         let new_name = format!("{} (Copy)", source.name);
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(ControlState::new(&agent_id)),
+            control: std::sync::RwLock::new(new_control.clone()),
             id: new_id.clone(),
             name: new_name.clone(),
             history: RwLock::new(new_history),
@@ -287,7 +306,14 @@ impl SessionService {
         });
 
         self.repository
-            .save_session(&session.id, &session.name, &agent_id, session.created_at, now)
+            .save_session(
+                &session.id,
+                &session.name,
+                &agent_id,
+                session.created_at,
+                now,
+                &new_control,
+            )
             .await?;
 
         for msg in session.get_history() {
@@ -298,5 +324,60 @@ impl SessionService {
 
         self.cache.insert(new_id, session.clone());
         Ok(Some(session))
+    }
+
+    pub async fn override_model(
+        &self,
+        session_id: &str,
+        orchestration: Option<crate::control::ModelRef>,
+        execution: Option<crate::control::ModelRef>,
+    ) -> Result<Arc<Session>> {
+        let session = self.get(session_id).await?.context("Session not found")?;
+
+        {
+            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.model_override.orchestration = orchestration;
+            control.model_override.execution = execution;
+            control.model_override.updated_at = Utc::now().timestamp_millis();
+        }
+
+        let rc = {
+            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtime_control.clone()
+        };
+        self.repository.update_session_runtime_control(session_id, &rc).await?;
+
+        Ok(session)
+    }
+
+    pub async fn update_runtime_state(
+        &self,
+        session_id: &str,
+        snapshot: Option<crate::control::LastTurnSnapshot>,
+        token_delta: Option<(u64, u64, u64, u64)>,
+    ) -> Result<()> {
+        let session = self.get(session_id).await?.context("Session not found")?;
+
+        {
+            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(s) = snapshot {
+                control.last_turn_snapshot = Some(s);
+            }
+            if let Some((input, output, cache_creation, cache_read)) = token_delta {
+                control.token_counters.input_tokens += input;
+                control.token_counters.output_tokens += output;
+                control.token_counters.cache_creation_input_tokens += cache_creation;
+                control.token_counters.cache_read_input_tokens += cache_read;
+                control.token_counters.updated_at = Utc::now().timestamp_millis();
+            }
+        }
+
+        let rc = {
+            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtime_control.clone()
+        };
+        self.repository.update_session_runtime_control(session_id, &rc).await?;
+
+        Ok(())
     }
 }

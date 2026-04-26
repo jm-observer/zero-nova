@@ -13,7 +13,12 @@ use tokio::sync::mpsc;
 #[async_trait]
 pub trait AgentApplication: Send + Sync {
     async fn session_exists(&self, session_id: &str) -> Result<bool>;
-    async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<()>;
+    async fn start_turn(
+        &self,
+        session_id: &str,
+        input: &str,
+        sender: mpsc::Sender<AppEvent>,
+    ) -> Result<nova_core::agent::TurnResult>;
     async fn stop_turn(&self, session_id: &str) -> Result<()>;
 
     async fn list_sessions(&self) -> Result<Vec<AppSession>>;
@@ -31,11 +36,58 @@ pub trait AgentApplication: Send + Sync {
 
     async fn on_connect(&self) -> Result<Vec<AppEvent>>;
     async fn on_disconnect(&self, conn_id: &str);
+
+    // --- Observability & Control (Plan 1 & 2) ---
+    async fn inspect_agent(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::AgentInspectResponse>;
+    async fn get_session_runtime(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot>;
+    async fn preview_session_prompt(
+        &self,
+        session_id: &str,
+        message_id: Option<String>,
+    ) -> Result<nova_protocol::observability::PromptPreviewSnapshot>;
+    async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse>;
+    async fn list_session_skill_bindings(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionSkillBindingsResponse>;
+    async fn get_session_memory_hits(
+        &self,
+        session_id: &str,
+        turn_id: Option<String>,
+    ) -> Result<nova_protocol::observability::SessionMemoryHitsResponse>;
+    async fn override_session_model(
+        &self,
+        session_id: &str,
+        req: nova_protocol::observability::SessionModelOverrideRequest,
+    ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot>;
+    async fn get_session_token_usage(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionTokenUsageResponse>;
+
+    // --- Plan 2: Execution Records & Control ---
+    async fn list_session_runs(&self, session_id: &str) -> Result<nova_protocol::observability::SessionRunsResponse>;
+    async fn get_run_detail(&self, run_id: &str) -> Result<nova_protocol::observability::RunRecord>;
+    async fn control_run(&self, run_id: &str, req: nova_protocol::observability::RunControlRequest) -> Result<()>;
+    async fn list_session_artifacts(&self, session_id: &str) -> Result<nova_protocol::observability::SessionArtifactsResponse>;
+    async fn list_pending_permissions(&self, session_id: Option<&str>) -> Result<nova_protocol::observability::PermissionPendingResponse>;
+    async fn respond_to_permission(&self, req: nova_protocol::observability::PermissionRespondRequest) -> Result<()>;
+    async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse>;
+    async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse>;
+    async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse>;
 }
 
 /// Agent 应用门面实现
 pub struct AgentApplicationImpl<C: LlmClient> {
     conversation_service: ConversationService<C>,
+    workspace_service: crate::agent_workspace_service::AgentWorkspaceService,
     config: Arc<RwLock<AppConfig>>,
     config_path: PathBuf,
 }
@@ -43,11 +95,13 @@ pub struct AgentApplicationImpl<C: LlmClient> {
 impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
     pub fn new(
         conversation_service: ConversationService<C>,
+        workspace_service: crate::agent_workspace_service::AgentWorkspaceService,
         config: Arc<RwLock<AppConfig>>,
         config_path: PathBuf,
     ) -> Self {
         Self {
             conversation_service,
+            workspace_service,
             config,
             config_path,
         }
@@ -60,20 +114,34 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         Ok(self.conversation_service.sessions.get(session_id).await?.is_some())
     }
 
-    async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<()> {
+    async fn start_turn(
+        &self,
+        session_id: &str,
+        input: &str,
+        sender: mpsc::Sender<AppEvent>,
+    ) -> Result<nova_core::agent::TurnResult> {
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
+        let sender_clone = sender.clone();
         tokio::spawn(async move {
             while let Some(event) = agent_event_rx.recv().await {
-                if sender.send(AppEvent::from(event)).await.is_err() {
+                if sender_clone.send(AppEvent::from(event)).await.is_err() {
                     break;
                 }
             }
         });
 
-        self.conversation_service
+        let turn_result = self
+            .conversation_service
             .start_turn(session_id, input, agent_event_tx)
-            .await
+            .await?;
+
+        let _ = sender
+            .send(AppEvent::TurnComplete {
+                usage: turn_result.usage.clone(),
+            })
+            .await;
+        Ok(turn_result)
     }
 
     async fn stop_turn(&self, session_id: &str) -> Result<()> {
@@ -261,4 +329,105 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn on_disconnect(&self, _conn_id: &str) {}
+
+    // --- Observability & Control Implementation ---
+
+    async fn inspect_agent(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::AgentInspectResponse> {
+        self.workspace_service.inspect_agent(agent_id, session_id).await
+    }
+
+    async fn get_session_runtime(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot> {
+        self.workspace_service.get_session_runtime(session_id).await
+    }
+
+    async fn preview_session_prompt(
+        &self,
+        session_id: &str,
+        message_id: Option<String>,
+    ) -> Result<nova_protocol::observability::PromptPreviewSnapshot> {
+        self.workspace_service
+            .preview_session_prompt(session_id, message_id)
+            .await
+    }
+
+    async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse> {
+        self.workspace_service.list_session_tools(session_id).await
+    }
+
+    async fn list_session_skill_bindings(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionSkillBindingsResponse> {
+        self.workspace_service.list_session_skill_bindings(session_id).await
+    }
+
+    async fn get_session_memory_hits(
+        &self,
+        session_id: &str,
+        turn_id: Option<String>,
+    ) -> Result<nova_protocol::observability::SessionMemoryHitsResponse> {
+        self.workspace_service
+            .get_session_memory_hits(session_id, turn_id)
+            .await
+    }
+
+    async fn override_session_model(
+        &self,
+        session_id: &str,
+        req: nova_protocol::observability::SessionModelOverrideRequest,
+    ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot> {
+        self.workspace_service.override_session_model(session_id, req).await
+    }
+
+    async fn get_session_token_usage(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionTokenUsageResponse> {
+        self.workspace_service.get_session_token_usage(session_id).await
+    }
+
+    // --- Plan 2: Execution Records & Control Implementation ---
+
+    async fn list_session_runs(&self, session_id: &str) -> Result<nova_protocol::observability::SessionRunsResponse> {
+        self.workspace_service.list_session_runs(session_id).await
+    }
+
+    async fn get_run_detail(&self, run_id: &str) -> Result<nova_protocol::observability::RunRecord> {
+        self.workspace_service.get_run_detail(run_id).await
+    }
+
+    async fn control_run(&self, run_id: &str, req: nova_protocol::observability::RunControlRequest) -> Result<()> {
+        self.workspace_service.control_run(run_id, req).await
+    }
+
+    async fn list_session_artifacts(&self, session_id: &str) -> Result<nova_protocol::observability::SessionArtifactsResponse> {
+        self.workspace_service.list_session_artifacts(session_id).await
+    }
+
+    async fn list_pending_permissions(&self, session_id: Option<&str>) -> Result<nova_protocol::observability::PermissionPendingResponse> {
+        self.workspace_service.list_pending_permissions(session_id).await
+    }
+
+    async fn respond_to_permission(&self, req: nova_protocol::observability::PermissionRespondRequest) -> Result<()> {
+        self.workspace_service.respond_to_permission(req).await
+    }
+
+    async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse> {
+        self.workspace_service.list_audit_logs(session_id).await
+    }
+
+    async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse> {
+        self.workspace_service.get_diagnostics(session_id).await
+    }
+
+    async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse> {
+        self.workspace_service.restore_workspace().await
+    }
 }

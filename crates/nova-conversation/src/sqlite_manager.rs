@@ -43,7 +43,8 @@ impl SqliteManager {
                 title TEXT,
                 agent_id TEXT,
                 created_at INTEGER,
-                updated_at INTEGER
+                updated_at INTEGER,
+                runtime_control TEXT -- Plan 1: Session extension
             );",
         )
         .execute(&self.pool)
@@ -64,7 +65,173 @@ impl SqliteManager {
         .await
         .context("Failed to create messages table")?;
 
+        // Plan 2 Tables
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS runs (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                duration_ms INTEGER,
+                orchestration_model TEXT,
+                execution_model TEXT,
+                usage TEXT,
+                error_summary TEXT,
+                waiting_reason TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create runs table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS run_steps (
+                step_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                step_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL,
+                tool_name TEXT,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                payload TEXT,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create run_steps table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                path TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                content_preview TEXT,
+                language TEXT,
+                size INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create artifacts table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS permission_requests (
+                request_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                reason TEXT,
+                target TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                resolved_at INTEGER,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create permission_requests table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS audit_logs (
+                log_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                run_id TEXT,
+                action TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create audit_logs table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS diagnostic_issues (
+                issue_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                message TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                action_hint TEXT,
+                count INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create diagnostic_issues table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS workspace_restore_state (
+                user_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                agent_id TEXT,
+                console_visible INTEGER,
+                active_tab TEXT,
+                selected_run_id TEXT,
+                selected_artifact_id TEXT,
+                selected_permission_request_id TEXT,
+                selected_diagnostic_id TEXT,
+                restorable_run_state TEXT,
+                updated_at INTEGER
+            );",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create workspace_restore_state table")?;
+
+        self.migrate_sessions_runtime_control_column().await?;
         self.migrate_messages_timestamp_column().await?;
+
+        Ok(())
+    }
+
+    async fn migrate_sessions_runtime_control_column(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect sessions table schema")?;
+
+        let mut has_runtime_control = false;
+
+        for column in columns {
+            let name: String = sqlx::Row::get(&column, "name");
+            if name == "runtime_control" {
+                has_runtime_control = true;
+                break;
+            }
+        }
+
+        if !has_runtime_control {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN runtime_control TEXT")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add runtime_control column to sessions table")?;
+        }
 
         Ok(())
     }

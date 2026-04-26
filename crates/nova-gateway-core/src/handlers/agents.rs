@@ -54,6 +54,33 @@ pub async fn handle_agents_switch(
     }
 }
 
+pub async fn handle_agent_inspect(
+    payload: nova_protocol::observability::AgentInspectRequest,
+    app: &dyn AgentApplication,
+    outbound_tx: ResponseSink<GatewayMessage>,
+    request_id: String,
+) {
+    match app.inspect_agent(&payload.agent_id, &payload.session_id).await {
+        Ok(resp) => {
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::AgentInspectResponse(resp),
+                ))
+                .await;
+        }
+        Err(error) => {
+            super::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                error.to_string(),
+                Some(error_code(&error).to_string()),
+            )
+            .await;
+        }
+    }
+}
+
 fn error_code(error: &anyhow::Error) -> &'static str {
     if error.to_string().contains("Session not found") {
         "SESSION_NOT_FOUND"

@@ -119,6 +119,105 @@ pub enum MessageEnvelope {
     #[serde(rename = "skill.invocation")]
     SkillInvocation(SkillInvocationPayload),
 
+    // --- Observability & Control (Plan 1 & 2) ---
+    #[serde(rename = "agent.inspect")]
+    AgentInspect(crate::observability::AgentInspectRequest),
+    #[serde(rename = "agent.inspect.response")]
+    AgentInspectResponse(crate::observability::AgentInspectResponse),
+    #[serde(rename = "session.runtime")]
+    SessionRuntime(crate::observability::SessionRuntimeRequest),
+    #[serde(rename = "session.runtime.response")]
+    SessionRuntimeResponse(crate::observability::SessionRuntimeSnapshot),
+    #[serde(rename = "session.prompt.preview")]
+    SessionPromptPreview(crate::observability::PromptPreviewRequest),
+    #[serde(rename = "session.prompt.preview.response")]
+    SessionPromptPreviewResponse(crate::observability::PromptPreviewSnapshot),
+    #[serde(rename = "session.tools.list")]
+    SessionToolsList(crate::observability::SessionToolsRequest),
+    #[serde(rename = "session.tools.list.response")]
+    SessionToolsListResponse(crate::observability::SessionToolsResponse),
+    #[serde(rename = "session.skill.bindings")]
+    SessionSkillBindings(crate::observability::SessionSkillBindingsRequest),
+    #[serde(rename = "session.skill.bindings.response")]
+    SessionSkillBindingsResponse(crate::observability::SessionSkillBindingsResponse),
+    #[serde(rename = "session.memory.hits")]
+    SessionMemoryHits(crate::observability::SessionMemoryHitsRequest),
+    #[serde(rename = "session.memory.hits.response")]
+    SessionMemoryHitsResponse(crate::observability::SessionMemoryHitsResponse),
+    #[serde(rename = "session.model.override")]
+    SessionModelOverride(crate::observability::SessionModelOverrideRequest),
+    #[serde(rename = "session.model.override.response")]
+    SessionModelOverrideResponse(crate::observability::SessionRuntimeSnapshot),
+    #[serde(rename = "sessions.token_usage")]
+    SessionTokenUsage(crate::observability::SessionTokenUsageRequest),
+    #[serde(rename = "sessions.token_usage.response")]
+    SessionTokenUsageResponse(crate::observability::SessionTokenUsageResponse),
+
+    #[serde(rename = "session.runs")]
+    SessionRuns(crate::observability::SessionRunsRequest),
+    #[serde(rename = "session.runs.response")]
+    SessionRunsResponse(crate::observability::SessionRunsResponse),
+    #[serde(rename = "run.detail")]
+    RunDetail(crate::observability::RunDetailRequest),
+    #[serde(rename = "run.detail.response")]
+    RunDetailResponse(crate::observability::RunRecord),
+    #[serde(rename = "run.control")]
+    RunControl(crate::observability::RunControlRequest),
+    #[serde(rename = "run.control.response")]
+    RunControlResponse(crate::session::SuccessResponse),
+    #[serde(rename = "session.artifacts")]
+    SessionArtifacts(crate::observability::SessionArtifactsRequest),
+    #[serde(rename = "session.artifacts.response")]
+    SessionArtifactsResponse(crate::observability::SessionArtifactsResponse),
+    #[serde(rename = "permission.pending")]
+    PermissionPending(crate::observability::PermissionPendingRequest),
+    #[serde(rename = "permission.pending.response")]
+    PermissionPendingResponse(crate::observability::PermissionPendingResponse),
+    #[serde(rename = "permission.respond")]
+    PermissionRespond(crate::observability::PermissionRespondRequest),
+    #[serde(rename = "permission.respond.response")]
+    PermissionRespondResponse(crate::session::SuccessResponse),
+    #[serde(rename = "audit.logs")]
+    AuditLogs(crate::observability::AuditLogsRequest),
+    #[serde(rename = "audit.logs.response")]
+    AuditLogsResponse(crate::observability::AuditLogsResponse),
+    #[serde(rename = "diagnostics.current")]
+    DiagnosticsCurrent(crate::observability::DiagnosticsCurrentRequest),
+    #[serde(rename = "diagnostics.current.response")]
+    DiagnosticsResponse(crate::observability::DiagnosticsResponse),
+    #[serde(rename = "workspace.restore")]
+    WorkspaceRestore(crate::observability::WorkspaceRestoreRequest),
+    #[serde(rename = "workspace.restore.response")]
+    WorkspaceRestoreResponse(crate::observability::WorkspaceRestoreResponse),
+
+    // --- Events ---
+    #[serde(rename = "session.runtime.updated")]
+    SessionRuntimeUpdated(crate::observability::SessionRuntimeSnapshot),
+    #[serde(rename = "session.token.usage")]
+    SessionTokenUsageUpdated(crate::observability::SessionTokenUsageResponse),
+    #[serde(rename = "session.tools.updated")]
+    SessionToolsUpdated(crate::observability::SessionToolsResponse),
+    #[serde(rename = "session.skill.bindings.updated")]
+    SessionSkillBindingsUpdated(crate::observability::SessionSkillBindingsResponse),
+    #[serde(rename = "session.memory.hit")]
+    SessionMemoryHit(crate::observability::MemoryHitSnapshot),
+    #[serde(rename = "run.status.updated")]
+    RunStatusUpdated(crate::observability::RunRecord),
+    #[serde(rename = "run.step.updated")]
+    RunStepUpdated(crate::observability::RunStepRecord),
+    #[serde(rename = "session.artifacts.updated")]
+    SessionArtifactsUpdated(crate::observability::ArtifactRecord),
+    #[serde(rename = "permission.requested")]
+    PermissionRequested(crate::observability::PermissionRequestRecord),
+    #[serde(rename = "permission.resolved")]
+    PermissionResolved(crate::observability::PermissionRequestRecord),
+    #[serde(rename = "audit.logs.updated")]
+    AuditLogsUpdated(crate::observability::AuditLogRecord),
+    #[serde(rename = "diagnostics.updated")]
+    DiagnosticsUpdated(crate::observability::DiagnosticsResponse),
+    #[serde(rename = "workspace.restore.available")]
+    WorkspaceRestoreAvailable(crate::observability::WorkspaceRestoreResponse),
+
     #[serde(other)]
     Unknown,
 }

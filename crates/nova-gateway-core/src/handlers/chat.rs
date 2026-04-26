@@ -72,22 +72,25 @@ pub async fn handle_chat(
         ))
         .await;
 
-    if let Err(e) = app.start_turn(&session_id, &payload.input, event_tx).await {
-        if let Err(join_error) = event_forwarder.await {
-            log::error!(
-                "Failed to join app event forwarder after start_turn error: {}",
-                join_error
-            );
+    let turn_result = match app.start_turn(&session_id, &payload.input, event_tx).await {
+        Ok(res) => res,
+        Err(e) => {
+            if let Err(join_error) = event_forwarder.await {
+                log::error!(
+                    "Failed to join app event forwarder after start_turn error: {}",
+                    join_error
+                );
+            }
+            super::system::send_general_error(
+                &outbound_tx,
+                &request_id,
+                format!("Service error: {}", e),
+                Some(error_code(&e).to_string()),
+            )
+            .await;
+            return;
         }
-        super::system::send_general_error(
-            &outbound_tx,
-            &request_id,
-            format!("Service error: {}", e),
-            Some(error_code(&e).to_string()),
-        )
-        .await;
-        return;
-    }
+    };
 
     // 等到所有 progress 事件转发完成后再发 complete，避免前端看到乱序消息。
     if let Err(join_error) = event_forwarder.await {
@@ -100,7 +103,12 @@ pub async fn handle_chat(
             MessageEnvelope::ChatComplete(ChatCompletePayload {
                 session_id,
                 output: None,
-                usage: None,
+                usage: Some(nova_protocol::Usage {
+                    input_tokens: turn_result.usage.input_tokens,
+                    output_tokens: turn_result.usage.output_tokens,
+                    cache_creation_input_tokens: turn_result.usage.cache_creation_input_tokens,
+                    cache_read_input_tokens: turn_result.usage.cache_read_input_tokens,
+                }),
             }),
         ))
         .await;

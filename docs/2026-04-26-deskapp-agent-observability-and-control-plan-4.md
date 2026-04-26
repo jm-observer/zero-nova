@@ -239,7 +239,7 @@ interface SettingsNavigatePayload {
 
 ### 7. `gateway-client.ts` 的组织方式
 
-backlog 已明确 `gateway-client.ts` 已经膨胀，Plan 4 必须在继续接协议前先做结构收敛。首期建议采用“按职责拆分文件、保留统一实例入口”的折中方案：
+backlog 已明确 `gateway-client   .ts` 已经膨胀，Plan 4 必须在继续接协议前先做结构收敛。首期建议采用“按职责拆分文件、保留统一实例入口”的折中方案：
 
 | 文件 | 职责 |
 |------|------|

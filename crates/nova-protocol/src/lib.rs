@@ -2,12 +2,14 @@ pub mod agent;
 pub mod chat;
 pub mod config;
 pub mod envelope;
+pub mod observability;
 pub mod session;
 pub mod system;
 
 pub use agent::*;
 pub use chat::*;
 pub use envelope::*;
+pub use observability::*;
 pub use session::*;
 pub use system::*;
 

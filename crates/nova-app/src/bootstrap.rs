@@ -151,10 +151,12 @@ pub async fn build_application<C: LlmClient + 'static>(
     let session_service = nova_conversation::SessionService::new(session_cache, repository);
     session_service.load_all().await?;
 
-    let conversation_service = ConversationService::new(agent, agent_registry, session_service);
+    let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());
+    let workspace_service = crate::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service);
 
     Ok(Arc::new(AgentApplicationImpl::new(
         conversation_service,
+        workspace_service,
         config_arc,
         config_path,
     )))

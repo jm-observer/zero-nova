@@ -48,6 +48,58 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
         MessageEnvelope::ConfigUpdate(payload) => {
             config::handle_config_update(payload, app, outbound_tx, msg_id).await;
         }
+        // --- Observability & Control (Plan 1 & 2) ---
+        MessageEnvelope::AgentInspect(payload) => {
+            agents::handle_agent_inspect(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionRuntime(payload) => {
+            sessions::handle_session_runtime(payload.session_id, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionPromptPreview(payload) => {
+            sessions::handle_session_prompt_preview(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionToolsList(payload) => {
+            sessions::handle_session_tools(payload.session_id, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionSkillBindings(payload) => {
+            sessions::handle_session_skill_bindings(payload.session_id, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionMemoryHits(payload) => {
+            sessions::handle_session_memory_hits(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionModelOverride(payload) => {
+            sessions::handle_session_model_override(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionTokenUsage(payload) => {
+            sessions::handle_session_token_usage(payload.session_id, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionRuns(payload) => {
+            sessions::handle_session_runs(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::RunDetail(payload) => {
+            sessions::handle_run_detail(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::RunControl(payload) => {
+            sessions::handle_run_control(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionArtifacts(payload) => {
+            sessions::handle_session_artifacts(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::PermissionPending(payload) => {
+            sessions::handle_permission_pending(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::PermissionRespond(payload) => {
+            sessions::handle_permission_respond(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::AuditLogs(payload) => {
+            sessions::handle_audit_logs(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::DiagnosticsCurrent(payload) => {
+            sessions::handle_diagnostics_current(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::WorkspaceRestore(payload) => {
+            sessions::handle_workspace_restore(payload, app, outbound_tx, msg_id).await;
+        }
         _ => {
             warn!(
                 "Unhandled or not implemented message envelope for id={}: {:?}",

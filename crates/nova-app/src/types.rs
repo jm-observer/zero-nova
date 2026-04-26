@@ -111,6 +111,20 @@ pub enum AppEvent {
         skill_name: String,
         level: SkillInvocationLevel,
     },
+    // --- Observability & Control (Plan 1 & 2) ---
+    SessionRuntimeUpdated(nova_protocol::observability::SessionRuntimeSnapshot),
+    SessionTokenUsageUpdated(nova_protocol::observability::SessionTokenUsageResponse),
+    SessionToolsUpdated(nova_protocol::observability::SessionToolsResponse),
+    SessionSkillBindingsUpdated(nova_protocol::observability::SessionSkillBindingsResponse),
+    SessionMemoryHit(nova_protocol::observability::MemoryHitSnapshot),
+    RunStatusUpdated(nova_protocol::observability::RunRecord),
+    RunStepUpdated(nova_protocol::observability::RunStepRecord),
+    SessionArtifactsUpdated(nova_protocol::observability::ArtifactRecord),
+    PermissionRequested(nova_protocol::observability::PermissionRequestRecord),
+    PermissionResolved(nova_protocol::observability::PermissionRequestRecord),
+    AuditLogsUpdated(nova_protocol::observability::AuditLogRecord),
+    DiagnosticsUpdated(nova_protocol::observability::DiagnosticsResponse),
+    WorkspaceRestoreAvailable(nova_protocol::observability::WorkspaceRestoreResponse),
 }
 
 impl From<nova_core::event::AgentEvent> for AppEvent {

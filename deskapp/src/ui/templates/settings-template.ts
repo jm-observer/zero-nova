@@ -202,7 +202,7 @@ export const SETTINGS_TEMPLATE = `
               <!-- 供应商密钥 -->
               <div class="settings-section-title" data-i18n="settings.provider_keys">供应商密钥</div>
 
-              <div id="server-provider-keys" class="settings-provider-keys">
+              <div id="server-provider-keys" class="settings-provider-keys" data-item-id="provider-keys">
                 <!-- 动态生成供应商密钥输入 -->
               </div>
 
@@ -216,7 +216,7 @@ export const SETTINGS_TEMPLATE = `
                     <span class="settings-item-desc" data-i18n="agent.model_independent_desc">Assign independent models
                       per Agent, falls back to global Orchestration model if not set</span>
                   </div>
-                  <div id="agent-model-list" class="agent-model-list"></div>
+                  <div id="agent-model-list" class="agent-model-list" data-item-id="agent-model-list"></div>
                 </div>
               </div>
 
@@ -306,7 +306,7 @@ export const SETTINGS_TEMPLATE = `
                 data-i18n="settings.mcp_desc">通过 MCP 协议连接外部工具服务器，扩展 Agent 能力</div>
 
               <!-- MCP Server 列表（动态渲染） -->
-              <div id="mcp-servers-list"></div>
+              <div id="mcp-servers-list" data-item-id="mcp-servers-list"></div>
 
               <!-- 添加 MCP Server 按钮 -->
               <button id="mcp-add-btn" class="mcp-add-btn">
@@ -549,7 +549,7 @@ export const SETTINGS_TEMPLATE = `
 
               <!-- 搜索栏 -->
               <div id="memory-search-bar" class="memory-search-bar">
-                <input type="text" id="memory-search-input" class="memory-search-input"
+                <input type="text" id="memory-search-input" class="memory-search-input" data-item-id="memory-search-input"
                   data-i18n-placeholder="memory.search_placeholder" placeholder="搜索记忆（语义 + 关键词）..." />
                 <button id="memory-search-btn" class="memory-search-btn" data-i18n-title="common.search" title="Search">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

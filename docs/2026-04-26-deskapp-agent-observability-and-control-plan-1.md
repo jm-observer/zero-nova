@@ -13,7 +13,7 @@
 - `deskapp/src/main.ts`
 - `deskapp/src/core/state.ts`（165 行，需扩展）
 - `deskapp/src/core/types.ts`（321 行，需扩展）
-- `deskapp/src/ui/chat-view.ts`（655 行，注意：不应在此文件中直接添加控制台渲染逻辑，应拆分）
+- `deskapp/src/ui/chat-view.ts`（666 行，注意：不应在此文件中直接添加控制台渲染逻辑，应拆分）
 - `deskapp/src/ui/agent-console-view.ts`（**新增**：独立的控制台视图模块）
 - `deskapp/src/ui/sidebar-view.ts`
 - `deskapp/src/ui/templates/agent-console-template.ts`（**新增**）
@@ -78,7 +78,16 @@
 - 标签切换只替换 body 子区域
 - 样式集中到独立的 `agent-console.css`，不污染 chat 或 settings 样式
 
-**与现有布局的空间关系**：`agent-console` 与 `#chat-main` 使用 flex 并排布局（宽屏）或绝对定位覆盖（窄屏）。现有 `.artifacts-panel`（chat.css 中已定义）在 Agent Console 打开时应自动收起或合并到控制台的 Artifact 标签中，避免右侧出现两个面板争夺空间。
+**与现有布局的空间关系**：`agent-console` 与 `#chat-main` 使用 flex 并排布局（宽屏）或绝对定位覆盖（窄屏）。现有 `.artifacts-panel`（chat.css 中已定义）与 Agent Console 的共存规则如下：
+
+| 操作 | artifacts-panel 状态 | Agent Console 状态 | 说明 |
+|------|---------------------|-------------------|------|
+| 打开 Console | 自动收起（添加 `.collapsed`） | 打开 | Console 优先占据右侧空间 |
+| 关闭 Console | 恢复到打开 Console 之前的状态 | 关闭 | 使用 `artifactsPanelWasOpen` 标记恢复 |
+| 打开 artifacts-panel（Console 已开） | 不操作 | 保持打开 | 不允许同时展示两个右侧面板 |
+| 会话切换 | 重置为默认状态 | 保持当前开关状态 | 面板内容刷新，开关状态不变 |
+
+实现方式：在 `AppState` 中维护 `artifactsPanelWasOpen: boolean` 标记，Console 打开时记录并收起，Console 关闭时根据标记恢复。两者为互斥关系，不需要动画同步。
 
 ### 1.2 窄屏适配策略
 
@@ -109,11 +118,12 @@ interface ResourceState<T> {
 consoleVisible: boolean;
 consoleActiveTab: 'overview' | 'model' | 'tools' | 'skills' | 'prompt-memory';
 agentRuntimeState: ResourceState<AgentRuntimeSnapshot>;
-sessionRuntimeStates: Record<string, ResourceState<SessionRuntimeSnapshot>>;
-sessionPromptStates: Record<string, ResourceState<PromptPreviewView>>;
-sessionToolStates: Record<string, ResourceState<ToolDescriptorView[]>>;
-sessionMemoryHitStates: Record<string, ResourceState<MemoryHitView[]>>;
-sessionTokenUsageStates: Record<string, ResourceState<TokenUsageView>>;
+// 注意：使用 Map 而非 Record，支持任意 key 和高效迭代
+sessionRuntimeStates: Map<string, ResourceState<SessionRuntimeSnapshot>>;
+sessionPromptStates: Map<string, ResourceState<PromptPreviewView>>;
+sessionToolStates: Map<string, ResourceState<ToolDescriptorView[]>>;
+sessionMemoryHitStates: Map<string, ResourceState<MemoryHitView[]>>;
+sessionTokenUsageStates: Map<string, ResourceState<TokenUsageView>>;
 ```
 
 这样可避免：
@@ -129,25 +139,28 @@ sessionTokenUsageStates: Record<string, ResourceState<TokenUsageView>>;
 - `CONSOLE_TAB_CHANGED`：标签页切换
 - `CONSOLE_DATA_UPDATED`：某个 ResourceState 数据刷新（payload 携带 key 标识哪个状态变了）
 
-**ResourceState 工具函数**：
+**ResourceState 工具方法**（实际实现为 `AppState` 的实例方法）：
 
 ```ts
-function createEmptyResource<T>(): ResourceState<T> {
+// 在 AppState 类中
+createEmptyResource<T>(): ResourceState<T> {
     return { loaded: false, loading: false };
 }
 
-function setLoading<T>(state: ResourceState<T>): ResourceState<T> {
+setLoadingResource<T>(state: ResourceState<T>): ResourceState<T> {
     return { ...state, loading: true, error: undefined };
 }
 
-function setLoaded<T>(data: T): ResourceState<T> {
+setLoadedResource<T>(data: T): ResourceState<T> {
     return { loaded: true, loading: false, data, updatedAt: Date.now() };
 }
 
-function setError<T>(error: string): ResourceState<T> {
+setErrorResource<T>(error: string): ResourceState<T> {
     return { loaded: true, loading: false, error, updatedAt: Date.now() };
 }
 ```
+
+> 这些方法挂在 `AppState` 实例上而非顶层函数，以便后续扩展（如自动触发 EventBus 通知）。
 
 ### 3. 交互边界
 
@@ -189,7 +202,7 @@ function setError<T>(error: string): ResourceState<T> {
 ### 4.1 缓存策略
 
 - 当前会话缓存常驻，直到会话切换或主动刷新。
-- 非当前会话缓存允许保留最近 3 个，超出后淘汰（LRU）。
+- 非当前会话缓存允许保留最近 3 个，超出后淘汰（LRU）。淘汰在 `updateSessionResourceState()` 中自动执行：每次写入新会话缓存时，检查 Map size，若超出阈值则删除最早插入的非当前会话条目（JS `Map` 天然保持插入顺序）。
 - Agent 切换时清空 `agentRuntimeState`，防止沿用旧 Agent 视图。
 - 连接断开时不清空缓存数据，仅在 UI 上标记"数据可能过期"。
 
@@ -209,7 +222,7 @@ function setError<T>(error: string): ResourceState<T> {
 
 **关键变更：控制台逻辑从 chat-view.ts 独立出来。**
 
-`chat-view.ts` 已有 655 行，再堆入控制台逻辑会导致维护困难。建议拆分为：
+`chat-view.ts` 已有 666 行，再堆入控制台逻辑会导致维护困难。建议拆分为：
 
 - `ui/agent-console-view.ts`（**新增**）
   - 负责控制台开关、标签切换、按需加载、局部渲染协调
@@ -237,9 +250,9 @@ function setError<T>(error: string): ResourceState<T> {
 2. 在 `AppState` 中增加控制台缓存字段、UI 状态字段与更新方法。
 3. 新建 `ui/templates/agent-console-template.ts`，定义控制台 HTML 模板。
 4. 新建 `ui/agent-console-view.ts`，实现开关、标签切换、按需加载逻辑。
-5. 在 `chat-view.ts` 的模板中加入 `#agent-console` 占位容器和入口按钮（最小改动）。
+5. 在 `chat-view.ts` 的模板中加入 `#agent-console` 占位容器和入口按钮（最小改动）。**注意**：`#inspect-btn` 已在 `ChatView` 中声明并绑定，入口按钮的 DOM 挂载点已就位，仅需确认点击事件正确广播到 EventBus。
 6. 新建 `styles/main/agent-console.css`，实现宽屏抽屉和窄屏覆盖层样式。
-7. 在 `main.ts` 中初始化 `AgentConsoleView` 实例。
+7. ~~在 `main.ts` 中初始化 `AgentConsoleView` 实例。~~ **已完成**：`main.ts` 已创建 `agentConsole` 实例并调用 `init()`。
 8. 接入事件总线，让会话切换（`SESSION_SELECTED`）、Agent 切换（`AGENT_SWITCHED`）、连接断开（`onConnectionChange`）能驱动控制台状态刷新。
 9. 补充控制台空态、错误态和 skeleton 样式。
 10. 处理与现有 `.artifacts-panel` 的共存/切换逻辑。

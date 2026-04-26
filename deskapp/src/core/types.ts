@@ -188,15 +188,17 @@ export interface SchedulerEventView {
 
 export interface SessionArtifactView {
     id: string;
-    type: 'file' | 'code' | 'output';
+    type: 'file' | 'code' | 'output' | 'image';
     path?: string;
     filename?: string;
+    title?: string;
     content?: string;
     language?: string;
     size?: number;
     timestamp: number;
     runId?: string;      // 来源任务 ID
     turnId?: string;     // 来源轮次 ID
+    stepId?: string;
 }
 
 export interface McpServerView {
@@ -327,11 +329,132 @@ export interface TaskRunView {
  * 资源状态包装器，用于处理异步加载的数据
  */
 export interface ResourceState<T> {
+    status: 'idle' | 'loading' | 'ready' | 'error';
     loaded: boolean;
     loading: boolean;
     error?: string;
+    unsupported?: boolean;
     data?: T;
     updatedAt?: number;
+}
+
+export interface GatewayCapabilityErrorPayload {
+    code: 'capability_not_supported' | 'invalid_request' | 'internal_error';
+    message: string;
+    capability?: string;
+}
+
+export interface SettingsNavigatePayload {
+    visible: true;
+    section?: 'models' | 'memory' | 'mcp' | 'skills';
+    search?: string;
+    itemId?: string;
+}
+
+export type ConsoleTab =
+    | 'overview'
+    | 'model'
+    | 'tools'
+    | 'skills'
+    | 'prompt-memory'
+    | 'runs'
+    | 'permissions'
+    | 'diagnostics';
+
+export interface RunSummaryView {
+    id: string;
+    sessionId: string;
+    turnId?: string;
+    agentId?: string;
+    status: 'queued' | 'running' | 'waiting_user' | 'paused' | 'stopped' | 'failed' | 'completed';
+    title?: string;
+    startedAt: number;
+    finishedAt?: number;
+    durationMs?: number;
+    modelSummary?: string;
+    toolCount?: number;
+    artifactCount?: number;
+    tokenUsage?: TokenUsageView;
+    errorSummary?: string;
+    waitingReason?: 'permission' | 'user_input' | 'external_callback';
+}
+
+export interface RunStepView {
+    id: string;
+    runId: string;
+    type: 'thinking' | 'tool' | 'approval' | 'message' | 'artifact' | 'system';
+    title: string;
+    status: 'running' | 'completed' | 'failed' | 'skipped';
+    startedAt?: number;
+    finishedAt?: number;
+    toolName?: string;
+    description?: string;
+    artifactIds?: string[];
+    permissionRequestId?: string;
+}
+
+export interface RunDetailView extends RunSummaryView {
+    steps: RunStepView[];
+    artifacts: SessionArtifactView[];
+    permissions: PermissionRequestView[];
+    diagnostics: DiagnosticIssueView[];
+    auditLogs: AuditLogView[];
+}
+
+export interface PermissionRequestView {
+    id: string;
+    sessionId?: string;
+    runId?: string;
+    stepId?: string;
+    agentId?: string;
+    kind: 'command' | 'file_write' | 'network' | 'mcp_tool';
+    title: string;
+    reason?: string;
+    target?: string;
+    createdAt: number;
+    riskLevel: 'low' | 'medium' | 'high';
+    status: 'pending' | 'approved' | 'denied' | 'expired';
+    rememberScope?: 'session' | 'agent' | 'global';
+}
+
+export interface AuditLogView {
+    id: string;
+    sessionId?: string;
+    runId?: string;
+    permissionRequestId?: string;
+    actionType: 'permission' | 'run_control' | 'artifact_open' | 'workspace_restore';
+    actor: 'user' | 'system' | 'agent';
+    result: 'approved' | 'denied' | 'failed' | 'completed';
+    summary: string;
+    createdAt: number;
+}
+
+export interface DiagnosticIssueView {
+    id: string;
+    category: 'llm' | 'mcp' | 'memory' | 'permission' | 'protocol' | 'artifact' | 'runtime' | 'unknown';
+    severity: 'info' | 'warn' | 'error';
+    title: string;
+    message: string;
+    suggestedActions: string[];
+    relatedRunId?: string;
+    relatedStepId?: string;
+    relatedSessionId?: string;
+    relatedPermissionRequestId?: string;
+    updatedAt: number;
+    retryable?: boolean;
+}
+
+export interface WorkspaceRestoreView {
+    sessionId?: string;
+    agentId?: string;
+    consoleVisible: boolean;
+    activeTab?: ConsoleTab;
+    selectedRunId?: string;
+    selectedArtifactId?: string;
+    selectedPermissionRequestId?: string;
+    selectedDiagnosticId?: string;
+    restorableRunState?: 'none' | 'view_only' | 'reattachable';
+    updatedAt: number;
 }
 
 /**
@@ -371,9 +494,11 @@ export interface PromptPreviewView {
     systemPrompt: string;
     skillFragments: Array<{ title: string; content: string }>;
     memoryFragments: Array<{ content: string; source: string }>;
-    toolFragments: Array<{ name: string; description: string }>;
+    /** @deprecated 使用 toolDescriptions 代替 */
+    toolFragments?: Array<{ name: string; description: string }>;
+    /** 工具描述列表（对齐后端 ToolDefinition.description） */
+    toolDescriptions: Array<{ name: string; description: string }>;
     contextSummary: string;
-    toolDescriptions?: Array<{ name: string; description: string }>;
     conversationFragments?: Array<{ role: string; summary: string }>;
     capabilityPolicy?: string;
     activeSkill?: { id: string; title: string };
@@ -439,6 +564,7 @@ export interface SkillBindingView {
  * 对应后端 ToolUnlockedPayload
  */
 export interface ToolUnlockedEvent {
+    sessionId?: string;
     toolName: string;
     description?: string;
     source?: 'tool_search' | 'skill_activation' | 'manual';
@@ -450,6 +576,7 @@ export interface ToolUnlockedEvent {
  * 技能激活事件 (Plan 3 新增)
  */
 export interface SkillActivatedEvent {
+    sessionId?: string;
     skillId: string;
     title?: string;
     content?: string;
@@ -462,6 +589,7 @@ export interface SkillActivatedEvent {
  * 技能切换事件 (Plan 3 新增)
  */
 export interface SkillSwitchedEvent {
+    sessionId?: string;
     previousSkillId?: string;
     currentSkillId: string;
     currentSkillTitle?: string;
@@ -472,6 +600,7 @@ export interface SkillSwitchedEvent {
  * 技能退出事件 (Plan 3 新增)
  */
 export interface SkillExitedEvent {
+    sessionId?: string;
     skillId: string;
     title?: string;
     sticky?: boolean;

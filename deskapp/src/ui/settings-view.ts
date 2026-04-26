@@ -1,6 +1,7 @@
 import { t } from '../i18n/index';
 import { AppState } from '../core/state';
-import { EventBus } from '../core/event-bus';
+import { EventBus, Events } from '../core/event-bus';
+import type { SettingsNavigatePayload } from '../core/types';
 
 import { SETTINGS_TEMPLATE } from './templates/settings-template';
 
@@ -40,6 +41,18 @@ export class SettingsView {
                 this.toggle(false); // Close settings if another view opens
             }
         });
+
+        this.bus.on<SettingsNavigatePayload>(Events.SETTINGS_NAVIGATE, payload => {
+            if (!payload?.visible) {
+                return;
+            }
+
+            this.toggle(true);
+            this.bus.emit('view:toggle', { name: 'settings', active: true });
+            const targetTab = this.resolveTabName(payload.section);
+            this.switchTab(targetTab);
+            this.focusItem(payload.itemId, payload.search);
+        });
     }
 
     toggle(active: boolean) {
@@ -52,6 +65,45 @@ export class SettingsView {
     private switchTab(tabName: string) {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(tc => tc.classList.toggle('active', tc.dataset.tab === tabName));
+    }
+
+    private resolveTabName(section?: SettingsNavigatePayload['section']): string {
+        switch (section) {
+            case 'models':
+                return 'models';
+            case 'memory':
+                return 'memory';
+            case 'mcp':
+            case 'skills':
+                return 'tools';
+            default:
+                return 'general';
+        }
+    }
+
+    private focusItem(itemId?: string, search?: string): void {
+        requestAnimationFrame(() => {
+            if (itemId) {
+                const el = this.view.querySelector(`[data-item-id="${itemId}"]`) as HTMLElement | null;
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('highlight-flash');
+                    window.setTimeout(() => el.classList.remove('highlight-flash'), 2000);
+                    return;
+                }
+            }
+
+            if (search) {
+                const lowerSearch = search.toLowerCase();
+                const candidates = Array.from(this.view.querySelectorAll('[data-item-id]')) as HTMLElement[];
+                const matched = candidates.find(el => (el.dataset.itemId || '').toLowerCase().includes(lowerSearch));
+                if (matched) {
+                    matched.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    matched.classList.add('highlight-flash');
+                    window.setTimeout(() => matched.classList.remove('highlight-flash'), 2000);
+                }
+            }
+        });
     }
 
     private async loadConfig() {

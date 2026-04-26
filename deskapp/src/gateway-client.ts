@@ -16,8 +16,16 @@ import type {
     SkillActivatedEvent,
     SkillSwitchedEvent,
     SkillExitedEvent,
+    GatewayCapabilityErrorPayload,
     DebugLogEntry,
     EvolutionConfirmRequest,
+    RunSummaryView,
+    RunDetailView,
+    SessionArtifactView,
+    PermissionRequestView,
+    AuditLogView,
+    DiagnosticIssueView,
+    WorkspaceRestoreView,
 } from './core/types';
 
 export type {
@@ -48,6 +56,20 @@ type ProgressHandler = (event: ProgressEvent) => void;
 type ChatIntentHandler = (payload: ChatIntentPayload) => void;
 type ConnectionHandler = (status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed') => void;
 
+export class GatewayRequestError extends Error {
+    kind: 'unsupported' | 'request_failed';
+    capability?: string;
+    code?: string;
+
+    constructor(message: string, options?: { kind?: 'unsupported' | 'request_failed'; capability?: string; code?: string }) {
+        super(message);
+        this.name = 'GatewayRequestError';
+        this.kind = options?.kind ?? 'request_failed';
+        this.capability = options?.capability;
+        this.code = options?.code;
+    }
+}
+
 /**
  * Gateway WebSocket 客户端
  */
@@ -74,6 +96,9 @@ export class GatewayClient {
         const record = (payload ?? {}) as Record<string, unknown>;
 
         return {
+            sessionId: typeof record.sessionId === 'string'
+                ? record.sessionId
+                : (typeof record.session_id === 'string' ? record.session_id : undefined),
             toolName: String(record.toolName ?? record.tool_name ?? ''),
             description: typeof record.description === 'string' ? record.description : undefined,
             source: this.normalizeUnlockedSource(record.source),
@@ -86,6 +111,9 @@ export class GatewayClient {
         const record = (payload ?? {}) as Record<string, unknown>;
 
         return {
+            sessionId: typeof record.sessionId === 'string'
+                ? record.sessionId
+                : (typeof record.session_id === 'string' ? record.session_id : undefined),
             skillId: String(record.skillId ?? record.skill_id ?? ''),
             title: typeof record.title === 'string'
                 ? record.title
@@ -101,6 +129,9 @@ export class GatewayClient {
         const record = (payload ?? {}) as Record<string, unknown>;
 
         return {
+            sessionId: typeof record.sessionId === 'string'
+                ? record.sessionId
+                : (typeof record.session_id === 'string' ? record.session_id : undefined),
             previousSkillId: typeof record.previousSkillId === 'string'
                 ? record.previousSkillId
                 : (typeof record.from_skill === 'string' ? record.from_skill : undefined),
@@ -116,6 +147,9 @@ export class GatewayClient {
         const record = (payload ?? {}) as Record<string, unknown>;
 
         return {
+            sessionId: typeof record.sessionId === 'string'
+                ? record.sessionId
+                : (typeof record.session_id === 'string' ? record.session_id : undefined),
             skillId: String(record.skillId ?? record.skill_id ?? ''),
             title: typeof record.title === 'string'
                 ? record.title
@@ -137,6 +171,21 @@ export class GatewayClient {
             return source;
         }
         return undefined;
+    }
+
+    private toRequestError(payload: unknown): GatewayRequestError {
+        const errorPayload = (payload ?? {}) as Partial<GatewayCapabilityErrorPayload>;
+        const code = typeof errorPayload.code === 'string' ? errorPayload.code : undefined;
+        const capability = typeof errorPayload.capability === 'string' ? errorPayload.capability : undefined;
+        const message = typeof errorPayload.message === 'string' && errorPayload.message
+            ? errorPayload.message
+            : '请求失败';
+
+        return new GatewayRequestError(message, {
+            kind: code === 'capability_not_supported' ? 'unsupported' : 'request_failed',
+            capability,
+            code,
+        });
     }
 
     constructor(url: string, token?: string) {
@@ -377,8 +426,7 @@ export class GatewayClient {
                 this.pendingRequests.delete(message.id);
 
                 if (message.type === 'error' || message.type.endsWith('.error')) {
-                    const payload = message.payload as { message?: string };
-                    reject(new Error(payload.message || '请求失败'));
+                    reject(this.toRequestError(message.payload));
                 } else {
                     resolve(message.payload);
                 }
@@ -1059,8 +1107,8 @@ export class GatewayClient {
      * 获取当前会话的技能绑定列表
      */
     async getSessionSkillBindings(sessionId?: string): Promise<SkillBindingView[]> {
-        const result = await this.request<{ skills: SkillBindingView[] }>('session.skill.bindings', { sessionId });
-        return result.skills || [];
+        const result = await this.request<{ skills?: SkillBindingView[]; bindings?: SkillBindingView[] }>('session.skill.bindings', { sessionId });
+        return result.bindings || result.skills || [];
     }
 
     /**
@@ -1074,7 +1122,61 @@ export class GatewayClient {
      * 获取会话的 Token 使用统计
      */
     async getSessionTokenUsage(sessionId: string): Promise<TokenUsageView> {
-        return this.request<TokenUsageView>('sessions.token_usage', { sessionId });
+        const result = await this.request<TokenUsageView | { totalUsage?: TokenUsageView; tokenUsage?: TokenUsageView }>('sessions.token_usage', { sessionId });
+        if ('inputTokens' in result && 'outputTokens' in result) {
+            return result;
+        }
+        return result.totalUsage || result.tokenUsage || { inputTokens: 0, outputTokens: 0 };
+    }
+
+    onSessionRuntimeUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.runtime.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onSessionTokenUsage(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.token.usage' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onSessionToolsUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.tools.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onSessionSkillBindingsUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.skill.bindings.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onSessionMemoryHit(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.memory.hit' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
     }
 
     // ========================
@@ -1143,51 +1245,151 @@ export class GatewayClient {
     /**
      * 获取会话执行历史列表
      */
-    async getSessionRuns(sessionId: string, page = 1, pageSize = 20): Promise<{ runs: any[]; total: number }> {
+    async getSessionRuns(sessionId: string, page = 1, pageSize = 20): Promise<{ runs: RunSummaryView[]; total: number }> {
         return this.request('session.runs', { sessionId, page, pageSize });
     }
 
     /**
      * 获取某次执行的详细步骤信息
      */
-    async getRunDetail(runId: string): Promise<any> {
+    async getRunDetail(runId: string): Promise<RunDetailView> {
         return this.request('run.detail', { runId });
+    }
+
+    /**
+     * 控制某次执行
+     */
+    async controlRun(runId: string, action: 'stop' | 'resume_waiting' | 'pause' | 'resume' | 'retry'): Promise<{ success: boolean; run?: RunSummaryView }> {
+        return this.request('run.control', { runId, action });
+    }
+
+    /**
+     * 获取会话级 artifact 列表，可按 run 过滤
+     */
+    async getSessionArtifacts(sessionId: string, runId?: string): Promise<SessionArtifactView[]> {
+        const result = await this.request<{ artifacts?: SessionArtifactView[]; items?: SessionArtifactView[] }>('session.artifacts', { sessionId, runId });
+        return result.artifacts || result.items || [];
     }
 
     /**
      * 获取待确认的权限请求列表
      */
-    async getPendingPermissions(sessionId?: string): Promise<any[]> {
-        const result = await this.request<{ requests: any[] }>('permission.pending', { sessionId });
+    async getPendingPermissions(sessionId?: string): Promise<PermissionRequestView[]> {
+        const result = await this.request<{ requests: PermissionRequestView[] }>('permission.pending', { sessionId });
         return result.requests || [];
     }
 
     /**
      * 响应权限确认请求
      */
-    async respondPermission(requestId: string, approved: boolean, remember = false): Promise<any> {
-        return this.request('permission.respond', { requestId, approved, remember });
+    async respondPermission(
+        requestId: string,
+        approved: boolean,
+        remember = false,
+        rememberScope?: 'session' | 'agent' | 'global'
+    ): Promise<{ success: boolean; request?: PermissionRequestView }> {
+        return this.request('permission.respond', { requestId, approved, remember, rememberScope });
     }
 
     /**
      * 获取审计日志
      */
-    async getAuditLogs(sessionId?: string, type?: string, page = 1, pageSize = 20): Promise<{ logs: any[]; total: number }> {
+    async getAuditLogs(sessionId?: string, type?: string, page = 1, pageSize = 20): Promise<{ logs: AuditLogView[]; total: number }> {
         return this.request('audit.logs', { sessionId, type, page, pageSize });
     }
 
     /**
      * 获取当前会话诊断摘要
      */
-    async getDiagnosticsCurrent(sessionId?: string): Promise<any> {
+    async getDiagnosticsCurrent(sessionId?: string): Promise<{ issues: DiagnosticIssueView[] }> {
         return this.request('diagnostics.current', { sessionId });
     }
 
     /**
      * 获取工作区恢复信息
      */
-    async getWorkspaceRestore(): Promise<any> {
+    async getWorkspaceRestore(): Promise<WorkspaceRestoreView> {
         return this.request('workspace.restore');
+    }
+
+    onRunStatusUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'run.status.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onRunStepUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'run.step.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onSessionArtifactsUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.artifacts.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onPermissionRequested(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'permission.requested' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onPermissionResolved(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'permission.resolved' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onAuditLogsUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'audit.logs.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onDiagnosticsUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'diagnostics.updated' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
+    onWorkspaceRestoreAvailable(callback: (payload: Record<string, unknown>) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'workspace.restore.available' && msg.payload) {
+                callback(msg.payload as Record<string, unknown>);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
     }
 
 }

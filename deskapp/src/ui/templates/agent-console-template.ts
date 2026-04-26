@@ -23,10 +23,13 @@ export const AGENT_CONSOLE_TEMPLATE = `
   
   <nav class="agent-console-tabs">
     <button class="agent-console-tab active" data-tab="overview" data-i18n="console.tab_overview">概览</button>
+    <button class="agent-console-tab" data-tab="runs" data-i18n="console.tab_runs">运行</button>
     <button class="agent-console-tab" data-tab="model" data-i18n="console.tab_model">模型</button>
     <button class="agent-console-tab" data-tab="tools" data-i18n="console.tab_tools">工具</button>
     <button class="agent-console-tab" data-tab="skills" data-i18n="console.tab_skills">技能</button>
     <button class="agent-console-tab" data-tab="prompt-memory" data-i18n="console.tab_prompt_memory">Prompt</button>
+    <button class="agent-console-tab" data-tab="permissions" data-i18n="console.tab_permissions">权限</button>
+    <button class="agent-console-tab" data-tab="diagnostics" data-i18n="console.tab_diagnostics">诊断</button>
   </nav>
   
   <section class="agent-console-body">
@@ -60,6 +63,25 @@ export const AGENT_CONSOLE_TEMPLATE = `
             <div class="console-section-title" data-i18n="console.recent_run">最近运行</div>
             <div id="console-recent-run-list" class="console-run-list">
                 <div class="empty-hint" data-i18n="console.no_runs">暂无运行记录</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="console-tab-content" data-tab="runs" id="console-tab-runs">
+        <div class="console-section">
+            <div class="console-section-title" data-i18n="console.current_run">当前运行</div>
+            <div id="console-current-run-card" class="console-status-card">
+                <div class="empty-hint" data-i18n="console.no_runs">暂无运行记录</div>
+            </div>
+        </div>
+        <div class="console-section">
+            <div class="console-section-title" data-i18n="console.run_history">运行历史</div>
+            <div id="console-run-filters" class="console-filter-row"></div>
+            <div class="console-split-panel">
+                <div id="console-runs-list" class="console-run-list"></div>
+                <div id="console-run-detail" class="console-run-detail">
+                    <div class="empty-hint" data-i18n="console.select_run">请选择一条运行记录</div>
+                </div>
             </div>
         </div>
     </div>
@@ -106,6 +128,36 @@ export const AGENT_CONSOLE_TEMPLATE = `
             <div class="console-section-title" data-i18n="console.memory_hits">记忆命中 (本轮)</div>
             <div id="console-memory-hits" class="memory-hits-list">
                 <div class="empty-hint" data-i18n="console.no_data">暂无命中记录</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="console-tab-content" data-tab="permissions" id="console-tab-permissions">
+        <div class="console-section">
+            <div class="console-section-title" data-i18n="console.pending_permissions">待确认请求</div>
+            <div id="console-permission-pending" class="console-card-list">
+                <div class="empty-hint" data-i18n="console.no_pending_permissions">当前没有待确认请求</div>
+            </div>
+        </div>
+        <div class="console-section">
+            <div class="console-section-title" data-i18n="console.audit_logs">审计日志</div>
+            <div id="console-audit-list" class="console-card-list">
+                <div class="empty-hint" data-i18n="console.no_audit_logs">暂无审计记录</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="console-tab-content" data-tab="diagnostics" id="console-tab-diagnostics">
+        <div class="console-section">
+            <div class="console-section-title" data-i18n="console.workspace_restore">工作区恢复</div>
+            <div id="console-restore-card" class="console-status-card">
+                <div class="empty-hint" data-i18n="console.no_restore">暂无可恢复上下文</div>
+            </div>
+        </div>
+        <div class="console-section">
+            <div class="console-section-title" data-i18n="console.current_diagnostics">当前诊断</div>
+            <div id="console-diagnostics-list" class="console-card-list">
+                <div class="empty-hint" data-i18n="console.no_diagnostics">当前没有诊断问题</div>
             </div>
         </div>
     </div>

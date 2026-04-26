@@ -1,20 +1,31 @@
+import { invoke } from '@tauri-apps/api/core';
 import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
+import { GatewayRequestError } from '../gateway-client';
 import { AGENT_CONSOLE_TEMPLATE } from './templates/agent-console-template';
 import { t } from '../i18n/index';
-import { escapeHtml, formatTime } from '../utils/html';
+import { escapeHtml, formatFileSize, formatTime } from '../utils/html';
 import type {
     AgentRuntimeSnapshot,
+    AuditLogView,
+    ConsoleTab,
+    DiagnosticIssueView,
     ModelBindingDetailView,
+    PermissionRequestView,
+    RunDetailView,
+    RunStepView,
+    RunSummaryView,
+    SkillBindingView,
+    SessionArtifactView,
     SessionRuntimeSnapshot,
     MemoryHitView,
     PromptPreviewView,
     ResourceState,
+    SettingsNavigatePayload,
     ToolDescriptorView,
     TokenUsageView,
+    WorkspaceRestoreView,
 } from '../core/types';
-
-type ConsoleTab = 'overview' | 'model' | 'tools' | 'skills' | 'prompt-memory';
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed';
 
 interface ConsoleTogglePayload {
@@ -37,13 +48,25 @@ interface GatewayStatusPayload {
  * Agent 控制台视图类
  * 负责运行态可观测与临时控制界面的渲染和交互
  */
+interface NavigateTarget {
+    tab?: ConsoleTab;
+    itemId?: string;
+    settingsSection?: 'models' | 'memory' | 'mcp' | 'skills';
+    settingsSearch?: string;
+}
+
+type RunFilter = 'all' | 'running' | 'waiting' | 'failed' | 'artifacts';
+
 export class AgentConsoleView {
+    private static readonly WORKSPACE_RESTORE_KEY = 'openflux-console-restore';
     private container: HTMLElement | null = null;
     private tabs: NodeListOf<HTMLButtonElement> | null = null;
     private refreshBtn: HTMLButtonElement | null = null;
     private closeBtn: HTMLButtonElement | null = null;
     private isDisposed = false;
     private connectionStatus: ConnectionStatus = 'connecting';
+    private artifactsPanelWasOpen = false;
+    private activeRunFilter: RunFilter = 'all';
     private unsubs: Array<() => void> = [];
     private keydownHandler = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
@@ -67,9 +90,13 @@ export class AgentConsoleView {
 
         this.bindEvents();
         this.listenBus();
+        this.restoreLocalUiState();
         this.updateTabUI(this.state.consoleActiveTab);
         this.renderCurrentTab();
         this.updateFooter();
+        if (this.state.consoleVisible) {
+            void this.refreshCurrentData();
+        }
     }
 
     dispose() {
@@ -119,16 +146,19 @@ export class AgentConsoleView {
                 if (payload.visible) {
                     this.container?.classList.remove('hidden');
                     this.syncLayout(true);
+                    this.persistLocalUiState();
                     void this.refreshCurrentData();
                 } else {
                     this.container?.classList.add('hidden');
                     this.syncLayout(false);
+                    this.persistLocalUiState();
                 }
             }),
             this.bus.on<ConsoleTabPayload>(Events.CONSOLE_TAB_CHANGED, payload => {
                 if (!payload) return;
 
                 this.updateTabUI(payload.tab);
+                this.persistLocalUiState();
                 void this.loadTabDataIfNeeded(payload.tab);
             }),
             this.bus.on<ConsoleDataPayload>(Events.CONSOLE_DATA_UPDATED, payload => {
@@ -143,18 +173,24 @@ export class AgentConsoleView {
                 const toolName = event.toolName ?? event.tool;
                 if (!toolName) return;
 
-                this.state.updateToolStatus(toolName, { lastCallStatus: 'running', lastUsedAt: Date.now() });
+                const sessionId = event.sessionId ?? this.state.currentSessionId;
+                if (!sessionId) return;
+
+                this.state.updateToolStatus(sessionId, toolName, { lastCallStatus: 'running', lastUsedAt: Date.now() });
             }),
             this.bus.on('tool:result', (event: { sessionId?: string; tool?: string; toolName?: string; isError?: boolean }) => {
                 const toolName = event.toolName ?? event.tool;
                 if (!toolName) return;
+                const sessionId = event.sessionId ?? this.state.currentSessionId;
+                if (!sessionId) return;
 
-                this.state.updateToolStatus(toolName, {
+                this.state.updateToolStatus(sessionId, toolName, {
                     lastCallStatus: event.isError ? 'error' : 'success',
                     lastUsedAt: Date.now(),
                 });
             }),
             this.bus.on(Events.SESSION_SELECTED, () => {
+                this.persistLocalUiState();
                 if (this.state.consoleVisible) {
                     void this.refreshCurrentData();
                 }
@@ -185,7 +221,17 @@ export class AgentConsoleView {
 
         const artifactsPanel = document.querySelector('.artifacts-panel');
         if (artifactsPanel) {
-            artifactsPanel.classList.toggle('collapsed', consoleVisible);
+            if (consoleVisible) {
+                // 记录 artifacts-panel 打开前的状态，以便关闭 Console 时恢复
+                this.artifactsPanelWasOpen = !artifactsPanel.classList.contains('collapsed');
+                artifactsPanel.classList.add('collapsed');
+            } else {
+                // 恢复 artifacts-panel 到 Console 打开之前的状态
+                if (this.artifactsPanelWasOpen) {
+                    artifactsPanel.classList.remove('collapsed');
+                }
+                this.artifactsPanelWasOpen = false;
+            }
         }
 
         window.dispatchEvent(new Event('resize'));
@@ -212,6 +258,7 @@ export class AgentConsoleView {
             return;
         }
 
+        await this.loadWorkspaceRestoreSnapshot();
         await this.loadOverviewData(sessionId, true);
         if (this.state.consoleActiveTab !== 'overview') {
             await this.loadTabDataIfNeeded(this.state.consoleActiveTab, true);
@@ -227,6 +274,9 @@ export class AgentConsoleView {
             case 'overview':
                 await this.loadOverviewData(sessionId, force);
                 break;
+            case 'runs':
+                await this.loadRunsData(sessionId, force);
+                break;
             case 'model':
                 await this.loadModelData(sessionId, force);
                 break;
@@ -239,6 +289,12 @@ export class AgentConsoleView {
             case 'prompt-memory':
                 await this.loadPromptMemoryData(sessionId, force);
                 break;
+            case 'permissions':
+                await this.loadPermissionData(sessionId, force);
+                break;
+            case 'diagnostics':
+                await this.loadDiagnosticData(sessionId, force);
+                break;
         }
     }
 
@@ -247,7 +303,8 @@ export class AgentConsoleView {
 
         const agentState = this.state.agentRuntimeState;
         const tokenState = this.state.getSessionResourceState(sessionId, 'tokenUsage');
-        if (!force && agentState.loaded && tokenState?.loaded) {
+        const runState = this.state.getSessionResourceState(sessionId, 'runs');
+        if (!force && agentState.loaded && tokenState?.loaded && runState?.loaded) {
             this.renderOverview();
             return;
         }
@@ -255,19 +312,24 @@ export class AgentConsoleView {
         this.state.updateResourceState('agentRuntime', this.state.setLoadingResource(agentState));
         const currentTokenState = (tokenState as ResourceState<TokenUsageView> | undefined) ?? this.state.createEmptyResource();
         this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setLoadingResource(currentTokenState));
+        const currentRunState = (runState as ResourceState<RunSummaryView[]> | undefined) ?? this.state.createEmptyResource();
+        this.state.updateSessionResourceState(sessionId, 'runs', this.state.setLoadingResource(currentRunState));
 
         try {
-            const [snapshot, usage] = await Promise.all([
+            const [snapshot, usage, runResult] = await Promise.all([
                 this.state.gatewayClient.getAgentInspect(),
                 this.state.gatewayClient.getSessionTokenUsage(sessionId),
+                this.state.gatewayClient.getSessionRuns(sessionId),
             ]);
 
             this.state.updateResourceState('agentRuntime', this.state.setLoadedResource(snapshot));
             this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setLoadedResource(usage));
+            this.state.updateSessionResourceState(sessionId, 'runs', this.state.setLoadedResource(runResult.runs ?? []));
+            this.ensureSelectedRun(sessionId);
         } catch (error) {
-            const message = error instanceof Error ? error.message : t('common.load_failed');
-            this.state.updateResourceState('agentRuntime', this.state.setErrorResource(message));
-            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setErrorResource(message));
+            this.state.updateResourceState('agentRuntime', this.state.toResourceError(error, t('common.load_failed')));
+            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.toResourceError(error, t('common.load_failed')));
+            this.state.updateSessionResourceState(sessionId, 'runs', this.state.toResourceError(error, t('common.load_failed')));
         }
     }
 
@@ -294,10 +356,9 @@ export class AgentConsoleView {
             this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtime));
             this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setLoadedResource(runtime.totalUsage));
         } catch (error) {
-            const message = error instanceof Error ? error.message : t('common.load_failed');
-            this.state.updateResourceState('agentRuntime', this.state.setErrorResource(message));
-            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setErrorResource(message));
-            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setErrorResource(message));
+            this.state.updateResourceState('agentRuntime', this.state.toResourceError(error, t('common.load_failed')));
+            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.toResourceError(error, t('common.load_failed')));
+            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.toResourceError(error, t('common.load_failed')));
         }
 
         this.renderModel();
@@ -320,11 +381,10 @@ export class AgentConsoleView {
 
         try {
             const tools = await this.state.gatewayClient.getSessionTools(sessionId);
-            const mergedTools = tools.map(tool => ({ ...tool, ...this.state.getToolStatus(tool.name) }));
+            const mergedTools = tools.map(tool => ({ ...tool, ...this.state.getToolStatus(sessionId, tool.name) }));
             this.state.updateSessionResourceState(sessionId, 'tools', this.state.setLoadedResource(mergedTools));
         } catch (error) {
-            const message = error instanceof Error ? error.message : t('common.load_failed');
-            this.state.updateSessionResourceState(sessionId, 'tools', this.state.setErrorResource(message));
+            this.state.updateSessionResourceState(sessionId, 'tools', this.state.toResourceError(error, t('common.load_failed')));
         }
     }
 
@@ -333,19 +393,24 @@ export class AgentConsoleView {
 
         await this.loadOverviewData(sessionId, force);
 
-        if (!force && this.state.getAllSkillBindings().size > 0) {
+        const currentSkills = this.state.getSessionResourceState(sessionId, 'skills') as ResourceState<SkillBindingView[]> | undefined;
+        if (!force && currentSkills?.loaded) {
             this.renderSkills();
             return;
         }
 
+        this.state.updateSessionResourceState(
+            sessionId,
+            'skills',
+            this.state.setLoadingResource(currentSkills ?? this.state.createEmptyResource())
+        );
+
         try {
             const bindings = await this.state.gatewayClient.getSessionSkillBindings(sessionId);
-            this.state.skillBindingStates.clear();
-            bindings.forEach(binding => {
-                this.state.setSkillBinding(binding.id, binding);
-            });
-        } catch {
-            this.state.skillBindingStates.clear();
+            this.state.setSkillBindings(sessionId, bindings);
+            this.state.updateSessionResourceState(sessionId, 'skills', this.state.setLoadedResource(bindings));
+        } catch (error) {
+            this.state.updateSessionResourceState(sessionId, 'skills', this.state.toResourceError(error, t('common.load_failed')));
         }
 
         this.renderSkills();
@@ -372,18 +437,167 @@ export class AgentConsoleView {
             this.state.setLoadingResource(currentMemory ?? this.state.createEmptyResource())
         );
 
-        try {
-            const [promptPreview, memoryHits] = await Promise.all([
-                this.state.gatewayClient.getSessionPromptPreview(sessionId),
-                this.state.gatewayClient.getSessionMemoryHits(sessionId),
-            ]);
+        const promptResult = await this.state.gatewayClient.getSessionPromptPreview(sessionId)
+            .then(promptPreview => this.state.setLoadedResource(promptPreview))
+            .catch(error => this.state.toResourceError<PromptPreviewView>(error, t('common.load_failed')));
+        this.state.updateSessionResourceState(sessionId, 'prompt', promptResult);
 
-            this.state.updateSessionResourceState(sessionId, 'prompt', this.state.setLoadedResource(promptPreview));
-            this.state.updateSessionResourceState(sessionId, 'memory', this.state.setLoadedResource(memoryHits));
+        const memoryResult = await this.state.gatewayClient.getSessionMemoryHits(sessionId)
+            .then(memoryHits => this.state.setLoadedResource(memoryHits))
+            .catch(async error => {
+                if (error instanceof GatewayRequestError && error.kind === 'unsupported') {
+                    const lastUserMessage = [...this.state.messages]
+                        .reverse()
+                        .find(message => message.role === 'user')
+                        ?.content
+                        ?.trim();
+
+                    if (lastUserMessage) {
+                        const searchResult = await this.state.gatewayClient?.memorySearch(lastUserMessage, 5);
+                        const approximatedHits = (searchResult?.items ?? []).map((item: Record<string, unknown>) => ({
+                            content: String(item.content ?? ''),
+                            score: typeof item.score === 'number' ? item.score : 0,
+                            source: String(item.source ?? 'memory.search'),
+                            timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
+                            reason: typeof item.reason === 'string' ? item.reason : undefined,
+                        })) as MemoryHitView[];
+
+                        return {
+                            ...this.state.setLoadedResource(approximatedHits),
+                            unsupported: true,
+                        };
+                    }
+                }
+
+                return this.state.toResourceError<MemoryHitView[]>(error, t('common.load_failed'));
+            });
+        this.state.updateSessionResourceState(sessionId, 'memory', memoryResult);
+    }
+
+    private async loadRunsData(sessionId: string, force = false) {
+        if (!this.state.gatewayClient || this.isDisposed) return;
+
+        const currentRuns = this.state.getSessionResourceState(sessionId, 'runs') as ResourceState<RunSummaryView[]> | undefined;
+        const currentArtifacts = this.state.getSessionResourceState(sessionId, 'artifacts') as ResourceState<SessionArtifactView[]> | undefined;
+        if (!force && currentRuns?.loaded && currentArtifacts?.loaded) {
+            this.ensureSelectedRun(sessionId);
+            this.renderRuns();
+            return;
+        }
+
+        this.state.updateSessionResourceState(sessionId, 'runs', this.state.setLoadingResource(currentRuns ?? this.state.createEmptyResource()));
+        this.state.updateSessionResourceState(sessionId, 'artifacts', this.state.setLoadingResource(currentArtifacts ?? this.state.createEmptyResource()));
+
+        const runsResult = await this.state.gatewayClient.getSessionRuns(sessionId)
+            .then(result => this.state.setLoadedResource(result.runs ?? []))
+            .catch(error => this.state.toResourceError<RunSummaryView[]>(error, t('common.load_failed')));
+        this.state.updateSessionResourceState(sessionId, 'runs', runsResult);
+
+        const artifactsResult = await this.state.gatewayClient.getSessionArtifacts(sessionId)
+            .then(artifacts => this.state.setLoadedResource(artifacts))
+            .catch(error => this.state.toResourceError<SessionArtifactView[]>(error, t('common.load_failed')));
+        this.state.updateSessionResourceState(sessionId, 'artifacts', artifactsResult);
+
+        this.ensureSelectedRun(sessionId);
+        const selectedRunId = this.state.selectedRunId;
+        if (selectedRunId && runsResult.data?.some(run => run.id === selectedRunId)) {
+            await this.loadRunDetail(sessionId, selectedRunId, force);
+        }
+        this.renderRuns();
+    }
+
+    private async loadRunDetail(sessionId: string, runId: string, force = false) {
+        if (!this.state.gatewayClient || this.isDisposed) return;
+
+        const currentDetail = this.state.getRunDetailState(sessionId, runId);
+        if (!force && currentDetail?.loaded) {
+            this.renderRuns();
+            return;
+        }
+
+        this.state.updateRunDetailState(sessionId, runId, this.state.setLoadingResource(currentDetail ?? this.state.createEmptyResource()));
+        const detailResult = await this.state.gatewayClient.getRunDetail(runId)
+            .then(detail => this.state.setLoadedResource(detail))
+            .catch(error => this.state.toResourceError<RunDetailView>(error, t('common.load_failed')));
+        this.state.updateRunDetailState(sessionId, runId, detailResult);
+        this.renderRuns();
+    }
+
+    private async loadPermissionData(sessionId: string, force = false) {
+        if (!this.state.gatewayClient || this.isDisposed) return;
+
+        const permissionState = this.state.getSessionResourceState(sessionId, 'permissions') as ResourceState<PermissionRequestView[]> | undefined;
+        const auditState = this.state.getSessionResourceState(sessionId, 'audit') as ResourceState<AuditLogView[]> | undefined;
+        if (!force && permissionState?.loaded && auditState?.loaded) {
+            this.renderPermissions();
+            return;
+        }
+
+        this.state.updateSessionResourceState(sessionId, 'permissions', this.state.setLoadingResource(permissionState ?? this.state.createEmptyResource()));
+        this.state.updateSessionResourceState(sessionId, 'audit', this.state.setLoadingResource(auditState ?? this.state.createEmptyResource()));
+
+        const permissionResult = await this.state.gatewayClient.getPendingPermissions(sessionId)
+            .then(requests => this.state.setLoadedResource(requests))
+            .catch(error => this.state.toResourceError<PermissionRequestView[]>(error, t('common.load_failed')));
+        this.state.updateSessionResourceState(sessionId, 'permissions', permissionResult);
+
+        const auditResult = await this.state.gatewayClient.getAuditLogs(sessionId)
+            .then(result => this.state.setLoadedResource(result.logs ?? []))
+            .catch(error => this.state.toResourceError<AuditLogView[]>(error, t('common.load_failed')));
+        this.state.updateSessionResourceState(sessionId, 'audit', auditResult);
+        this.renderPermissions();
+    }
+
+    private async loadDiagnosticData(sessionId: string, force = false) {
+        if (!this.state.gatewayClient || this.isDisposed) return;
+
+        const diagnosticState = this.state.getSessionResourceState(sessionId, 'diagnostics') as ResourceState<DiagnosticIssueView[]> | undefined;
+        if (!force && diagnosticState?.loaded && this.state.workspaceRestoreState.loaded) {
+            this.renderDiagnostics();
+            return;
+        }
+
+        this.state.updateSessionResourceState(sessionId, 'diagnostics', this.state.setLoadingResource(diagnosticState ?? this.state.createEmptyResource()));
+        if (force || !this.state.workspaceRestoreState.loaded) {
+            this.state.workspaceRestoreState = this.state.setLoadingResource(this.state.workspaceRestoreState);
+        }
+
+        const diagnosticResult = await this.state.gatewayClient.getDiagnosticsCurrent(sessionId)
+            .then(result => this.state.setLoadedResource(result.issues ?? []))
+            .catch(error => this.state.toResourceError<DiagnosticIssueView[]>(error, t('common.load_failed')));
+        this.state.updateSessionResourceState(sessionId, 'diagnostics', diagnosticResult);
+
+        await this.loadWorkspaceRestoreSnapshot();
+
+        this.renderDiagnostics();
+    }
+
+    private async loadWorkspaceRestoreSnapshot() {
+        if (!this.state.gatewayClient || this.isDisposed) return;
+
+        try {
+            const restore = await this.state.gatewayClient.getWorkspaceRestore();
+            this.applyWorkspaceRestore(restore);
         } catch (error) {
-            const message = error instanceof Error ? error.message : t('common.load_failed');
-            this.state.updateSessionResourceState(sessionId, 'prompt', this.state.setErrorResource(message));
-            this.state.updateSessionResourceState(sessionId, 'memory', this.state.setErrorResource(message));
+            if (error instanceof GatewayRequestError && error.kind === 'unsupported') {
+                this.state.workspaceRestoreState = {
+                    ...this.state.setLoadedResource({
+                        sessionId: this.state.currentSessionId ?? undefined,
+                        agentId: this.state.currentAgentId ?? undefined,
+                        consoleVisible: this.state.consoleVisible,
+                        activeTab: this.state.consoleActiveTab,
+                        selectedRunId: this.state.selectedRunId ?? undefined,
+                        selectedArtifactId: this.state.selectedArtifactId ?? undefined,
+                        selectedPermissionRequestId: this.state.selectedPermissionRequestId ?? undefined,
+                        selectedDiagnosticId: this.state.selectedDiagnosticId ?? undefined,
+                        restorableRunState: 'none',
+                        updatedAt: Date.now(),
+                    } satisfies WorkspaceRestoreView),
+                    unsupported: true,
+                };
+            } else {
+                this.state.workspaceRestoreState = this.state.toResourceError<WorkspaceRestoreView>(error, t('common.load_failed'));
+            }
         }
     }
 
@@ -391,6 +605,9 @@ export class AgentConsoleView {
         switch (this.state.consoleActiveTab) {
             case 'overview':
                 this.renderOverview();
+                break;
+            case 'runs':
+                this.renderRuns();
                 break;
             case 'model':
                 this.renderModel();
@@ -403,6 +620,12 @@ export class AgentConsoleView {
                 break;
             case 'prompt-memory':
                 this.renderPromptMemory();
+                break;
+            case 'permissions':
+                this.renderPermissions();
+                break;
+            case 'diagnostics':
+                this.renderDiagnostics();
                 break;
         }
     }
@@ -427,6 +650,8 @@ export class AgentConsoleView {
         this.setTextContent('summary-tokens-total', usageData ? String(usageData.inputTokens + usageData.outputTokens) : '0');
         this.setTextContent('summary-tools-count', String(agentData?.availableTools.length ?? 0));
         this.setTextContent('summary-skills-count', String(agentData?.skills?.length ?? agentData?.activeSkills.length ?? 0));
+
+        this.renderRecentRuns();
     }
 
     private renderStatusCard(state: ResourceState<AgentRuntimeSnapshot>): string {
@@ -435,7 +660,7 @@ export class AgentConsoleView {
         }
 
         if (state.error) {
-            return `<div class="empty-hint">${escapeHtml(state.error)}</div>`;
+            return `<div class="empty-hint">${escapeHtml(this.getResourceHint(state))}</div>`;
         }
 
         const status = state.data?.status ?? 'idle';
@@ -462,7 +687,7 @@ export class AgentConsoleView {
         const modelSettings = document.getElementById('console-model-settings');
         if (modelSettings) {
             if (this.state.agentRuntimeState.error) {
-                modelSettings.innerHTML = `<div class="empty-hint">${escapeHtml(this.state.agentRuntimeState.error)}</div>`;
+                modelSettings.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(this.state.agentRuntimeState))}</div>`;
             } else {
                 // 使用 SessionRuntimeSnapshot 中的双模型绑定数据（Plan 2 扩展）
                 const orchRuntime = sessionId
@@ -533,7 +758,7 @@ export class AgentConsoleView {
         }
 
         if (usageState?.error) {
-            tokenUsage.innerHTML = `<div class="empty-hint">${escapeHtml(usageState.error)}</div>`;
+            tokenUsage.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(usageState))}</div>`;
             return;
         }
 
@@ -659,11 +884,11 @@ export class AgentConsoleView {
         }
 
         if (toolsState?.error) {
-            toolsList.innerHTML = `<div class="empty-hint">${escapeHtml(toolsState.error)}</div>`;
+            toolsList.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(toolsState))}</div>`;
             return;
         }
 
-        const tools = (toolsState?.data ?? []).map(tool => ({ ...tool, ...this.state.getToolStatus(tool.name) }));
+        const tools = (toolsState?.data ?? []).map(tool => ({ ...tool, ...this.state.getToolStatus(sessionId ?? '', tool.name) }));
         if (tools.length === 0) {
             const availableTools = this.state.agentRuntimeState.data?.availableTools ?? [];
             if (availableTools.length === 0) {
@@ -723,9 +948,23 @@ export class AgentConsoleView {
         if (!skillsList) return;
 
         // 优先使用 SkillBindingView 缓存中的数据（Plan 3 运行时绑定）
-        const skillBindings = this.state.getAllSkillBindings();
+        const sessionId = this.state.currentSessionId;
+        const skillState = sessionId
+            ? (this.state.getSessionResourceState(sessionId, 'skills') as ResourceState<SkillBindingView[]> | undefined)
+            : undefined;
+        const skillBindings = new Map((skillState?.data ?? []).map(binding => [binding.id, binding] as const));
         const agentSkills = this.state.agentRuntimeState.data?.skills ?? [];
         const activeSkills = this.state.agentRuntimeState.data?.activeSkills ?? [];
+
+        if (skillState?.loading && !skillState.data) {
+            skillsList.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+            return;
+        }
+
+        if (skillState?.error) {
+            skillsList.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(skillState))}</div>`;
+            return;
+        }
 
         // 合并 SkillBindingView 和 agentSkills
         const items: Array<{ id: string; label: string; enabled: boolean; source: string; sticky?: boolean; contentPreview?: string }> = [];
@@ -804,7 +1043,7 @@ export class AgentConsoleView {
             if (promptState?.loading && !promptState.data) {
                 promptPreview.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
             } else if (promptState?.error) {
-                promptPreview.innerHTML = `<div class="empty-hint">${escapeHtml(promptState.error)}</div>`;
+                promptPreview.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(promptState))}</div>`;
             } else if (promptState?.data) {
                 promptPreview.innerHTML = this.renderPromptSegments(promptState.data);
             } else {
@@ -821,7 +1060,7 @@ export class AgentConsoleView {
         }
 
         if (memoryState?.error) {
-            memoryHits.innerHTML = `<div class="empty-hint">${escapeHtml(memoryState.error)}</div>`;
+            memoryHits.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(memoryState))}</div>`;
             return;
         }
 
@@ -831,6 +1070,11 @@ export class AgentConsoleView {
             return;
         }
 
+        // 近似数据警告：后端尚未实现精确命中记录，当前为 memory.search 近似结果
+        const approximateWarning = memoryState?.unsupported
+            ? `<div class="memory-approximate-warning">${escapeHtml(t('console.memory_approximate'))}</div>`
+            : '';
+
         // 统计各类命中率
         const semanticHits = hits.filter(h => h.sourceType === 'semantic').length;
         const keywordHits = hits.filter(h => h.sourceType === 'keyword').length;
@@ -839,6 +1083,7 @@ export class AgentConsoleView {
         const summaryHtml = hitSummary ? `<div class="memory-hit-summary">${escapeHtml(hitSummary)}</div>` : '';
 
         memoryHits.innerHTML = `
+            ${approximateWarning}
             ${summaryHtml}
             ${hits
                 .map(
@@ -852,6 +1097,680 @@ export class AgentConsoleView {
                 )
                 .join('')}
         `;
+    }
+
+    private renderRuns() {
+        if (this.isDisposed) return;
+
+        const sessionId = this.state.currentSessionId;
+        const runState = sessionId ? this.state.getSessionResourceState(sessionId, 'runs') as ResourceState<RunSummaryView[]> | undefined : undefined;
+        const artifactsState = sessionId ? this.state.getSessionResourceState(sessionId, 'artifacts') as ResourceState<SessionArtifactView[]> | undefined : undefined;
+        const runsList = document.getElementById('console-runs-list');
+        const runDetail = document.getElementById('console-run-detail');
+        const currentRunCard = document.getElementById('console-current-run-card');
+        const filterBar = document.getElementById('console-run-filters');
+        if (!runsList || !runDetail || !currentRunCard || !filterBar) return;
+
+        filterBar.innerHTML = this.renderRunFilters();
+        filterBar.querySelectorAll<HTMLButtonElement>('.console-filter-chip').forEach(button => {
+            button.onclick = () => {
+                this.activeRunFilter = (button.dataset.filter as RunFilter) ?? 'all';
+                this.renderRuns();
+            };
+        });
+
+        if (runState?.loading && !runState.data) {
+            runsList.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+            runDetail.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+            currentRunCard.innerHTML = '<div class="skeleton-text"></div>';
+            return;
+        }
+
+        if (runState?.error) {
+            const hint = this.getResourceHint(runState);
+            runsList.innerHTML = `<div class="empty-hint">${escapeHtml(hint)}</div>`;
+            runDetail.innerHTML = `<div class="empty-hint">${escapeHtml(hint)}</div>`;
+            currentRunCard.innerHTML = `<div class="empty-hint">${escapeHtml(hint)}</div>`;
+            return;
+        }
+
+        const allRuns = runState?.data ?? [];
+        const filteredRuns = this.filterRuns(allRuns);
+        const selectedRunId = this.state.selectedRunId;
+        const selectedRun = filteredRuns.find(run => run.id === selectedRunId) ?? allRuns.find(run => run.id === selectedRunId) ?? filteredRuns[0];
+        const detailState = sessionId && selectedRun ? this.state.getRunDetailState(sessionId, selectedRun.id) : undefined;
+        const detail = detailState?.data;
+
+        currentRunCard.innerHTML = selectedRun ? this.renderCurrentRunCard(selectedRun) : `<div class="empty-hint">${escapeHtml(t('console.no_runs'))}</div>`;
+        runsList.innerHTML = filteredRuns.length > 0
+            ? filteredRuns.map(run => this.renderRunListItem(run, run.id === selectedRun?.id)).join('')
+            : `<div class="empty-hint">${escapeHtml(t('console.no_runs'))}</div>`;
+
+        runsList.querySelectorAll<HTMLElement>('.run-item').forEach(item => {
+            item.onclick = () => {
+                const runId = item.dataset.runId;
+                if (!runId || !sessionId) return;
+                this.state.setConsoleSelection({ runId });
+                this.persistLocalUiState();
+                void this.loadRunDetail(sessionId, runId);
+            };
+        });
+
+        currentRunCard.querySelectorAll<HTMLButtonElement>('[data-run-action]').forEach(button => {
+            button.onclick = () => {
+                if (!selectedRun) return;
+                void this.handleRunAction(selectedRun, button.dataset.runAction as 'stop' | 'resume_waiting');
+            };
+        });
+
+        if (!selectedRun) {
+            runDetail.innerHTML = `<div class="empty-hint">${escapeHtml(t('console.select_run'))}</div>`;
+            return;
+        }
+
+        if (detailState?.loading && !detail) {
+            runDetail.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+            return;
+        }
+
+        if (detailState?.error) {
+            runDetail.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(detailState))}</div>`;
+            return;
+        }
+
+        runDetail.innerHTML = this.renderRunDetailCard(selectedRun, detail, artifactsState?.data ?? []);
+        runDetail.querySelectorAll<HTMLButtonElement>('[data-artifact-action]').forEach(button => {
+            button.onclick = () => {
+                const artifactId = button.dataset.artifactId;
+                const action = button.dataset.artifactAction;
+                const artifact = detail?.artifacts?.find(item => item.id === artifactId) ?? artifactsState?.data?.find(item => item.id === artifactId);
+                if (!artifact || !action) return;
+                void this.handleArtifactAction(artifact, action);
+            };
+        });
+        runDetail.querySelectorAll<HTMLButtonElement>('[data-nav-run]').forEach(button => {
+            button.onclick = () => {
+                const runId = button.dataset.navRun;
+                if (!runId || !sessionId) return;
+                this.state.setConsoleSelection({ runId });
+                void this.loadRunDetail(sessionId, runId);
+            };
+        });
+        runDetail.querySelectorAll<HTMLButtonElement>('[data-nav-permission]').forEach(button => {
+            button.onclick = () => {
+                const requestId = button.dataset.navPermission;
+                if (!requestId) return;
+                this.state.setConsoleSelection({ permissionRequestId: requestId });
+                this.state.setConsoleTab('permissions');
+            };
+        });
+    }
+
+    private renderPermissions() {
+        if (this.isDisposed) return;
+
+        const sessionId = this.state.currentSessionId;
+        const permissionState = sessionId ? this.state.getSessionResourceState(sessionId, 'permissions') as ResourceState<PermissionRequestView[]> | undefined : undefined;
+        const auditState = sessionId ? this.state.getSessionResourceState(sessionId, 'audit') as ResourceState<AuditLogView[]> | undefined : undefined;
+        const pendingRoot = document.getElementById('console-permission-pending');
+        const auditRoot = document.getElementById('console-audit-list');
+        if (!pendingRoot || !auditRoot) return;
+
+        pendingRoot.innerHTML = this.renderPermissionList(permissionState);
+        auditRoot.innerHTML = this.renderAuditList(auditState);
+
+        pendingRoot.querySelectorAll<HTMLButtonElement>('[data-permission-decision]').forEach(button => {
+            button.onclick = () => {
+                const requestId = button.dataset.permissionId;
+                const approved = button.dataset.permissionDecision === 'approve';
+                if (!requestId) return;
+                void this.handlePermissionDecision(requestId, approved);
+            };
+        });
+
+        pendingRoot.querySelectorAll<HTMLButtonElement>('[data-permission-run]').forEach(button => {
+            button.onclick = () => {
+                const runId = button.dataset.permissionRun;
+                if (!runId) return;
+                this.state.setConsoleSelection({ runId });
+                this.state.setConsoleTab('runs');
+            };
+        });
+    }
+
+    private renderDiagnostics() {
+        if (this.isDisposed) return;
+
+        const sessionId = this.state.currentSessionId;
+        const diagnosticState = sessionId ? this.state.getSessionResourceState(sessionId, 'diagnostics') as ResourceState<DiagnosticIssueView[]> | undefined : undefined;
+        const restoreRoot = document.getElementById('console-restore-card');
+        const diagnosticRoot = document.getElementById('console-diagnostics-list');
+        if (!restoreRoot || !diagnosticRoot) return;
+
+        restoreRoot.innerHTML = this.renderRestoreCard(this.state.workspaceRestoreState);
+        diagnosticRoot.innerHTML = this.renderDiagnosticList(diagnosticState);
+
+        restoreRoot.querySelectorAll<HTMLButtonElement>('[data-restore-action]').forEach(button => {
+            button.onclick = () => {
+                if (button.dataset.restoreAction === 'apply') {
+                    const restore = this.state.workspaceRestoreState.data;
+                    if (restore) {
+                        this.applyWorkspaceRestore(restore, true);
+                    }
+                }
+            };
+        });
+
+        diagnosticRoot.querySelectorAll<HTMLButtonElement>('[data-diagnostic-action]').forEach(button => {
+            button.onclick = () => {
+                const action = button.dataset.diagnosticAction;
+                const diagnosticId = button.dataset.diagnosticId;
+                const issue = diagnosticState?.data?.find(item => item.id === diagnosticId);
+                if (!issue || !action) return;
+                this.handleDiagnosticAction(issue, action);
+            };
+        });
+    }
+
+    private renderRunFilters(): string {
+        const filters: Array<{ id: RunFilter; label: string }> = [
+            { id: 'all', label: t('console.filter_all') },
+            { id: 'running', label: t('console.filter_running') },
+            { id: 'waiting', label: t('console.filter_waiting') },
+            { id: 'failed', label: t('console.filter_failed') },
+            { id: 'artifacts', label: t('console.filter_artifacts') },
+        ];
+
+        return filters
+            .map(filter => `<button class="console-filter-chip ${filter.id === this.activeRunFilter ? 'active' : ''}" data-filter="${filter.id}">${escapeHtml(filter.label)}</button>`)
+            .join('');
+    }
+
+    private filterRuns(runs: RunSummaryView[]): RunSummaryView[] {
+        return runs.filter(run => {
+            switch (this.activeRunFilter) {
+                case 'running':
+                    return run.status === 'running';
+                case 'waiting':
+                    return run.status === 'waiting_user';
+                case 'failed':
+                    return run.status === 'failed' || run.status === 'stopped';
+                case 'artifacts':
+                    return (run.artifactCount ?? 0) > 0;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    private renderCurrentRunCard(run: RunSummaryView): string {
+        const actions: string[] = [];
+        if (run.status === 'running') {
+            actions.push(`<button class="console-action-btn danger" data-run-action="stop">${escapeHtml(t('console.action_stop'))}</button>`);
+        }
+        if (run.status === 'waiting_user') {
+            actions.push(`<button class="console-action-btn" data-run-action="resume_waiting">${escapeHtml(t('console.action_resume'))}</button>`);
+        }
+
+        return `
+            <div class="console-detail-card">
+                <div class="run-item-header">
+                    <div>
+                        <div class="run-title">${escapeHtml(run.title ?? run.id)}</div>
+                        <div class="run-subtitle">${escapeHtml(formatTime(run.startedAt))}</div>
+                    </div>
+                    <span class="run-status ${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
+                </div>
+                <div class="console-detail-grid">
+                    <div><strong>${escapeHtml(t('console.label_model'))}</strong><div class="run-meta">${escapeHtml(run.modelSummary ?? '—')}</div></div>
+                    <div><strong>${escapeHtml(t('console.label_duration'))}</strong><div class="run-meta">${escapeHtml(this.formatDuration(run.durationMs, run.startedAt, run.finishedAt))}</div></div>
+                    <div><strong>${escapeHtml(t('console.label_tools'))}</strong><div class="run-meta">${escapeHtml(String(run.toolCount ?? 0))}</div></div>
+                    <div><strong>${escapeHtml(t('console.label_artifacts'))}</strong><div class="run-meta">${escapeHtml(String(run.artifactCount ?? 0))}</div></div>
+                </div>
+                ${run.waitingReason ? `<div class="run-meta"><strong>${escapeHtml(t('console.label_waiting_reason'))}</strong> ${escapeHtml(run.waitingReason)}</div>` : ''}
+                ${actions.length > 0 ? `<div class="detail-actions">${actions.join('')}</div>` : ''}
+            </div>
+        `;
+    }
+
+    private renderRunListItem(run: RunSummaryView, active: boolean): string {
+        const tokenTotal = (run.tokenUsage?.inputTokens ?? 0) + (run.tokenUsage?.outputTokens ?? 0);
+        return `
+            <div class="run-item ${active ? 'active' : ''}" data-run-id="${escapeHtml(run.id)}">
+                <div class="run-item-header">
+                    <span class="run-title">${escapeHtml(run.title ?? run.id)}</span>
+                    <span class="run-status ${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
+                </div>
+                <div class="run-meta-row">
+                    <span class="run-meta">${escapeHtml(formatTime(run.startedAt))}</span>
+                    <span class="run-duration">${escapeHtml(this.formatDuration(run.durationMs, run.startedAt, run.finishedAt))}</span>
+                </div>
+                <div class="run-meta-row">
+                    <span class="run-meta">${escapeHtml(run.modelSummary ?? '—')}</span>
+                    <span class="run-meta">${escapeHtml(`${t('console.label_tokens')}: ${tokenTotal}`)}</span>
+                </div>
+                ${run.errorSummary ? `<div class="run-meta">${escapeHtml(run.errorSummary)}</div>` : ''}
+            </div>
+        `;
+    }
+
+    private renderRunDetailCard(run: RunSummaryView, detail: RunDetailView | undefined, fallbackArtifacts: SessionArtifactView[]): string {
+        const artifacts = detail?.artifacts ?? fallbackArtifacts.filter(item => item.runId === run.id);
+        const steps = detail?.steps ?? [];
+        const permissions = detail?.permissions ?? [];
+        const diagnostics = detail?.diagnostics ?? [];
+        const auditLogs = detail?.auditLogs ?? [];
+
+        return `
+            <div class="console-detail-card">
+                <div class="run-item-header">
+                    <div>
+                        <div class="run-title">${escapeHtml(run.title ?? run.id)}</div>
+                        <div class="run-subtitle">${escapeHtml(run.id)}</div>
+                    </div>
+                    <span class="run-status ${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
+                </div>
+                <div class="console-detail-grid">
+                    <div><strong>${escapeHtml(t('console.label_model'))}</strong><div class="run-meta">${escapeHtml(run.modelSummary ?? '—')}</div></div>
+                    <div><strong>${escapeHtml(t('console.label_duration'))}</strong><div class="run-meta">${escapeHtml(this.formatDuration(run.durationMs, run.startedAt, run.finishedAt))}</div></div>
+                </div>
+            </div>
+            <div class="console-detail-card">
+                <div class="console-section-title">${escapeHtml(t('console.section_steps'))}</div>
+                <div class="step-list">
+                    ${steps.length > 0 ? steps.map(step => this.renderStepItem(step)).join('') : `<div class="empty-hint">${escapeHtml(t('console.no_data'))}</div>`}
+                </div>
+            </div>
+            <div class="console-detail-card">
+                <div class="console-section-title">${escapeHtml(t('console.section_artifacts'))}</div>
+                <div class="artifact-list">
+                    ${artifacts.length > 0 ? artifacts.map(artifact => this.renderArtifactItem(artifact)).join('') : `<div class="empty-hint">${escapeHtml(t('console.no_data'))}</div>`}
+                </div>
+            </div>
+            <div class="console-detail-card">
+                <div class="console-section-title">${escapeHtml(t('console.section_relations'))}</div>
+                <div class="card-item-meta">${escapeHtml(`permissions ${permissions.length} · diagnostics ${diagnostics.length} · audit ${auditLogs.length}`)}</div>
+                ${permissions.map(item => `<div class="card-item"><div class="card-item-title">${escapeHtml(item.title)}</div><div class="card-item-actions"><button class="console-inline-btn" data-nav-permission="${escapeHtml(item.id)}">${escapeHtml(t('console.action_go_permission'))}</button></div></div>`).join('')}
+                ${diagnostics.map(item => `<div class="card-item diagnostic-card ${escapeHtml(item.severity)}"><div class="card-item-header"><span class="card-item-title">${escapeHtml(item.title)}</span><span class="diagnostic-badge ${escapeHtml(item.severity)}">${escapeHtml(item.severity)}</span></div><div class="card-item-meta">${escapeHtml(item.message)}</div>${item.relatedRunId ? `<div class="card-item-actions"><button class="console-inline-btn" data-nav-run="${escapeHtml(item.relatedRunId)}">${escapeHtml(t('console.action_go_run'))}</button></div>` : ''}</div>`).join('')}
+                ${auditLogs.map(item => `<div class="card-item"><div class="card-item-header"><span class="card-item-title">${escapeHtml(item.summary)}</span><span class="card-item-meta">${escapeHtml(formatTime(item.createdAt))}</span></div></div>`).join('')}
+                ${permissions.length === 0 && diagnostics.length === 0 && auditLogs.length === 0 ? `<div class="empty-hint">${escapeHtml(t('console.no_data'))}</div>` : ''}
+            </div>
+        `;
+    }
+
+    private renderStepItem(step: RunStepView): string {
+        return `
+            <div class="step-item ${escapeHtml(step.status)}">
+                <strong>${escapeHtml(step.title)}</strong>
+                <div class="card-item-meta">${escapeHtml(step.type)} · ${escapeHtml(step.status)}</div>
+                ${step.description ? `<div class="card-item-meta">${escapeHtml(step.description)}</div>` : ''}
+            </div>
+        `;
+    }
+
+    private renderArtifactItem(artifact: SessionArtifactView): string {
+        const name = artifact.filename ?? artifact.title ?? artifact.id;
+        return `
+            <div class="card-item">
+                <div class="card-item-header">
+                    <span class="card-item-title">${escapeHtml(name)}</span>
+                    <span class="artifact-type-badge ${escapeHtml(artifact.type)}">${escapeHtml(artifact.type)}</span>
+                </div>
+                <div class="card-item-meta">${escapeHtml(artifact.path ?? '')}</div>
+                <div class="card-item-footer">
+                    <span class="card-item-meta">${escapeHtml(formatFileSize(artifact.size))}</span>
+                    <div class="card-item-actions">
+                        <button class="console-inline-btn" data-artifact-action="preview" data-artifact-id="${escapeHtml(artifact.id)}">${escapeHtml(t('console.action_open'))}</button>
+                        ${artifact.path ? `<button class="console-inline-btn" data-artifact-action="copy-path" data-artifact-id="${escapeHtml(artifact.id)}">${escapeHtml(t('console.action_copy_path'))}</button>` : ''}
+                        ${artifact.path ? `<button class="console-inline-btn" data-artifact-action="reveal" data-artifact-id="${escapeHtml(artifact.id)}">${escapeHtml(t('console.action_reveal'))}</button>` : ''}
+                        ${artifact.content ? `<button class="console-inline-btn" data-artifact-action="copy-content" data-artifact-id="${escapeHtml(artifact.id)}">${escapeHtml(t('console.action_copy_content'))}</button>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    private renderPermissionList(state: ResourceState<PermissionRequestView[]> | undefined): string {
+        if (state?.loading && !state.data) {
+            return `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+        }
+        if (state?.error) {
+            return `<div class="empty-hint">${escapeHtml(this.getResourceHint(state))}</div>`;
+        }
+
+        const pending = (state?.data ?? []).filter(item => item.status === 'pending');
+        if (pending.length === 0) {
+            return `<div class="empty-hint">${escapeHtml(t('console.no_pending_permissions'))}</div>`;
+        }
+
+        return pending.map(item => `
+            <div class="card-item permission-card ${escapeHtml(item.status)}">
+                <div class="card-item-header">
+                    <span class="card-item-title">${escapeHtml(item.title)}</span>
+                    <span class="risk-badge ${escapeHtml(item.riskLevel)}">${escapeHtml(item.riskLevel)}</span>
+                </div>
+                <div class="card-item-meta">${escapeHtml(item.reason ?? item.target ?? '')}</div>
+                <div class="card-item-actions">
+                    <button class="console-inline-btn" data-permission-decision="approve" data-permission-id="${escapeHtml(item.id)}">${escapeHtml(t('console.permission_approved'))}</button>
+                    <button class="console-inline-btn danger" data-permission-decision="deny" data-permission-id="${escapeHtml(item.id)}">${escapeHtml(t('console.permission_denied'))}</button>
+                    ${item.runId ? `<button class="console-inline-btn" data-permission-run="${escapeHtml(item.runId)}">${escapeHtml(t('console.action_go_run'))}</button>` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    private renderAuditList(state: ResourceState<AuditLogView[]> | undefined): string {
+        if (state?.loading && !state.data) {
+            return `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+        }
+        if (state?.error) {
+            return `<div class="empty-hint">${escapeHtml(this.getResourceHint(state))}</div>`;
+        }
+        const logs = state?.data ?? [];
+        if (logs.length === 0) {
+            return `<div class="empty-hint">${escapeHtml(t('console.no_audit_logs'))}</div>`;
+        }
+        return logs.map(item => `
+            <div class="card-item">
+                <div class="card-item-header">
+                    <span class="card-item-title">${escapeHtml(item.summary)}</span>
+                    <span class="card-item-meta">${escapeHtml(formatTime(item.createdAt))}</span>
+                </div>
+                <div class="card-item-meta">${escapeHtml(`${item.actionType} · ${item.result}`)}</div>
+            </div>
+        `).join('');
+    }
+
+    private renderDiagnosticList(state: ResourceState<DiagnosticIssueView[]> | undefined): string {
+        if (state?.loading && !state.data) {
+            return `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+        }
+        if (state?.error) {
+            return `<div class="empty-hint">${escapeHtml(this.getResourceHint(state))}</div>`;
+        }
+        const issues = state?.data ?? [];
+        if (issues.length === 0) {
+            return `<div class="empty-hint">${escapeHtml(t('console.no_diagnostics'))}</div>`;
+        }
+        return issues.map(issue => `
+            <div class="card-item diagnostic-card ${escapeHtml(issue.severity)}">
+                <div class="card-item-header">
+                    <span class="card-item-title">${escapeHtml(issue.title)}</span>
+                    <span class="diagnostic-badge ${escapeHtml(issue.severity)}">${escapeHtml(issue.severity)}</span>
+                </div>
+                <div class="card-item-meta">${escapeHtml(issue.message)}</div>
+                <div class="card-item-actions">
+                    ${issue.relatedRunId ? `<button class="console-inline-btn" data-diagnostic-action="run" data-diagnostic-id="${escapeHtml(issue.id)}">${escapeHtml(t('console.action_go_run'))}</button>` : ''}
+                    ${issue.relatedPermissionRequestId ? `<button class="console-inline-btn" data-diagnostic-action="permission" data-diagnostic-id="${escapeHtml(issue.id)}">${escapeHtml(t('console.action_go_permission'))}</button>` : ''}
+                    ${issue.category === 'mcp' || issue.category === 'memory' ? `<button class="console-inline-btn" data-diagnostic-action="settings" data-diagnostic-id="${escapeHtml(issue.id)}">${escapeHtml(t('console.action_go_settings'))}</button>` : ''}
+                    ${issue.retryable ? `<button class="console-inline-btn" data-diagnostic-action="retry" data-diagnostic-id="${escapeHtml(issue.id)}">${escapeHtml(t('console.action_retry'))}</button>` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    private renderRestoreCard(state: ResourceState<WorkspaceRestoreView>): string {
+        if (state.loading && !state.data) {
+            return '<div class="skeleton-text"></div>';
+        }
+        if (state.error) {
+            return `<div class="empty-hint">${escapeHtml(this.getResourceHint(state))}</div>`;
+        }
+        const restore = state.data;
+        if (!restore) {
+            return `<div class="empty-hint">${escapeHtml(t('console.no_restore'))}</div>`;
+        }
+        const restoreText = restore.restorableRunState === 'reattachable'
+            ? t('console.restore_reattachable')
+            : t('console.restore_view_only');
+        return `
+            <div class="console-detail-card">
+                <div class="run-item-header">
+                    <div>
+                        <div class="run-title">${escapeHtml(restore.sessionId ?? '—')}</div>
+                        <div class="run-subtitle">${escapeHtml(formatTime(restore.updatedAt))}</div>
+                    </div>
+                    <span class="restore-state-pill">${escapeHtml(restoreText)}</span>
+                </div>
+                <div class="card-item-meta">${escapeHtml(restore.activeTab ?? 'overview')}</div>
+                <div class="detail-actions">
+                    <button class="console-action-btn" data-restore-action="apply">${escapeHtml(t('console.action_restore_view'))}</button>
+                </div>
+            </div>
+        `;
+    }
+
+    private async handleRunAction(run: RunSummaryView, action: 'stop' | 'resume_waiting') {
+        if (!this.state.gatewayClient || !this.state.currentSessionId) return;
+
+        try {
+            await this.state.gatewayClient.controlRun(run.id, action);
+            this.state.appendAuditLog(this.state.currentSessionId, {
+                id: `audit-${Date.now()}`,
+                sessionId: this.state.currentSessionId,
+                runId: run.id,
+                actionType: 'run_control',
+                actor: 'user',
+                result: 'completed',
+                summary: `${action} ${run.title ?? run.id}`,
+                createdAt: Date.now(),
+            });
+            await this.loadRunsData(this.state.currentSessionId, true);
+        } catch (error) {
+            this.bus.emit(Events.NOTIFICATION, { type: 'error', message: error instanceof Error ? error.message : t('common.failed') });
+        }
+    }
+
+    private async handlePermissionDecision(requestId: string, approved: boolean) {
+        if (!this.state.gatewayClient || !this.state.currentSessionId) return;
+
+        const remember = window.confirm(`${t('console.permission_remember')}?`);
+        try {
+            await this.state.gatewayClient.respondPermission(requestId, approved, remember, remember ? 'session' : undefined);
+            this.state.appendAuditLog(this.state.currentSessionId, {
+                id: `audit-${Date.now()}`,
+                sessionId: this.state.currentSessionId,
+                permissionRequestId: requestId,
+                actionType: 'permission',
+                actor: 'user',
+                result: approved ? 'approved' : 'denied',
+                summary: `${approved ? t('console.permission_approved') : t('console.permission_denied')} ${requestId}`,
+                createdAt: Date.now(),
+            });
+            await this.loadPermissionData(this.state.currentSessionId, true);
+            await this.loadRunsData(this.state.currentSessionId, true);
+        } catch (error) {
+            this.bus.emit(Events.NOTIFICATION, { type: 'error', message: error instanceof Error ? error.message : t('common.failed') });
+        }
+    }
+
+    private async handleArtifactAction(artifact: SessionArtifactView, action: string) {
+        const sessionId = this.state.currentSessionId ?? undefined;
+        this.state.setConsoleSelection({ artifactId: artifact.id });
+        this.persistLocalUiState();
+
+        try {
+            switch (action) {
+                case 'preview':
+                    if (!artifact.path) {
+                        throw new Error(t('console.artifact_missing'));
+                    }
+                    await invoke('file_open', { filePath: artifact.path });
+                    break;
+                case 'reveal':
+                    if (!artifact.path) {
+                        throw new Error(t('console.artifact_missing'));
+                    }
+                    await invoke('file_reveal', { filePath: artifact.path });
+                    break;
+                case 'copy-path':
+                    if (artifact.path) {
+                        await navigator.clipboard.writeText(artifact.path);
+                    }
+                    break;
+                case 'copy-content':
+                    if (artifact.content) {
+                        await navigator.clipboard.writeText(artifact.content);
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            this.state.appendAuditLog(sessionId, {
+                id: `audit-${Date.now()}`,
+                sessionId,
+                runId: artifact.runId,
+                actionType: 'artifact_open',
+                actor: 'user',
+                result: 'completed',
+                summary: `${action} ${artifact.filename ?? artifact.id}`,
+                createdAt: Date.now(),
+            });
+        } catch (error) {
+            const issue: DiagnosticIssueView = {
+                id: `diag-artifact-${Date.now()}`,
+                category: 'artifact',
+                severity: 'error',
+                title: t('console.audit_action_failed'),
+                message: error instanceof Error ? error.message : t('console.artifact_missing'),
+                suggestedActions: [t('console.action_go_run')],
+                relatedRunId: artifact.runId,
+                relatedSessionId: sessionId,
+                updatedAt: Date.now(),
+            };
+            this.state.upsertDiagnostic(sessionId, issue);
+            this.state.appendAuditLog(sessionId, {
+                id: `audit-${Date.now()}`,
+                sessionId,
+                runId: artifact.runId,
+                actionType: 'artifact_open',
+                actor: 'user',
+                result: 'failed',
+                summary: `${action} ${artifact.filename ?? artifact.id}`,
+                createdAt: Date.now(),
+            });
+        }
+    }
+
+    private handleDiagnosticAction(issue: DiagnosticIssueView, action: string) {
+        switch (action) {
+            case 'run':
+                if (issue.relatedRunId) {
+                    this.state.setConsoleSelection({ runId: issue.relatedRunId, diagnosticId: issue.id });
+                    this.state.setConsoleTab('runs');
+                }
+                break;
+            case 'permission':
+                if (issue.relatedPermissionRequestId) {
+                    this.state.setConsoleSelection({ permissionRequestId: issue.relatedPermissionRequestId, diagnosticId: issue.id });
+                    this.state.setConsoleTab('permissions');
+                }
+                break;
+            case 'settings':
+                this.navigateTo({ settingsSection: issue.category === 'memory' ? 'memory' : 'mcp' });
+                break;
+            case 'retry':
+                if (issue.relatedRunId && this.state.currentSessionId) {
+                    void this.loadRunDetail(this.state.currentSessionId, issue.relatedRunId, true);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private ensureSelectedRun(sessionId: string) {
+        const runs = (this.state.getSessionResourceState(sessionId, 'runs') as ResourceState<RunSummaryView[]> | undefined)?.data ?? [];
+        if (runs.length === 0) {
+            this.state.setConsoleSelection({ runId: null });
+            return;
+        }
+
+        if (!this.state.selectedRunId || !runs.some(run => run.id === this.state.selectedRunId)) {
+            this.state.setConsoleSelection({ runId: runs[0].id });
+        }
+    }
+
+    private formatDuration(durationMs?: number, startedAt?: number, finishedAt?: number): string {
+        const value = durationMs ?? (startedAt ? (finishedAt ?? Date.now()) - startedAt : 0);
+        if (!value || value < 0) return '0s';
+        if (value < 1000) return `${value}ms`;
+        const seconds = Math.round(value / 1000);
+        if (seconds < 60) return `${seconds}s`;
+        const minutes = Math.floor(seconds / 60);
+        const remainSeconds = seconds % 60;
+        return remainSeconds > 0 ? `${minutes}m ${remainSeconds}s` : `${minutes}m`;
+    }
+
+    private persistLocalUiState() {
+        const payload: WorkspaceRestoreView = {
+            sessionId: this.state.currentSessionId ?? undefined,
+            agentId: this.state.currentAgentId ?? undefined,
+            consoleVisible: this.state.consoleVisible,
+            activeTab: this.state.consoleActiveTab,
+            selectedRunId: this.state.selectedRunId ?? undefined,
+            selectedArtifactId: this.state.selectedArtifactId ?? undefined,
+            selectedPermissionRequestId: this.state.selectedPermissionRequestId ?? undefined,
+            selectedDiagnosticId: this.state.selectedDiagnosticId ?? undefined,
+            restorableRunState: this.state.workspaceRestoreState.data?.restorableRunState ?? 'none',
+            updatedAt: Date.now(),
+        };
+        localStorage.setItem(AgentConsoleView.WORKSPACE_RESTORE_KEY, JSON.stringify(payload));
+    }
+
+    private restoreLocalUiState() {
+        const raw = localStorage.getItem(AgentConsoleView.WORKSPACE_RESTORE_KEY);
+        if (!raw) return;
+        try {
+            const parsed = JSON.parse(raw) as Partial<WorkspaceRestoreView>;
+            if (parsed.activeTab) {
+                this.state.consoleActiveTab = parsed.activeTab;
+            }
+            this.state.consoleVisible = Boolean(parsed.consoleVisible);
+            this.state.selectedRunId = parsed.selectedRunId ?? null;
+            this.state.selectedArtifactId = parsed.selectedArtifactId ?? null;
+            this.state.selectedPermissionRequestId = parsed.selectedPermissionRequestId ?? null;
+            this.state.selectedDiagnosticId = parsed.selectedDiagnosticId ?? null;
+            if (this.state.consoleVisible) {
+                this.container?.classList.remove('hidden');
+                this.syncLayout(true);
+            }
+        } catch {
+            localStorage.removeItem(AgentConsoleView.WORKSPACE_RESTORE_KEY);
+        }
+    }
+
+    private applyWorkspaceRestore(restore: WorkspaceRestoreView, fromUserAction = false) {
+        this.state.setWorkspaceRestore(restore);
+
+        if (restore.sessionId && this.state.sessions.some(session => session.id === restore.sessionId)) {
+            this.state.setCurrentSession(restore.sessionId);
+        } else if (restore.sessionId && fromUserAction) {
+            this.bus.emit(Events.NOTIFICATION, { type: 'error', message: t('console.restore_missing_session') });
+        }
+
+        if (restore.activeTab) {
+            this.state.setConsoleTab(restore.activeTab);
+        }
+        this.state.setConsoleSelection({
+            runId: restore.selectedRunId ?? null,
+            artifactId: restore.selectedArtifactId ?? null,
+            permissionRequestId: restore.selectedPermissionRequestId ?? null,
+            diagnosticId: restore.selectedDiagnosticId ?? null,
+        });
+
+        if (fromUserAction) {
+            this.state.setConsoleVisible(true);
+            this.updateTabUI(this.state.consoleActiveTab);
+            void this.loadTabDataIfNeeded(this.state.consoleActiveTab, true);
+            this.bus.emit(Events.NOTIFICATION, {
+                type: 'info',
+                message: this.state.workspaceRestoreState.unsupported ? t('console.restore_unsupported') : t('console.restore_applied'),
+            });
+        }
+
+        this.persistLocalUiState();
     }
 
     private renderPromptSegments(promptView: PromptPreviewView): string {
@@ -892,7 +1811,7 @@ export class AgentConsoleView {
             );
         }
 
-        const toolDescriptions = promptView.toolDescriptions ?? promptView.toolFragments;
+        const toolDescriptions = promptView.toolDescriptions ?? promptView.toolFragments ?? [];
         if (toolDescriptions.length > 0) {
             sections.push(
                 `
@@ -990,5 +1909,79 @@ export class AgentConsoleView {
         if (element) {
             element.textContent = value;
         }
+    }
+
+    /**
+     * 跨标签/跨视图统一跳转方法 (Plan 3)
+     */
+    navigateTo(target: NavigateTarget): void {
+        if (target.settingsSection) {
+            const payload: SettingsNavigatePayload = {
+                visible: true,
+                section: target.settingsSection,
+                search: target.settingsSearch,
+                itemId: target.itemId,
+            };
+            this.bus.emit(Events.SETTINGS_NAVIGATE, payload);
+            return;
+        }
+
+        if (target.tab) {
+            this.state.setConsoleTab(target.tab);
+
+            // 延迟定位到具体条目（等待 DOM 更���）
+            if (target.itemId) {
+                requestAnimationFrame(() => {
+                    const el = this.container?.querySelector(`[data-item-id="${target.itemId}"]`);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        el.classList.add('highlight-flash');
+                        setTimeout(() => el.classList.remove('highlight-flash'), 2000);
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * 渲染概览中的近期任务列表
+     */
+    private renderRecentRuns() {
+        const sessionId = this.state.currentSessionId;
+        const runList = document.getElementById('console-recent-run-list');
+        if (!runList) return;
+
+        const runState = sessionId ? this.state.getSessionResourceState(sessionId, 'runs') as ResourceState<RunSummaryView[]> | undefined : undefined;
+        if (runState?.loading && !runState.data) {
+            runList.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
+            return;
+        }
+        if (runState?.error) {
+            runList.innerHTML = `<div class="empty-hint">${escapeHtml(this.getResourceHint(runState))}</div>`;
+            return;
+        }
+
+        const runs = (runState?.data ?? []).slice(0, 3);
+        if (runs.length === 0) {
+            runList.innerHTML = `<div class="empty-hint">${escapeHtml(t('console.no_runs'))}</div>`;
+            return;
+        }
+
+        runList.innerHTML = runs.map(run => this.renderRunListItem(run, run.id === this.state.selectedRunId)).join('');
+        runList.querySelectorAll<HTMLElement>('.run-item').forEach(item => {
+            item.onclick = () => {
+                const runId = item.dataset.runId;
+                if (!runId || !sessionId) return;
+                this.state.setConsoleSelection({ runId });
+                this.state.setConsoleTab('runs');
+            };
+        });
+    }
+
+    private getResourceHint<T>(state: ResourceState<T>): string {
+        if (state.unsupported) {
+            return t('console.backend_upgrade_required');
+        }
+        return state.error ?? t('common.load_failed');
     }
 }

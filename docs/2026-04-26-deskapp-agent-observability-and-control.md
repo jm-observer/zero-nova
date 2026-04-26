@@ -2,6 +2,8 @@
 
 **时间**: 2026-04-26（创建）/ 2026-04-26（最后更新）
 
+> **文档编写进度**：Plan 1-5 详细设计已完成；原 Plan 5 与 Plan 6 已合并为新的 Plan 5。
+
 ## 项目现状
 
 `deskapp` 当前已经具备以下基础：
@@ -145,7 +147,7 @@
   - 等待工具返回（对应 `tool_start` 后未收到 `tool_result`）
   - 等待用户确认（对应 `evolution.confirm` 或新增权限确认事件）
   - 结果整理中（对应 `turn_complete` 但未收到 `complete`）
-- **注意**：前端已有 `TaskRunView { id, taskId, taskName, status: 'running'|'completed'|'failed', startedAt, completedAt, duration, output, error }`，新状态机设计应扩展此类型而非重建。
+- **注意**：前端已有 `TaskRunView { id, taskId, taskName, status: 'running'|'completed'|'failed'|'paused'|'waiting_user', startedAt, completedAt, duration, output, error }`，状态枚举已扩展完成（含 `paused` 和 `waiting_user`），新状态机设计应沿用此类型。
 
 ### 8. 执行历史与任务计划
 
@@ -176,7 +178,7 @@
   - 来源任务
   - 文件路径或内容预览
 - 与现有会话消息区分开，避免”文件结果埋在聊天气泡里找不到”。
-- **注意**：前端已定义 `SessionArtifactView { id, type: 'file'|'code'|'output', path, filename, content, language, size, timestamp }`，CSS 中已有 `.artifacts-panel` 及相关样式。新设计应复用此类型并扩展，而非重新定义。需要补充的字段：`runId`（来源任务）、`turnId`（来源轮次）。
+- **注意**：前端已定义 `SessionArtifactView { id, type: 'file'|'code'|'output', path, filename, content, language, size, timestamp, runId?, turnId? }`，CSS 中已有 `.artifacts-panel` 及相关样式。`runId` 和 `turnId` 字段已补充完成。新设计应复用此类型，而非重新定义。
 
 ### 10. 权限确认与审计中心
 
@@ -313,14 +315,16 @@
 
 ### 新增事件推送
 
-以下事件需明确与已有 `AppEvent` 枚举的映射关系：
+以下事件需明确与已有后端 `AppEvent` 枚举及前端 `EventBus` 事件的映射关系。
 
-| 新增事件 | 已有 AppEvent 基础 | 说明 |
-|---------|-------------------|------|
+> **说明**：下表”已有基础”列指的是**后端 Gateway 推送事件**（Rust 侧 `AppEvent` 枚举），不是前端 `EventBus` 常量。前端接收后端推送后，通过 `gateway-client.ts` 的 handler 转换为前端 `EventBus` 事件（如 `Events.PROGRESS_UPDATE`、字符串字面量 `'tool:start'` 等）。两套命名体系的统一规范参见遗留问题文档。
+
+| 新增事件 | 已有后端基础 | 说明 |
+|---------|------------|------|
 | `session.token.usage` | `ChatComplete` 中已有 `usage` | 需拆分为增量推送，而非仅在完成时返回 |
 | `session.tools.updated` | `ToolUnlocked` 已有 | 需补充”工具移除/禁用”场景 |
 | `session.memory.hit` | 无 | 完全新增，需后端在 memory 注入阶段埋点 |
-| `run.status.updated` | `TaskStatusChanged` 已有 | 需扩展状态枚举，增加 `paused`/`waiting_user` |
+| `run.status.updated` | `ProgressEvent` 已有（前端通过 `'tool:start'`/`'chat:complete'` 等字面量事件处理） | 需扩展状态枚举，增加 `paused`/`waiting_user`（`TaskRunView` 已包含） |
 | `run.step.updated` | `ProgressEvent` 已有丰富的 kind 类型 | 可将现有 ProgressEvent 语义化包装 |
 | `session.artifacts.updated` | 无 | 完全新增 |
 | `permission.requested` | `EvolutionConfirm` 已有 | 泛化为通用权限请求事件 |
@@ -355,17 +359,11 @@
 - 依赖：Plan 2、Plan 3
 - 顺序：第四步
 
-### Plan 5: 运行控制、执行历史与 Artifact 工作流
+### Plan 5: 运行工作流、权限诊断与工作区恢复
 
-- 目标：设计 run/turn 模型、任务状态机、执行历史视图与 artifact 面板。
+- 目标：统一设计 run/turn 模型、运行控制、执行历史、artifact 工作流、权限确认中心、审计记录、错误诊断和应用重启后的工作区恢复。
 - 依赖：Plan 1、Plan 4
 - 顺序：第五步
-
-### Plan 6: 权限确认、诊断恢复与工作区持久化
-
-- 目标：设计权限确认中心、审计记录、错误诊断页和应用重启后的上下文恢复。
-- 依赖：Plan 1、Plan 4、Plan 5
-- 顺序：第六步
 
 ## 风险与待定项
 
@@ -378,5 +376,6 @@
 - Artifact 与普通消息附件的边界需要统一，否则会出现同一输出在消息区和工作台区重复展示。前端已有 `SessionArtifactView` 和 `.artifacts-panel`，需要明确新 Artifact 面板与现有实现的关系（替代还是增强）。
 - 权限确认若支持”记住选择”，必须明确记忆范围，是仅当前会话、当前 Agent 还是全局。需要与已有的 `evolution.confirm` 记忆机制统一。
 - 工作区恢复若跨应用重启保留未完成任务状态，需要界定哪些状态只是展示恢复，哪些能真正继续执行。
-- **前端文件复杂度**：`chat-view.ts` 已有 655 行，`chat.css` 已有 1693 行。Agent Console 如果全部加入 chat-view 会导致单文件过大，需要拆分为独立模块。
+- **前端文件复杂度**：`chat-view.ts` 已有 666 行，`chat.css` 已有 1693 行。Agent Console 如果全部加入 chat-view 会导致单文件过大，需要拆分为独立模块。
 - **Memory 命中追踪的后端缺口**：当前 memory 注入发生在 prompt 构建阶段，但注入结果（命中了哪些记忆、评分多少）并未被记录或返回。这是一个后端新增需求，不是简单的协议暴露。
+- **后端接口就绪状态**：本文档提出的新增接口（`agent.inspect`、`session.runtime`、`session.tools.list`、`session.prompt.preview`、`session.memory.hits` 等）目前后端均未实现。前端调用时需统一降级处理：`ResourceState.error = '接口暂未支持'`，UI 显示"该功能需要后端升级"提示。具体的接口就绪状态矩阵将在 Plan 4 中详细定义。

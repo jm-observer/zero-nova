@@ -663,6 +663,210 @@
     color: var(--color-text-secondary);
 }
 
+.console-split-panel {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-sm);
+}
+
+@media (min-width: 1280px) {
+    .console-split-panel {
+        grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+        align-items: start;
+    }
+}
+
+.console-run-detail,
+.console-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.console-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.console-filter-chip,
+.console-action-btn,
+.console-inline-btn {
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+    color: var(--color-text);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.console-filter-chip {
+    padding: 4px 10px;
+    font-size: 0.72rem;
+}
+
+.console-filter-chip.active,
+.console-action-btn:hover,
+.console-inline-btn:hover {
+    border-color: var(--color-primary);
+}
+
+.console-filter-chip.active {
+    background: color-mix(in srgb, var(--color-primary) 12%, var(--color-bg-secondary));
+}
+
+.console-action-btn,
+.console-inline-btn {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+}
+
+.console-inline-btn.danger {
+    color: var(--color-error);
+}
+
+.run-item {
+    align-items: flex-start;
+    flex-direction: column;
+}
+
+.run-item.active {
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 10%, var(--color-bg-secondary));
+}
+
+.run-item-header,
+.run-meta-row,
+.card-item-header,
+.card-item-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.run-title,
+.card-item-title {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.run-subtitle,
+.card-item-subtitle,
+.card-item-meta,
+.run-meta {
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+}
+
+.run-status,
+.risk-badge,
+.diagnostic-badge,
+.artifact-type-badge {
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.run-status.running,
+.diagnostic-badge.info,
+.artifact-type-badge.code {
+    background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+    color: var(--color-primary);
+}
+
+.run-status.waiting_user,
+.risk-badge.medium,
+.diagnostic-badge.warn {
+    background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+    color: var(--color-warning);
+}
+
+.run-status.failed,
+.run-status.stopped,
+.risk-badge.high,
+.diagnostic-badge.error {
+    background: color-mix(in srgb, var(--color-error) 18%, transparent);
+    color: var(--color-error);
+}
+
+.run-status.completed,
+.risk-badge.low,
+.artifact-type-badge.file,
+.artifact-type-badge.image,
+.artifact-type-badge.output {
+    background: color-mix(in srgb, var(--color-success) 18%, transparent);
+    color: var(--color-success);
+}
+
+.console-detail-card,
+.card-item {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-secondary);
+    padding: var(--spacing-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.console-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-xs);
+}
+
+.console-detail-grid strong,
+.step-item strong {
+    color: var(--color-text);
+}
+
+.step-list,
+.artifact-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.step-item {
+    border-left: 2px solid var(--color-border);
+    padding-left: var(--spacing-sm);
+}
+
+.step-item.failed {
+    border-left-color: var(--color-error);
+}
+
+.step-item.running {
+    border-left-color: var(--color-primary);
+}
+
+.step-item.completed {
+    border-left-color: var(--color-success);
+}
+
+.card-item-actions,
+.detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.permission-card.pending,
+.diagnostic-card.error {
+    border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+}
+
+.restore-state-pill {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    font-size: 0.7rem;
+}
+
 /* ==============================
    Plan 3: Tool/Skill Enhancements
    ============================== */
@@ -760,5 +964,24 @@
     font-size: 0.75rem;
     color: var(--color-text-secondary);
 }
-    color: var(--color-text-secondary);
+
+/* Memory approximate warning */
+.memory-approximate-warning {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    color: var(--color-warning);
+}
+
+/* NavigateTo highlight flash animation */
+.highlight-flash {
+    animation: flash-highlight 2s ease-out;
+}
+
+@keyframes flash-highlight {
+    0% { background-color: color-mix(in srgb, var(--color-primary) 20%, transparent); }
+    100% { background-color: transparent; }
 }

@@ -42,7 +42,11 @@ interface ToolDescriptorView {
 
 - `parameterSchema` 对应后端 `ToolDefinition.input_schema`（JSON Schema 格式），前端展示时应简化为参数名 + 类型列表，不需要完整渲染 JSON Schema。
 - 当前运行时事件里的 `ToolUnlocked` 仅稳定提供 `tool_name`。因此 `source: 'skill_unlocked'`、`unlockedBy`、`unlockedReason` 不能只靠事件直接推导，首期应由 `session.tools.list` / `getAgentInspect()` 返回完整快照作为真源，事件只负责触发刷新或临时高亮。
-- `lastCallStatus` 可从已有的 `ProgressEvent`（`tool_start` → `running`，`tool_result` + `isError` → `error`/`success`）推导，无需新增后端接口。
+- `lastCallStatus` 可从已有的 `ProgressEvent`（`tool_start` → `running`，`tool_result` + `isError` → `error`/`success`）推导，无需新增后端接口。状态存储在 `AppState.toolStatusCache: Map<string, { status, updatedAt }>`（私有字段，已实现），通过 `updateToolStatus(toolName, status)` / `getToolStatus(toolName)` 访问。**生命周期规则**：
+  - 会话切换时清空整个 `toolStatusCache`（新会话无历史工具调用）
+  - 新一轮对话（`chat:iteration` 事件）不清空，保留上一轮的状态供参考
+  - 同一工具在一轮中被调用多次时，`lastCallStatus` 仅保留最后一次结果
+  - Console 关闭时不清空，重新打开后仍可展示
 
 **与已有 MCP 类型的关系**：
 
@@ -133,8 +137,13 @@ interface MemoryHitView {
 
 **首期替代方案**：在 `session.memory.hits` 后端实现之前，前端可以：
 1. 调用已有的 `memory.search(lastUserMessage)` 做一次相似度搜索作为近似展示
-2. 在 UI 上明确标注"以下为近似匹配结果，非实际注入内容"
+2. 在 UI 上明确标注"以下为近似匹配结果，非实际注入内容"（使用醒目的警告色标注，避免用户将近似结果当作真实注入数据做诊断决策）
 3. 后端补充埋点后切换为精确数据
+
+**近似方案注意事项**：
+- **性能**：`memory.search` 调用应为**按需触发**（用户切到 Prompt/Memory 标签时才执行），而非每轮自动执行
+- **准确性**：`lastUserMessage` 搜索不等于后端实际注入过程（后端可能使用不同的查询策略、不同的 top-k 值），近似结果仅供参考
+- **字段兼容性**：近似方案的 `MemoryHitView.score` 来自 `memory.search` 的相似度分数，精确方案切换后可能有不同的评分机制。为确保平滑切换，`score` 统一为 0-1 区间浮点数，UI 展示时不依赖绝对分值而只做相对排序
 
 交互要求：
 
@@ -173,7 +182,7 @@ interface PromptPreviewView {
 | `skillFragments` | `TurnContext.active_skill` | 当前活跃技能的内容片段 |
 | `toolDescriptions` | `TurnContext.tool_definitions` | 工具定义的 name + description 摘要 |
 | `memoryFragments` | system_prompt 中的记忆注入部分 | 需要后端在构建时分离记忆片段 |
-| `conversationFragments` | `TurnContext.history` | 历史对话的角色+摘要 |
+| `conversationFragments` | `TurnContext.history` | 历史对话的角色+摘要（后端返回时截断为最近 50 条，`summary` 为摘要而非完整消息内容，由后端生成；前端 UI 默认折叠，展开后只显示最近 20 条，提供"加载更多"按钮） |
 | `capabilityPolicy` | `TurnContext.capability_policy` | 当前能力策略描述 |
 | `activeSkill` | `TurnContext.active_skill` | 当前活跃技能标识 |
 | `tokenBudget` | `TurnContext.max_tokens` / `iteration_budget` | token 和迭代预算 |
@@ -202,6 +211,26 @@ interface PromptPreviewView {
 - 点击 toolDescription → 跳转到"工具"标签并定位到该工具
 - 点击 memoryFragment → 跳转到 Settings 的 Memory 管理并搜索该条目
 - 点击 capabilityPolicy → 跳转到"模型"标签查看当前配置
+
+**跳转统一接口**：所有跨标签/跨视图跳转通过 `AgentConsoleView.navigateTo()` 方法实现：
+
+```ts
+interface NavigateTarget {
+    // Console 内标签跳转
+    tab?: 'overview' | 'model' | 'tools' | 'skills' | 'prompt-memory';
+    // 标签内定位到具体条目（高亮 + 滚动）
+    itemId?: string;
+    // 跳转到 Settings（Console 保持打开状态）
+    settingsSection?: 'models' | 'memory' | 'mcp' | 'skills';
+    settingsSearch?: string;
+}
+
+// AgentConsoleView
+navigateTo(target: NavigateTarget): void;
+```
+
+- Console 内跳转：通过 EventBus 广播 `CONSOLE_TAB_CHANGED` + 延迟定位到 `itemId` 对应的 DOM 元素
+- 跳转到 Settings：触发 `Events.SETTINGS_TOGGLE` 并传递 section/search 参数，Console 不自动关闭（用户可手动关闭）
 
 ### 6. 视图分区设计
 

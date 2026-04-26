@@ -75,4 +75,10 @@
    CONSOLE_TOGGLED: 'console:toggled',     // { visible: boolean }
    CONSOLE_TAB_CHANGED: 'console:tab',     // { tab: string }
    CONSOLE_DATA_UPDATED: 'console:data',   // { key: string, data: any }
+   CONSOLE_RUNTIME_UPDATED: 'console:runtime_updated',
+   CONSOLE_TOKEN_UPDATED: 'console:token_updated',
+   CONSOLE_TOOLS_UPDATED: 'console:tools_updated',
+   CONSOLE_SKILLS_UPDATED: 'console:skills_updated',
+   CONSOLE_MEMORY_UPDATED: 'console:memory_updated',
+   SETTINGS_NAVIGATE: 'settings:navigate',
  } as const;

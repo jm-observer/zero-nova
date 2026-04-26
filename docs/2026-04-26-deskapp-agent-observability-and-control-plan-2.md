@@ -103,7 +103,7 @@ interface ModelBindingDetailView {
 
 - 只传某一项时表示局部覆盖
 - `reset = true` 时忽略 `orchestration/execution`，恢复继承
-- 返回最新完整 `SessionRuntimeSnapshot`
+- 返回最新完整 `SessionRuntimeSnapshot`（若后端仅返回 `{ success: true }` 而非完整 snapshot，前端应在操作成功后立即调用 `getSessionRuntime(sessionId)` 刷新缓存，以确保展示一致性）
 
 ### 2.3 与 copySession 的交互
 
@@ -118,12 +118,21 @@ interface ModelBindingDetailView {
 定义展示对象（需对齐后端已有 `Usage` 结构）：
 
 ```ts
-/** 对齐后端 nova-protocol::Usage 结构 */
+/** 对齐后端 nova-protocol::Usage 结构，纯数据传输用 */
 interface UsageView {
     inputTokens: number;
     outputTokens: number;
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
+}
+
+/** UI 展示用的 token 统计（含成本），用于 AppState 缓存 */
+interface TokenUsageView {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+    totalCost?: number;
 }
 
 /** 单轮 token 统计 */
@@ -142,6 +151,12 @@ interface SessionTokenUsageView {
     lastUpdatedAt: number;
 }
 ```
+
+> **类型职责划分**：
+> - `UsageView`：对齐后端 `Usage` 结构，用于 WebSocket 消息解析和接口返回值
+> - `TokenUsageView`：前端 UI 展示用，在 `UsageView` 基础上增加 `totalCost`，作为 `sessionTokenUsageStates: Map<string, ResourceState<TokenUsageView>>` 的泛型参数
+> - `TurnTokenUsageView`：单轮快照，用于聊天消息尾部的 `TokenUsageBadge`
+> - `SessionTokenUsageView`：后端 `sessions.token_usage` 接口的返回类型，前端收到后映射为 `TokenUsageView` 写入缓存
 
 **与原设计的差异说明**：
 
@@ -180,6 +195,11 @@ interface SessionTokenUsageView {
 
 **注意**：前端临时累加仅用于实时展示优化，不作为持久状态来源。页面刷新、切换会话、复制会话后，均应重新读取 `session.runtime` 或 `sessions.token_usage`。
 
+**累加误差回退策略**：前端增量累加可能因 WebSocket 断线重连导致消息丢失（累计偏低）或重复处理（累计偏高）。为此：
+- 每次用户切换到 Console 的"概览"或"模型"标签时，强制调用 `getSessionTokenUsage()` 校正缓存值
+- WebSocket 重连成功后，自动触发一次校正拉取
+- 连续 3 轮累加后即使用户未切换标签，也在下一次 `chat.complete` 事件时顺带校正一次（避免长时间偏移）
+
 ### 4.1 前端归并规则
 
 - 事件到达后优先更新当前轮次展示卡片。
@@ -208,7 +228,7 @@ interface SessionTokenUsageView {
 - 正在流式回复时不允许提交同作用域模型变更（按钮置灰 + tooltip 说明）。
 - 当前 session 没有 `sessionId` 时（如新建会话未发送消息），不展示"仅本会话覆盖"操作。
 - 复制会话时，默认不继承旧会话的 session override（见 2.3 节）。
-- provider 未配置 API key 时，该 provider 下的模型选项置灰并标注"未配置"。
+- provider 未配置 API key 时，该 provider 下的模型选项置灰并标注"未配置"。判定规则：`ServerConfigView.providers[name].apiKey` 为 `undefined`、`null` 或空字符串 `""` 时均视为"未配置"；provider key 存在但 `apiKey` 和 `baseUrl` 均为空时同样视为未配置。
 
 ### 7. 实施步骤
 

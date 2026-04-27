@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "agentId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "intent": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "intent"
+  ],
+  "title": "ChatIntentPayload",
+  "type": "object"
+}
+// Chat intent modification payload

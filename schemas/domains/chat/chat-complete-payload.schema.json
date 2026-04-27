@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "Usage": {
+      "description": "Usage statistics for a chat turn, re-exported from nova-core.\nThis mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
+      "properties": {
+        "cacheCreationInputTokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cacheReadInputTokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "output": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Usage"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "title": "ChatCompletePayload",
+  "type": "object"
+}
+// Chat completion payload

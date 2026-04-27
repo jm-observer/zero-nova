@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "agentId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "attachments": {
+      "items": true,
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "input": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "input"
+  ],
+  "title": "ChatPayload",
+  "type": "object"
+}
+// Chat request payload

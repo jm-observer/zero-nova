@@ -1,0 +1,1292 @@
+{
+  "$defs": {
+    "Agent": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "systemPrompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "AgentsListResponse": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/Agent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents"
+      ],
+      "type": "object"
+    },
+    "AgentsSwitchResponse": {
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/Agent"
+        },
+        "messages": {
+          "items": true,
+          "type": "array"
+        }
+      },
+      "required": [
+        "agent",
+        "messages"
+      ],
+      "type": "object"
+    },
+    "ChatCompletePayload": {
+      "properties": {
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Usage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "ChatIntentPayload": {
+      "properties": {
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "intent": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "intent"
+      ],
+      "type": "object"
+    },
+    "ChatPayload": {
+      "properties": {
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attachments": {
+          "items": true,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "input": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "ContentBlockDTO": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "input": true,
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_use",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "name",
+            "input"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "is_error": {
+              "type": "boolean"
+            },
+            "tool_use_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "tool_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "tool_use_id",
+            "content",
+            "is_error"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "thinking": {
+              "type": "string"
+            },
+            "type": {
+              "const": "thinking",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "thinking"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ErrorPayload": {
+      "properties": {
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "MessageDTO": {
+      "properties": {
+        "content": {
+          "items": {
+            "$ref": "#/$defs/ContentBlockDTO"
+          },
+          "type": "array"
+        },
+        "role": {
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "role",
+        "content",
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "ProgressEvent": {
+      "properties": {
+        "args": true,
+        "isError": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "iteration": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "log": {
+          "description": "日志内容（仅 kind=\"tool_log\" 时有值）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": true,
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stream": {
+          "description": "日志来源流: \"stdout\" | \"stderr\"（仅 kind=\"tool_log\" 时有值）",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thinking": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolUseId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "Session": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "agentId",
+        "createdAt",
+        "updatedAt",
+        "messageCount"
+      ],
+      "type": "object"
+    },
+    "SessionAgentSwitchPayload": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agentId"
+      ],
+      "type": "object"
+    },
+    "SessionCopyRequest": {
+      "properties": {
+        "index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionCreateRequest": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentId"
+      ],
+      "type": "object"
+    },
+    "SessionCreateResponse": {
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "type": "object"
+    },
+    "SessionIdPayload": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionsListResponse": {
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/Session"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "SessionsMessagesResponse": {
+      "properties": {
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/MessageDTO"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "messages"
+      ],
+      "type": "object"
+    },
+    "SkillActivatedPayload": {
+      "description": "Skill 激活事件 payload",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skillId": {
+          "type": "string"
+        },
+        "skillName": {
+          "type": "string"
+        },
+        "sticky": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "skillId",
+        "skillName",
+        "sticky",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "SkillExitedPayload": {
+      "description": "Skill 退出事件 payload",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skillId": {
+          "type": "string"
+        },
+        "skillName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "skillId",
+        "skillName",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "SkillInvocationPayload": {
+      "description": "Skill 调用事件 payload",
+      "properties": {
+        "level": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skillId": {
+          "type": "string"
+        },
+        "skillName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "skillId",
+        "skillName",
+        "level"
+      ],
+      "type": "object"
+    },
+    "SkillRouteEvaluatedPayload": {
+      "description": "Skill 路由评估事件 payload",
+      "properties": {
+        "confidence": {
+          "format": "double",
+          "type": "number"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skillId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "skillId",
+        "confidence",
+        "decision",
+        "reasoning"
+      ],
+      "type": "object"
+    },
+    "SkillSwitchedPayload": {
+      "description": "Skill 切换事件 payload",
+      "properties": {
+        "fromSkill": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toSkill": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fromSkill",
+        "toSkill",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "SuccessResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
+    "TaskStatusChangedPayload": {
+      "description": "Task 状态变化事件 payload",
+      "properties": {
+        "activeForm": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isMainTask": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "taskSubject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "taskId",
+        "taskSubject",
+        "status",
+        "isMainTask"
+      ],
+      "type": "object"
+    },
+    "ToolUnlockedPayload": {
+      "description": "Tool 解锁事件 payload",
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolName",
+        "source"
+      ],
+      "type": "object"
+    },
+    "Usage": {
+      "description": "Usage statistics for a chat turn, re-exported from nova-core.\nThis mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
+      "properties": {
+        "cacheCreationInputTokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cacheReadInputTokens": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ],
+      "type": "object"
+    },
+    "WelcomePayload": {
+      "properties": {
+        "requireAuth": {
+          "type": "boolean"
+        },
+        "setupRequired": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requireAuth"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "统一消息信封 (与 OpenFlux 前端规范完全一致)\n序列化结构: { \"id\": \"...\", \"type\": \"...\", \"payload\": { ... } }",
+  "oneOf": [
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ErrorPayload"
+        },
+        "type": {
+          "const": "error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/WelcomePayload"
+        },
+        "type": {
+          "const": "welcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ChatPayload"
+        },
+        "type": {
+          "const": "chat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionIdPayload"
+        },
+        "type": {
+          "const": "chat.stop",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionIdPayload"
+        },
+        "type": {
+          "const": "chat.stop.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "sessions.list",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionsListResponse"
+        },
+        "type": {
+          "const": "sessions.list.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionIdPayload"
+        },
+        "type": {
+          "const": "sessions.messages",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionsMessagesResponse"
+        },
+        "type": {
+          "const": "sessions.messages.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionCreateRequest"
+        },
+        "type": {
+          "const": "sessions.create",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionCreateResponse"
+        },
+        "type": {
+          "const": "sessions.create.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionIdPayload"
+        },
+        "type": {
+          "const": "sessions.delete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SuccessResponse"
+        },
+        "type": {
+          "const": "sessions.delete.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionCopyRequest"
+        },
+        "type": {
+          "const": "sessions.copy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionCreateResponse"
+        },
+        "type": {
+          "const": "sessions.copy.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionIdPayload"
+        },
+        "type": {
+          "const": "chat.start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ChatIntentPayload"
+        },
+        "type": {
+          "const": "chat.intent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ProgressEvent"
+        },
+        "type": {
+          "const": "chat.progress",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ChatCompletePayload"
+        },
+        "type": {
+          "const": "chat.complete",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "agents.list",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/AgentsListResponse"
+        },
+        "type": {
+          "const": "agents.list.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SessionAgentSwitchPayload"
+        },
+        "type": {
+          "const": "agents.switch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/AgentsSwitchResponse"
+        },
+        "type": {
+          "const": "agents.switch.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "config.get",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": true,
+        "type": {
+          "const": "config.get.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": true,
+        "type": {
+          "const": "config.update",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SuccessResponse"
+        },
+        "type": {
+          "const": "config.update.response",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SkillActivatedPayload"
+        },
+        "type": {
+          "const": "skill.activated",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SkillSwitchedPayload"
+        },
+        "type": {
+          "const": "skill.switched",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SkillExitedPayload"
+        },
+        "type": {
+          "const": "skill.exited",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/ToolUnlockedPayload"
+        },
+        "type": {
+          "const": "tool.unlocked",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/TaskStatusChangedPayload"
+        },
+        "type": {
+          "const": "task.status_changed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SkillRouteEvaluatedPayload"
+        },
+        "type": {
+          "const": "skill.route_evaluated",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/$defs/SkillInvocationPayload"
+        },
+        "type": {
+          "const": "skill.invocation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "Unknown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "id": {
+      "description": "请求响应模式下的消息 ID，事件推送时为 None",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "GatewayMessage",
+  "type": "object"
+}
+// GatewayMessage - envelope payload

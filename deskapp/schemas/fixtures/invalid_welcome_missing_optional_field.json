@@ -1,0 +1,6 @@
+{
+  "type": "welcome",
+  "payload": {
+    "requireAuth": true
+  }
+}

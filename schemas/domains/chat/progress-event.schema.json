@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "args": true,
+    "isError": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "iteration": {
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "log": {
+      "description": "日志内容（仅 kind=\"tool_log\" 时有值）",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "output": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result": true,
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stream": {
+      "description": "日志来源流: \"stdout\" | \"stderr\"（仅 kind=\"tool_log\" 时有值）",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "thinking": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "token": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "toolName": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "toolUseId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "type"
+  ],
+  "title": "ProgressEvent",
+  "type": "object"
+}
+// Progress event during chat processing

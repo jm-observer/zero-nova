@@ -11,6 +11,44 @@ permissions:
   contents: write
 
 jobs:
+  schema-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Export schema and check for changes
+        run: |
+          cargo run -p nova-protocol --bin export-schema --features export-schema -- --root .
+          git diff --exit-code -- schemas/ || (
+            echo "::error::Schema exports have changed. Run 'cargo run -p nova-protocol --bin export-schema --features export-schema' to regenerate."
+            exit 1
+          )
+
+  frontend-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: deskapp/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: deskapp
+      - name: Run frontend tests (contract tests)
+        run: pnpm test
+        working-directory: deskapp
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -28,7 +66,7 @@ jobs:
         run: cargo test --workspace
 
   build:
-    needs: check
+    needs: [schema-check, frontend-check, check]
     strategy:
       matrix:
         include:

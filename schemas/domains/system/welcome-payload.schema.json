@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "requireAuth": {
+      "type": "boolean"
+    },
+    "setupRequired": {
+      "default": false,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "requireAuth"
+  ],
+  "title": "WelcomePayload",
+  "type": "object"
+}
+// Welcome event payload

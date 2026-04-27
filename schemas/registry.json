@@ -1,0 +1,149 @@
+{
+  "metadata": {
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    },
+    "generatedAt": "2026-04-27T09:34:21.532664800+00:00",
+    "sourceCrate": "nova-protocol",
+    "sourceCrateVersion": "0.1.0"
+  },
+  "types": {
+    "Agent": {
+      "fullName": "Agent",
+      "schemaId": "Agent",
+      "domain": "agent",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "agent-agent.schema.json",
+      "tsFile": "agent-agent.ts"
+    },
+    "ChatCompletePayload": {
+      "fullName": "ChatCompletePayload",
+      "schemaId": "ChatCompletePayload",
+      "domain": "chat",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "chat-chatcompletepayload.schema.json",
+      "tsFile": "chat-chatcompletepayload.ts"
+    },
+    "ChatIntentPayload": {
+      "fullName": "ChatIntentPayload",
+      "schemaId": "ChatIntentPayload",
+      "domain": "chat",
+      "pattern": "request",
+      "inEnvelope": true,
+      "schemaFile": "chat-chatintentpayload.schema.json",
+      "tsFile": "chat-chatintentpayload.ts"
+    },
+    "ChatPayload": {
+      "fullName": "ChatPayload",
+      "schemaId": "ChatPayload",
+      "domain": "chat",
+      "pattern": "request",
+      "inEnvelope": true,
+      "schemaFile": "chat-chatpayload.schema.json",
+      "tsFile": "chat-chatpayload.ts"
+    },
+    "ContentBlockDTO": {
+      "fullName": "ContentBlockDTO",
+      "schemaId": "ContentBlockDTO",
+      "domain": "session",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "session-contentblockdto.schema.json",
+      "tsFile": "session-contentblockdto.ts"
+    },
+    "ErrorPayload": {
+      "fullName": "ErrorPayload",
+      "schemaId": "ErrorPayload",
+      "domain": "system",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "system-errorpayload.schema.json",
+      "tsFile": "system-errorpayload.ts"
+    },
+    "GatewayMessage": {
+      "fullName": "GatewayMessage",
+      "schemaId": "GatewayMessage",
+      "domain": "gateway",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "gateway-gatewaymessage.schema.json",
+      "tsFile": "gateway-gatewaymessage.ts"
+    },
+    "MessageDTO": {
+      "fullName": "MessageDTO",
+      "schemaId": "MessageDTO",
+      "domain": "session",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "session-messagedto.schema.json",
+      "tsFile": "session-messagedto.ts"
+    },
+    "MessageEnvelope": {
+      "fullName": "MessageEnvelope",
+      "schemaId": "MessageEnvelope",
+      "domain": "gateway",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "gateway-messageenvelope.schema.json",
+      "tsFile": "gateway-messageenvelope.ts"
+    },
+    "ProgressEvent": {
+      "fullName": "ProgressEvent",
+      "schemaId": "ProgressEvent",
+      "domain": "chat",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "chat-progressevent.schema.json",
+      "tsFile": "chat-progressevent.ts"
+    },
+    "Session": {
+      "fullName": "Session",
+      "schemaId": "Session",
+      "domain": "session",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "session-session.schema.json",
+      "tsFile": "session-session.ts"
+    },
+    "SessionAgentSwitchPayload": {
+      "fullName": "SessionAgentSwitchPayload",
+      "schemaId": "SessionAgentSwitchPayload",
+      "domain": "agent",
+      "pattern": "request",
+      "inEnvelope": true,
+      "schemaFile": "agent-sessionagentswitchpayload.schema.json",
+      "tsFile": "agent-sessionagentswitchpayload.ts"
+    },
+    "SessionCreateRequest": {
+      "fullName": "SessionCreateRequest",
+      "schemaId": "SessionCreateRequest",
+      "domain": "session",
+      "pattern": "request",
+      "inEnvelope": true,
+      "schemaFile": "session-sessioncreaterequest.schema.json",
+      "tsFile": "session-sessioncreaterequest.ts"
+    },
+    "WelcomePayload": {
+      "fullName": "WelcomePayload",
+      "schemaId": "WelcomePayload",
+      "domain": "system",
+      "pattern": "payload",
+      "inEnvelope": true,
+      "schemaFile": "system-welcomepayload.schema.json",
+      "tsFile": "system-welcomepayload.ts"
+    }
+  },
+  "domainRoots": {
+    "agent": "schemas/domains/agent",
+    "chat": "schemas/domains/chat",
+    "gateway": "schemas/domains/gateway",
+    "observability": "schemas/domains/observability",
+    "session": "schemas/domains/session",
+    "skills": "schemas/domains/skills",
+    "system": "schemas/domains/system"
+  }
+}

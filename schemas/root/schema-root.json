@@ -1,0 +1,40 @@
+{
+  "$id": "https://zero-nova.org/schemas/root/schema-root.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Root schema referencing all domain schemas. Generated from nova-protocol Rust types.",
+  "domains": {
+    "agent": {
+      "$ref": "../agent/agent.json"
+    },
+    "chat": {
+      "$ref": "../chat/chat.json"
+    },
+    "gateway": {
+      "$ref": "../gateway/gateway.json"
+    },
+    "observability": {
+      "$ref": "../observability/observability.json"
+    },
+    "session": {
+      "$ref": "../session/session.json"
+    },
+    "skills": {
+      "$ref": "../skills/skills.json"
+    },
+    "system": {
+      "$ref": "../system/system.json"
+    }
+  },
+  "generatedAt": "2026-04-27T09:34:21.494540900+00:00",
+  "sourceCrate": "nova-protocol",
+  "sourceCrateVersion": "0.1.0",
+  "title": "Zero-Nova Protocol Schema Registry",
+  "type": "object",
+  "types": [],
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  }
+}
+// Metadata generated at: 2026-04-27T09:34:21.494540900+00:00

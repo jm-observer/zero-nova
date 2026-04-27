@@ -1,0 +1,10 @@
+{
+  "type": "skill.activated",
+  "payload": {
+    "sessionId": "session-123",
+    "skillId": "code-review",
+    "skillName": "Code Review",
+    "sticky": true,
+    "reason": "auto-detected"
+  }
+}

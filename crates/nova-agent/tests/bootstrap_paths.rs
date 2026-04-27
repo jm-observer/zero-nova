@@ -4,7 +4,7 @@
 /// (prompts_dir, data_dir_path, config_path, skills_dir) are used
 /// correctly in the bootstrap sequence for prompt loading, session
 /// database placement, skills loading, and config re-export.
-use nova_core::config::{AppConfig, OriginAppConfig};
+use nova_agent::config::{AppConfig, OriginAppConfig};
 use std::path::PathBuf;
 
 fn make_test_config(workspace: PathBuf) -> AppConfig {

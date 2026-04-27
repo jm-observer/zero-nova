@@ -1,6 +1,6 @@
 use channel_core::ResponseSink;
 use log::{error, info};
-use nova_app::AgentApplication;
+use nova_agent::app::AgentApplication;
 use nova_protocol::{GatewayMessage, MessageEnvelope, SuccessResponse};
 use serde_json::Value;
 

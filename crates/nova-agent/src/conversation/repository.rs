@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nova_core::message::{ContentBlock, Role};
+use crate::message::{ContentBlock, Role};
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -19,7 +19,7 @@ impl SqliteSessionRepository {
         agent_id: &str,
         created_at: i64,
         updated_at: i64,
-        runtime_control: &crate::control::ControlState,
+        runtime_control: &super::control::ControlState,
     ) -> Result<()> {
         let runtime_control_json = serde_json::to_string(runtime_control)?;
         sqlx::query(
@@ -45,7 +45,7 @@ impl SqliteSessionRepository {
     pub async fn update_session_runtime_control(
         &self,
         id: &str,
-        runtime_control: &crate::control::ControlState,
+        runtime_control: &super::control::ControlState,
     ) -> Result<()> {
         let runtime_control_json = serde_json::to_string(runtime_control)?;
         sqlx::query("UPDATE sessions SET runtime_control = ?, updated_at = ? WHERE id = ?")
@@ -94,8 +94,8 @@ impl SqliteSessionRepository {
             String,
             i64,
             i64,
-            crate::control::ControlState,
-            Vec<nova_core::message::Message>,
+            super::control::ControlState,
+            Vec<crate::message::Message>,
         )>,
     > {
         let row = sqlx::query(
@@ -116,7 +116,7 @@ impl SqliteSessionRepository {
             let runtime_control = if let Some(json) = runtime_control_json {
                 serde_json::from_str(&json)?
             } else {
-                crate::control::ControlState::new(&agent_id)
+                super::control::ControlState::new(&agent_id)
             };
 
             let messages_rows =
@@ -135,7 +135,7 @@ impl SqliteSessionRepository {
                     _ => Role::Assistant,
                 };
                 let content: Vec<ContentBlock> = serde_json::from_str(&content_str)?;
-                history.push(nova_core::message::Message { role, content });
+                history.push(crate::message::Message { role, content });
             }
 
             return Ok(Some((
@@ -152,7 +152,7 @@ impl SqliteSessionRepository {
         Ok(None)
     }
 
-    pub async fn list_sessions(&self) -> Result<Vec<(String, String, String, i64, i64, crate::control::ControlState)>> {
+    pub async fn list_sessions(&self) -> Result<Vec<(String, String, String, i64, i64, super::control::ControlState)>> {
         let rows = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control FROM sessions ORDER BY updated_at DESC",
         )
@@ -164,9 +164,9 @@ impl SqliteSessionRepository {
             let agent_id: String = row.get("agent_id");
             let runtime_control_json: Option<String> = row.get("runtime_control");
             let runtime_control = if let Some(json) = runtime_control_json {
-                serde_json::from_str(&json).unwrap_or_else(|_| crate::control::ControlState::new(&agent_id))
+                serde_json::from_str(&json).unwrap_or_else(|_| super::control::ControlState::new(&agent_id))
             } else {
-                crate::control::ControlState::new(&agent_id)
+                super::control::ControlState::new(&agent_id)
             };
 
             sessions.push((
@@ -197,7 +197,7 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Runs & Steps ---
 
-    pub async fn create_run(&self, run: &crate::model::RunRecord) -> Result<()> {
+    pub async fn create_run(&self, run: &super::model::RunRecord) -> Result<()> {
         sqlx::query("INSERT INTO runs (id, session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
             .bind(&run.id)
             .bind(&run.session_id)
@@ -219,7 +219,7 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
-    pub async fn create_run_step(&self, step: &crate::model::RunStepRecord) -> Result<()> {
+    pub async fn create_run_step(&self, step: &super::model::RunStepRecord) -> Result<()> {
         let input_json = step.input.as_ref().map(|v| serde_json::to_string(v).unwrap());
         let output_json = step.output.as_ref().map(|v| serde_json::to_string(v).unwrap());
         sqlx::query("INSERT INTO run_steps (id, run_id, step_type, status, input, output, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
@@ -256,7 +256,7 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Artifacts ---
 
-    pub async fn create_artifact(&self, artifact: &crate::model::ArtifactRecord) -> Result<()> {
+    pub async fn create_artifact(&self, artifact: &super::model::ArtifactRecord) -> Result<()> {
         sqlx::query("INSERT INTO artifacts (id, session_id, run_id, name, content_type, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
             .bind(&artifact.id)
             .bind(&artifact.session_id)
@@ -270,7 +270,7 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
-    pub async fn list_artifacts(&self, session_id: &str) -> Result<Vec<crate::model::ArtifactRecord>> {
+    pub async fn list_artifacts(&self, session_id: &str) -> Result<Vec<super::model::ArtifactRecord>> {
         let rows = sqlx::query("SELECT id, session_id, run_id, name, content_type, storage_path, created_at FROM artifacts WHERE session_id = ? ORDER BY created_at DESC")
             .bind(session_id)
             .fetch_all(&self.pool)
@@ -278,7 +278,7 @@ impl SqliteSessionRepository {
 
         let mut artifacts = Vec::new();
         for row in rows {
-            artifacts.push(crate::model::ArtifactRecord {
+            artifacts.push(super::model::ArtifactRecord {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 run_id: row.get("run_id"),
@@ -293,7 +293,7 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Permissions ---
 
-    pub async fn create_permission_request(&self, req: &crate::model::PermissionRequestRecord) -> Result<()> {
+    pub async fn create_permission_request(&self, req: &super::model::PermissionRequestRecord) -> Result<()> {
         sqlx::query("INSERT INTO permission_requests (id, session_id, run_id, capability, resource, status, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&req.id)
             .bind(&req.session_id)
@@ -320,7 +320,7 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Diagnostics & Audit ---
 
-    pub async fn create_audit_log(&self, log: &crate::model::AuditLogRecord) -> Result<()> {
+    pub async fn create_audit_log(&self, log: &super::model::AuditLogRecord) -> Result<()> {
         let details_json = serde_json::to_string(&log.details).unwrap();
         sqlx::query("INSERT INTO audit_logs (session_id, run_id, action, details, created_at) VALUES (?, ?, ?, ?, ?)")
             .bind(&log.session_id)
@@ -333,7 +333,7 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
-    pub async fn create_diagnostic_issue(&self, issue: &crate::model::DiagnosticIssue) -> Result<()> {
+    pub async fn create_diagnostic_issue(&self, issue: &super::model::DiagnosticIssue) -> Result<()> {
         let details_json = issue.details.as_ref().map(|v| serde_json::to_string(v).unwrap());
         sqlx::query("INSERT INTO diagnostic_issues (id, session_id, severity, message, details, created_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&issue.id)
@@ -357,7 +357,7 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Workspace Restore ---
 
-    pub async fn save_workspace_restore_state(&self, state: &crate::model::WorkspaceRestoreState) -> Result<()> {
+    pub async fn save_workspace_restore_state(&self, state: &super::model::WorkspaceRestoreState) -> Result<()> {
         let snapshot_json = serde_json::to_string(&state.snapshot).unwrap();
         sqlx::query("INSERT INTO workspace_restore_state (session_id, snapshot, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET snapshot=excluded.snapshot, updated_at=excluded.updated_at")
             .bind(&state.session_id)
@@ -371,7 +371,7 @@ impl SqliteSessionRepository {
     pub async fn get_workspace_restore_state(
         &self,
         session_id: &str,
-    ) -> Result<Option<crate::model::WorkspaceRestoreState>> {
+    ) -> Result<Option<super::model::WorkspaceRestoreState>> {
         let row =
             sqlx::query("SELECT session_id, snapshot, updated_at FROM workspace_restore_state WHERE session_id = ?")
                 .bind(session_id)
@@ -380,7 +380,7 @@ impl SqliteSessionRepository {
 
         if let Some(row) = row {
             let snapshot_json: String = row.get("snapshot");
-            Ok(Some(crate::model::WorkspaceRestoreState {
+            Ok(Some(super::model::WorkspaceRestoreState {
                 session_id: row.get("session_id"),
                 snapshot: serde_json::from_str(&snapshot_json)?,
                 updated_at: row.get("updated_at"),
@@ -390,7 +390,7 @@ impl SqliteSessionRepository {
         }
     }
 
-    pub async fn get_last_workspace_restore_state(&self) -> Result<Option<crate::model::WorkspaceRestoreState>> {
+    pub async fn get_last_workspace_restore_state(&self) -> Result<Option<super::model::WorkspaceRestoreState>> {
         let row = sqlx::query(
             "SELECT session_id, snapshot, updated_at FROM workspace_restore_state ORDER BY updated_at DESC LIMIT 1",
         )
@@ -399,7 +399,7 @@ impl SqliteSessionRepository {
 
         if let Some(row) = row {
             let snapshot_json: String = row.get("snapshot");
-            Ok(Some(crate::model::WorkspaceRestoreState {
+            Ok(Some(super::model::WorkspaceRestoreState {
                 session_id: row.get("session_id"),
                 snapshot: serde_json::from_str(&snapshot_json)?,
                 updated_at: row.get("updated_at"),
@@ -412,7 +412,7 @@ impl SqliteSessionRepository {
     pub async fn list_permission_requests(
         &self,
         session_id: &str,
-    ) -> Result<Vec<crate::model::PermissionRequestRecord>> {
+    ) -> Result<Vec<super::model::PermissionRequestRecord>> {
         let rows = sqlx::query("SELECT id, session_id, run_id, capability, resource, status, reason, created_at FROM permission_requests WHERE session_id = ? ORDER BY created_at DESC")
             .bind(session_id)
             .fetch_all(&self.pool)
@@ -420,7 +420,7 @@ impl SqliteSessionRepository {
 
         let mut requests = Vec::new();
         for row in rows {
-            requests.push(crate::model::PermissionRequestRecord {
+            requests.push(super::model::PermissionRequestRecord {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 run_id: row.get("run_id"),
@@ -434,7 +434,7 @@ impl SqliteSessionRepository {
         Ok(requests)
     }
 
-    pub async fn list_audit_logs(&self, session_id: &str) -> Result<Vec<crate::model::AuditLogRecord>> {
+    pub async fn list_audit_logs(&self, session_id: &str) -> Result<Vec<super::model::AuditLogRecord>> {
         let rows = sqlx::query("SELECT id, session_id, run_id, action, details, created_at FROM audit_logs WHERE session_id = ? ORDER BY created_at DESC")
             .bind(session_id)
             .fetch_all(&self.pool)
@@ -443,7 +443,7 @@ impl SqliteSessionRepository {
         let mut logs = Vec::new();
         for row in rows {
             let details_json: String = row.get("details");
-            logs.push(crate::model::AuditLogRecord {
+            logs.push(super::model::AuditLogRecord {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 run_id: row.get("run_id"),
@@ -455,7 +455,7 @@ impl SqliteSessionRepository {
         Ok(logs)
     }
 
-    pub async fn list_diagnostics(&self, session_id: &str) -> Result<Vec<crate::model::DiagnosticIssue>> {
+    pub async fn list_diagnostics(&self, session_id: &str) -> Result<Vec<super::model::DiagnosticIssue>> {
         let rows = sqlx::query("SELECT id, session_id, severity, message, details, created_at FROM diagnostic_issues WHERE session_id = ? ORDER BY created_at DESC")
             .bind(session_id)
             .fetch_all(&self.pool)
@@ -464,7 +464,7 @@ impl SqliteSessionRepository {
         let mut issues = Vec::new();
         for row in rows {
             let details_json: Option<String> = row.get("details");
-            issues.push(crate::model::DiagnosticIssue {
+            issues.push(super::model::DiagnosticIssue {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 severity: row.get("severity"),
@@ -476,7 +476,7 @@ impl SqliteSessionRepository {
         Ok(issues)
     }
 
-    pub async fn list_runs(&self, session_id: &str) -> Result<Vec<crate::model::RunRecord>> {
+    pub async fn list_runs(&self, session_id: &str) -> Result<Vec<super::model::RunRecord>> {
         let rows = sqlx::query("SELECT id, session_id, status, created_at, updated_at FROM runs WHERE session_id = ? ORDER BY created_at DESC")
             .bind(session_id)
             .fetch_all(&self.pool)
@@ -484,7 +484,7 @@ impl SqliteSessionRepository {
 
         let mut runs = Vec::new();
         for row in rows {
-            runs.push(crate::model::RunRecord {
+            runs.push(super::model::RunRecord {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 status: row.get("status"),
@@ -495,14 +495,14 @@ impl SqliteSessionRepository {
         Ok(runs)
     }
 
-    pub async fn get_run(&self, run_id: &str) -> Result<Option<crate::model::RunRecord>> {
+    pub async fn get_run(&self, run_id: &str) -> Result<Option<super::model::RunRecord>> {
         let row = sqlx::query("SELECT id, session_id, status, created_at, updated_at FROM runs WHERE id = ?")
             .bind(run_id)
             .fetch_optional(&self.pool)
             .await?;
 
         if let Some(row) = row {
-            Ok(Some(crate::model::RunRecord {
+            Ok(Some(super::model::RunRecord {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 status: row.get("status"),

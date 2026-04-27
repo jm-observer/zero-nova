@@ -1,6 +1,6 @@
 use chrono::Utc;
-use nova_conversation::control::ControlState;
-use nova_core::prompt::TurnContext;
+use crate::conversation::control::ControlState;
+use crate::prompt::TurnContext;
 use nova_protocol::observability::*;
 
 pub struct RuntimeSnapshotAssembler;

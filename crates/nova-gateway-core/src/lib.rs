@@ -8,7 +8,7 @@ pub use router::dispatch;
 use anyhow::Result;
 use async_trait::async_trait;
 use channel_core::{ChannelHandler, PeerId, ResponseSink};
-use nova_app::AgentApplication;
+use nova_agent::app::AgentApplication;
 use nova_protocol::GatewayMessage;
 use std::sync::Arc;
 

@@ -1,10 +1,10 @@
-use crate::cache::SessionCache;
-use crate::control::ControlState;
-use crate::repository::SqliteSessionRepository;
-use crate::session::{Session, SessionSummary};
+use super::cache::SessionCache;
+use super::control::ControlState;
+use super::repository::SqliteSessionRepository;
+use super::session::{Session, SessionSummary};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use nova_core::message::{ContentBlock, Message, Role};
+use crate::message::{ContentBlock, Message, Role};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -329,8 +329,8 @@ impl SessionService {
     pub async fn override_model(
         &self,
         session_id: &str,
-        orchestration: Option<crate::control::ModelRef>,
-        execution: Option<crate::control::ModelRef>,
+        orchestration: Option<super::control::ModelRef>,
+        execution: Option<super::control::ModelRef>,
     ) -> Result<Arc<Session>> {
         let session = self.get(session_id).await?.context("Session not found")?;
 
@@ -353,7 +353,7 @@ impl SessionService {
     pub async fn update_runtime_state(
         &self,
         session_id: &str,
-        snapshot: Option<crate::control::LastTurnSnapshot>,
+        snapshot: Option<super::control::LastTurnSnapshot>,
         token_delta: Option<(u64, u64, u64, u64)>,
     ) -> Result<()> {
         let session = self.get(session_id).await?.context("Session not found")?;

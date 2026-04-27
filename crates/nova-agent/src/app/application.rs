@@ -1,9 +1,9 @@
-use crate::conversation_service::ConversationService;
-use crate::types::{AppAgent, AppEvent, AppMessage, AppSession};
-use anyhow::{anyhow, Context, Result};
+use super::conversation_service::ConversationService;
+use super::types::{AppAgent, AppEvent, AppMessage, AppSession};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use nova_core::config::AppConfig;
-use nova_core::provider::LlmClient;
+use crate::config::AppConfig;
+use crate::provider::LlmClient;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub trait AgentApplication: Send + Sync {
         session_id: &str,
         input: &str,
         sender: mpsc::Sender<AppEvent>,
-    ) -> Result<nova_core::agent::TurnResult>;
+    ) -> Result<crate::agent::TurnResult>;
     async fn stop_turn(&self, session_id: &str) -> Result<()>;
 
     async fn list_sessions(&self) -> Result<Vec<AppSession>>;
@@ -93,7 +93,7 @@ pub trait AgentApplication: Send + Sync {
 /// Agent 应用门面实现
 pub struct AgentApplicationImpl<C: LlmClient> {
     conversation_service: ConversationService<C>,
-    workspace_service: crate::agent_workspace_service::AgentWorkspaceService,
+    workspace_service: super::agent_workspace_service::AgentWorkspaceService,
     config: Arc<RwLock<AppConfig>>,
     config_path: PathBuf,
 }
@@ -101,7 +101,7 @@ pub struct AgentApplicationImpl<C: LlmClient> {
 impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
     pub fn new(
         conversation_service: ConversationService<C>,
-        workspace_service: crate::agent_workspace_service::AgentWorkspaceService,
+        workspace_service: super::agent_workspace_service::AgentWorkspaceService,
         config: Arc<RwLock<AppConfig>>,
         config_path: PathBuf,
     ) -> Self {
@@ -125,7 +125,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         session_id: &str,
         input: &str,
         sender: mpsc::Sender<AppEvent>,
-    ) -> Result<nova_core::agent::TurnResult> {
+    ) -> Result<crate::agent::TurnResult> {
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
         let sender_clone = sender.clone();
@@ -182,9 +182,9 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .into_iter()
             .map(|m| AppMessage {
                 role: match m.role {
-                    nova_core::message::Role::System => "system".to_string(),
-                    nova_core::message::Role::User => "user".to_string(),
-                    nova_core::message::Role::Assistant => "assistant".to_string(),
+                    crate::message::Role::System => "system".to_string(),
+                    crate::message::Role::User => "user".to_string(),
+                    crate::message::Role::Assistant => "assistant".to_string(),
                 },
                 content: m.content,
                 timestamp: 0,

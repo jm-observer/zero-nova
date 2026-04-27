@@ -1,8 +1,11 @@
 use clap::Parser;
+use custom_utils::{args::workspace as resolve_workspace, logger::logger_feature};
 use nova_agent::app::bootstrap::build_application;
-use nova_agent::config::OriginAppConfig;
+use nova_agent::config::{AppConfig, OriginAppConfig};
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
+use std::{env::current_dir, future::pending, process::exit, time::Duration};
 use sysinfo::{Pid, System};
+use tokio::time::sleep;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -33,11 +36,11 @@ pub struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let _ = custom_utils::logger::logger_feature("nova-gateway-ws", "debug", log::LevelFilter::Debug, false).build();
+    let _ = logger_feature("nova-gateway-ws", "debug", log::LevelFilter::Debug, false).build();
 
-    let workspace = custom_utils::args::workspace(&args.workspace, ".nova")?;
+    let workspace = resolve_workspace(&args.workspace, ".nova")?;
 
-    log::info!("Working directory: {:?}", std::env::current_dir().unwrap_or_default());
+    log::info!("Working directory: {:?}", current_dir().unwrap_or_default());
     log::info!("Workspace directory: {:?}", workspace);
 
     let config_path = workspace.join("config.toml");
@@ -45,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut origin_config = OriginAppConfig::load_from_file(&config_path)?;
 
-    // Apply CLI overrides
+    // Keep CLI flags as the highest priority so one-off runs do not require editing config files.
     if let Some(ref m) = args.model {
         origin_config.llm.model_config.model = m.clone();
     }
@@ -56,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     origin_config.gateway.host = args.host.clone();
     origin_config.gateway.port = args.port;
 
-    let final_config = nova_agent::config::AppConfig::from_origin(origin_config.clone(), workspace.clone());
+    let final_config = AppConfig::from_origin(origin_config.clone(), workspace.clone());
 
     log::info!("Starting Nova Gateway WS with config: {:?}", final_config);
 
@@ -79,12 +82,12 @@ async fn main() -> anyhow::Result<()> {
                 loop {
                     if !sys.refresh_process(pid) {
                         log::warn!("Detected parent process exit via PID monitoring (PID: {}).", pid_val);
-                        std::process::exit(0);
+                        exit(0);
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    sleep(Duration::from_secs(2)).await;
                 }
             } else {
-                std::future::pending::<()>().await
+                pending::<()>().await
             }
         } => {}
         _ = async {
@@ -98,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             }
         } => {
             log::warn!("Stdin closed (EOF). Parent process might have exited. Sidecar shutting down...");
-            std::process::exit(0);
+            exit(0);
         }
     }
 

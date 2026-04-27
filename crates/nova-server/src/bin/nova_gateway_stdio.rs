@@ -1,6 +1,7 @@
 use clap::Parser;
+use custom_utils::{args::workspace as resolve_workspace, logger::logger_feature};
 use nova_agent::app::bootstrap::build_application;
-use nova_agent::config::OriginAppConfig;
+use nova_agent::config::{AppConfig, OriginAppConfig};
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 
 #[derive(Parser, Debug)]
@@ -30,16 +31,16 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // NOTE: Logger MUST go to stderr for stdio transport
-    let _ = custom_utils::logger::logger_feature("nova-gateway-stdio", "debug", log::LevelFilter::Debug, false).build();
+    let _ = logger_feature("nova-gateway-stdio", "debug", log::LevelFilter::Debug, false).build();
 
-    let workspace = custom_utils::args::workspace(&args.workspace, ".nova")?;
+    let workspace = resolve_workspace(&args.workspace, ".nova")?;
 
     log::info!("Starting Nova Gateway Stdio...");
 
     let config_path = workspace.join("config.toml");
     let mut origin_config = OriginAppConfig::load_from_file(&config_path)?;
 
-    // Apply CLI overrides
+    // Keep CLI flags as the highest priority so one-off runs do not require editing config files.
     if let Some(ref m) = args.model {
         origin_config.llm.model_config.model = m.clone();
     }
@@ -48,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         origin_config.llm.base_url = url.clone();
     }
 
-    let final_config = nova_agent::config::AppConfig::from_origin(origin_config, workspace.clone());
+    let final_config = AppConfig::from_origin(origin_config, workspace.clone());
 
     let client = OpenAiCompatClient::new(final_config.llm.api_key.clone(), final_config.llm.base_url.clone());
     let app = build_application(final_config, client).await?;

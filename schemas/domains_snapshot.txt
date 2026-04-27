@@ -1,7 +1,13 @@
-gateway: [gateway-message.schema.json, message-envelope.schema.json]
-chat: [chat-complete-payload.schema.json, chat-intent-payload.schema.json, chat-payload.schema.json, progress-event.schema.json]
-session: [content-block-dto.schema.json, message-dto.schema.json, session-create-request.schema.json, session.schema.json]
-agent: [agent.schema.json]
-system: [error-payload.schema.json, welcome-payload.schema.json]
-observability: []
-skills: []
+schemas\domains\agent\agent.schema.json
+schemas\domains\chat\chat-complete-payload.schema.json
+schemas\domains\chat\chat-intent-payload.schema.json
+schemas\domains\chat\chat-payload.schema.json
+schemas\domains\chat\progress-event.schema.json
+schemas\domains\gateway\gateway-message.schema.json
+schemas\domains\gateway\message-envelope.schema.json
+schemas\domains\session\content-block-dto.schema.json
+schemas\domains\session\message-dto.schema.json
+schemas\domains\session\session-create-request.schema.json
+schemas\domains\session\session.schema.json
+schemas\domains\system\error-payload.schema.json
+schemas\domains\system\welcome-payload.schema.json

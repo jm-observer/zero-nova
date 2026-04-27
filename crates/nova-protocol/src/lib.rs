@@ -3,6 +3,7 @@ pub mod chat;
 pub mod config;
 pub mod envelope;
 pub mod observability;
+pub mod schema;
 pub mod session;
 pub mod system;
 

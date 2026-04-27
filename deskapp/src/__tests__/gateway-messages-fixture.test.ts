@@ -16,7 +16,7 @@ import { ProtocolErrorHandler, validateEnvelope } from '../generated/generated-t
 // ============================================================
 
 // 前端 tests 运行时 CWD 为 deskapp/，fixtures 在 deskapp/schemas/fixtures/ 或 repo root schemas/fixtures/
-const FIXTURE_DIR = path.resolve(__dirname, '../../schemas/fixtures');
+const FIXTURE_DIR = path.resolve(__dirname, '../../../schemas/fixtures');
 
 function loadFixture(name: string): string {
   const filePath = path.join(FIXTURE_DIR, name);

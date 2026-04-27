@@ -45,6 +45,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
         working-directory: deskapp
+      - name: Regenerate frontend contract helpers
+        run: |
+          pnpm generate:schemas
+          git diff --exit-code -- src/generated/ || (
+            echo "::error::Generated frontend contract helpers changed. Run 'pnpm generate:schemas' in deskapp to regenerate."
+            exit 1
+          )
+        working-directory: deskapp
       - name: Run frontend tests (contract tests)
         run: pnpm test
         working-directory: deskapp

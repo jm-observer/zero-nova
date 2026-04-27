@@ -19,6 +19,12 @@ import {
     renderTokenRow,
     type RunFilter,
 } from './agent-console-renderers';
+import {
+    mergeSkillPanelItems,
+    renderMemoryHitsHtml,
+    renderSkillsPanelHtml,
+    renderToolsPanelHtml,
+} from './agent-console-panel-renderers';
 import type {
     AgentRuntimeSnapshot,
     AuditLogView,
@@ -890,56 +896,8 @@ export class AgentConsoleView {
         }
 
         const tools = (toolsState?.data ?? []).map(tool => ({ ...tool, ...this.state.getToolStatus(sessionId ?? '', tool.name) }));
-        if (tools.length === 0) {
-            const availableTools = this.state.agentRuntimeState.data?.availableTools ?? [];
-            if (availableTools.length === 0) {
-                toolsList.innerHTML = `<div class="empty-hint">${escapeHtml(t('console.no_data'))}</div>`;
-                return;
-            }
-
-            const summary = `${availableTools.length} ${t('common.results')}`;
-            toolsList.innerHTML = `
-                <div class="tool-summary">${escapeHtml(summary)}</div>
-                ${availableTools
-                    .map(
-                        toolName => `
-                            <div class="tool-item">
-                                <span class="tool-name">${escapeHtml(toolName)}</span>
-                                <span class="tool-source-badge">${escapeHtml(t('common.none'))}</span>
-                            </div>
-                        `
-                    )
-                    .join('')}
-            `;
-            return;
-        }
-
-        // 统计各类工具数量
-        const unlockedCount = tools.filter(t => t.source === 'skill_unlocked').length;
-        const runnningCount = tools.filter(t => t.lastCallStatus === 'running').length;
-
-        toolsList.innerHTML = `
-            <div class="tool-summary">
-                <span>${escapeHtml(String(tools.length))} ${t('console.tools_count')}</span>
-                ${runnningCount > 0 ? `<span class="tool-running-badge">${escapeHtml(String(runnningCount))} ${t('tools.running')}</span>` : ''}
-                ${unlockedCount > 0 ? `<span class="tool-unlocked-badge">${escapeHtml(String(unlockedCount))} ${t('tools.unlocked')}</span>` : ''}
-            </div>
-            ${tools
-                .map(
-                    tool => {
-                        const statusClass = tool.lastCallStatus === 'success' ? 'tool-success' : tool.lastCallStatus === 'error' ? 'tool-error' : '';
-                        const unlockedBadge = tool.source === 'skill_unlocked' ? ' <span class="tool-new-badge">NEW</span>' : '';
-                        return `
-                            <div class="tool-item ${statusClass}">
-                                <span class="tool-name">${escapeHtml(tool.name)}${unlockedBadge}</span>
-                                <span class="tool-source-badge ${escapeHtml(tool.source)}">${escapeHtml(tool.source)}</span>
-                                <span class="tool-desc">${escapeHtml(tool.description)}</span>
-                            </div>
-                        `;
-                    }
-                )
-                .join('')}
-        `;
+        const availableTools = this.state.agentRuntimeState.data?.availableTools ?? [];
+        toolsList.innerHTML = renderToolsPanelHtml(tools, availableTools);
     }
 
     private renderSkills() {
@@ -953,7 +911,8 @@ export class AgentConsoleView {
         const skillState = sessionId
             ? (this.state.getSessionResourceState(sessionId, 'skills') as ResourceState<SkillBindingView[]> | undefined)
             : undefined;
-        const skillBindings = new Map((skillState?.data ?? []).map(binding => [binding.id, binding] as const));
+        const skillBindings = skillState?.data ?? [];
+        const skillBindingMap = new Map(skillBindings.map(binding => [binding.id, binding] as const));
         const agentSkills = this.state.agentRuntimeState.data?.skills ?? [];
         const activeSkills = this.state.agentRuntimeState.data?.activeSkills ?? [];
 
@@ -967,48 +926,14 @@ export class AgentConsoleView {
             return;
         }
 
-        // 合并 SkillBindingView 和 agentSkills
-        const items: Array<{ id: string; label: string; enabled: boolean; source: string; sticky?: boolean; contentPreview?: string }> = [];
-        for (const [id, binding] of skillBindings) {
-            items.push({ id, label: binding.title, enabled: binding.enabled, source: binding.source, sticky: binding.sticky, contentPreview: binding.contentPreview });
-        }
-        // 补充不在 SkillBindingView 中的 agentSkills
-        agentSkills.forEach(skill => {
-            if (!skillBindings.has(skill.id)) {
-                items.push({ id: skill.id, label: skill.title || skill.id, enabled: skill.enabled, source: 'agent' });
-            }
-        });
-        // 补充 pure activeSkills（string 类型）
-        activeSkills.forEach(skillId => {
-            if (!skillBindings.has(skillId) && !agentSkills.find(s => s.id === skillId)) {
-                items.push({ id: skillId, label: skillId, enabled: true, source: 'runtime' });
-            }
-        });
+        const items = mergeSkillPanelItems(skillBindings, agentSkills, activeSkills);
 
         if (items.length === 0) {
             skillsList.innerHTML = `<div class="empty-hint">${escapeHtml(t('console.no_data'))}</div>`;
             return;
         }
 
-        // 统计不同类型
-        const runtimeCount = items.filter(i => i.source === 'runtime').length;
-        const summaryHtml = runtimeCount > 0 ? ` <span class="skill-runtime-badge">${escapeHtml(String(runtimeCount))} ${t('skills.runtime')}</span>` : '';
-
-        skillsList.innerHTML = `
-            <div class="skill-summary">${escapeHtml(String(items.length))} ${t('console.skills_count')}${summaryHtml}</div>
-            ${items
-                .map(
-                    skill => `
-                        <div class="skill-item ${skill.enabled ? 'enabled' : 'disabled'} ${skill.sticky ? 'skill-sticky' : ''}">
-                            <span class="skill-status-dot"></span>
-                            <span class="skill-name">${escapeHtml(skill.label)}</span>
-                            <span class="skill-source-badge ${skill.source === 'runtime' ? 'skill-runtime-badge' : ''}">${escapeHtml(skill.source)}</span>
-                            ${skill.sticky ? '<span class="skill-sticky-badge">📌</span>' : ''}
-                        </div>
-                    `
-                )
-                .join('')}
-        `;
+        skillsList.innerHTML = renderSkillsPanelHtml(items);
 
         // 绑定技能详情点击事件
         const skillItems = skillsList.querySelectorAll('.skill-item');
@@ -1018,13 +943,11 @@ export class AgentConsoleView {
             el.addEventListener('click', () => {
                 const skillId = (el.dataset.skillId || el.querySelector('.skill-name')?.textContent)?.trim();
                 if (!skillId) return;
-                const binding = skillBindings.get(skillId);
+                const binding = skillBindingMap.get(skillId);
                 if (binding && binding.contentPreview) {
                     this.bus.emit(Events.NOTIFICATION, { type: 'info', message: `${binding.title}:\n${binding.contentPreview}` });
                 }
             });
-            // 保存 skillId 供点击事件使用
-            el.dataset.skillId = items[Array.from(skillItems).indexOf(el)]?.id || '';
         });
     }
 
@@ -1071,33 +994,7 @@ export class AgentConsoleView {
             return;
         }
 
-        // 近似数据警告：后端尚未实现精确命中记录，当前为 memory.search 近似结果
-        const approximateWarning = memoryState?.unsupported
-            ? `<div class="memory-approximate-warning">${escapeHtml(t('console.memory_approximate'))}</div>`
-            : '';
-
-        // 统计各类命中率
-        const semanticHits = hits.filter(h => h.sourceType === 'semantic').length;
-        const keywordHits = hits.filter(h => h.sourceType === 'keyword').length;
-        const distillationHits = hits.filter(h => h.sourceType === 'distillation').length;
-        const hitSummary = [semanticHits > 0 ? `${semanticHits} ${t('memory.semantic')}` : '', keywordHits > 0 ? `${keywordHits} ${t('memory.keyword')}` : '', distillationHits > 0 ? `${distillationHits} ${t('memory.distillation')}` : ''].filter(Boolean).join(', ');
-        const summaryHtml = hitSummary ? `<div class="memory-hit-summary">${escapeHtml(hitSummary)}</div>` : '';
-
-        memoryHits.innerHTML = `
-            ${approximateWarning}
-            ${summaryHtml}
-            ${hits
-                .map(
-                    hit => `
-                        <div class="memory-hit-item">
-                            <span class="memory-hit-score">${escapeHtml((hit.score * 100).toFixed(1))}%</span>
-                            <span class="memory-hit-content">${escapeHtml(hit.content)}</span>
-                            <span class="memory-hit-source">${escapeHtml(hit.source)}${hit.sourceType ? `<span title="${hit.sourceType}"> · ${escapeHtml(hit.sourceType)}</span>` : ''}</span>
-                        </div>
-                    `
-                )
-                .join('')}
-        `;
+        memoryHits.innerHTML = renderMemoryHitsHtml(hits, Boolean(memoryState?.unsupported));
     }
 
     private renderRuns() {

@@ -2,8 +2,8 @@ use crate::conversation_service::ConversationService;
 use crate::types::{AppAgent, AppEvent, AppMessage, AppSession};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use nova_core::config::AppConfig;
-use nova_core::provider::LlmClient;
+use nova_agent::config::AppConfig;
+use nova_agent::provider::LlmClient;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub trait AgentApplication: Send + Sync {
         session_id: &str,
         input: &str,
         sender: mpsc::Sender<AppEvent>,
-    ) -> Result<nova_core::agent::TurnResult>;
+    ) -> Result<nova_agent::agent::TurnResult>;
     async fn stop_turn(&self, session_id: &str) -> Result<()>;
 
     async fn list_sessions(&self) -> Result<Vec<AppSession>>;
@@ -125,7 +125,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         session_id: &str,
         input: &str,
         sender: mpsc::Sender<AppEvent>,
-    ) -> Result<nova_core::agent::TurnResult> {
+    ) -> Result<nova_agent::agent::TurnResult> {
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
         let sender_clone = sender.clone();
@@ -182,9 +182,9 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .into_iter()
             .map(|m| AppMessage {
                 role: match m.role {
-                    nova_core::message::Role::System => "system".to_string(),
-                    nova_core::message::Role::User => "user".to_string(),
-                    nova_core::message::Role::Assistant => "assistant".to_string(),
+                    nova_agent::message::Role::System => "system".to_string(),
+                    nova_agent::message::Role::User => "user".to_string(),
+                    nova_agent::message::Role::Assistant => "assistant".to_string(),
                 },
                 content: m.content,
                 timestamp: 0,

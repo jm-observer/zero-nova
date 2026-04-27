@@ -1,7 +1,7 @@
 use clap::Parser;
 use nova_app::bootstrap::build_application;
-use nova_core::config::OriginAppConfig;
-use nova_core::provider::openai_compat::OpenAiCompatClient;
+use nova_agent::config::OriginAppConfig;
+use nova_agent::provider::openai_compat::OpenAiCompatClient;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         origin_config.llm.base_url = url.clone();
     }
 
-    let final_config = nova_core::config::AppConfig::from_origin(origin_config, workspace.clone());
+    let final_config = nova_agent::config::AppConfig::from_origin(origin_config, workspace.clone());
 
     let client = OpenAiCompatClient::new(final_config.llm.api_key.clone(), final_config.llm.base_url.clone());
     let app = build_application(final_config, client).await?;

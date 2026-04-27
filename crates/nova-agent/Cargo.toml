@@ -1,5 +1,5 @@
 [package]
-name = "nova-core"
+name = "nova-agent"
 version = "0.1.0"
 edition = "2021"
 description = "Core agent library for zero-nova"

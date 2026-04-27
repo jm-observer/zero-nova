@@ -1,6 +1,6 @@
 /// 模拟 LLM 客户端用于集成测试
-use nova_core::provider::types::ToolDefinition;
-use nova_core::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
+use nova_agent::provider::types::ToolDefinition;
+use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -42,7 +42,7 @@ impl MockClient {
 impl LlmClient for MockClient {
     async fn stream(
         &self,
-        _messages: &[nova_core::message::Message],
+        _messages: &[nova_agent::message::Message],
         _tools: &[ToolDefinition],
         _config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {

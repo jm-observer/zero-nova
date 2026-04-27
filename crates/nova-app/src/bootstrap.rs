@@ -3,13 +3,13 @@ use crate::conversation_service::ConversationService;
 use anyhow::{bail, Context, Result};
 use nova_conversation::repository::SqliteSessionRepository;
 use nova_conversation::sqlite_manager::SqliteManager;
-use nova_core::agent::{AgentConfig, AgentRuntime};
-use nova_core::agent_catalog::{AgentDescriptor, AgentRegistry};
-use nova_core::config::AppConfig;
-use nova_core::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder, TrimmerConfig};
-use nova_core::provider::LlmClient;
-use nova_core::skill::SkillRegistry;
-use nova_core::tool::ToolRegistry;
+use nova_agent::agent::{AgentConfig, AgentRuntime};
+use nova_agent::agent_catalog::{AgentDescriptor, AgentRegistry};
+use nova_agent::config::AppConfig;
+use nova_agent::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder, TrimmerConfig};
+use nova_agent::provider::LlmClient;
+use nova_agent::skill::SkillRegistry;
+use nova_agent::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -37,10 +37,10 @@ pub async fn build_application<C: LlmClient + 'static>(
         e
     };
 
-    let task_store = Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
+    let task_store = Arc::new(tokio::sync::Mutex::new(nova_agent::tool::builtin::task::TaskStore::new()));
 
     // 预加载项目上下文（R2 修复）
-    let project_context = nova_core::prompt::load_project_context_with_config_async(
+    let project_context = nova_agent::prompt::load_project_context_with_config_async(
         &config.workspace,
         config.project_context_file().as_deref(),
     )
@@ -48,7 +48,7 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let tools = ToolRegistry::new();
     // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
-    nova_core::tool::builtin::register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
+    nova_agent::tool::builtin::register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -129,13 +129,13 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     // 侧信道注入器（Phase 3 G10）
     if config.gateway.side_channel.enabled {
-        let si = nova_core::prompt::SideChannelConfig {
+        let si = nova_agent::prompt::SideChannelConfig {
             enabled: config.gateway.side_channel.enabled,
             skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
             inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
             custom_reminders: vec![],
         };
-        agent.set_side_channel_injector(nova_core::prompt::SideChannelInjector::new(si));
+        agent.set_side_channel_injector(nova_agent::prompt::SideChannelInjector::new(si));
     }
 
     let config_arc = Arc::new(RwLock::new(config.clone()));

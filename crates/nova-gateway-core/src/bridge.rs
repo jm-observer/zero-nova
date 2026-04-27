@@ -1,5 +1,5 @@
 use nova_app::types::{AppAgent, AppEvent, AppMessage, AppSession};
-use nova_core::message::ContentBlock;
+use nova_agent::message::ContentBlock;
 use nova_protocol::{
     Agent, AgentsSwitchResponse, ContentBlockDTO, ErrorPayload, GatewayMessage, MessageDTO, MessageEnvelope,
     ProgressEvent, Session as SessionProtocol, SkillActivatedPayload, SkillExitedPayload, SkillInvocationPayload,

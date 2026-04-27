@@ -9,7 +9,7 @@ name = "nova_cli"
 path = "src/main.rs"
 
 [dependencies]
-nova-core = { workspace = true }
+nova-agent = { workspace = true }
 clap = { workspace = true }
 rustyline = { workspace = true }
 chrono = { workspace = true }

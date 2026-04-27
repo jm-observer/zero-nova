@@ -2,7 +2,7 @@ use crate::snapshot_assembler::RuntimeSnapshotAssembler;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_conversation::SessionService;
-use nova_core::agent_catalog::AgentRegistry;
+use nova_agent::agent_catalog::AgentRegistry;
 use nova_protocol::observability::*;
 
 pub struct AgentWorkspaceService {

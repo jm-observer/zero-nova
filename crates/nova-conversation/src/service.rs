@@ -4,7 +4,7 @@ use crate::repository::SqliteSessionRepository;
 use crate::session::{Session, SessionSummary};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use nova_core::message::{ContentBlock, Message, Role};
+use nova_agent::message::{ContentBlock, Message, Role};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;

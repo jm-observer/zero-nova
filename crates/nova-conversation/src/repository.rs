@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nova_core::message::{ContentBlock, Role};
+use nova_agent::message::{ContentBlock, Role};
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -95,7 +95,7 @@ impl SqliteSessionRepository {
             i64,
             i64,
             crate::control::ControlState,
-            Vec<nova_core::message::Message>,
+            Vec<nova_agent::message::Message>,
         )>,
     > {
         let row = sqlx::query(
@@ -135,7 +135,7 @@ impl SqliteSessionRepository {
                     _ => Role::Assistant,
                 };
                 let content: Vec<ContentBlock> = serde_json::from_str(&content_str)?;
-                history.push(nova_core::message::Message { role, content });
+                history.push(nova_agent::message::Message { role, content });
             }
 
             return Ok(Some((

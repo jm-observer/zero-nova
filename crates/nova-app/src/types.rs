@@ -1,6 +1,6 @@
-use nova_core::message::ContentBlock;
-use nova_core::prompt::SkillInvocationLevel;
-use nova_core::provider::types::Usage;
+use nova_agent::message::ContentBlock;
+use nova_agent::prompt::SkillInvocationLevel;
+use nova_agent::provider::types::Usage;
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
@@ -127,13 +127,13 @@ pub enum AppEvent {
     WorkspaceRestoreAvailable(nova_protocol::observability::WorkspaceRestoreResponse),
 }
 
-impl From<nova_core::event::AgentEvent> for AppEvent {
-    fn from(event: nova_core::event::AgentEvent) -> Self {
+impl From<nova_agent::event::AgentEvent> for AppEvent {
+    fn from(event: nova_agent::event::AgentEvent) -> Self {
         match event {
-            nova_core::event::AgentEvent::TextDelta(text) => AppEvent::Token(text),
-            nova_core::event::AgentEvent::ThinkingDelta(text) => AppEvent::ThinkingDelta(text),
-            nova_core::event::AgentEvent::ToolStart { id, name, input } => AppEvent::ToolStart { id, name, input },
-            nova_core::event::AgentEvent::ToolEnd {
+            nova_agent::event::AgentEvent::TextDelta(text) => AppEvent::Token(text),
+            nova_agent::event::AgentEvent::ThinkingDelta(text) => AppEvent::ThinkingDelta(text),
+            nova_agent::event::AgentEvent::ToolStart { id, name, input } => AppEvent::ToolStart { id, name, input },
+            nova_agent::event::AgentEvent::ToolEnd {
                 id,
                 name,
                 output,
@@ -144,18 +144,18 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                 output,
                 is_error,
             },
-            nova_core::event::AgentEvent::LogDelta { id, name, log, stream } => {
+            nova_agent::event::AgentEvent::LogDelta { id, name, log, stream } => {
                 AppEvent::ToolLog { id, name, log, stream }
             }
-            nova_core::event::AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
-            nova_core::event::AgentEvent::IterationLimitReached { iterations } => {
+            nova_agent::event::AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
+            nova_agent::event::AgentEvent::IterationLimitReached { iterations } => {
                 AppEvent::IterationLimitReached { iterations }
             }
-            nova_core::event::AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
-            nova_core::event::AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
-            nova_core::event::AgentEvent::Error(msg) => AppEvent::Error(msg),
-            nova_core::event::AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),
-            nova_core::event::AgentEvent::AgentSwitched {
+            nova_agent::event::AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
+            nova_agent::event::AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
+            nova_agent::event::AgentEvent::Error(msg) => AppEvent::Error(msg),
+            nova_agent::event::AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),
+            nova_agent::event::AgentEvent::AgentSwitched {
                 agent_id,
                 agent_name,
                 description,
@@ -166,8 +166,8 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                     description,
                 },
             },
-            nova_core::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
-            nova_core::event::AgentEvent::TaskStatusChanged {
+            nova_agent::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
+            nova_agent::event::AgentEvent::TaskStatusChanged {
                 id,
                 subject,
                 status,
@@ -178,11 +178,11 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                 status,
                 active_form,
             },
-            nova_core::event::AgentEvent::BackgroundTaskComplete { id, name } => {
+            nova_agent::event::AgentEvent::BackgroundTaskComplete { id, name } => {
                 AppEvent::BackgroundTaskComplete { id, name }
             }
-            nova_core::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
-            nova_core::event::AgentEvent::SkillActivated {
+            nova_agent::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
+            nova_agent::event::AgentEvent::SkillActivated {
                 skill_id,
                 skill_name,
                 sticky,
@@ -192,15 +192,15 @@ impl From<nova_core::event::AgentEvent> for AppEvent {
                 skill_name,
                 sticky,
             },
-            nova_core::event::AgentEvent::SkillSwitched {
+            nova_agent::event::AgentEvent::SkillSwitched {
                 from_skill, to_skill, ..
             } => AppEvent::SkillSwitched { from_skill, to_skill },
-            nova_core::event::AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
-            nova_core::event::AgentEvent::SkillRouteEvaluated {
+            nova_agent::event::AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
+            nova_agent::event::AgentEvent::SkillRouteEvaluated {
                 confidence, reasoning, ..
             } => AppEvent::SkillRouteEvaluated { confidence, reasoning },
-            nova_core::event::AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
-            nova_core::event::AgentEvent::SkillInvocation {
+            nova_agent::event::AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
+            nova_agent::event::AgentEvent::SkillInvocation {
                 skill_id,
                 skill_name,
                 level,

@@ -5,7 +5,7 @@ edition = "2021"
 description = "WebSocket server for zero-nova"
 
 [dependencies]
-nova-core = { workspace = true }
+nova-agent = { workspace = true }
 nova-conversation = { workspace = true }
 nova-app = { workspace = true }
 nova-protocol = { workspace = true }

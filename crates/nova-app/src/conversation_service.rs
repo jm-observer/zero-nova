@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_conversation::SessionService;
-use nova_core::agent::AgentRuntime;
-use nova_core::agent_catalog::AgentRegistry;
-use nova_core::event::AgentEvent;
-use nova_core::message::{ContentBlock, Message, Role};
-use nova_core::prompt::PromptConfig;
-use nova_core::provider::LlmClient;
+use nova_agent::agent::AgentRuntime;
+use nova_agent::agent_catalog::AgentRegistry;
+use nova_agent::event::AgentEvent;
+use nova_agent::message::{ContentBlock, Message, Role};
+use nova_agent::prompt::PromptConfig;
+use nova_agent::provider::LlmClient;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -33,7 +33,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         session_id: &str,
         input: &str,
         event_tx: mpsc::Sender<AgentEvent>,
-    ) -> Result<nova_core::agent::TurnResult> {
+    ) -> Result<nova_agent::agent::TurnResult> {
         self.execute_agent_turn(session_id, input, event_tx).await
     }
 
@@ -49,7 +49,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         &self,
         session_id: &str,
         agent_id: &str,
-    ) -> Result<nova_core::agent_catalog::AgentDescriptor> {
+    ) -> Result<nova_agent::agent_catalog::AgentDescriptor> {
         let agent = self
             .agent_registry
             .get(agent_id)
@@ -66,7 +66,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         session_id: &str,
         input: &str,
         event_tx: mpsc::Sender<AgentEvent>,
-    ) -> Result<nova_core::agent::TurnResult> {
+    ) -> Result<nova_agent::agent::TurnResult> {
         let turn_id = uuid::Uuid::new_v4().to_string();
         let run_id = turn_id.clone(); // Use turn_id as run_id for simplicity
         let now = Utc::now().timestamp_millis();
@@ -131,8 +131,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         self.sessions
             .append_message(
                 session_id,
-                nova_core::message::Role::User,
-                vec![nova_core::message::ContentBlock::Text {
+                nova_agent::message::Role::User,
+                vec![nova_agent::message::ContentBlock::Text {
                     text: input.to_string(),
                 }],
             )
@@ -156,7 +156,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let use_turn_context = self.agent.config.use_turn_context;
         if use_turn_context {
             // 预加载项目上下文（R2 修复）
-            let project_context = nova_core::prompt::load_project_context_with_config_async(
+            let project_context = nova_agent::prompt::load_project_context_with_config_async(
                 &self.agent.config.workspace,
                 self.agent.config.project_context_file.as_deref(),
             )

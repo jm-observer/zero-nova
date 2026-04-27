@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::RwLock;
 
-use nova_core::message::Message;
+use nova_agent::message::Message;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 

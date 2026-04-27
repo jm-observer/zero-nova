@@ -7,7 +7,7 @@ pub mod session;
 pub mod sqlite_manager;
 
 pub use cache::SessionCache;
-pub use nova_core::message::{ContentBlock, Message, Role};
+pub use nova_agent::message::{ContentBlock, Message, Role};
 pub use repository::SqliteSessionRepository;
 pub use service::SessionService;
 pub use session::{Session, SessionSummary};

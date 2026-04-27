@@ -5,7 +5,7 @@ edition = "2021"
 description = "stdio server for zero-nova"
 
 [dependencies]
-nova-core = { workspace = true }
+nova-agent = { workspace = true }
 nova-app = { workspace = true }
 nova-protocol = { workspace = true }
 nova-gateway-core = { workspace = true }

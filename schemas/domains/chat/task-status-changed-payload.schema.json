@@ -1,0 +1,39 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Task 状态变化事件 payload",
+  "properties": {
+    "activeForm": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "isMainTask": {
+      "type": "boolean"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "taskId": {
+      "type": "string"
+    },
+    "taskSubject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "isMainTask",
+    "status",
+    "taskId",
+    "taskSubject"
+  ],
+  "title": "TaskStatusChangedPayload",
+  "type": "object"
+}

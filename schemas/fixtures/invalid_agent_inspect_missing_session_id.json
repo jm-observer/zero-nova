@@ -1,0 +1,7 @@
+{
+  "id": "inspect-002",
+  "type": "agent.inspect",
+  "payload": {
+    "agentId": "agent-default"
+  }
+}

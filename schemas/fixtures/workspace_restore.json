@@ -1,0 +1,5 @@
+{
+  "id": "restore-001",
+  "type": "workspace.restore",
+  "payload": {}
+}

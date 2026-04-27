@@ -1,0 +1,33 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Skill 激活事件 payload",
+  "properties": {
+    "reason": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skillId": {
+      "type": "string"
+    },
+    "skillName": {
+      "type": "string"
+    },
+    "sticky": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "reason",
+    "skillId",
+    "skillName",
+    "sticky"
+  ],
+  "title": "SkillActivatedPayload",
+  "type": "object"
+}

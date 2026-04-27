@@ -16,6 +16,7 @@ fn load_fixture(name: &str) -> String {
 #[test]
 fn valid_contract_fixtures_deserialize() {
     let fixtures = [
+        "agent_inspect.json",
         "welcome.json",
         "error.json",
         "chat.json",
@@ -23,6 +24,7 @@ fn valid_contract_fixtures_deserialize() {
         "skill_activated.json",
         "task_status_changed.json",
         "progress_event.json",
+        "workspace_restore.json",
     ];
 
     for fixture in fixtures {
@@ -33,16 +35,23 @@ fn valid_contract_fixtures_deserialize() {
 }
 
 #[test]
-fn welcome_fixture_allows_missing_optional_field() {
-    let raw = load_fixture("invalid_welcome_missing_optional_field.json");
+fn workspace_restore_fixture_allows_empty_payload() {
+    let raw = load_fixture("workspace_restore.json");
     let parsed = serde_json::from_str::<GatewayMessage>(&raw).unwrap();
     let serialized = serde_json::to_value(parsed).unwrap();
-    assert_eq!(serialized["payload"]["setupRequired"], false);
+    assert!(serialized["payload"].is_object());
+    assert!(serialized["payload"]["userId"].is_null());
 }
 
 #[test]
 fn invalid_contract_fixtures_fail_deserialize() {
-    for fixture in ["invalid_chat_missing_input.json", "invalid_error_missing_code.json"] {
+    for fixture in [
+        "invalid_agent_inspect_missing_session_id.json",
+        "invalid_chat_missing_input.json",
+        "invalid_error_missing_code.json",
+        "invalid_welcome_missing_optional_field.json",
+        "invalid_workspace_restore_missing_payload.json",
+    ] {
         let raw = load_fixture(fixture);
         let parsed = serde_json::from_str::<GatewayMessage>(&raw);
         assert!(parsed.is_err(), "fixture should fail: {fixture}");

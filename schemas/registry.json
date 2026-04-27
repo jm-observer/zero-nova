@@ -14,73 +14,144 @@
   "types": {
     "AgentInspectRequest": {
       "domain": "observability",
+      "frontend": true,
+      "kind": "request",
+      "messageType": "agent.inspect",
+      "name": "AgentInspectRequest",
       "path": "schemas/domains/observability/agent-inspect-request.schema.json",
       "title": "AgentInspectRequest"
     },
     "AgentInspectResponse": {
       "domain": "observability",
+      "frontend": true,
+      "kind": "response",
+      "messageType": "agent.inspect.response",
+      "name": "AgentInspectResponse",
       "path": "schemas/domains/observability/agent-inspect-response.schema.json",
       "title": "AgentInspectResponse"
     },
     "ChatCompletePayload": {
       "domain": "chat",
+      "frontend": true,
+      "kind": "payload",
+      "messageType": "chat.complete",
+      "name": "ChatCompletePayload",
       "path": "schemas/domains/chat/chat-complete-payload.schema.json",
       "title": "ChatCompletePayload"
     },
     "ChatPayload": {
       "domain": "chat",
+      "frontend": true,
+      "kind": "payload",
+      "messageType": "chat",
+      "name": "ChatPayload",
       "path": "schemas/domains/chat/chat-payload.schema.json",
       "title": "ChatPayload"
     },
     "ErrorPayload": {
       "domain": "system",
+      "frontend": true,
+      "kind": "payload",
+      "messageType": "error",
+      "name": "ErrorPayload",
       "path": "schemas/domains/system/error-payload.schema.json",
       "title": "ErrorPayload"
     },
     "GatewayMessage": {
       "description": "Gateway websocket message root.",
       "domain": "gateway",
+      "frontend": true,
+      "kind": "message",
+      "name": "GatewayMessage",
       "path": "schemas/domains/gateway/gateway-message.schema.json",
       "title": "GatewayMessage"
     },
     "MessageEnvelope": {
       "description": "Tagged gateway envelope payload.",
       "domain": "gateway",
+      "frontend": true,
+      "kind": "message",
+      "name": "MessageEnvelope",
       "path": "schemas/domains/gateway/message-envelope.schema.json",
       "title": "MessageEnvelope"
     },
     "ProgressEvent": {
       "domain": "chat",
+      "frontend": true,
+      "kind": "event",
+      "messageType": "chat.progress",
+      "name": "ProgressEvent",
       "path": "schemas/domains/chat/progress-event.schema.json",
       "title": "ProgressEvent"
     },
     "SessionCreateRequest": {
       "domain": "session",
+      "frontend": true,
+      "kind": "request",
+      "messageType": "sessions.create",
+      "name": "SessionCreateRequest",
       "path": "schemas/domains/session/session-create-request.schema.json",
       "title": "SessionCreateRequest"
     },
     "SessionCreateResponse": {
       "domain": "session",
+      "frontend": true,
+      "kind": "response",
+      "messageType": "sessions.create.response",
+      "name": "SessionCreateResponse",
       "path": "schemas/domains/session/session-create-response.schema.json",
       "title": "SessionCreateResponse"
     },
     "SessionIdPayload": {
       "domain": "session",
+      "frontend": true,
+      "kind": "payload",
+      "name": "SessionIdPayload",
       "path": "schemas/domains/session/session-id-payload.schema.json",
       "title": "SessionIdPayload"
     },
+    "SkillActivatedPayload": {
+      "domain": "chat",
+      "frontend": true,
+      "kind": "event",
+      "messageType": "skill.activated",
+      "name": "SkillActivatedPayload",
+      "path": "schemas/domains/chat/skill-activated-payload.schema.json",
+      "title": "SkillActivatedPayload"
+    },
+    "TaskStatusChangedPayload": {
+      "domain": "chat",
+      "frontend": true,
+      "kind": "event",
+      "messageType": "task.status_changed",
+      "name": "TaskStatusChangedPayload",
+      "path": "schemas/domains/chat/task-status-changed-payload.schema.json",
+      "title": "TaskStatusChangedPayload"
+    },
     "WelcomePayload": {
       "domain": "system",
+      "frontend": true,
+      "kind": "payload",
+      "messageType": "welcome",
+      "name": "WelcomePayload",
       "path": "schemas/domains/system/welcome-payload.schema.json",
       "title": "WelcomePayload"
     },
     "WorkspaceRestoreRequest": {
       "domain": "observability",
+      "frontend": true,
+      "kind": "request",
+      "messageType": "workspace.restore",
+      "name": "WorkspaceRestoreRequest",
       "path": "schemas/domains/observability/workspace-restore-request.schema.json",
       "title": "WorkspaceRestoreRequest"
     },
     "WorkspaceRestoreResponse": {
       "domain": "observability",
+      "frontend": true,
+      "kind": "response",
+      "messageType": "workspace.restore.response",
+      "name": "WorkspaceRestoreResponse",
       "path": "schemas/domains/observability/workspace-restore-response.schema.json",
       "title": "WorkspaceRestoreResponse"
     }

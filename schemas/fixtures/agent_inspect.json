@@ -1,0 +1,8 @@
+{
+  "id": "inspect-001",
+  "type": "agent.inspect",
+  "payload": {
+    "sessionId": "session-123",
+    "agentId": "agent-default"
+  }
+}

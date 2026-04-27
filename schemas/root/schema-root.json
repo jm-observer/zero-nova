@@ -13,6 +13,12 @@
         },
         "ProgressEvent": {
           "$ref": "../schemas/domains/chat/progress-event.schema.json"
+        },
+        "SkillActivatedPayload": {
+          "$ref": "../schemas/domains/chat/skill-activated-payload.schema.json"
+        },
+        "TaskStatusChangedPayload": {
+          "$ref": "../schemas/domains/chat/task-status-changed-payload.schema.json"
         }
       },
       "type": "object"

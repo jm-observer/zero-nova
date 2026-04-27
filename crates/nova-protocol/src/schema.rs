@@ -62,6 +62,12 @@ const FIXTURES: &[FixtureSpec] = &[
         content: include_str!("../../../schemas/fixtures/invalid_agent_inspect_missing_session_id.json"),
     },
     FixtureSpec {
+        file_name: "invalid_agent_inspect_missing_agent_id.json",
+        message_type: "agent.inspect",
+        valid: false,
+        content: include_str!("../../../schemas/fixtures/invalid_agent_inspect_missing_agent_id.json"),
+    },
+    FixtureSpec {
         file_name: "invalid_chat_missing_input.json",
         message_type: "chat",
         valid: false,
@@ -799,6 +805,52 @@ mod tests {
     }
 
     #[test]
+    fn fixtures_deserialize_into_expected_gateway_variants() {
+        let agent_inspect = serde_json::from_str::<GatewayMessage>(FIXTURES[0].content).unwrap();
+        match agent_inspect.envelope {
+            MessageEnvelope::AgentInspect(payload) => {
+                assert_eq!(payload.session_id, "session-123");
+                assert_eq!(payload.agent_id, "agent-default");
+            }
+            other => panic!("unexpected envelope for agent_inspect fixture: {other:?}"),
+        }
+
+        let workspace_restore = serde_json::from_str::<GatewayMessage>(
+            FIXTURES
+                .iter()
+                .find(|fixture| fixture.file_name == "workspace_restore.json")
+                .unwrap()
+                .content,
+        )
+        .unwrap();
+        match workspace_restore.envelope {
+            MessageEnvelope::WorkspaceRestore(payload) => {
+                assert_eq!(payload.user_id, None);
+            }
+            other => panic!("unexpected envelope for workspace_restore fixture: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_agent_inspect_fixtures_fail_rust_deserialization() {
+        for fixture_name in [
+            "invalid_agent_inspect_missing_session_id.json",
+            "invalid_agent_inspect_missing_agent_id.json",
+        ] {
+            let content = FIXTURES
+                .iter()
+                .find(|fixture| fixture.file_name == fixture_name)
+                .unwrap()
+                .content;
+
+            assert!(
+                serde_json::from_str::<GatewayMessage>(content).is_err(),
+                "{fixture_name} should be rejected"
+            );
+        }
+    }
+
+    #[test]
     fn workspace_restore_envelope_requires_payload() {
         let root = create_temp_root("schema-workspace-restore");
         export_repository_artifacts(&root).unwrap();
@@ -839,6 +891,9 @@ mod tests {
         assert_eq!(lines, sorted);
         assert!(root
             .join("schemas/fixtures/invalid_agent_inspect_missing_session_id.json")
+            .is_file());
+        assert!(root
+            .join("schemas/fixtures/invalid_agent_inspect_missing_agent_id.json")
             .is_file());
         assert!(root
             .join("schemas/fixtures/invalid_workspace_restore_missing_payload.json")

@@ -12,6 +12,7 @@ pub mod prompt;
 pub mod provider;
 pub mod skill;
 pub mod tool;
+pub mod conversation;
 
 pub use agent::{AgentConfig, AgentRuntime, TurnResult};
 pub use agent_catalog::{AgentDescriptor, AgentRegistry};

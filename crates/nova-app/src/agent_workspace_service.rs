@@ -1,7 +1,7 @@
 use crate::snapshot_assembler::RuntimeSnapshotAssembler;
 use anyhow::{Context, Result};
 use chrono::Utc;
-use nova_conversation::SessionService;
+use nova_agent::conversation::SessionService;
 use nova_agent::agent_catalog::AgentRegistry;
 use nova_protocol::observability::*;
 
@@ -130,11 +130,11 @@ impl AgentWorkspaceService {
             .sessions
             .override_model(
                 session_id,
-                req.orchestration.map(|m| nova_conversation::control::ModelRef {
+                req.orchestration.map(|m| nova_agent::conversation::control::ModelRef {
                     provider: m.provider,
                     model: m.model,
                 }),
-                req.execution.map(|m| nova_conversation::control::ModelRef {
+                req.execution.map(|m| nova_agent::conversation::control::ModelRef {
                     provider: m.provider,
                     model: m.model,
                 }),

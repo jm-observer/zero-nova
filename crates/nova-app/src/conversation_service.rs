@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use nova_conversation::SessionService;
+use nova_agent::conversation::SessionService;
 use nova_agent::agent::AgentRuntime;
 use nova_agent::agent_catalog::AgentRegistry;
 use nova_agent::event::AgentEvent;
@@ -74,7 +74,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         // Phase 2: Create Run record
         self.sessions
             .get_repository()
-            .create_run(&nova_conversation::model::RunRecord {
+            .create_run(&nova_agent::conversation::model::RunRecord {
                 id: run_id.clone(),
                 session_id: session_id.to_string(),
                 status: "running".to_string(),
@@ -93,7 +93,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 match &event {
                     AgentEvent::ToolStart { id, name: _, input } => {
                         let _ = repository
-                            .create_run_step(&nova_conversation::model::RunStepRecord {
+                            .create_run_step(&nova_agent::conversation::model::RunStepRecord {
                                 id: id.clone(),
                                 run_id: run_id_clone.clone(),
                                 step_type: "tool_use".to_string(),
@@ -188,7 +188,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 &turn_ctx,
             );
             // We use Value for storage to avoid deep coupling
-            let snapshot_internal = nova_conversation::control::LastTurnSnapshot {
+            let snapshot_internal = nova_agent::conversation::control::LastTurnSnapshot {
                 turn_id: snapshot.turn_id.clone(),
                 prepared_at: snapshot.prepared_at,
                 prompt_preview: snapshot

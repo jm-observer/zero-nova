@@ -1,11 +1,11 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::RwLock;
 
-use nova_agent::message::Message;
+use crate::message::Message;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::control::ControlState;
+use crate::conversation::control::ControlState;
 
 /// Session represents a single conversation turn with its own lock.
 ///

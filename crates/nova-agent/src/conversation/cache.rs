@@ -1,4 +1,4 @@
-use crate::session::Session;
+use crate::conversation::session::Session;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 

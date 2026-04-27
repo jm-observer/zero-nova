@@ -1,10 +1,10 @@
-use crate::cache::SessionCache;
-use crate::control::ControlState;
-use crate::repository::SqliteSessionRepository;
-use crate::session::{Session, SessionSummary};
+use crate::conversation::cache::SessionCache;
+use crate::conversation::control::ControlState;
+use crate::conversation::repository::SqliteSessionRepository;
+use crate::conversation::session::{Session, SessionSummary};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use nova_agent::message::{ContentBlock, Message, Role};
+use crate::message::{ContentBlock, Message, Role};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -127,19 +127,16 @@ impl SessionService {
         let (wrapper_tx, wrapper_rx) = oneshot::channel();
         let was_loaded = {
             let mut loading = self.loading.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            // Wrap the real tx we'll use later
             loading.insert(id_owned.clone(), wrapper_tx)
         };
 
         match was_loaded {
             Some(_prev_tx) => {
                 // We lost the race: await the receiver from the first-ordered caller.
-                // The first-ordered caller will send via its `tx`, and our `rx` receives it.
                 if let Ok(s) = wrapper_rx.await {
                     self.cache.insert(id_owned, s.clone());
                     return Ok(Some(s));
                 }
-                // Cache check for second-ordered fallback
                 if let Some(s) = self.cache.get(id) {
                     return Ok(Some(s));
                 }
@@ -180,21 +177,12 @@ impl SessionService {
     pub async fn append_message(&self, session_id: &str, role: Role, content: Vec<ContentBlock>) -> Result<()> {
         let session = self.get(session_id).await?.context("Session not found")?;
         let now = Utc::now().timestamp_millis();
-
-        // 1. 更新内存
         {
             let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            history.push(Message {
-                role: role.clone(),
-                content: content.clone(),
-            });
+            history.push(Message { role: role.clone(), content: content.clone() });
             session.touch_updated_at();
         }
-
-        // 2. 持久化消息
         self.repository.save_message(session_id, role, content, now).await?;
-
-        // 3. 更新会话元数据
         let rc = {
             let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
             runtime_control.clone()
@@ -209,29 +197,17 @@ impl SessionService {
                 &rc,
             )
             .await?;
-
         Ok(())
     }
 
     pub async fn list_sorted(&self) -> Vec<SessionSummary> {
         let mut list: Vec<_> = self.cache.list();
-
-        list.sort_by(|a, b| {
-            b.updated_at
-                .load(Ordering::SeqCst)
-                .cmp(&a.updated_at.load(Ordering::SeqCst))
-        });
-
+        list.sort_by_key(|b| std::cmp::Reverse(b.updated_at.load(Ordering::SeqCst)));
         list.into_iter()
             .map(|s| SessionSummary {
                 id: s.id.clone(),
                 name: s.name.clone(),
-                agent_id: s
-                    .control
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .active_agent
-                    .clone(),
+                agent_id: s.control.read().unwrap_or_else(|poisoned| poisoned.into_inner()).active_agent.clone(),
                 created_at: s.created_at,
                 updated_at: s.updated_at.load(Ordering::SeqCst),
                 message_count: s.history.read().unwrap_or_else(|poisoned| poisoned.into_inner()).len(),
@@ -241,12 +217,10 @@ impl SessionService {
 
     pub async fn set_active_agent(&self, session_id: &str, agent_id: &str) -> Result<Arc<Session>> {
         let session = self.get(session_id).await?.context("Session not found")?;
-
         {
             let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             control.active_agent = agent_id.to_string();
         }
-
         let rc = {
             let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
             runtime_control.clone()
@@ -261,7 +235,6 @@ impl SessionService {
                 &rc,
             )
             .await?;
-
         Ok(session)
     }
 
@@ -272,7 +245,6 @@ impl SessionService {
 
     pub async fn copy_session(&self, source_id: &str, truncate_index: Option<usize>) -> Result<Option<Arc<Session>>> {
         let source = self.get(source_id).await?.context("Source session not found")?;
-
         let history = source.get_history();
         let new_history = if let Some(idx) = truncate_index {
             if idx < history.len() {
@@ -283,7 +255,6 @@ impl SessionService {
         } else {
             history
         };
-
         let new_id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
         let agent_id = source.control.read().unwrap().active_agent.clone();
@@ -293,7 +264,6 @@ impl SessionService {
             new_control.model_override = source_control.model_override.clone();
         }
         let new_name = format!("{} (Copy)", source.name);
-
         let session = Arc::new(Session {
             control: std::sync::RwLock::new(new_control.clone()),
             id: new_id.clone(),
@@ -304,24 +274,12 @@ impl SessionService {
             chat_lock: Mutex::new(()),
             cancellation_token: RwLock::new(None),
         });
-
         self.repository
-            .save_session(
-                &session.id,
-                &session.name,
-                &agent_id,
-                session.created_at,
-                now,
-                &new_control,
-            )
+            .save_session(&session.id, &session.name, &agent_id, session.created_at, now, &new_control)
             .await?;
-
         for msg in session.get_history() {
-            self.repository
-                .save_message(&session.id, msg.role.clone(), msg.content.clone(), now)
-                .await?;
+            self.repository.save_message(&session.id, msg.role.clone(), msg.content.clone(), now).await?;
         }
-
         self.cache.insert(new_id, session.clone());
         Ok(Some(session))
     }
@@ -329,35 +287,31 @@ impl SessionService {
     pub async fn override_model(
         &self,
         session_id: &str,
-        orchestration: Option<crate::control::ModelRef>,
-        execution: Option<crate::control::ModelRef>,
+        orchestration: Option<crate::conversation::control::ModelRef>,
+        execution: Option<crate::conversation::control::ModelRef>,
     ) -> Result<Arc<Session>> {
         let session = self.get(session_id).await?.context("Session not found")?;
-
         {
             let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             control.model_override.orchestration = orchestration;
             control.model_override.execution = execution;
             control.model_override.updated_at = Utc::now().timestamp_millis();
         }
-
         let rc = {
             let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
             runtime_control.clone()
         };
         self.repository.update_session_runtime_control(session_id, &rc).await?;
-
         Ok(session)
     }
 
     pub async fn update_runtime_state(
         &self,
         session_id: &str,
-        snapshot: Option<crate::control::LastTurnSnapshot>,
+        snapshot: Option<crate::conversation::control::LastTurnSnapshot>,
         token_delta: Option<(u64, u64, u64, u64)>,
     ) -> Result<()> {
         let session = self.get(session_id).await?.context("Session not found")?;
-
         {
             let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(s) = snapshot {
@@ -371,13 +325,11 @@ impl SessionService {
                 control.token_counters.updated_at = Utc::now().timestamp_millis();
             }
         }
-
         let rc = {
             let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
             runtime_control.clone()
         };
         self.repository.update_session_runtime_control(session_id, &rc).await?;
-
         Ok(())
     }
 }

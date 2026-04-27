@@ -16,7 +16,7 @@ pub struct SessionModelOverride {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelRef {
     pub provider: String,
     pub model: String,

@@ -1,8 +1,8 @@
 use crate::application::{AgentApplication, AgentApplicationImpl};
 use crate::conversation_service::ConversationService;
 use anyhow::{bail, Context, Result};
-use nova_conversation::repository::SqliteSessionRepository;
-use nova_conversation::sqlite_manager::SqliteManager;
+use nova_agent::conversation::repository::SqliteSessionRepository;
+use nova_agent::conversation::sqlite_manager::SqliteManager;
 use nova_agent::agent::{AgentConfig, AgentRuntime};
 use nova_agent::agent_catalog::{AgentDescriptor, AgentRegistry};
 use nova_agent::config::AppConfig;
@@ -147,8 +147,8 @@ pub async fn build_application<C: LlmClient + 'static>(
         .context("Data directory contains non-UTF8 characters")?;
     let sqlite_manager = SqliteManager::new(data_dir).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
-    let session_cache = Arc::new(nova_conversation::SessionCache::new());
-    let session_service = nova_conversation::SessionService::new(session_cache, repository);
+    let session_cache = Arc::new(nova_agent::conversation::SessionCache::new());
+    let session_service = nova_agent::conversation::SessionService::new(session_cache, repository);
     session_service.load_all().await?;
 
     let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());

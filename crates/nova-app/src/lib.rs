@@ -12,7 +12,7 @@ pub use bootstrap::{build_application, BootstrapOptions};
 pub use conversation_service::ConversationService;
 pub use types::{AppAgent, AppEvent, AppMessage, AppSession};
 
-pub use nova_conversation::SessionService;
+pub use nova_agent::conversation::SessionService;
 pub use nova_agent::event::AgentEvent;
 pub use nova_agent::message::ContentBlock;
 pub use nova_agent::provider::LlmClient;

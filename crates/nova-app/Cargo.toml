@@ -6,7 +6,7 @@ description = "Application门面 for zero-nova"
 
 [dependencies]
 nova-agent = { workspace = true }
-nova-conversation = { workspace = true }
+
 nova-protocol = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }

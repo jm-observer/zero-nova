@@ -1,4 +1,4 @@
-use nova_app::types::{AppAgent, AppEvent, AppMessage, AppSession};
+use nova_agent::types::{AppAgent, AppEvent, AppMessage, AppSession};
 use nova_agent::message::ContentBlock;
 use nova_protocol::{
     Agent, AgentsSwitchResponse, ContentBlockDTO, ErrorPayload, GatewayMessage, MessageDTO, MessageEnvelope,

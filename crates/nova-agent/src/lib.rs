@@ -12,6 +12,14 @@ pub mod prompt;
 pub mod provider;
 pub mod skill;
 pub mod tool;
+pub mod facade;
+
+
+
+
+
+
+
 pub mod conversation;
 
 pub use agent::{AgentConfig, AgentRuntime, TurnResult};
@@ -25,6 +33,9 @@ pub use prompt::{
 pub use provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 pub use skill::{CapabilityPolicy, FileToolPriority, PolicySource, Skill, SkillPackage, SkillRegistry, ToolPolicy};
 pub use tool::{Tool, ToolContext, ToolDefinition, ToolRegistry};
+
+pub use facade::application::{AgentApplication, AgentApplicationImpl};
+pub use facade::types::{AppAgent, AppEvent, AppMessage, AppSession};
 
 pub async fn run() -> anyhow::Result<()> {
     log::info!("nova-core started");

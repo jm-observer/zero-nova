@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -69,11 +70,7 @@ pub enum ContentBlockDTO {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: serde_json::Value,
-    },
+    ToolUse { id: String, name: String, input: Value },
     #[serde(rename = "tool_result")]
     ToolResult {
         tool_use_id: String,

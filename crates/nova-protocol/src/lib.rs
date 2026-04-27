@@ -18,6 +18,7 @@ mod tests {
     use crate::chat::*;
     use crate::envelope::*;
     use crate::system::*;
+    use serde_json::{from_str, to_string};
 
     #[test]
     fn test_serialize_event() {
@@ -25,7 +26,7 @@ mod tests {
             require_auth: true,
             setup_required: false,
         }));
-        let json = serde_json::to_string(&msg).unwrap();
+        let json = to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"welcome\""));
         assert!(json.contains("\"requireAuth\":true"));
         assert!(!json.contains("\"id\":"));
@@ -41,7 +42,7 @@ mod tests {
             ..Default::default()
         };
         let msg = GatewayMessage::new_event(MessageEnvelope::SkillActivated(payload));
-        let json = serde_json::to_string(&msg).unwrap();
+        let json = to_string(&msg).unwrap();
         assert!(json.contains("\"skillId\":\"code-review\""));
         assert!(json.contains("\"sticky\":true"));
     }
@@ -54,7 +55,7 @@ mod tests {
             ..Default::default()
         };
         let msg = GatewayMessage::new_event(MessageEnvelope::ToolUnlocked(payload));
-        let json = serde_json::to_string(&msg).unwrap();
+        let json = to_string(&msg).unwrap();
         assert!(json.contains("\"toolName\":\"TaskCreate\""));
         assert!(json.contains("\"source\":\"tool_search\""));
     }
@@ -69,7 +70,7 @@ mod tests {
             ..Default::default()
         };
         let msg = GatewayMessage::new_event(MessageEnvelope::TaskStatusChanged(payload));
-        let json = serde_json::to_string(&msg).unwrap();
+        let json = to_string(&msg).unwrap();
         assert!(json.contains("\"taskId\":\"1\""));
         assert!(json.contains("\"status\":\"completed\""));
         assert!(json.contains("\"isMainTask\":true"));
@@ -99,16 +100,13 @@ mod tests {
             ..Default::default()
         };
 
-        // Test SkillActivatedPayload round-trip
-        let json = serde_json::to_string(&skill_payload).unwrap();
-        let _restored: SkillActivatedPayload = serde_json::from_str(&json).unwrap();
+        let json = to_string(&skill_payload).unwrap();
+        let _restored: SkillActivatedPayload = from_str(&json).unwrap();
 
-        // Test ToolUnlockedPayload round-trip
-        let json = serde_json::to_string(&tool_payload).unwrap();
-        let _restored: ToolUnlockedPayload = serde_json::from_str(&json).unwrap();
+        let json = to_string(&tool_payload).unwrap();
+        let _restored: ToolUnlockedPayload = from_str(&json).unwrap();
 
-        // Test TaskStatusChangedPayload round-trip
-        let json = serde_json::to_string(&task_payload).unwrap();
-        let _restored: TaskStatusChangedPayload = serde_json::from_str(&json).unwrap();
+        let json = to_string(&task_payload).unwrap();
+        let _restored: TaskStatusChangedPayload = from_str(&json).unwrap();
     }
 }

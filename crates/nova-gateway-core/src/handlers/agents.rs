@@ -1,9 +1,11 @@
 use crate::bridge::app_agent_to_protocol;
+use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use log::info;
 use nova_agent::app::AgentApplication;
 use nova_protocol::{
-    AgentsListResponse, AgentsSwitchResponse, GatewayMessage, MessageEnvelope, SessionAgentSwitchPayload,
+    observability::AgentInspectRequest, AgentsListResponse, AgentsSwitchResponse, GatewayMessage, MessageEnvelope,
+    SessionAgentSwitchPayload,
 };
 
 pub async fn handle_agents_list(
@@ -43,7 +45,7 @@ pub async fn handle_agents_switch(
                 .await;
         }
         Err(error) => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 error.to_string(),
@@ -55,7 +57,7 @@ pub async fn handle_agents_switch(
 }
 
 pub async fn handle_agent_inspect(
-    payload: nova_protocol::observability::AgentInspectRequest,
+    payload: AgentInspectRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -70,7 +72,7 @@ pub async fn handle_agent_inspect(
                 .await;
         }
         Err(error) => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 error.to_string(),

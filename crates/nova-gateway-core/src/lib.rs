@@ -31,13 +31,13 @@ impl ChannelHandler for GatewayHandler {
         let events = self.app.on_connect().await?;
         let mut responses = Vec::new();
         for event in events {
-            responses.push(crate::bridge::app_event_to_gateway(event, "0", "0"));
+            responses.push(app_event_to_gateway(event, "0", "0"));
         }
         Ok(responses)
     }
 
     async fn on_message(&self, _peer: PeerId, req: Self::Req, sink: ResponseSink<Self::Resp>) -> Result<()> {
-        crate::router::dispatch(req, &*self.app, sink).await;
+        dispatch(req, &*self.app, sink).await;
         Ok(())
     }
 

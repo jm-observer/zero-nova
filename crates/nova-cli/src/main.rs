@@ -1,25 +1,31 @@
 //! CLI for zero-nova library
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use custom_utils::args::workspace as resolve_workspace;
+use custom_utils::logger::logger_feature;
 use log::info;
 use nova_agent::agent::{AgentConfig, AgentRuntime};
+use nova_agent::config::{AppConfig, OriginAppConfig};
 use nova_agent::event::AgentEvent;
 use nova_agent::mcp::client::McpClient;
-use nova_agent::message::Message;
-use nova_agent::prompt::{SystemPromptBuilder, TrimmerConfig};
+use nova_agent::message::{ContentBlock, Message, Role};
+use nova_agent::prompt::{EnvironmentSnapshot, SystemPromptBuilder, TrimmerConfig};
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::provider::LlmClient;
+use nova_agent::skill::SkillRegistry;
+use nova_agent::tool::builtin::task::TaskStore;
 use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry};
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
-use tokio::sync::mpsc;
-
-// ============================================================
-// Plan 4: CLI CliCommand 枚举与 7 个 debug 命令
-// ============================================================
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::runtime::Handle;
+use tokio::signal::ctrl_c;
+use tokio::sync::{mpsc, Mutex};
 
 /// CLI 调试命令枚举（Plan 4）。
 #[derive(Debug, Clone)]
@@ -130,14 +136,13 @@ enum Command {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let _ =
-        custom_utils::logger::logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
+    let _ = logger_feature("nova_cli", "debug,rustyline=info", log::LevelFilter::Info, false).build();
 
-    let workspace = custom_utils::args::workspace(&cli.workspace, ".nova")?;
+    let workspace = resolve_workspace(&cli.workspace, ".nova")?;
     info!("workspace {}", workspace.display());
     let config_path = workspace.join("config.toml");
 
-    let mut config = nova_agent::config::OriginAppConfig::load_from_file(&config_path)?;
+    let mut config = OriginAppConfig::load_from_file(&config_path)?;
 
     if let Some(model) = &cli.model {
         config.llm.model_config.model = model.to_string();
@@ -146,19 +151,18 @@ async fn main() -> Result<()> {
         config.llm.base_url = base_url.to_string();
     }
 
-    let config = nova_agent::config::AppConfig::from_origin(config, workspace.clone());
+    let config = AppConfig::from_origin(config, workspace.clone());
 
     log::info!("Starting Nova CLI with : {:?}", config);
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
 
     let env_snapshot = {
-        let mut snapshot = nova_agent::prompt::EnvironmentSnapshot::collect().await;
+        let mut snapshot = EnvironmentSnapshot::collect().await;
         snapshot.model_id = Some(config.llm.model_config.model.clone());
         snapshot
     };
 
-    // 1. Initialize SkillRegistry and load skills
-    let mut skill_registry_raw = nova_agent::skill::SkillRegistry::new();
+    let mut skill_registry_raw = SkillRegistry::new();
     let skill_dir = config.skills_dir();
     if let Err(e) = skill_registry_raw.load_from_dir(&skill_dir) {
         if matches!(cli.output_format, OutputFormat::PlainText) {
@@ -166,25 +170,20 @@ async fn main() -> Result<()> {
         }
     }
     if let Some(extra_skill_path) = &cli.include_skill {
-        let path = std::path::Path::new(extra_skill_path);
+        let path = Path::new(extra_skill_path);
         if let Err(e) = skill_registry_raw.load_single_skill(path) {
             log::error!("Failed to load included skill from {:?}: {}", path, e);
         }
     }
 
     let skill_prompt = skill_registry_raw.generate_contextual_prompt(None);
-    let skill_registry = std::sync::Arc::new(skill_registry_raw);
+    let skill_registry = Arc::new(skill_registry_raw);
 
-    // 2. Initialize TaskStore
-    let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(
-        nova_agent::tool::builtin::task::TaskStore::new(),
-    ));
+    let task_store = Arc::new(Mutex::new(TaskStore::new()));
 
-    // 3. Setup Tool Registry
     let tools = ToolRegistry::new();
     register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
 
-    // Build system prompt including loaded tools and environment information
     let prompt_builder = SystemPromptBuilder::new();
     let system_prompt_str = prompt_builder.with_tools(&tools).build();
     let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
@@ -194,7 +193,7 @@ async fn main() -> Result<()> {
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
         model_config: config.llm.model_config.clone(),
-        tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
+        tool_timeout: Duration::from_secs(tool_timeout_secs),
         max_tokens: config.gateway.max_tokens,
         use_turn_context: config.gateway.use_turn_context,
         trimmer: TrimmerConfig {
@@ -236,11 +235,10 @@ async fn run_repl(
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
 
-    // Initialize history with system prompt
     if !system_prompt.is_empty() {
         history.push(Message {
-            role: nova_agent::message::Role::System,
-            content: vec![nova_agent::message::ContentBlock::Text {
+            role: Role::System,
+            content: vec![ContentBlock::Text {
                 text: system_prompt.to_string(),
             }],
         });
@@ -299,10 +297,7 @@ async fn run_repl(
             }
             "/clear" => {
                 // Keep the first system message if it exists
-                let system_msg = history
-                    .first()
-                    .cloned()
-                    .filter(|m| m.role == nova_agent::message::Role::System);
+                let system_msg = history.first().cloned().filter(|m| m.role == Role::System);
                 history.clear();
                 if let Some(msg) = system_msg {
                     history.push(msg);
@@ -319,9 +314,9 @@ async fn run_repl(
             }
             "/prompt" => {
                 println!("{}", "--- System Prompt ---".bright_black());
-                if let Some(msg) = history.first().filter(|m| m.role == nova_agent::message::Role::System) {
+                if let Some(msg) = history.first().filter(|m| m.role == Role::System) {
                     for block in &msg.content {
-                        if let nova_agent::message::ContentBlock::Text { text } = block {
+                        if let ContentBlock::Text { text } = block {
                             println!("{}", text);
                         }
                     }
@@ -358,7 +353,7 @@ async fn run_repl(
                             }
                         }
                     }
-                    _ = tokio::signal::ctrl_c() => {
+                    _ = ctrl_c() => {
                         printer_task.abort();
                         println!("\n{}", "Interrupted by user.".yellow());
                     }
@@ -390,8 +385,8 @@ async fn run_oneshot(
     let mut history = Vec::new();
     if !system_prompt.is_empty() {
         history.push(Message {
-            role: nova_agent::message::Role::System,
-            content: vec![nova_agent::message::ContentBlock::Text {
+            role: Role::System,
+            content: vec![ContentBlock::Text {
                 text: system_prompt.to_string(),
             }],
         });
@@ -417,7 +412,6 @@ fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
     }
     println!();
     println!("{}", "Turn Tool View:".bold());
-    // Access the turn view for tool and tool_search capabilities
     println!("  - Tool Search: {}", if true { "enabled" } else { "disabled" });
     let loaded = tools.loaded_definitions();
     let deferred = tools.deferred_definitions();
@@ -440,7 +434,7 @@ fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
 /// Prints the task status.
 fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
     if let Some(task_store) = &agent.task_store {
-        let store = tokio::runtime::Handle::current().block_on(async { task_store.lock().await });
+        let store = Handle::current().block_on(async { task_store.lock().await });
         let tasks = store.list();
         if tasks.is_empty() {
             println!("{}", "No tasks found.".blue());
@@ -469,24 +463,20 @@ fn print_status(agent: &AgentRuntime<impl LlmClient>) {
     println!("{}", "Overall Status:".bold());
     println!();
 
-    // Agent info
     println!("  Agent:");
     println!("    - Max iterations: 15");
     println!("    - Model: N/A");
     println!();
 
-    // Tool policy
     if let Some(task_store) = &agent.task_store {
-        let store = tokio::runtime::Handle::current().block_on(async { task_store.lock().await });
+        let store = Handle::current().block_on(async { task_store.lock().await });
         println!("  Tasks: {} registered", store.list().len());
     }
 
-    // Skills
     if let Some(skill_registry) = &agent.skill_registry {
         println!("  Skills: {} available", skill_registry.all_candidates().len());
     }
 
-    // Tool capabilities
     println!();
     println!("  Tool Capabilities:");
     println!("    - Always enabled tools: {}", agent.tools().tool_definitions().len());
@@ -497,7 +487,7 @@ fn print_status(agent: &AgentRuntime<impl LlmClient>) {
 /// Tests the MCP server by invoking the first tool.
 async fn test_mcp(cmd: &[String]) -> Result<()> {
     if cmd.is_empty() {
-        anyhow::bail!("No command provided for MCP test");
+        bail!("No command provided for MCP test");
     }
     let command = &cmd[0];
     let args: Vec<&str> = cmd[1..].iter().map(|s| s.as_str()).collect();
@@ -592,7 +582,7 @@ impl EventPrinter {
                 }
                 AgentEvent::AssistantMessage { content } => {
                     for block in content {
-                        if let nova_agent::message::ContentBlock::Text { text } = block {
+                        if let ContentBlock::Text { text } = block {
                             println!("\n{text}");
                         }
                     }
@@ -622,7 +612,7 @@ impl EventPrinter {
                     println!("\n{}", format!("[skill exited] {skill_id}").yellow());
                 }
                 AgentEvent::SkillRouteEvaluated { .. } => {
-                    // Debug event, silently handled
+                    // 该事件仅用于内部调试，CLI 不重复打印以避免输出噪音。
                 }
                 AgentEvent::ToolUnlocked { tool_name } => {
                     println!("\n{}", format!("[tool unlocked] {tool_name}").bright_blue());
@@ -654,10 +644,6 @@ impl EventPrinter {
         }
     }
 }
-
-// ============================================================
-// Plan 4: CLI 命令解析单元测试
-// ============================================================
 
 #[cfg(test)]
 mod tests {

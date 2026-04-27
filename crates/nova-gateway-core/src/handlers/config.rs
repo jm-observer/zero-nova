@@ -1,3 +1,4 @@
+use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use log::{error, info};
 use nova_agent::app::AgentApplication;
@@ -20,7 +21,7 @@ pub async fn handle_config_get(
         }
         Err(e) => {
             error!("Failed to serialize config snapshot: {}", e);
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Service error: {}", e),
@@ -50,7 +51,7 @@ pub async fn handle_config_update(
         }
         Err(e) => {
             error!("Failed to update config: {}", e);
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Service error: {}", e),

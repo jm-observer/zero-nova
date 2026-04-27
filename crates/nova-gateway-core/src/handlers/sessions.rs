@@ -1,10 +1,12 @@
 use crate::bridge::{app_message_to_protocol, app_session_to_protocol};
+use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use log::error;
 use nova_agent::app::AgentApplication;
 use nova_protocol::{
-    GatewayMessage, MessageEnvelope, SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload,
-    SessionsListResponse, SessionsMessagesResponse, SuccessResponse,
+    observability, session::SuccessResponse as SessionSuccessResponse, GatewayMessage, MessageEnvelope,
+    SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload, SessionsListResponse,
+    SessionsMessagesResponse, SuccessResponse,
 };
 
 pub async fn handle_sessions_list(
@@ -24,7 +26,7 @@ pub async fn handle_sessions_list(
         }
         Err(e) => {
             error!("Failed to list sessions: {}", e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -46,7 +48,7 @@ pub async fn handle_session_get(
                 .await;
         }
         Err(e) if e.to_string().contains("Session not found") => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 "Session not found".to_string(),
@@ -56,7 +58,7 @@ pub async fn handle_session_get(
         }
         Err(e) => {
             error!("Failed to get session {}: {}", session_id, e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -79,7 +81,7 @@ pub async fn handle_session_create(
         }
         Err(e) => {
             error!("Failed to create session: {}", e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -101,7 +103,7 @@ pub async fn handle_session_delete(
         }
         Err(e) => {
             error!("Failed to delete session {}: {}", payload.session_id, e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -123,7 +125,7 @@ pub async fn handle_session_copy(
                 .await;
         }
         Err(e) if e.to_string().contains("Source session not found") => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 "Source session not found".to_string(),
@@ -133,7 +135,7 @@ pub async fn handle_session_copy(
         }
         Err(e) => {
             error!("Failed to copy session {}: {}", payload.session_id, e);
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -154,13 +156,13 @@ pub async fn handle_session_runtime(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_session_prompt_preview(
-    payload: nova_protocol::observability::PromptPreviewRequest,
+    payload: observability::PromptPreviewRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -178,7 +180,7 @@ pub async fn handle_session_prompt_preview(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -199,7 +201,7 @@ pub async fn handle_session_tools(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -220,13 +222,13 @@ pub async fn handle_session_skill_bindings(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_session_memory_hits(
-    payload: nova_protocol::observability::SessionMemoryHitsRequest,
+    payload: observability::SessionMemoryHitsRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -241,13 +243,13 @@ pub async fn handle_session_memory_hits(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_session_model_override(
-    payload: nova_protocol::observability::SessionModelOverrideRequest,
+    payload: observability::SessionModelOverrideRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -263,7 +265,7 @@ pub async fn handle_session_model_override(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
@@ -284,15 +286,13 @@ pub async fn handle_session_token_usage(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
-// --- Plan 2: Execution Records & Control Handlers ---
-
 pub async fn handle_session_runs(
-    payload: nova_protocol::observability::SessionRunsRequest,
+    payload: observability::SessionRunsRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -307,13 +307,13 @@ pub async fn handle_session_runs(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_run_detail(
-    payload: nova_protocol::observability::RunDetailRequest,
+    payload: observability::RunDetailRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -325,13 +325,13 @@ pub async fn handle_run_detail(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_run_control(
-    payload: nova_protocol::observability::RunControlRequest,
+    payload: observability::RunControlRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -341,18 +341,18 @@ pub async fn handle_run_control(
             let _ = outbound_tx
                 .send_async(GatewayMessage::new(
                     request_id,
-                    MessageEnvelope::RunControlResponse(nova_protocol::session::SuccessResponse { success: true }),
+                    MessageEnvelope::RunControlResponse(SessionSuccessResponse { success: true }),
                 ))
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_session_artifacts(
-    payload: nova_protocol::observability::SessionArtifactsRequest,
+    payload: observability::SessionArtifactsRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -367,13 +367,13 @@ pub async fn handle_session_artifacts(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_permission_pending(
-    payload: nova_protocol::observability::PermissionPendingRequest,
+    payload: observability::PermissionPendingRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -388,13 +388,13 @@ pub async fn handle_permission_pending(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_permission_respond(
-    payload: nova_protocol::observability::PermissionRespondRequest,
+    payload: observability::PermissionRespondRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -404,20 +404,18 @@ pub async fn handle_permission_respond(
             let _ = outbound_tx
                 .send_async(GatewayMessage::new(
                     request_id,
-                    MessageEnvelope::PermissionRespondResponse(nova_protocol::session::SuccessResponse {
-                        success: true,
-                    }),
+                    MessageEnvelope::PermissionRespondResponse(SessionSuccessResponse { success: true }),
                 ))
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_audit_logs(
-    payload: nova_protocol::observability::AuditLogsRequest,
+    payload: observability::AuditLogsRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -429,13 +427,13 @@ pub async fn handle_audit_logs(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_diagnostics_current(
-    payload: nova_protocol::observability::DiagnosticsCurrentRequest,
+    payload: observability::DiagnosticsCurrentRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -450,13 +448,13 @@ pub async fn handle_diagnostics_current(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }
 
 pub async fn handle_workspace_restore(
-    _payload: nova_protocol::observability::WorkspaceRestoreRequest,
+    _payload: observability::WorkspaceRestoreRequest,
     app: &dyn AgentApplication,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
@@ -471,7 +469,7 @@ pub async fn handle_workspace_restore(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
         }
     }
 }

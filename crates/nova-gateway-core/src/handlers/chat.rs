@@ -1,7 +1,8 @@
 use crate::bridge::app_event_to_gateway;
+use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use nova_agent::app::AgentApplication;
-use nova_protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload};
+use nova_protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload, Usage};
 use tokio::sync::mpsc;
 
 pub async fn handle_chat(
@@ -13,7 +14,7 @@ pub async fn handle_chat(
     let session_id: String = match payload.session_id {
         Some(id) => id,
         None => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 "session_id is required".to_string(),
@@ -42,7 +43,7 @@ pub async fn handle_chat(
     match app.session_exists(&session_id).await {
         Ok(true) => {}
         Ok(false) => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Session {} not found", session_id),
@@ -52,7 +53,7 @@ pub async fn handle_chat(
             return;
         }
         Err(e) => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Service error: {}", e),
@@ -81,7 +82,7 @@ pub async fn handle_chat(
                     join_error
                 );
             }
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Service error: {}", e),
@@ -103,7 +104,7 @@ pub async fn handle_chat(
             MessageEnvelope::ChatComplete(ChatCompletePayload {
                 session_id,
                 output: None,
-                usage: Some(nova_protocol::Usage {
+                usage: Some(Usage {
                     input_tokens: turn_result.usage.input_tokens,
                     output_tokens: turn_result.usage.output_tokens,
                     cache_creation_input_tokens: turn_result.usage.cache_creation_input_tokens,
@@ -130,7 +131,7 @@ pub async fn handle_chat_stop(
                 .await;
         }
         Err(e) => {
-            super::system::send_general_error(
+            send_general_error(
                 &outbound_tx,
                 &request_id,
                 format!("Service error: {}", e),

@@ -5,54 +5,119 @@ import { invoke } from '@tauri-apps/api/core';
 export class ModalsView {
     // Confirm Modal
     private confirmModal: HTMLDivElement;
-    private confirmMessage: HTMLParagraphElement;
-    private confirmYes: HTMLButtonElement;
-    private confirmNo: HTMLButtonElement;
+    private confirmMessage!: HTMLParagraphElement;
+    private confirmYes!: HTMLButtonElement;
+    private confirmNo!: HTMLButtonElement;
     private pendingConfirmation: { taskId: string; resolve: (value: boolean) => void } | null = null;
 
     // File Preview Modal
     private filePreviewModal: HTMLDivElement;
-    private filePreviewName: HTMLSpanElement;
-    private filePreviewSize: HTMLSpanElement;
-    private filePreviewBody: HTMLDivElement;
-    private filePreviewClose: HTMLButtonElement;
-    private filePreviewOpen: HTMLButtonElement;
-    private filePreviewReveal: HTMLButtonElement;
-    private filePreviewCopy: HTMLButtonElement;
+    private filePreviewName!: HTMLSpanElement;
+    private filePreviewSize!: HTMLSpanElement;
+    private filePreviewBody!: HTMLDivElement;
+    private filePreviewClose!: HTMLButtonElement;
+    private filePreviewOpen!: HTMLButtonElement;
+    private filePreviewReveal!: HTMLButtonElement;
+    private filePreviewCopy!: HTMLButtonElement;
 
     // Tool Detail Modal
     private toolDetailModal: HTMLDivElement;
-    private toolDetailTitle: HTMLHeadingElement;
-    private toolDetailContent: HTMLPreElement;
-    private toolDetailClose: HTMLButtonElement;
-    private toolDetailOk: HTMLButtonElement;
-    private toolDetailCopy: HTMLButtonElement;
+    private toolDetailTitle!: HTMLHeadingElement;
+    private toolDetailContent!: HTMLPreElement;
+    private toolDetailClose!: HTMLButtonElement;
+    private toolDetailOk!: HTMLButtonElement;
+    private toolDetailCopy!: HTMLButtonElement;
 
     constructor(private bus: EventBus) {
-        this.confirmModal = document.getElementById('confirm-modal') as HTMLDivElement;
-        this.confirmMessage = document.getElementById('confirm-message') as HTMLParagraphElement;
-        this.confirmYes = document.getElementById('confirm-yes') as HTMLButtonElement;
-        this.confirmNo = document.getElementById('confirm-no') as HTMLButtonElement;
-
-        this.filePreviewModal = document.getElementById('file-preview-modal') as HTMLDivElement;
-        this.filePreviewName = document.getElementById('file-preview-name') as HTMLSpanElement;
-        this.filePreviewSize = document.getElementById('file-preview-size') as HTMLSpanElement;
-        this.filePreviewBody = document.getElementById('file-preview-body') as HTMLDivElement;
-        this.filePreviewClose = document.getElementById('file-preview-close') as HTMLButtonElement;
-        this.filePreviewOpen = document.getElementById('file-preview-open') as HTMLButtonElement;
-        this.filePreviewReveal = document.getElementById('file-preview-reveal') as HTMLButtonElement;
-        this.filePreviewCopy = document.getElementById('file-preview-copy') as HTMLButtonElement;
-
-        this.toolDetailModal = document.getElementById('tool-detail-modal') as HTMLDivElement;
-        this.toolDetailTitle = document.getElementById('tool-detail-title') as HTMLHeadingElement;
-        this.toolDetailContent = document.getElementById('tool-detail-content') as HTMLPreElement;
-        this.toolDetailClose = document.getElementById('tool-detail-close') as HTMLButtonElement;
-        this.toolDetailOk = document.getElementById('tool-detail-ok') as HTMLButtonElement;
-        this.toolDetailCopy = document.getElementById('tool-detail-copy') as HTMLButtonElement;
+        this.confirmModal = this.requireElement('confirm-modal');
+        this.filePreviewModal = this.requireElement('file-preview-modal');
+        this.toolDetailModal = this.requireElement('tool-detail-modal');
     }
 
     init() {
+        this.ensureModalMarkup();
+        this.cacheInnerElements();
         this.bindEvents();
+    }
+
+    private ensureModalMarkup() {
+        if (!this.confirmModal.querySelector('#confirm-yes')) {
+            this.confirmModal.innerHTML = `
+                <div class="modal-content confirm-modal-content">
+                    <h3>${t('common.confirm')}</h3>
+                    <p id="confirm-message"></p>
+                    <div class="modal-actions">
+                        <button id="confirm-no" class="secondary-btn">${t('common.cancel')}</button>
+                        <button id="confirm-yes" class="primary-btn">${t('common.confirm')}</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (!this.filePreviewModal.querySelector('#file-preview-close')) {
+            this.filePreviewModal.innerHTML = `
+                <div class="modal-content file-preview-modal-content">
+                    <div class="modal-header">
+                        <div>
+                            <span id="file-preview-name" class="file-preview-name"></span>
+                            <span id="file-preview-size" class="file-preview-size"></span>
+                        </div>
+                        <button id="file-preview-close" class="icon-btn" type="button">×</button>
+                    </div>
+                    <div id="file-preview-body" class="tool-detail-modal-body"></div>
+                    <div class="modal-actions">
+                        <button id="file-preview-copy" class="secondary-btn">${t('common.copy')}</button>
+                        <button id="file-preview-reveal" class="secondary-btn">${t('console.action_reveal')}</button>
+                        <button id="file-preview-open" class="primary-btn">${t('preview.open')}</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (!this.toolDetailModal.querySelector('#tool-detail-close')) {
+            this.toolDetailModal.innerHTML = `
+                <div class="modal-content tool-detail-modal-content">
+                    <div class="modal-header">
+                        <h3 id="tool-detail-title"></h3>
+                        <button id="tool-detail-close" class="icon-btn" type="button">×</button>
+                    </div>
+                    <pre id="tool-detail-content" class="tool-detail-modal-body"></pre>
+                    <div class="modal-actions">
+                        <button id="tool-detail-copy" class="secondary-btn">${t('common.copy')}</button>
+                        <button id="tool-detail-ok" class="primary-btn">${t('common.confirm')}</button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    private cacheInnerElements() {
+        this.confirmMessage = this.requireElement('confirm-message');
+        this.confirmYes = this.requireElement('confirm-yes');
+        this.confirmNo = this.requireElement('confirm-no');
+
+        this.filePreviewName = this.requireElement('file-preview-name');
+        this.filePreviewSize = this.requireElement('file-preview-size');
+        this.filePreviewBody = this.requireElement('file-preview-body');
+        this.filePreviewClose = this.requireElement('file-preview-close');
+        this.filePreviewOpen = this.requireElement('file-preview-open');
+        this.filePreviewReveal = this.requireElement('file-preview-reveal');
+        this.filePreviewCopy = this.requireElement('file-preview-copy');
+
+        this.toolDetailTitle = this.requireElement('tool-detail-title');
+        this.toolDetailContent = this.requireElement('tool-detail-content');
+        this.toolDetailClose = this.requireElement('tool-detail-close');
+        this.toolDetailOk = this.requireElement('tool-detail-ok');
+        this.toolDetailCopy = this.requireElement('tool-detail-copy');
+    }
+
+    private requireElement<T extends HTMLElement>(id: string): T {
+        const element = document.getElementById(id);
+        if (!(element instanceof HTMLElement)) {
+            throw new Error(`Missing required modal element: ${id}`);
+        }
+
+        return element as T;
     }
 
     private bindEvents() {

@@ -27,6 +27,8 @@ import type {
     DiagnosticIssueView,
     WorkspaceRestoreView,
 } from './core/types';
+import type { AgentInspectRequest, WorkspaceRestoreRequest } from './generated/generated-types';
+import { validateOutboundMessage } from './gateway-messages';
 
 export type {
     ProgressEvent,
@@ -345,9 +347,22 @@ export class GatewayClient {
      * 发送消息
      */
     private send(message: GatewayMessage): void {
+        this.assertOutboundMessage(message.type, message.payload);
         if (this.ws?.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(message));
         }
+    }
+
+    private assertOutboundMessage(type: string, payload: unknown): void {
+        const hints = validateOutboundMessage(type, payload ?? {});
+        if (hints.length === 0) {
+            return;
+        }
+
+        const details = hints
+            .map(hint => `${hint.path}: expected ${hint.expected}`)
+            .join('; ');
+        throw new Error(`[GatewayClient] outbound message validation failed for ${type}: ${details}`);
     }
 
     /**
@@ -1114,8 +1129,8 @@ export class GatewayClient {
     /**
      * 获取 Agent 的运行态大小写（含 Skill/Tool 信息）
      */
-    async getAgentInspect(runtime: boolean = true): Promise<AgentRuntimeSnapshot> {
-        return this.request<AgentRuntimeSnapshot>('agent.inspect', { runtime });
+    async getAgentInspect(payload: AgentInspectRequest): Promise<AgentRuntimeSnapshot> {
+        return this.request<AgentRuntimeSnapshot>('agent.inspect', payload);
     }
 
     /**
@@ -1308,8 +1323,8 @@ export class GatewayClient {
     /**
      * 获取工作区恢复信息
      */
-    async getWorkspaceRestore(): Promise<WorkspaceRestoreView> {
-        return this.request('workspace.restore');
+    async getWorkspaceRestore(payload: WorkspaceRestoreRequest = {}): Promise<WorkspaceRestoreView> {
+        return this.request('workspace.restore', payload);
     }
 
     onRunStatusUpdated(callback: (payload: Record<string, unknown>) => void): () => void {

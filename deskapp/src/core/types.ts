@@ -1,3 +1,5 @@
+export type { AgentInspectRequest, SessionCreateRequest, WorkspaceRestoreRequest } from '../generated/generated-types';
+
 /**
  * 集中存放所有共享的类型定义
  */

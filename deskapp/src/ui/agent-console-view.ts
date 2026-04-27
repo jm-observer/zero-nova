@@ -333,7 +333,7 @@ export class AgentConsoleView {
 
         try {
             const [snapshot, usage, runResult] = await Promise.all([
-                this.state.gatewayClient.getAgentInspect(),
+                this.state.gatewayClient.getAgentInspect({ sessionId, agentId: this.state.currentAgentId! }),
                 this.state.gatewayClient.getSessionTokenUsage(sessionId),
                 this.state.gatewayClient.getSessionRuns(sessionId),
             ]);
@@ -364,7 +364,7 @@ export class AgentConsoleView {
 
         try {
             const [snapshot, runtime] = await Promise.all([
-                this.state.gatewayClient.getAgentInspect(),
+                this.state.gatewayClient.getAgentInspect({ sessionId, agentId: this.state.currentAgentId! }),
                 this.state.gatewayClient.getSessionRuntime(sessionId),
             ]);
 
@@ -592,7 +592,7 @@ export class AgentConsoleView {
         if (!this.state.gatewayClient || this.isDisposed) return;
 
         try {
-            const restore = await this.state.gatewayClient.getWorkspaceRestore();
+            const restore = await this.state.gatewayClient.getWorkspaceRestore({});
             this.applyWorkspaceRestore(restore);
         } catch (error) {
             if (error instanceof GatewayRequestError && error.kind === 'unsupported') {

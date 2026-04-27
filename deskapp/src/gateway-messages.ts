@@ -1,7 +1,8 @@
-import {
+﻿import {
   ProtocolErrorHandler,
   type ValidationHint,
   validateEnvelope,
+  validateGatewayMessage,
   validateInboundPayload,
   validateOutboundPayload,
 } from './generated/generated-types';
@@ -37,12 +38,16 @@ export function parseInboundMessage(
     return { parsed: null, errors: [{ path: '$', expected: 'object', got: decoded }] };
   }
 
-  const envelopeHints = validateEnvelope(decoded, ['payload-required']);
-  const errors: ValidationHint[] = envelopeHints.map((hint) => ({
-    path: hint === 'missing-type' ? 'type' : 'payload',
-    expected: hint === 'missing-type' ? 'string' : 'present',
-    got: hint,
-  }));
+  const errors: ValidationHint[] = validateGatewayMessage(decoded);
+
+  if (errors.length === 0) {
+    const envelopeHints = validateEnvelope(decoded, ['payload-required']);
+    errors.push(...envelopeHints.map((hint) => ({
+      path: hint === 'missing-type' ? 'type' : 'payload',
+      expected: hint === 'missing-type' ? 'string' : 'present',
+      got: hint,
+    })));
+  }
 
   const parsed: ParsedMessage = {
     id: typeof decoded.id === 'string' ? decoded.id : undefined,
@@ -50,7 +55,7 @@ export function parseInboundMessage(
     payload: decoded.payload,
   };
 
-  if (parsed.type) {
+  if (parsed.type && errors.length === 0) {
     errors.push(...validateInboundPayload(parsed.type, parsed.payload));
   }
 

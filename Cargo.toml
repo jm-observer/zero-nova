@@ -8,8 +8,7 @@ members = [
   "crates/channel-websocket",
   "crates/channel-stdio",
   "crates/nova-gateway-core",
-  "crates/nova-server-ws",
-  "crates/nova-server-stdio",
+  "crates/nova-server",
   "crates/nova-cli",
   "deskapp/src-tauri",
 ]
@@ -51,6 +50,5 @@ channel-core = { path = "crates/channel-core" }
 channel-websocket = { path = "crates/channel-websocket" }
 channel-stdio = { path = "crates/channel-stdio" }
 nova-gateway-core = { path = "crates/nova-gateway-core" }
-nova-server-ws = { path = "crates/nova-server-ws" }
-nova-server-stdio = { path = "crates/nova-server-stdio" }
+nova-server = { path = "crates/nova-server" }
 nova-cli = { path = "crates/nova-cli" }

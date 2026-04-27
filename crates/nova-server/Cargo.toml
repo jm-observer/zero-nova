@@ -1,13 +1,14 @@
 [package]
-name = "nova-server-ws"
+name = "nova-server"
 version = "0.1.0"
 edition = "2021"
-description = "WebSocket server for zero-nova"
+description = "Unified server for zero-nova"
 
 [dependencies]
 nova-agent = { workspace = true }
 nova-protocol = { workspace = true }
 nova-gateway-core = { workspace = true }
+channel-stdio = { workspace = true }
 channel-core = { workspace = true }
 channel-websocket = { workspace = true }
 tokio = { workspace = true }
@@ -25,6 +26,10 @@ custom-utils = { workspace = true }
 default = ["cli"]
 cli = ["clap", "sysinfo"]
 prod = []
+
+[[bin]]
+name = "nova_gateway_stdio"
+path = "src/bin/nova_gateway_stdio.rs"
 
 [[bin]]
 name = "nova-server-ws"

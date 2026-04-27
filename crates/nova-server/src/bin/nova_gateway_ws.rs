@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = format!("{}:{}", args.host, args.port);
 
     tokio::select! {
-        res = nova_server_ws::run_server(&addr, app) => {
+        res = nova_server::run_server(&addr, app) => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

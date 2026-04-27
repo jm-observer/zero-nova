@@ -1,5 +1,5 @@
 use crate::bridge::app_event_to_gateway;
-use channel_core::ResponseSink;
+use crate::transport::ResponseSink;
 use nova_agent::AgentApplication;
 use nova_protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload};
 use tokio::sync::mpsc;

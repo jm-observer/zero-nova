@@ -4,9 +4,6 @@ members = [
   "crates/nova-agent",
 
   "crates/nova-protocol",
-  "crates/channel-core",
-  "crates/channel-websocket",
-  "crates/channel-stdio",
   "crates/nova-gateway-core",
   "crates/nova-server",
   "crates/nova-cli",
@@ -46,9 +43,6 @@ tempfile = "3"
 # Internal crates
 nova-agent = { path = "crates/nova-agent" }
 nova-protocol = { path = "crates/nova-protocol" }
-channel-core = { path = "crates/channel-core" }
-channel-websocket = { path = "crates/channel-websocket" }
-channel-stdio = { path = "crates/channel-stdio" }
 nova-gateway-core = { path = "crates/nova-gateway-core" }
 nova-server = { path = "crates/nova-server" }
 nova-cli = { path = "crates/nova-cli" }

@@ -1,5 +1,5 @@
 use crate::bridge::app_agent_to_protocol;
-use channel_core::ResponseSink;
+use crate::transport::ResponseSink;
 use log::info;
 use nova_agent::AgentApplication;
 use nova_protocol::{

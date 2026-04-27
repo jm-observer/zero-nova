@@ -1,5 +1,5 @@
 use crate::handlers::{agents, chat, config, sessions, system};
-use channel_core::ResponseSink;
+use crate::transport::ResponseSink;
 use log::warn;
 use nova_agent::AgentApplication;
 use nova_protocol::{GatewayMessage, MessageEnvelope};

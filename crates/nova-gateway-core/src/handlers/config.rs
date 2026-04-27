@@ -1,4 +1,4 @@
-use channel_core::ResponseSink;
+use crate::transport::ResponseSink;
 use log::{error, info};
 use nova_agent::AgentApplication;
 use nova_protocol::{GatewayMessage, MessageEnvelope, SuccessResponse};

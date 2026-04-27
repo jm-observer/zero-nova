@@ -1,1 +1,1 @@
-pub use channel_core::{ChannelHandler, PeerId, ResponseSink};
+pub use nova_gateway_core::transport::{ChannelHandler, PeerId, ResponseSink};

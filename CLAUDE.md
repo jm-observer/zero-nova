@@ -78,7 +78,7 @@ cargo test --workspace
 cargo run --bin nova_cli -- chat
 
 # Run WebSocket gateway
-cargo run --bin nova-server-ws
+cargo run -p nova-server --bin nova-server-ws
 
 # Desktop app (in deskapp/)
 pnpm dev          # frontend only
@@ -100,14 +100,10 @@ Zero-Nova is an AI agent framework. The runtime has three layers:
 
 | Crate | Role |
 |---|---|
-| `nova-core` | Core agent loop: LLM clients, tool dispatch, MCP integration |
-| `nova-conversation` | Conversation state and history management |
-| `nova-app` | Application-level facade; Tauri backend entry point |
+| `nova-agent` | Core agent loop + application facade |
 | `nova-protocol` | JSON DTOs for the gateway protocol |
 | `nova-gateway-core` | Gateway routing and orchestration logic |
-| `nova-server-stdio` | NDJSON-over-stdio server |
-| `nova-server-ws` | WebSocket server |
-| `channel-core` / `channel-stdio` / `channel-websocket` | Channel trait + implementations |
+| `nova-server` | Unified server crate (`nova_gateway_stdio` + `nova-server-ws`) and transport modules |
 
 Configuration lives in `.nova/config.toml` (LLM providers, gateway port, agents, voice, browser).
 

@@ -2,10 +2,8 @@ use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::mpsc;
 
-/// Peer identifier for channel handlers
 pub type PeerId = String;
 
-/// Generic channel handler trait for transport-layer abstraction
 #[async_trait]
 pub trait ChannelHandler: Send + Sync + 'static {
     type Req: DeserializeOwned + Send + 'static;

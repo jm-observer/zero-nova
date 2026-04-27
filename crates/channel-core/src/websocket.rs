@@ -1,4 +1,4 @@
-pub use channel_core::{ChannelHandler, PeerId, ResponseSink};
+use crate::{ChannelHandler, ResponseSink};
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, trace, warn};
 use serde::{de::DeserializeOwned, Serialize};

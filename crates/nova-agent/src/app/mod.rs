@@ -8,7 +8,7 @@ pub mod types;
 pub use agent_workspace_service::AgentWorkspaceService;
 
 pub use application::{AgentApplication, AgentApplicationImpl};
-pub use bootstrap::{BootstrapOptions, build_application};
+pub use bootstrap::{build_application, BootstrapOptions};
 pub use conversation_service::ConversationService;
 pub use types::{AppAgent, AppEvent, AppMessage, AppSession};
 

@@ -1,7 +1,7 @@
 use clap::Parser;
-use nova_app::bootstrap::build_application;
-use nova_core::config::OriginAppConfig;
-use nova_core::provider::openai_compat::OpenAiCompatClient;
+use nova_agent::app::bootstrap::build_application;
+use nova_agent::config::OriginAppConfig;
+use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use sysinfo::{Pid, System};
 
 #[derive(Parser, Debug)]
@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
     origin_config.gateway.host = args.host.clone();
     origin_config.gateway.port = args.port;
 
-    let final_config = nova_core::config::AppConfig::from_origin(origin_config.clone(), workspace.clone());
+    let final_config = nova_agent::config::AppConfig::from_origin(origin_config.clone(), workspace.clone());
 
     log::info!("Starting Nova Gateway WS with config: {:?}", final_config);
 

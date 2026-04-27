@@ -1,8 +1,8 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
+use crate::agent_catalog::AgentRegistry;
+use crate::conversation::SessionService;
 use anyhow::{Context, Result};
 use chrono::Utc;
-use crate::conversation::SessionService;
-use crate::agent_catalog::AgentRegistry;
 use nova_protocol::observability::*;
 
 pub struct AgentWorkspaceService {

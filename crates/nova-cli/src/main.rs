@@ -4,14 +4,14 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use log::info;
-use nova_core::agent::{AgentConfig, AgentRuntime};
-use nova_core::event::AgentEvent;
-use nova_core::mcp::client::McpClient;
-use nova_core::message::Message;
-use nova_core::prompt::{SystemPromptBuilder, TrimmerConfig};
-use nova_core::provider::openai_compat::OpenAiCompatClient;
-use nova_core::provider::LlmClient;
-use nova_core::tool::{builtin::register_builtin_tools, ToolRegistry};
+use nova_agent::agent::{AgentConfig, AgentRuntime};
+use nova_agent::event::AgentEvent;
+use nova_agent::mcp::client::McpClient;
+use nova_agent::message::Message;
+use nova_agent::prompt::{SystemPromptBuilder, TrimmerConfig};
+use nova_agent::provider::openai_compat::OpenAiCompatClient;
+use nova_agent::provider::LlmClient;
+use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry};
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
     info!("workspace {}", workspace.display());
     let config_path = workspace.join("config.toml");
 
-    let mut config = nova_core::config::OriginAppConfig::load_from_file(&config_path)?;
+    let mut config = nova_agent::config::OriginAppConfig::load_from_file(&config_path)?;
 
     if let Some(model) = &cli.model {
         config.llm.model_config.model = model.to_string();
@@ -146,19 +146,19 @@ async fn main() -> Result<()> {
         config.llm.base_url = base_url.to_string();
     }
 
-    let config = nova_core::config::AppConfig::from_origin(config, workspace.clone());
+    let config = nova_agent::config::AppConfig::from_origin(config, workspace.clone());
 
     log::info!("Starting Nova CLI with : {:?}", config);
     let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
 
     let env_snapshot = {
-        let mut snapshot = nova_core::prompt::EnvironmentSnapshot::collect().await;
+        let mut snapshot = nova_agent::prompt::EnvironmentSnapshot::collect().await;
         snapshot.model_id = Some(config.llm.model_config.model.clone());
         snapshot
     };
 
     // 1. Initialize SkillRegistry and load skills
-    let mut skill_registry_raw = nova_core::skill::SkillRegistry::new();
+    let mut skill_registry_raw = nova_agent::skill::SkillRegistry::new();
     let skill_dir = config.skills_dir();
     if let Err(e) = skill_registry_raw.load_from_dir(&skill_dir) {
         if matches!(cli.output_format, OutputFormat::PlainText) {
@@ -176,7 +176,9 @@ async fn main() -> Result<()> {
     let skill_registry = std::sync::Arc::new(skill_registry_raw);
 
     // 2. Initialize TaskStore
-    let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(nova_core::tool::builtin::task::TaskStore::new()));
+    let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(
+        nova_agent::tool::builtin::task::TaskStore::new(),
+    ));
 
     // 3. Setup Tool Registry
     let tools = ToolRegistry::new();
@@ -237,8 +239,8 @@ async fn run_repl(
     // Initialize history with system prompt
     if !system_prompt.is_empty() {
         history.push(Message {
-            role: nova_core::message::Role::System,
-            content: vec![nova_core::message::ContentBlock::Text {
+            role: nova_agent::message::Role::System,
+            content: vec![nova_agent::message::ContentBlock::Text {
                 text: system_prompt.to_string(),
             }],
         });
@@ -300,7 +302,7 @@ async fn run_repl(
                 let system_msg = history
                     .first()
                     .cloned()
-                    .filter(|m| m.role == nova_core::message::Role::System);
+                    .filter(|m| m.role == nova_agent::message::Role::System);
                 history.clear();
                 if let Some(msg) = system_msg {
                     history.push(msg);
@@ -317,9 +319,9 @@ async fn run_repl(
             }
             "/prompt" => {
                 println!("{}", "--- System Prompt ---".bright_black());
-                if let Some(msg) = history.first().filter(|m| m.role == nova_core::message::Role::System) {
+                if let Some(msg) = history.first().filter(|m| m.role == nova_agent::message::Role::System) {
                     for block in &msg.content {
-                        if let nova_core::message::ContentBlock::Text { text } = block {
+                        if let nova_agent::message::ContentBlock::Text { text } = block {
                             println!("{}", text);
                         }
                     }
@@ -388,8 +390,8 @@ async fn run_oneshot(
     let mut history = Vec::new();
     if !system_prompt.is_empty() {
         history.push(Message {
-            role: nova_core::message::Role::System,
-            content: vec![nova_core::message::ContentBlock::Text {
+            role: nova_agent::message::Role::System,
+            content: vec![nova_agent::message::ContentBlock::Text {
                 text: system_prompt.to_string(),
             }],
         });
@@ -590,7 +592,7 @@ impl EventPrinter {
                 }
                 AgentEvent::AssistantMessage { content } => {
                     for block in content {
-                        if let nova_core::message::ContentBlock::Text { text } = block {
+                        if let nova_agent::message::ContentBlock::Text { text } = block {
                             println!("\n{text}");
                         }
                     }

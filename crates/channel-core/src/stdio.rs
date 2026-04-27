@@ -1,5 +1,5 @@
+use crate::{ChannelHandler, ResponseSink};
 use anyhow::Result;
-use channel_core::{ChannelHandler, ResponseSink};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader};

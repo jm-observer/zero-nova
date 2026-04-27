@@ -1,9 +1,9 @@
 use super::conversation_service::ConversationService;
 use super::types::{AppAgent, AppEvent, AppMessage, AppSession};
-use anyhow::{Context, Result, anyhow};
-use async_trait::async_trait;
 use crate::config::AppConfig;
 use crate::provider::LlmClient;
+use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;

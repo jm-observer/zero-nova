@@ -6,8 +6,8 @@ pub mod service;
 pub mod session;
 pub mod sqlite_manager;
 
-pub use cache::SessionCache;
 pub use crate::message::{ContentBlock, Message, Role};
+pub use cache::SessionCache;
 pub use repository::SqliteSessionRepository;
 pub use service::SessionService;
 pub use session::{Session, SessionSummary};

@@ -144,9 +144,7 @@ impl From<crate::event::AgentEvent> for AppEvent {
                 output,
                 is_error,
             },
-            crate::event::AgentEvent::LogDelta { id, name, log, stream } => {
-                AppEvent::ToolLog { id, name, log, stream }
-            }
+            crate::event::AgentEvent::LogDelta { id, name, log, stream } => AppEvent::ToolLog { id, name, log, stream },
             crate::event::AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
             crate::event::AgentEvent::IterationLimitReached { iterations } => {
                 AppEvent::IterationLimitReached { iterations }

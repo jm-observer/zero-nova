@@ -1,15 +1,15 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
-use anyhow::{Context, Result, bail};
-use crate::conversation::repository::SqliteSessionRepository;
-use crate::conversation::sqlite_manager::SqliteManager;
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
+use crate::conversation::repository::SqliteSessionRepository;
+use crate::conversation::sqlite_manager::SqliteManager;
 use crate::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder, TrimmerConfig};
 use crate::provider::LlmClient;
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};

@@ -1,4 +1,5 @@
 {
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "code": {
@@ -17,4 +18,3 @@
   "title": "ErrorPayload",
   "type": "object"
 }
-// Error event payload

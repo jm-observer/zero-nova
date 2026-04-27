@@ -1,9 +1,10 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Usage statistics for a chat turn, re-exported from nova-core.
 /// This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
     pub input_tokens: u64,
@@ -14,7 +15,7 @@ pub struct Usage {
     pub cache_read_input_tokens: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatPayload {
     pub input: String,
@@ -24,7 +25,7 @@ pub struct ChatPayload {
     pub attachments: Option<Vec<Value>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressEvent {
     #[serde(rename = "type")]
@@ -47,7 +48,7 @@ pub struct ProgressEvent {
     pub stream: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatIntentPayload {
     pub session_id: String,
@@ -55,7 +56,7 @@ pub struct ChatIntentPayload {
     pub agent_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatCompletePayload {
     pub session_id: String,
@@ -68,7 +69,7 @@ pub struct ChatCompletePayload {
 // ============================================================
 
 /// Skill 激活事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillActivatedPayload {
     pub session_id: Option<String>,
@@ -79,7 +80,7 @@ pub struct SkillActivatedPayload {
 }
 
 /// Skill 切换事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillSwitchedPayload {
     pub session_id: Option<String>,
@@ -89,7 +90,7 @@ pub struct SkillSwitchedPayload {
 }
 
 /// Skill 退出事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillExitedPayload {
     pub session_id: Option<String>,
@@ -99,7 +100,7 @@ pub struct SkillExitedPayload {
 }
 
 /// Tool 解锁事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolUnlockedPayload {
     pub session_id: Option<String>,
@@ -108,7 +109,7 @@ pub struct ToolUnlockedPayload {
 }
 
 /// Task 状态变化事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskStatusChangedPayload {
     pub session_id: Option<String>,
@@ -120,7 +121,7 @@ pub struct TaskStatusChangedPayload {
 }
 
 /// Skill 路由评估事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillRouteEvaluatedPayload {
     pub session_id: Option<String>,
@@ -131,7 +132,7 @@ pub struct SkillRouteEvaluatedPayload {
 }
 
 /// Skill 调用事件 payload
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillInvocationPayload {
     pub session_id: Option<String>,
@@ -141,7 +142,7 @@ pub struct SkillInvocationPayload {
 }
 
 /// 工具结果 payload (结构化输出)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResultPayload {
     pub tool_name: String,

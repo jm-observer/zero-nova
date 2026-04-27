@@ -10,12 +10,13 @@ use crate::session::{
     SessionsMessagesResponse, SuccessResponse,
 };
 use crate::system::{ErrorPayload, WelcomePayload};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// 统一消息信封 (与 OpenFlux 前端规范完全一致)
 /// 序列化结构: { "id": "...", "type": "...", "payload": { ... } }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GatewayMessage {
     /// 请求响应模式下的消息 ID，事件推送时为 None
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,7 +39,7 @@ impl GatewayMessage {
 }
 
 /// 消息封装，包含类型标签和可选的 Payload
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "payload")]
 pub enum MessageEnvelope {
     // --- System & Control Events ---
@@ -221,5 +222,6 @@ pub enum MessageEnvelope {
     WorkspaceRestoreAvailable(obs::WorkspaceRestoreResponse),
 
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }

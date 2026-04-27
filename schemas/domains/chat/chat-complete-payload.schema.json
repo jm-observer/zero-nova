@@ -1,28 +1,30 @@
 {
-  "$defs": {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
     "Usage": {
-      "description": "Usage statistics for a chat turn, re-exported from nova-core.\nThis mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
+      "description": "Usage statistics for a chat turn, re-exported from nova-core. This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
       "properties": {
         "cacheCreationInputTokens": {
           "default": 0,
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "cacheReadInputTokens": {
           "default": 0,
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "inputTokens": {
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "outputTokens": {
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         }
       },
@@ -33,7 +35,6 @@
       "type": "object"
     }
   },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "output": {
       "type": [
@@ -47,7 +48,7 @@
     "usage": {
       "anyOf": [
         {
-          "$ref": "#/$defs/Usage"
+          "$ref": "#/definitions/Usage"
         },
         {
           "type": "null"
@@ -61,4 +62,3 @@
   "title": "ChatCompletePayload",
   "type": "object"
 }
-// Chat completion payload

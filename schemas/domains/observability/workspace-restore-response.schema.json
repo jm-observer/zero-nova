@@ -1,0 +1,63 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "activeTab": {
+      "type": "string"
+    },
+    "agentId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "consoleVisible": {
+      "type": "boolean"
+    },
+    "restorableRunState": {
+      "type": "string"
+    },
+    "selectedArtifactId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selectedDiagnosticId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selectedPermissionRequestId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "selectedRunId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "activeTab",
+    "consoleVisible",
+    "restorableRunState",
+    "updatedAt"
+  ],
+  "title": "WorkspaceRestoreResponse",
+  "type": "object"
+}

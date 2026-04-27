@@ -2,19 +2,13 @@
   "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
-    "agentId": {
-      "type": "string"
-    },
-    "title": {
+    "userId": {
       "type": [
         "string",
         "null"
       ]
     }
   },
-  "required": [
-    "agentId"
-  ],
-  "title": "SessionCreateRequest",
+  "title": "WorkspaceRestoreRequest",
   "type": "object"
 }

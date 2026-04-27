@@ -1,40 +1,76 @@
 {
-  "$id": "https://zero-nova.org/schemas/root/schema-root.json",
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Root schema referencing all domain schemas. Generated from nova-protocol Rust types.",
-  "domains": {
-    "agent": {
-      "$ref": "../agent/agent.json"
-    },
+  "description": "Root schema referencing exported nova-protocol domain schemas.",
+  "properties": {
     "chat": {
-      "$ref": "../chat/chat.json"
+      "properties": {
+        "ChatCompletePayload": {
+          "$ref": "../schemas/domains/chat/chat-complete-payload.schema.json"
+        },
+        "ChatPayload": {
+          "$ref": "../schemas/domains/chat/chat-payload.schema.json"
+        },
+        "ProgressEvent": {
+          "$ref": "../schemas/domains/chat/progress-event.schema.json"
+        }
+      },
+      "type": "object"
     },
     "gateway": {
-      "$ref": "../gateway/gateway.json"
+      "properties": {
+        "GatewayMessage": {
+          "$ref": "../schemas/domains/gateway/gateway-message.schema.json"
+        },
+        "MessageEnvelope": {
+          "$ref": "../schemas/domains/gateway/message-envelope.schema.json"
+        }
+      },
+      "type": "object"
     },
     "observability": {
-      "$ref": "../observability/observability.json"
+      "properties": {
+        "AgentInspectRequest": {
+          "$ref": "../schemas/domains/observability/agent-inspect-request.schema.json"
+        },
+        "AgentInspectResponse": {
+          "$ref": "../schemas/domains/observability/agent-inspect-response.schema.json"
+        },
+        "WorkspaceRestoreRequest": {
+          "$ref": "../schemas/domains/observability/workspace-restore-request.schema.json"
+        },
+        "WorkspaceRestoreResponse": {
+          "$ref": "../schemas/domains/observability/workspace-restore-response.schema.json"
+        }
+      },
+      "type": "object"
     },
     "session": {
-      "$ref": "../session/session.json"
-    },
-    "skills": {
-      "$ref": "../skills/skills.json"
+      "properties": {
+        "SessionCreateRequest": {
+          "$ref": "../schemas/domains/session/session-create-request.schema.json"
+        },
+        "SessionCreateResponse": {
+          "$ref": "../schemas/domains/session/session-create-response.schema.json"
+        },
+        "SessionIdPayload": {
+          "$ref": "../schemas/domains/session/session-id-payload.schema.json"
+        }
+      },
+      "type": "object"
     },
     "system": {
-      "$ref": "../system/system.json"
+      "properties": {
+        "ErrorPayload": {
+          "$ref": "../schemas/domains/system/error-payload.schema.json"
+        },
+        "WelcomePayload": {
+          "$ref": "../schemas/domains/system/welcome-payload.schema.json"
+        }
+      },
+      "type": "object"
     }
   },
-  "generatedAt": "2026-04-27T09:34:21.494540900+00:00",
-  "sourceCrate": "nova-protocol",
-  "sourceCrateVersion": "0.1.0",
-  "title": "Zero-Nova Protocol Schema Registry",
-  "type": "object",
-  "types": [],
-  "version": {
-    "major": 1,
-    "minor": 0,
-    "patch": 0
-  }
+  "title": "SchemaRoot",
+  "type": "object"
 }
-// Metadata generated at: 2026-04-27T09:34:21.494540900+00:00

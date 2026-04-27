@@ -1,0 +1,53 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "Session": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "messageCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "agentId",
+        "createdAt",
+        "id",
+        "messageCount",
+        "updatedAt"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "session": {
+      "$ref": "#/definitions/Session"
+    }
+  },
+  "required": [
+    "session"
+  ],
+  "title": "SessionCreateResponse",
+  "type": "object"
+}

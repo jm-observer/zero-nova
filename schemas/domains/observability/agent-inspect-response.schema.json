@@ -1,0 +1,63 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ModelBindingDetailView": {
+      "properties": {
+        "execution": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "orchestration": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution",
+        "orchestration",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ModelRef": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "provider"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "agentId": {
+      "type": "string"
+    },
+    "effectiveModel": {
+      "$ref": "#/definitions/ModelBindingDetailView"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "agentId",
+    "effectiveModel",
+    "sessionId",
+    "updatedAt"
+  ],
+  "title": "AgentInspectResponse",
+  "type": "object"
+}

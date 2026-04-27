@@ -2,19 +2,13 @@
   "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
-    "agentId": {
+    "sessionId": {
       "type": "string"
-    },
-    "title": {
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [
-    "agentId"
+    "sessionId"
   ],
-  "title": "SessionCreateRequest",
+  "title": "SessionIdPayload",
   "type": "object"
 }

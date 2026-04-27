@@ -1,13 +1,8 @@
 {
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "agentId": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "intent": {
       "type": "string"
     },
     "sessionId": {
@@ -15,10 +10,9 @@
     }
   },
   "required": [
-    "sessionId",
-    "intent"
+    "agentId",
+    "sessionId"
   ],
-  "title": "ChatIntentPayload",
+  "title": "AgentInspectRequest",
   "type": "object"
 }
-// Chat intent modification payload

@@ -1,5 +1,7 @@
 {
-  "$defs": {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
     "Agent": {
       "properties": {
         "description": {
@@ -33,11 +35,50 @@
       ],
       "type": "object"
     },
+    "AgentInspectRequest": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "AgentInspectResponse": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "effectiveModel": {
+          "$ref": "#/definitions/ModelBindingDetailView"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "agentId",
+        "effectiveModel",
+        "sessionId",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "AgentsListResponse": {
       "properties": {
         "agents": {
           "items": {
-            "$ref": "#/$defs/Agent"
+            "$ref": "#/definitions/Agent"
           },
           "type": "array"
         }
@@ -50,7 +91,7 @@
     "AgentsSwitchResponse": {
       "properties": {
         "agent": {
-          "$ref": "#/$defs/Agent"
+          "$ref": "#/definitions/Agent"
         },
         "messages": {
           "items": true,
@@ -60,6 +101,127 @@
       "required": [
         "agent",
         "messages"
+      ],
+      "type": "object"
+    },
+    "ArtifactRecord": {
+      "properties": {
+        "artifactId": {
+          "type": "string"
+        },
+        "artifactType": {
+          "type": "string"
+        },
+        "contentPreview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stepId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactType",
+        "createdAt",
+        "filename",
+        "path",
+        "runId",
+        "sessionId",
+        "size",
+        "stepId"
+      ],
+      "type": "object"
+    },
+    "AuditLogRecord": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "logId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "actor",
+        "createdAt",
+        "detail",
+        "logId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "AuditLogsRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "AuditLogsResponse": {
+      "properties": {
+        "logs": {
+          "items": {
+            "$ref": "#/definitions/AuditLogRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "logs"
       ],
       "type": "object"
     },
@@ -77,7 +239,7 @@
         "usage": {
           "anyOf": [
             {
-              "$ref": "#/$defs/Usage"
+              "$ref": "#/definitions/Usage"
             },
             {
               "type": "null"
@@ -106,8 +268,8 @@
         }
       },
       "required": [
-        "sessionId",
-        "intent"
+        "intent",
+        "sessionId"
       ],
       "type": "object"
     },
@@ -149,13 +311,15 @@
               "type": "string"
             },
             "type": {
-              "const": "text",
+              "enum": [
+                "text"
+              ],
               "type": "string"
             }
           },
           "required": [
-            "type",
-            "text"
+            "text",
+            "type"
           ],
           "type": "object"
         },
@@ -169,15 +333,17 @@
               "type": "string"
             },
             "type": {
-              "const": "tool_use",
+              "enum": [
+                "tool_use"
+              ],
               "type": "string"
             }
           },
           "required": [
-            "type",
             "id",
+            "input",
             "name",
-            "input"
+            "type"
           ],
           "type": "object"
         },
@@ -193,15 +359,17 @@
               "type": "string"
             },
             "type": {
-              "const": "tool_result",
+              "enum": [
+                "tool_result"
+              ],
               "type": "string"
             }
           },
           "required": [
-            "type",
-            "tool_use_id",
             "content",
-            "is_error"
+            "is_error",
+            "tool_use_id",
+            "type"
           ],
           "type": "object"
         },
@@ -211,17 +379,93 @@
               "type": "string"
             },
             "type": {
-              "const": "thinking",
+              "enum": [
+                "thinking"
+              ],
               "type": "string"
             }
           },
           "required": [
-            "type",
-            "thinking"
+            "thinking",
+            "type"
           ],
           "type": "object"
         }
       ]
+    },
+    "DiagnosticIssueRecord": {
+      "properties": {
+        "actionHint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "count": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "issueId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "category",
+        "count",
+        "createdAt",
+        "issueId",
+        "message",
+        "severity",
+        "title",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "DiagnosticsCurrentRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "DiagnosticsResponse": {
+      "properties": {
+        "issues": {
+          "items": {
+            "$ref": "#/definitions/DiagnosticIssueRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "issues"
+      ],
+      "type": "object"
     },
     "ErrorPayload": {
       "properties": {
@@ -240,11 +484,110 @@
       ],
       "type": "object"
     },
+    "LastTurnSnapshot": {
+      "properties": {
+        "memoryHits": {
+          "items": {
+            "$ref": "#/definitions/MemoryHitSnapshot"
+          },
+          "type": "array"
+        },
+        "preparedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "promptPreview": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PromptPreviewSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/definitions/SkillBindingSnapshot"
+          },
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/definitions/ToolAvailabilitySnapshot"
+          },
+          "type": "array"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "memoryHits",
+        "preparedAt",
+        "skills",
+        "tools",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "MemoryHitSnapshot": {
+      "properties": {
+        "excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "injected": {
+          "type": "boolean"
+        },
+        "memoryId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "score": {
+          "format": "float",
+          "type": "number"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "injected",
+        "memoryId",
+        "score",
+        "title"
+      ],
+      "type": "object"
+    },
     "MessageDTO": {
       "properties": {
         "content": {
           "items": {
-            "$ref": "#/$defs/ContentBlockDTO"
+            "$ref": "#/definitions/ContentBlockDTO"
           },
           "type": "array"
         },
@@ -257,9 +600,154 @@
         }
       },
       "required": [
-        "role",
         "content",
+        "role",
         "timestamp"
+      ],
+      "type": "object"
+    },
+    "ModelBindingDetailView": {
+      "properties": {
+        "execution": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "orchestration": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution",
+        "orchestration",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ModelRef": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "model",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "PermissionPendingRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "PermissionPendingResponse": {
+      "properties": {
+        "requests": {
+          "items": {
+            "$ref": "#/definitions/PermissionRequestRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
+      ],
+      "type": "object"
+    },
+    "PermissionRequestRecord": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "resolvedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "riskLevel": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stepId": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "createdAt",
+        "kind",
+        "requestId",
+        "riskLevel",
+        "runId",
+        "sessionId",
+        "status",
+        "stepId",
+        "target",
+        "title"
+      ],
+      "type": "object"
+    },
+    "PermissionRespondRequest": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "rememberScope": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "requestId"
       ],
       "type": "object"
     },
@@ -339,6 +827,256 @@
       ],
       "type": "object"
     },
+    "PromptPreviewRequest": {
+      "properties": {
+        "messageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "PromptPreviewSnapshot": {
+      "properties": {
+        "activeSkill": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilityPolicySummary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "conversationSummary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "historyMessageCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "iterationBudget": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maxTokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "renderedPrompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skillSections": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "systemPrompt": {
+          "type": "string"
+        },
+        "toolSections": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "historyMessageCount",
+        "skillSections",
+        "systemPrompt",
+        "toolSections"
+      ],
+      "type": "object"
+    },
+    "RunControlRequest": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "runId"
+      ],
+      "type": "object"
+    },
+    "RunDetailRequest": {
+      "properties": {
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "type": "object"
+    },
+    "RunRecord": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "errorSummary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "executionModel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finishedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "orchestrationModel": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waitingReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agentId",
+        "runId",
+        "sessionId",
+        "startedAt",
+        "status",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "RunStepRecord": {
+      "properties": {
+        "finishedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "payload": true,
+        "runId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "stepId": {
+          "type": "string"
+        },
+        "stepType": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "payload",
+        "runId",
+        "startedAt",
+        "status",
+        "stepId",
+        "stepType",
+        "title"
+      ],
+      "type": "object"
+    },
     "Session": {
       "properties": {
         "agentId": {
@@ -353,7 +1091,7 @@
         },
         "messageCount": {
           "format": "uint",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "title": {
@@ -368,11 +1106,11 @@
         }
       },
       "required": [
-        "id",
         "agentId",
         "createdAt",
-        "updatedAt",
-        "messageCount"
+        "id",
+        "messageCount",
+        "updatedAt"
       ],
       "type": "object"
     },
@@ -386,8 +1124,45 @@
         }
       },
       "required": [
-        "sessionId",
-        "agentId"
+        "agentId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionArtifactsRequest": {
+      "properties": {
+        "artifactType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionArtifactsResponse": {
+      "properties": {
+        "artifacts": {
+          "items": {
+            "$ref": "#/definitions/ArtifactRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifacts"
       ],
       "type": "object"
     },
@@ -395,7 +1170,7 @@
       "properties": {
         "index": {
           "format": "uint",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": [
             "integer",
             "null"
@@ -430,7 +1205,7 @@
     "SessionCreateResponse": {
       "properties": {
         "session": {
-          "$ref": "#/$defs/Session"
+          "$ref": "#/definitions/Session"
         }
       },
       "required": [
@@ -449,11 +1224,311 @@
       ],
       "type": "object"
     },
+    "SessionMemoryHitsRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionMemoryHitsResponse": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/definitions/MemoryHitSnapshot"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "enabled",
+        "hits",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionModelOverride": {
+      "properties": {
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "orchestration": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionModelOverrideRequest": {
+      "properties": {
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "orchestration": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionRunsRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionRunsResponse": {
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/definitions/RunRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "runs"
+      ],
+      "type": "object"
+    },
+    "SessionRuntimeRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionRuntimeSnapshot": {
+      "properties": {
+        "activeAgent": {
+          "type": "string"
+        },
+        "lastTurn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LastTurnSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "modelOverride": {
+          "$ref": "#/definitions/SessionModelOverride"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "tokenCounters": {
+          "$ref": "#/definitions/SessionTokenCounters"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "activeAgent",
+        "modelOverride",
+        "sessionId",
+        "tokenCounters",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionSkillBindingsRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionSkillBindingsResponse": {
+      "properties": {
+        "skills": {
+          "items": {
+            "$ref": "#/definitions/SkillBindingSnapshot"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "skills",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionTokenCounters": {
+      "properties": {
+        "cacheCreationInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cacheReadInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cacheCreationInputTokens",
+        "cacheReadInputTokens",
+        "inputTokens",
+        "outputTokens",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionTokenUsageRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionTokenUsageResponse": {
+      "properties": {
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage": {
+          "$ref": "#/definitions/SessionTokenCounters"
+        }
+      },
+      "required": [
+        "updatedAt",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "SessionToolsRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionToolsResponse": {
+      "properties": {
+        "tools": {
+          "items": {
+            "$ref": "#/definitions/ToolAvailabilitySnapshot"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tools",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "SessionsListResponse": {
       "properties": {
         "sessions": {
           "items": {
-            "$ref": "#/$defs/Session"
+            "$ref": "#/definitions/Session"
           },
           "type": "array"
         }
@@ -467,7 +1542,7 @@
       "properties": {
         "messages": {
           "items": {
-            "$ref": "#/$defs/MessageDTO"
+            "$ref": "#/definitions/MessageDTO"
           },
           "type": "array"
         }
@@ -500,10 +1575,35 @@
         }
       },
       "required": [
+        "reason",
         "skillId",
         "skillName",
-        "sticky",
-        "reason"
+        "sticky"
+      ],
+      "type": "object"
+    },
+    "SkillBindingSnapshot": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "skillId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "skillId",
+        "status"
       ],
       "type": "object"
     },
@@ -527,9 +1627,9 @@
         }
       },
       "required": [
+        "reason",
         "skillId",
-        "skillName",
-        "reason"
+        "skillName"
       ],
       "type": "object"
     },
@@ -553,9 +1653,9 @@
         }
       },
       "required": [
+        "level",
         "skillId",
-        "skillName",
-        "level"
+        "skillName"
       ],
       "type": "object"
     },
@@ -583,10 +1683,10 @@
         }
       },
       "required": [
-        "skillId",
         "confidence",
         "decision",
-        "reasoning"
+        "reasoning",
+        "skillId"
       ],
       "type": "object"
     },
@@ -611,8 +1711,8 @@
       },
       "required": [
         "fromSkill",
-        "toSkill",
-        "reason"
+        "reason",
+        "toSkill"
       ],
       "type": "object"
     },
@@ -656,10 +1756,43 @@
         }
       },
       "required": [
-        "taskId",
-        "taskSubject",
+        "isMainTask",
         "status",
-        "isMainTask"
+        "taskId",
+        "taskSubject"
+      ],
+      "type": "object"
+    },
+    "ToolAvailabilitySnapshot": {
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "schemaSummary": true,
+        "source": {
+          "type": "string"
+        },
+        "unlockedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "name",
+        "schemaSummary",
+        "source"
       ],
       "type": "object"
     },
@@ -680,34 +1813,69 @@
         }
       },
       "required": [
-        "toolName",
-        "source"
+        "source",
+        "toolName"
+      ],
+      "type": "object"
+    },
+    "TurnUsage": {
+      "properties": {
+        "cacheCreationInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cacheReadInputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
       ],
       "type": "object"
     },
     "Usage": {
-      "description": "Usage statistics for a chat turn, re-exported from nova-core.\nThis mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
+      "description": "Usage statistics for a chat turn, re-exported from nova-core. This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
       "properties": {
         "cacheCreationInputTokens": {
           "default": 0,
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "cacheReadInputTokens": {
           "default": 0,
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "inputTokens": {
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         },
         "outputTokens": {
           "format": "uint64",
-          "minimum": 0,
+          "minimum": 0.0,
           "type": "integer"
         }
       },
@@ -731,95 +1899,177 @@
         "requireAuth"
       ],
       "type": "object"
+    },
+    "WorkspaceRestoreRequest": {
+      "properties": {
+        "userId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "WorkspaceRestoreResponse": {
+      "properties": {
+        "activeTab": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consoleVisible": {
+          "type": "boolean"
+        },
+        "restorableRunState": {
+          "type": "string"
+        },
+        "selectedArtifactId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedDiagnosticId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedPermissionRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "activeTab",
+        "consoleVisible",
+        "restorableRunState",
+        "updatedAt"
+      ],
+      "type": "object"
     }
   },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "统一消息信封 (与 OpenFlux 前端规范完全一致)\n序列化结构: { \"id\": \"...\", \"type\": \"...\", \"payload\": { ... } }",
+  "description": "Gateway websocket message root.",
   "oneOf": [
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/ErrorPayload"
+          "$ref": "#/definitions/ErrorPayload"
         },
         "type": {
-          "const": "error",
+          "enum": [
+            "error"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/WelcomePayload"
+          "$ref": "#/definitions/WelcomePayload"
         },
         "type": {
-          "const": "welcome",
+          "enum": [
+            "welcome"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/ChatPayload"
+          "$ref": "#/definitions/ChatPayload"
         },
         "type": {
-          "const": "chat",
+          "enum": [
+            "chat"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionIdPayload"
+          "$ref": "#/definitions/SessionIdPayload"
         },
         "type": {
-          "const": "chat.stop",
+          "enum": [
+            "chat.stop"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionIdPayload"
+          "$ref": "#/definitions/SessionIdPayload"
         },
         "type": {
-          "const": "chat.stop.response",
+          "enum": [
+            "chat.stop.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "type": {
-          "const": "sessions.list",
+          "enum": [
+            "sessions.list"
+          ],
           "type": "string"
         }
       },
@@ -831,215 +2081,243 @@
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionsListResponse"
+          "$ref": "#/definitions/SessionsListResponse"
         },
         "type": {
-          "const": "sessions.list.response",
+          "enum": [
+            "sessions.list.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionIdPayload"
+          "$ref": "#/definitions/SessionIdPayload"
         },
         "type": {
-          "const": "sessions.messages",
+          "enum": [
+            "sessions.messages"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionsMessagesResponse"
+          "$ref": "#/definitions/SessionsMessagesResponse"
         },
         "type": {
-          "const": "sessions.messages.response",
+          "enum": [
+            "sessions.messages.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionCreateRequest"
+          "$ref": "#/definitions/SessionCreateRequest"
         },
         "type": {
-          "const": "sessions.create",
+          "enum": [
+            "sessions.create"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionCreateResponse"
+          "$ref": "#/definitions/SessionCreateResponse"
         },
         "type": {
-          "const": "sessions.create.response",
+          "enum": [
+            "sessions.create.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionIdPayload"
+          "$ref": "#/definitions/SessionIdPayload"
         },
         "type": {
-          "const": "sessions.delete",
+          "enum": [
+            "sessions.delete"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SuccessResponse"
+          "$ref": "#/definitions/SuccessResponse"
         },
         "type": {
-          "const": "sessions.delete.response",
+          "enum": [
+            "sessions.delete.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionCopyRequest"
+          "$ref": "#/definitions/SessionCopyRequest"
         },
         "type": {
-          "const": "sessions.copy",
+          "enum": [
+            "sessions.copy"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionCreateResponse"
+          "$ref": "#/definitions/SessionCreateResponse"
         },
         "type": {
-          "const": "sessions.copy.response",
+          "enum": [
+            "sessions.copy.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionIdPayload"
+          "$ref": "#/definitions/SessionIdPayload"
         },
         "type": {
-          "const": "chat.start",
+          "enum": [
+            "chat.start"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/ChatIntentPayload"
+          "$ref": "#/definitions/ChatIntentPayload"
         },
         "type": {
-          "const": "chat.intent",
+          "enum": [
+            "chat.intent"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/ProgressEvent"
+          "$ref": "#/definitions/ProgressEvent"
         },
         "type": {
-          "const": "chat.progress",
+          "enum": [
+            "chat.progress"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/ChatCompletePayload"
+          "$ref": "#/definitions/ChatCompletePayload"
         },
         "type": {
-          "const": "chat.complete",
+          "enum": [
+            "chat.complete"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "type": {
-          "const": "agents.list",
+          "enum": [
+            "agents.list"
+          ],
           "type": "string"
         }
       },
@@ -1051,55 +2329,63 @@
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/AgentsListResponse"
+          "$ref": "#/definitions/AgentsListResponse"
         },
         "type": {
-          "const": "agents.list.response",
+          "enum": [
+            "agents.list.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SessionAgentSwitchPayload"
+          "$ref": "#/definitions/SessionAgentSwitchPayload"
         },
         "type": {
-          "const": "agents.switch",
+          "enum": [
+            "agents.switch"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/AgentsSwitchResponse"
+          "$ref": "#/definitions/AgentsSwitchResponse"
         },
         "type": {
-          "const": "agents.switch.response",
+          "enum": [
+            "agents.switch.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "type": {
-          "const": "config.get",
+          "enum": [
+            "config.get"
+          ],
           "type": "string"
         }
       },
@@ -1112,13 +2398,15 @@
       "properties": {
         "payload": true,
         "type": {
-          "const": "config.get.response",
+          "enum": [
+            "config.get.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
@@ -1126,152 +2414,1004 @@
       "properties": {
         "payload": true,
         "type": {
-          "const": "config.update",
+          "enum": [
+            "config.update"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SuccessResponse"
+          "$ref": "#/definitions/SuccessResponse"
         },
         "type": {
-          "const": "config.update.response",
+          "enum": [
+            "config.update.response"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SkillActivatedPayload"
+          "$ref": "#/definitions/SkillActivatedPayload"
         },
         "type": {
-          "const": "skill.activated",
+          "enum": [
+            "skill.activated"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SkillSwitchedPayload"
+          "$ref": "#/definitions/SkillSwitchedPayload"
         },
         "type": {
-          "const": "skill.switched",
+          "enum": [
+            "skill.switched"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SkillExitedPayload"
+          "$ref": "#/definitions/SkillExitedPayload"
         },
         "type": {
-          "const": "skill.exited",
+          "enum": [
+            "skill.exited"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/ToolUnlockedPayload"
+          "$ref": "#/definitions/ToolUnlockedPayload"
         },
         "type": {
-          "const": "tool.unlocked",
+          "enum": [
+            "tool.unlocked"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/TaskStatusChangedPayload"
+          "$ref": "#/definitions/TaskStatusChangedPayload"
         },
         "type": {
-          "const": "task.status_changed",
+          "enum": [
+            "task.status_changed"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SkillRouteEvaluatedPayload"
+          "$ref": "#/definitions/SkillRouteEvaluatedPayload"
         },
         "type": {
-          "const": "skill.route_evaluated",
+          "enum": [
+            "skill.route_evaluated"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
         "payload": {
-          "$ref": "#/$defs/SkillInvocationPayload"
+          "$ref": "#/definitions/SkillInvocationPayload"
         },
         "type": {
-          "const": "skill.invocation",
+          "enum": [
+            "skill.invocation"
+          ],
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "payload"
+        "payload",
+        "type"
       ],
       "type": "object"
     },
     {
       "properties": {
+        "payload": {
+          "$ref": "#/definitions/AgentInspectRequest"
+        },
         "type": {
-          "const": "Unknown",
+          "enum": [
+            "agent.inspect"
+          ],
           "type": "string"
         }
       },
       "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/AgentInspectResponse"
+        },
+        "type": {
+          "enum": [
+            "agent.inspect.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRuntimeRequest"
+        },
+        "type": {
+          "enum": [
+            "session.runtime"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRuntimeSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.runtime.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PromptPreviewRequest"
+        },
+        "type": {
+          "enum": [
+            "session.prompt.preview"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PromptPreviewSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.prompt.preview.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionToolsRequest"
+        },
+        "type": {
+          "enum": [
+            "session.tools.list"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionToolsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.tools.list.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionSkillBindingsRequest"
+        },
+        "type": {
+          "enum": [
+            "session.skill.bindings"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionSkillBindingsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.skill.bindings.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionMemoryHitsRequest"
+        },
+        "type": {
+          "enum": [
+            "session.memory.hits"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionMemoryHitsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.memory.hits.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionModelOverrideRequest"
+        },
+        "type": {
+          "enum": [
+            "session.model.override"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRuntimeSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.model.override.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionTokenUsageRequest"
+        },
+        "type": {
+          "enum": [
+            "sessions.token_usage"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionTokenUsageResponse"
+        },
+        "type": {
+          "enum": [
+            "sessions.token_usage.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRunsRequest"
+        },
+        "type": {
+          "enum": [
+            "session.runs"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRunsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.runs.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/RunDetailRequest"
+        },
+        "type": {
+          "enum": [
+            "run.detail"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/RunRecord"
+        },
+        "type": {
+          "enum": [
+            "run.detail.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/RunControlRequest"
+        },
+        "type": {
+          "enum": [
+            "run.control"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SuccessResponse"
+        },
+        "type": {
+          "enum": [
+            "run.control.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionArtifactsRequest"
+        },
+        "type": {
+          "enum": [
+            "session.artifacts"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionArtifactsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.artifacts.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PermissionPendingRequest"
+        },
+        "type": {
+          "enum": [
+            "permission.pending"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PermissionPendingResponse"
+        },
+        "type": {
+          "enum": [
+            "permission.pending.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PermissionRespondRequest"
+        },
+        "type": {
+          "enum": [
+            "permission.respond"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SuccessResponse"
+        },
+        "type": {
+          "enum": [
+            "permission.respond.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/AuditLogsRequest"
+        },
+        "type": {
+          "enum": [
+            "audit.logs"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/AuditLogsResponse"
+        },
+        "type": {
+          "enum": [
+            "audit.logs.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/DiagnosticsCurrentRequest"
+        },
+        "type": {
+          "enum": [
+            "diagnostics.current"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/DiagnosticsResponse"
+        },
+        "type": {
+          "enum": [
+            "diagnostics.current.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/WorkspaceRestoreRequest"
+        },
+        "type": {
+          "enum": [
+            "workspace.restore"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/WorkspaceRestoreResponse"
+        },
+        "type": {
+          "enum": [
+            "workspace.restore.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRuntimeSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.runtime.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionTokenUsageResponse"
+        },
+        "type": {
+          "enum": [
+            "session.token.usage"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionToolsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.tools.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionSkillBindingsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.skill.bindings.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/MemoryHitSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.memory.hit"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/RunRecord"
+        },
+        "type": {
+          "enum": [
+            "run.status.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/RunStepRecord"
+        },
+        "type": {
+          "enum": [
+            "run.step.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/ArtifactRecord"
+        },
+        "type": {
+          "enum": [
+            "session.artifacts.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PermissionRequestRecord"
+        },
+        "type": {
+          "enum": [
+            "permission.requested"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/PermissionRequestRecord"
+        },
+        "type": {
+          "enum": [
+            "permission.resolved"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/AuditLogRecord"
+        },
+        "type": {
+          "enum": [
+            "audit.logs.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/DiagnosticsResponse"
+        },
+        "type": {
+          "enum": [
+            "diagnostics.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/WorkspaceRestoreResponse"
+        },
+        "type": {
+          "enum": [
+            "workspace.restore.available"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
         "type"
       ],
       "type": "object"
@@ -1289,4 +3429,3 @@
   "title": "GatewayMessage",
   "type": "object"
 }
-// GatewayMessage - envelope payload

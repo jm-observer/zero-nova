@@ -7,20 +7,21 @@ description = "Unified server for zero-nova"
 [dependencies]
 nova-agent = { workspace = true }
 nova-protocol = { workspace = true }
-nova-gateway-core = { workspace = true }
-channel-stdio = { workspace = true }
 channel-core = { workspace = true }
-channel-websocket = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 chrono = { workspace = true }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
 clap = { workspace = true, optional = true }
 sysinfo = { workspace = true, optional = true }
 custom-utils = { workspace = true }
+nova-gateway-core = { workspace = true }
 
 [features]
 default = ["cli"]

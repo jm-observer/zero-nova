@@ -2,6 +2,8 @@ use clap::Parser;
 use nova_agent::build_application;
 use nova_agent::config::OriginAppConfig;
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
+use nova_gateway_core::GatewayHandler;
+use std::sync::Arc;
 use sysinfo::{Pid, System};
 
 #[derive(Parser, Debug)]
@@ -62,11 +64,12 @@ async fn main() -> anyhow::Result<()> {
 
     let client = OpenAiCompatClient::new(final_config.llm.api_key.clone(), final_config.llm.base_url.clone());
     let app = build_application(final_config, client).await?;
+    let handler = Arc::new(GatewayHandler::new(app));
 
     let addr = format!("{}:{}", args.host, args.port);
 
     tokio::select! {
-        res = nova_server::run_server(&addr, app) => {
+        res = nova_server::run_server(&addr, handler) => {
             if let Err(e) = res {
                 log::error!("Server error: {}", e);
                 return Err(e);

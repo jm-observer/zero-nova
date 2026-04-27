@@ -2,9 +2,9 @@ use crate::conversation::cache::SessionCache;
 use crate::conversation::control::ControlState;
 use crate::conversation::repository::SqliteSessionRepository;
 use crate::conversation::session::{Session, SessionSummary};
+use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use crate::message::{ContentBlock, Message, Role};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -179,7 +179,10 @@ impl SessionService {
         let now = Utc::now().timestamp_millis();
         {
             let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            history.push(Message { role: role.clone(), content: content.clone() });
+            history.push(Message {
+                role: role.clone(),
+                content: content.clone(),
+            });
             session.touch_updated_at();
         }
         self.repository.save_message(session_id, role, content, now).await?;
@@ -207,7 +210,12 @@ impl SessionService {
             .map(|s| SessionSummary {
                 id: s.id.clone(),
                 name: s.name.clone(),
-                agent_id: s.control.read().unwrap_or_else(|poisoned| poisoned.into_inner()).active_agent.clone(),
+                agent_id: s
+                    .control
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .active_agent
+                    .clone(),
                 created_at: s.created_at,
                 updated_at: s.updated_at.load(Ordering::SeqCst),
                 message_count: s.history.read().unwrap_or_else(|poisoned| poisoned.into_inner()).len(),
@@ -275,10 +283,19 @@ impl SessionService {
             cancellation_token: RwLock::new(None),
         });
         self.repository
-            .save_session(&session.id, &session.name, &agent_id, session.created_at, now, &new_control)
+            .save_session(
+                &session.id,
+                &session.name,
+                &agent_id,
+                session.created_at,
+                now,
+                &new_control,
+            )
             .await?;
         for msg in session.get_history() {
-            self.repository.save_message(&session.id, msg.role.clone(), msg.content.clone(), now).await?;
+            self.repository
+                .save_message(&session.id, msg.role.clone(), msg.content.clone(), now)
+                .await?;
         }
         self.cache.insert(new_id, session.clone());
         Ok(Some(session))

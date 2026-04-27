@@ -1,15 +1,15 @@
-use crate::application::{AgentApplication, AgentApplicationImpl};
-use crate::conversation_service::ConversationService;
+use super::application::{AgentApplication, AgentApplicationImpl};
+use super::conversation_service::ConversationService;
+use crate::agent::{AgentConfig, AgentRuntime};
+use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
+use crate::config::AppConfig;
+use crate::conversation::repository::SqliteSessionRepository;
+use crate::conversation::sqlite_manager::SqliteManager;
+use crate::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder, TrimmerConfig};
+use crate::provider::LlmClient;
+use crate::skill::SkillRegistry;
+use crate::tool::ToolRegistry;
 use anyhow::{bail, Context, Result};
-use nova_agent::conversation::repository::SqliteSessionRepository;
-use nova_agent::conversation::sqlite_manager::SqliteManager;
-use nova_agent::agent::{AgentConfig, AgentRuntime};
-use nova_agent::agent_catalog::{AgentDescriptor, AgentRegistry};
-use nova_agent::config::AppConfig;
-use nova_agent::prompt::{EnvironmentSnapshot, PromptConfig, SystemPromptBuilder, TrimmerConfig};
-use nova_agent::provider::LlmClient;
-use nova_agent::skill::SkillRegistry;
-use nova_agent::tool::ToolRegistry;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -37,10 +37,10 @@ pub async fn build_application<C: LlmClient + 'static>(
         e
     };
 
-    let task_store = Arc::new(tokio::sync::Mutex::new(nova_agent::tool::builtin::task::TaskStore::new()));
+    let task_store = Arc::new(tokio::sync::Mutex::new(crate::tool::builtin::task::TaskStore::new()));
 
     // 预加载项目上下文（R2 修复）
-    let project_context = nova_agent::prompt::load_project_context_with_config_async(
+    let project_context = crate::prompt::load_project_context_with_config_async(
         &config.workspace,
         config.project_context_file().as_deref(),
     )
@@ -48,7 +48,7 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let tools = ToolRegistry::new();
     // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
-    nova_agent::tool::builtin::register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
+    crate::tool::builtin::register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -129,13 +129,13 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     // 侧信道注入器（Phase 3 G10）
     if config.gateway.side_channel.enabled {
-        let si = nova_agent::prompt::SideChannelConfig {
+        let si = crate::prompt::SideChannelConfig {
             enabled: config.gateway.side_channel.enabled,
             skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
             inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
             custom_reminders: vec![],
         };
-        agent.set_side_channel_injector(nova_agent::prompt::SideChannelInjector::new(si));
+        agent.set_side_channel_injector(crate::prompt::SideChannelInjector::new(si));
     }
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
@@ -147,12 +147,12 @@ pub async fn build_application<C: LlmClient + 'static>(
         .context("Data directory contains non-UTF8 characters")?;
     let sqlite_manager = SqliteManager::new(data_dir).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
-    let session_cache = Arc::new(nova_agent::conversation::SessionCache::new());
-    let session_service = nova_agent::conversation::SessionService::new(session_cache, repository);
+    let session_cache = Arc::new(crate::conversation::SessionCache::new());
+    let session_service = crate::conversation::SessionService::new(session_cache, repository);
     session_service.load_all().await?;
 
     let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());
-    let workspace_service = crate::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service);
+    let workspace_service = super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service);
 
     Ok(Arc::new(AgentApplicationImpl::new(
         conversation_service,

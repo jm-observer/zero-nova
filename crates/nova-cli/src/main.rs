@@ -176,7 +176,9 @@ async fn main() -> Result<()> {
     let skill_registry = std::sync::Arc::new(skill_registry_raw);
 
     // 2. Initialize TaskStore
-    let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(nova_agent::tool::builtin::task::TaskStore::new()));
+    let task_store = std::sync::Arc::new(tokio::sync::Mutex::new(
+        nova_agent::tool::builtin::task::TaskStore::new(),
+    ));
 
     // 3. Setup Tool Registry
     let tools = ToolRegistry::new();

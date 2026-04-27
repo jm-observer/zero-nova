@@ -5,18 +5,23 @@
 pub mod agent;
 pub mod agent_catalog;
 pub mod config;
+pub mod conversation;
 pub mod event;
+pub mod facade;
 pub mod mcp;
 pub mod message;
 pub mod prompt;
 pub mod provider;
 pub mod skill;
 pub mod tool;
-pub mod conversation;
 
 pub use agent::{AgentConfig, AgentRuntime, TurnResult};
 pub use agent_catalog::{AgentDescriptor, AgentRegistry};
 pub use event::AgentEvent;
+pub use facade::{
+    build_application, AgentApplication, AgentApplicationImpl, AgentWorkspaceService, AppAgent, AppEvent, AppMessage,
+    AppSession, BootstrapOptions, ConversationService,
+};
 pub use mcp::{McpClient, McpToolDef, ServerInfo};
 pub use message::{ContentBlock, Message, Role};
 pub use prompt::{

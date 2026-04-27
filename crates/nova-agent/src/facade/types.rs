@@ -1,6 +1,6 @@
-use nova_agent::message::ContentBlock;
-use nova_agent::prompt::SkillInvocationLevel;
-use nova_agent::provider::types::Usage;
+use crate::message::ContentBlock;
+use crate::prompt::SkillInvocationLevel;
+use crate::provider::types::Usage;
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
@@ -127,13 +127,13 @@ pub enum AppEvent {
     WorkspaceRestoreAvailable(nova_protocol::observability::WorkspaceRestoreResponse),
 }
 
-impl From<nova_agent::event::AgentEvent> for AppEvent {
-    fn from(event: nova_agent::event::AgentEvent) -> Self {
+impl From<crate::event::AgentEvent> for AppEvent {
+    fn from(event: crate::event::AgentEvent) -> Self {
         match event {
-            nova_agent::event::AgentEvent::TextDelta(text) => AppEvent::Token(text),
-            nova_agent::event::AgentEvent::ThinkingDelta(text) => AppEvent::ThinkingDelta(text),
-            nova_agent::event::AgentEvent::ToolStart { id, name, input } => AppEvent::ToolStart { id, name, input },
-            nova_agent::event::AgentEvent::ToolEnd {
+            crate::event::AgentEvent::TextDelta(text) => AppEvent::Token(text),
+            crate::event::AgentEvent::ThinkingDelta(text) => AppEvent::ThinkingDelta(text),
+            crate::event::AgentEvent::ToolStart { id, name, input } => AppEvent::ToolStart { id, name, input },
+            crate::event::AgentEvent::ToolEnd {
                 id,
                 name,
                 output,
@@ -144,18 +144,16 @@ impl From<nova_agent::event::AgentEvent> for AppEvent {
                 output,
                 is_error,
             },
-            nova_agent::event::AgentEvent::LogDelta { id, name, log, stream } => {
-                AppEvent::ToolLog { id, name, log, stream }
-            }
-            nova_agent::event::AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
-            nova_agent::event::AgentEvent::IterationLimitReached { iterations } => {
+            crate::event::AgentEvent::LogDelta { id, name, log, stream } => AppEvent::ToolLog { id, name, log, stream },
+            crate::event::AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
+            crate::event::AgentEvent::IterationLimitReached { iterations } => {
                 AppEvent::IterationLimitReached { iterations }
             }
-            nova_agent::event::AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
-            nova_agent::event::AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
-            nova_agent::event::AgentEvent::Error(msg) => AppEvent::Error(msg),
-            nova_agent::event::AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),
-            nova_agent::event::AgentEvent::AgentSwitched {
+            crate::event::AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
+            crate::event::AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
+            crate::event::AgentEvent::Error(msg) => AppEvent::Error(msg),
+            crate::event::AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),
+            crate::event::AgentEvent::AgentSwitched {
                 agent_id,
                 agent_name,
                 description,
@@ -166,8 +164,8 @@ impl From<nova_agent::event::AgentEvent> for AppEvent {
                     description,
                 },
             },
-            nova_agent::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
-            nova_agent::event::AgentEvent::TaskStatusChanged {
+            crate::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
+            crate::event::AgentEvent::TaskStatusChanged {
                 id,
                 subject,
                 status,
@@ -178,11 +176,11 @@ impl From<nova_agent::event::AgentEvent> for AppEvent {
                 status,
                 active_form,
             },
-            nova_agent::event::AgentEvent::BackgroundTaskComplete { id, name } => {
+            crate::event::AgentEvent::BackgroundTaskComplete { id, name } => {
                 AppEvent::BackgroundTaskComplete { id, name }
             }
-            nova_agent::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
-            nova_agent::event::AgentEvent::SkillActivated {
+            crate::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
+            crate::event::AgentEvent::SkillActivated {
                 skill_id,
                 skill_name,
                 sticky,
@@ -192,15 +190,15 @@ impl From<nova_agent::event::AgentEvent> for AppEvent {
                 skill_name,
                 sticky,
             },
-            nova_agent::event::AgentEvent::SkillSwitched {
+            crate::event::AgentEvent::SkillSwitched {
                 from_skill, to_skill, ..
             } => AppEvent::SkillSwitched { from_skill, to_skill },
-            nova_agent::event::AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
-            nova_agent::event::AgentEvent::SkillRouteEvaluated {
+            crate::event::AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
+            crate::event::AgentEvent::SkillRouteEvaluated {
                 confidence, reasoning, ..
             } => AppEvent::SkillRouteEvaluated { confidence, reasoning },
-            nova_agent::event::AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
-            nova_agent::event::AgentEvent::SkillInvocation {
+            crate::event::AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
+            crate::event::AgentEvent::SkillInvocation {
                 skill_id,
                 skill_name,
                 level,

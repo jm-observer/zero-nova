@@ -1,6 +1,6 @@
-use anyhow::Result;
-use crate::message::{ContentBlock, Role};
 use crate::message;
+use crate::message::{ContentBlock, Role};
+use anyhow::Result;
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -153,7 +153,18 @@ impl SqliteSessionRepository {
         Ok(None)
     }
 
-    pub async fn list_sessions(&self) -> Result<Vec<(String, String, String, i64, i64, crate::conversation::control::ControlState)>> {
+    pub async fn list_sessions(
+        &self,
+    ) -> Result<
+        Vec<(
+            String,
+            String,
+            String,
+            i64,
+            i64,
+            crate::conversation::control::ControlState,
+        )>,
+    > {
         let rows = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control FROM sessions ORDER BY updated_at DESC",
         )
@@ -165,7 +176,8 @@ impl SqliteSessionRepository {
             let agent_id: String = row.get("agent_id");
             let runtime_control_json: Option<String> = row.get("runtime_control");
             let runtime_control = if let Some(json) = runtime_control_json {
-                serde_json::from_str(&json).unwrap_or_else(|_| crate::conversation::control::ControlState::new(&agent_id))
+                serde_json::from_str(&json)
+                    .unwrap_or_else(|_| crate::conversation::control::ControlState::new(&agent_id))
             } else {
                 crate::conversation::control::ControlState::new(&agent_id)
             };
@@ -294,7 +306,10 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Permissions ---
 
-    pub async fn create_permission_request(&self, req: &crate::conversation::model::PermissionRequestRecord) -> Result<()> {
+    pub async fn create_permission_request(
+        &self,
+        req: &crate::conversation::model::PermissionRequestRecord,
+    ) -> Result<()> {
         sqlx::query("INSERT INTO permission_requests (id, session_id, run_id, capability, resource, status, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&req.id)
             .bind(&req.session_id)
@@ -358,7 +373,10 @@ impl SqliteSessionRepository {
 
     // --- Plan 2: Workspace Restore ---
 
-    pub async fn save_workspace_restore_state(&self, state: &crate::conversation::model::WorkspaceRestoreState) -> Result<()> {
+    pub async fn save_workspace_restore_state(
+        &self,
+        state: &crate::conversation::model::WorkspaceRestoreState,
+    ) -> Result<()> {
         let snapshot_json = serde_json::to_string(&state.snapshot).unwrap();
         sqlx::query("INSERT INTO workspace_restore_state (session_id, snapshot, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET snapshot=excluded.snapshot, updated_at=excluded.updated_at")
             .bind(&state.session_id)
@@ -391,7 +409,9 @@ impl SqliteSessionRepository {
         }
     }
 
-    pub async fn get_last_workspace_restore_state(&self) -> Result<Option<crate::conversation::model::WorkspaceRestoreState>> {
+    pub async fn get_last_workspace_restore_state(
+        &self,
+    ) -> Result<Option<crate::conversation::model::WorkspaceRestoreState>> {
         let row = sqlx::query(
             "SELECT session_id, snapshot, updated_at FROM workspace_restore_state ORDER BY updated_at DESC LIMIT 1",
         )

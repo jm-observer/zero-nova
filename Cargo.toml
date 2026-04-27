@@ -3,7 +3,6 @@ resolver = "2"
 members = [
   "crates/nova-agent",
 
-  "crates/nova-app",
   "crates/nova-protocol",
   "crates/channel-core",
   "crates/channel-websocket",
@@ -47,8 +46,6 @@ tempfile = "3"
 
 # Internal crates
 nova-agent = { path = "crates/nova-agent" }
-
-nova-app = { path = "crates/nova-app" }
 nova-protocol = { path = "crates/nova-protocol" }
 channel-core = { path = "crates/channel-core" }
 channel-websocket = { path = "crates/channel-websocket" }

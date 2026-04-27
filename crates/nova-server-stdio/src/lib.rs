@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nova_app::AgentApplication;
+use nova_agent::AgentApplication;
 use nova_gateway_core::GatewayHandler;
 use std::sync::Arc;
 

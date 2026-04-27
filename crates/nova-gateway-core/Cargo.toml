@@ -5,7 +5,6 @@ edition = "2021"
 description = "Gateway core for zero-nova"
 
 [dependencies]
-nova-app = { workspace = true }
 nova-protocol = { workspace = true }
 channel-core = { workspace = true }
 async-trait = { workspace = true }

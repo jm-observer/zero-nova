@@ -6,7 +6,6 @@ description = "stdio server for zero-nova"
 
 [dependencies]
 nova-agent = { workspace = true }
-nova-app = { workspace = true }
 nova-protocol = { workspace = true }
 nova-gateway-core = { workspace = true }
 channel-stdio = { workspace = true }

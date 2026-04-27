@@ -1,5 +1,5 @@
 use clap::Parser;
-use nova_app::bootstrap::build_application;
+use nova_agent::build_application;
 use nova_agent::config::OriginAppConfig;
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 

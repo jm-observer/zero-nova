@@ -1,10 +1,13 @@
+use crate::config::BashConfig;
 use crate::event::AgentEvent;
-use crate::tool::{Tool, ToolDefinition, ToolOutput};
+use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{info, warn};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -98,7 +101,7 @@ impl ShellBackend for CmdBackend {
     }
 }
 
-fn select_shell(config: &crate::config::BashConfig) -> Box<dyn ShellBackend> {
+fn select_shell(config: &BashConfig) -> Box<dyn ShellBackend> {
     // 1. 配置覆盖
     if let Some(shell) = &config.shell {
         match shell.to_lowercase().as_str() {
@@ -128,21 +131,21 @@ fn select_shell(config: &crate::config::BashConfig) -> Box<dyn ShellBackend> {
 
 /// Tool for executing shell commands.
 pub struct BashTool {
-    shell: std::sync::Arc<dyn ShellBackend>,
+    shell: Arc<dyn ShellBackend>,
     /// Optional workspace directory to execute commands in.
-    workspace: Option<std::path::PathBuf>,
+    workspace: Option<PathBuf>,
 }
 
 impl BashTool {
-    pub fn new(config: &crate::config::BashConfig) -> Self {
-        let shell: std::sync::Arc<dyn ShellBackend> = select_shell(config).into();
+    pub fn new(config: &BashConfig) -> Self {
+        let shell: Arc<dyn ShellBackend> = select_shell(config).into();
         info!("BashTool initialized using shell: {}", shell.name());
         Self { shell, workspace: None }
     }
 
     /// Creates a new `BashTool` with a specific workspace directory.
-    pub fn with_workspace(config: &crate::config::BashConfig, workspace: std::path::PathBuf) -> Self {
-        let shell: std::sync::Arc<dyn ShellBackend> = select_shell(config).into();
+    pub fn with_workspace(config: &BashConfig, workspace: PathBuf) -> Self {
+        let shell: Arc<dyn ShellBackend> = select_shell(config).into();
         Self {
             shell,
             workspace: Some(workspace),
@@ -177,7 +180,7 @@ impl Tool for BashTool {
     }
 
     /// Executes the bash command as defined in the input JSON.
-    async fn execute(&self, input: Value, context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
         let command_str = input["command"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' field"))?;
@@ -199,7 +202,7 @@ impl Tool for BashTool {
                 if let Some(c) = ctx {
                     let _ = c
                         .event_tx
-                        .send(crate::event::AgentEvent::BackgroundTaskComplete {
+                        .send(AgentEvent::BackgroundTaskComplete {
                             id: c.tool_use_id,
                             name: "Bash".to_string(),
                         })
@@ -394,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_shell_selection_default() {
-        let config = crate::config::BashConfig::default();
+        let config = BashConfig::default();
         let shell = select_shell(&config);
         if cfg!(windows) {
             // Check if one of the expected Windows shells is selected
@@ -422,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shell_execution() {
-        let config = crate::config::BashConfig::default();
+        let config = BashConfig::default();
         let tool = BashTool::new(&config);
         let input = json!({
             "command": "echo hello",

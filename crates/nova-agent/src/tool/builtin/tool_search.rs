@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolDefinition, ToolOutput, ToolRegistry};
+use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -119,7 +119,7 @@ impl Tool for ToolSearchTool {
         tool_definition()
     }
 
-    async fn execute(&self, _input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
+    async fn execute(&self, _input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
         // ToolSearch 本身不通过 ToolRegistry.execute() 调用，
         // 而是由 builtin::tool_search::execute() 处理。
         // 这里实现一个基本版本以保持 Tool trait 兼容性。

@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolDefinition, ToolOutput};
+use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::warn;
@@ -58,7 +58,7 @@ impl Tool for WebFetchTool {
     }
 
     /// Executes the web fetch based on input parameters.
-    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
         let url = input["url"].as_str().ok_or_else(|| anyhow!("Missing 'url' field"))?;
         let selector_str = input["selector"].as_str().unwrap_or("body");
 

@@ -1,5 +1,6 @@
+use crate::config::SearchConfig;
 use crate::tool::builtin::web_search::types::SearchBackend;
-use crate::tool::{Tool, ToolDefinition, ToolOutput};
+use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -22,7 +23,7 @@ pub struct WebSearchTool {
 
 impl WebSearchTool {
     /// Creates a `WebSearchTool` from configuration.
-    pub fn new(config: &crate::config::SearchConfig) -> Self {
+    pub fn new(config: &SearchConfig) -> Self {
         let client = Client::new();
 
         // 1. 优先处理显式指定的后端
@@ -126,7 +127,7 @@ impl Tool for WebSearchTool {
     }
 
     /// Executes the web search based on the input query.
-    async fn execute(&self, input: Value, _context: Option<crate::tool::ToolContext>) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'query' field"))?;

@@ -1,4 +1,5 @@
-use crate::skill::SkillRegistry;
+use crate::event::AgentEvent;
+use crate::skill::{Skill, SkillRegistry};
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -50,7 +51,7 @@ impl Tool for SkillTool {
             if let Some(ctx) = &context {
                 let _ = ctx
                     .event_tx
-                    .send(crate::event::AgentEvent::SkillLoaded {
+                    .send(AgentEvent::SkillLoaded {
                         skill_name: skill_name.to_string(),
                     })
                     .await;
@@ -74,7 +75,7 @@ impl Tool for SkillTool {
     }
 }
 
-fn format_skill_output(skill: &crate::skill::Skill, args: Option<&str>) -> String {
+fn format_skill_output(skill: &Skill, args: Option<&str>) -> String {
     match args {
         Some(args) => format!(
             "Skill '{}' loaded.\nArguments: {}\n\nInstructions:\n\n{}",

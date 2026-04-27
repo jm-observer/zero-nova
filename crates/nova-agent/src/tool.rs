@@ -1,11 +1,13 @@
+use crate::event::AgentEvent;
+use crate::prompt::EnvironmentSnapshot;
+use crate::provider::types::ToolDefinition as ProviderToolDefinition;
+use crate::skill::{CapabilityPolicy, SkillRegistry};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-
-use crate::skill::CapabilityPolicy;
 
 use serde_json::Value;
 
@@ -15,17 +17,17 @@ pub mod builtin;
 #[derive(Clone)]
 pub struct ToolContext {
     /// Channel for sending intermediate events (e.g., logs).
-    pub event_tx: mpsc::Sender<crate::event::AgentEvent>,
+    pub event_tx: mpsc::Sender<AgentEvent>,
     /// The tool_use_id to associate LogDelta events with.
     pub tool_use_id: String,
     /// Reference to the task store for TaskCreate/TaskList/TaskUpdate.
-    pub task_store: Option<Arc<tokio::sync::Mutex<builtin::task::TaskStore>>>,
+    pub task_store: Option<Arc<Mutex<builtin::task::TaskStore>>>,
     /// Reference to the skill registry.
-    pub skill_registry: Option<Arc<crate::skill::SkillRegistry>>,
+    pub skill_registry: Option<Arc<SkillRegistry>>,
     /// Session-level state: files that have been read (for Write pre-read enforcement).
-    pub read_files: Arc<tokio::sync::Mutex<HashSet<String>>>,
+    pub read_files: Arc<Mutex<HashSet<String>>>,
     /// 运行时环境快照
-    pub environment: Option<crate::prompt::EnvironmentSnapshot>,
+    pub environment: Option<EnvironmentSnapshot>,
 }
 
 /// Definition of a tool, including name, description, and input schema.
@@ -112,7 +114,7 @@ pub struct DeferredToolRepresentation {
 /// TurnToolView 表示当前轮次对 LLM 可见的工具视图。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnToolView {
-    pub loaded: Vec<crate::provider::types::ToolDefinition>,
+    pub loaded: Vec<ProviderToolDefinition>,
     pub deferred: Vec<DeferredToolRepresentation>,
     pub tool_search_enabled: bool,
     pub skill_tool_enabled: bool,
@@ -219,13 +221,13 @@ impl ToolRegistry {
         });
     }
     /// Returns the definitions of all registered tools, including deferred ones as stubs.
-    pub fn tool_definitions(&self) -> Vec<crate::provider::types::ToolDefinition> {
+    pub fn tool_definitions(&self) -> Vec<ProviderToolDefinition> {
         let mut defs: Vec<_> = self
             .lock_tools()
             .iter()
             .map(|t| {
                 let d = t.definition();
-                crate::provider::types::ToolDefinition {
+                ProviderToolDefinition {
                     name: d.name,
                     description: d.description,
                     input_schema: d.input_schema,
@@ -235,7 +237,7 @@ impl ToolRegistry {
 
         if !self.lock_deferred().is_empty() {
             let d = builtin::tool_search::tool_definition();
-            defs.push(crate::provider::types::ToolDefinition {
+            defs.push(ProviderToolDefinition {
                 name: d.name,
                 description: d.description,
                 input_schema: d.input_schema,
@@ -299,7 +301,7 @@ impl ToolRegistry {
             .iter()
             .map(|t| {
                 let d = t.definition();
-                crate::provider::types::ToolDefinition {
+                ProviderToolDefinition {
                     name: d.name,
                     description: d.description,
                     input_schema: d.input_schema,

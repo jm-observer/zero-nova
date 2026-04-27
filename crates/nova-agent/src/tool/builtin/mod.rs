@@ -9,15 +9,18 @@ pub mod web_fetch;
 pub mod web_search;
 pub mod write;
 
+use crate::config::AppConfig;
+use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
 pub fn register_builtin_tools(
     registry: &ToolRegistry,
-    config: &crate::config::AppConfig,
-    task_store: std::sync::Arc<tokio::sync::Mutex<task::TaskStore>>,
-    skill_registry: std::sync::Arc<crate::skill::SkillRegistry>,
+    config: &AppConfig,
+    task_store: Arc<Mutex<task::TaskStore>>,
+    skill_registry: Arc<SkillRegistry>,
     tool_whitelist: Option<&[String]>,
 ) {
     if is_tool_enabled(tool_whitelist, "Bash") {

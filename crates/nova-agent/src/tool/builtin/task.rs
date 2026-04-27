@@ -1,3 +1,4 @@
+use crate::event::AgentEvent;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -328,7 +329,7 @@ impl Tool for TaskCreateTool {
         if let Some(ctx) = context {
             let _ = ctx
                 .event_tx
-                .send(crate::event::AgentEvent::TaskCreated {
+                .send(AgentEvent::TaskCreated {
                     id: task.id.clone(),
                     subject,
                 })
@@ -449,7 +450,7 @@ impl Tool for TaskUpdateTool {
         if let Some(ctx) = context {
             let _ = ctx
                 .event_tx
-                .send(crate::event::AgentEvent::TaskStatusChanged {
+                .send(AgentEvent::TaskStatusChanged {
                     id: task.id.clone(),
                     subject: task.subject.clone(),
                     status: task.status.as_str().to_string(),

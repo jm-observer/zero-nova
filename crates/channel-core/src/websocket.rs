@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message as WsMessage};
 
 const DEFAULT_OUTBOUND_CAPACITY: usize = 128;
 
@@ -49,11 +49,11 @@ where
     let (mut ws_sink, mut ws_source) = ws_stream.split();
     let (internal_tx, mut internal_rx) = mpsc::channel::<InternalMessage<Resp>>(DEFAULT_OUTBOUND_CAPACITY);
 
-    // Create the channel-core ResponseSink
+    // 分离协议响应通道，避免业务回调直接耦合底层 WebSocket sink。
     let (core_tx, mut core_rx) = mpsc::channel::<Resp>(DEFAULT_OUTBOUND_CAPACITY);
     let response_sink = ResponseSink::new(core_tx);
 
-    // Forwarding task: core_rx -> internal_tx
+    // 单独转发任务可避免业务发送受写 socket 背压直接影响。
     let internal_tx_clone = internal_tx.clone();
     tokio::spawn(async move {
         while let Some(msg) = core_rx.recv().await {
@@ -104,24 +104,38 @@ where
     });
 
     // 接收消息循环
+    handle_receive_loop(&mut ws_source, &handler, &peer_id, &peer, &internal_tx, &response_sink).await;
+
+    write_task.abort();
+    let _ = write_task.await;
+    info!("Connection closed for {}", peer_id);
+
+    // 在写任务收尾后再通知业务层，避免断开事件先于连接关闭日志出现。
+    handler.on_disconnect(peer_id).await;
+    Ok(())
+}
+
+/// 处理来自 WebSocket 客户端的接收循环。
+///
+/// 将接收分支与连接收尾逻辑分离，便于在读循环异常退出时保持统一清理路径。
+async fn handle_receive_loop<H, Req, Resp>(
+    ws_source: &mut (impl StreamExt<Item = Result<WsMessage, WsError>> + Unpin),
+    handler: &Arc<H>,
+    peer_id: &str,
+    peer: &SocketAddr,
+    internal_tx: &mpsc::Sender<InternalMessage<Resp>>,
+    response_sink: &ResponseSink<Resp>,
+) where
+    H: ChannelHandler<Req = Req, Resp = Resp>,
+    Req: DeserializeOwned + Send + 'static,
+    Resp: Serialize + Send + 'static,
+{
     while let Some(msg_result) = ws_source.next().await {
         trace!("recv from {}: {:?}", peer, msg_result);
         match msg_result {
-            Ok(WsMessage::Text(text)) => match serde_json::from_str::<Req>(&text) {
-                Ok(req) => {
-                    let handler_clone = handler.clone();
-                    let peer_id_clone = peer_id.clone();
-                    let sink_clone = response_sink.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = handler_clone.on_message(peer_id_clone, req, sink_clone).await {
-                            error!("Error in on_message: {}", e);
-                        }
-                    });
-                }
-                Err(e) => {
-                    warn!("Failed to parse request from {}: {}. Text: {}", peer_id, e, text);
-                }
-            },
+            Ok(WsMessage::Text(text)) => {
+                handle_text_message(&text, handler, peer_id, response_sink).await;
+            }
             Ok(WsMessage::Ping(data)) => match internal_tx.send(InternalMessage::Raw(WsMessage::Pong(data))).await {
                 Ok(()) => {}
                 Err(_) => {
@@ -137,12 +151,34 @@ where
             _ => {}
         }
     }
+}
 
-    // 通知业务层连接断开
-    handler.on_disconnect(peer_id.clone()).await;
-
-    write_task.abort();
-    let _ = write_task.await;
-    info!("Connection closed for {}", peer_id);
-    Ok(())
+/// 处理 WebSocket Text 消息并进行 JSON 反序列化。
+///
+/// 提取单独函数后，读循环可集中处理协议分支，文本请求解析失败也能局部化记录。
+async fn handle_text_message<H, Req, Resp>(
+    text: &str,
+    handler: &Arc<H>,
+    peer_id: &str,
+    response_sink: &ResponseSink<Resp>,
+) where
+    H: ChannelHandler<Req = Req, Resp = Resp>,
+    Req: DeserializeOwned + Send + 'static,
+    Resp: Serialize + Send + 'static,
+{
+    match serde_json::from_str::<Req>(text) {
+        Ok(req) => {
+            let handler_clone = handler.clone();
+            let peer_id_clone = peer_id.to_string();
+            let sink_clone = response_sink.clone();
+            tokio::spawn(async move {
+                if let Err(e) = handler_clone.on_message(peer_id_clone, req, sink_clone).await {
+                    error!("Error in on_message: {}", e);
+                }
+            });
+        }
+        Err(e) => {
+            warn!("Failed to parse request from {}: {}. Text: {}", peer_id, e, text);
+        }
+    }
 }

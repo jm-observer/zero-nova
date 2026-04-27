@@ -1,9 +1,12 @@
 use crate::agent::AgentRuntime;
-use crate::agent_catalog::AgentRegistry;
+use crate::agent::TurnResult;
+use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
+use crate::conversation::control::LastTurnSnapshot;
+use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
-use crate::prompt::PromptConfig;
+use crate::prompt::{load_project_context_with_config_async, PromptConfig};
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -33,7 +36,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         session_id: &str,
         input: &str,
         event_tx: mpsc::Sender<AgentEvent>,
-    ) -> Result<crate::agent::TurnResult> {
+    ) -> Result<TurnResult> {
         self.execute_agent_turn(session_id, input, event_tx).await
     }
 
@@ -45,11 +48,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         Ok(())
     }
 
-    pub async fn switch_agent(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-    ) -> Result<crate::agent_catalog::AgentDescriptor> {
+    pub async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AgentDescriptor> {
         let agent = self
             .agent_registry
             .get(agent_id)
@@ -66,7 +65,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         session_id: &str,
         input: &str,
         event_tx: mpsc::Sender<AgentEvent>,
-    ) -> Result<crate::agent::TurnResult> {
+    ) -> Result<TurnResult> {
         let turn_id = uuid::Uuid::new_v4().to_string();
         let run_id = turn_id.clone(); // Use turn_id as run_id for simplicity
         let now = Utc::now().timestamp_millis();
@@ -74,7 +73,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         // Phase 2: Create Run record
         self.sessions
             .get_repository()
-            .create_run(&crate::conversation::model::RunRecord {
+            .create_run(&RunRecord {
                 id: run_id.clone(),
                 session_id: session_id.to_string(),
                 status: "running".to_string(),
@@ -93,7 +92,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 match &event {
                     AgentEvent::ToolStart { id, name: _, input } => {
                         let _ = repository
-                            .create_run_step(&crate::conversation::model::RunStepRecord {
+                            .create_run_step(&RunStepRecord {
                                 id: id.clone(),
                                 run_id: run_id_clone.clone(),
                                 step_type: "tool_use".to_string(),
@@ -131,8 +130,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         self.sessions
             .append_message(
                 session_id,
-                crate::message::Role::User,
-                vec![crate::message::ContentBlock::Text {
+                Role::User,
+                vec![ContentBlock::Text {
                     text: input.to_string(),
                 }],
             )
@@ -156,7 +155,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let use_turn_context = self.agent.config.use_turn_context;
         if use_turn_context {
             // 预加载项目上下文（R2 修复）
-            let project_context = crate::prompt::load_project_context_with_config_async(
+            let project_context = load_project_context_with_config_async(
                 &self.agent.config.workspace,
                 self.agent.config.project_context_file.as_deref(),
             )
@@ -188,7 +187,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 &turn_ctx,
             );
             // We use Value for storage to avoid deep coupling
-            let snapshot_internal = crate::conversation::control::LastTurnSnapshot {
+            let snapshot_internal = LastTurnSnapshot {
                 turn_id: snapshot.turn_id.clone(),
                 prepared_at: snapshot.prepared_at,
                 prompt_preview: snapshot

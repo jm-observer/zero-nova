@@ -1,4 +1,4 @@
-use crate::message::{ContentBlock, Role};
+use crate::message::{ContentBlock, Message, Role};
 use anyhow::Result;
 use sqlx::Row;
 
@@ -95,7 +95,7 @@ impl SqliteSessionRepository {
             i64,
             i64,
             super::control::ControlState,
-            Vec<crate::message::Message>,
+            Vec<Message>,
         )>,
     > {
         let row = sqlx::query(
@@ -135,7 +135,7 @@ impl SqliteSessionRepository {
                     _ => Role::Assistant,
                 };
                 let content: Vec<ContentBlock> = serde_json::from_str(&content_str)?;
-                history.push(crate::message::Message { role, content });
+                history.push(Message { role, content });
             }
 
             return Ok(Some((

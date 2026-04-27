@@ -1,6 +1,9 @@
-use crate::message::Role;
+use crate::config::LlmConfig;
+use crate::message::{ContentBlock, Message, Role};
 use crate::provider::sse::SseParser;
-use crate::provider::types::{MessageRequest, ToolDefinition};
+use crate::provider::types::{
+    InputContentBlock, InputMessage, MessageRequest, StreamEvent, ThinkingConfig, ThinkingMode, ToolDefinition,
+};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StopReason, StreamReceiver};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -15,7 +18,7 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     /// Constructs an `AnthropicClient` using the provided configuration.
-    pub fn from_config(config: &crate::config::LlmConfig) -> Self {
+    pub fn from_config(config: &LlmConfig) -> Self {
         Self {
             http: Client::new(),
             api_key: config.api_key.clone(),
@@ -39,7 +42,7 @@ impl LlmClient for AnthropicClient {
     /// Streams responses from the Anthropic API based on the provided messages and configuration.
     async fn stream(
         &self,
-        messages: &[crate::message::Message],
+        messages: &[Message],
         tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
@@ -50,7 +53,7 @@ impl LlmClient for AnthropicClient {
         for msg in messages {
             if msg.role == Role::System {
                 for block in &msg.content {
-                    if let crate::message::ContentBlock::Text { text } = block {
+                    if let ContentBlock::Text { text } = block {
                         system_prompts.push(text.clone());
                     }
                 }
@@ -58,35 +61,29 @@ impl LlmClient for AnthropicClient {
             }
 
             let role = match msg.role {
-                crate::message::Role::User => "user",
-                crate::message::Role::Assistant => "assistant",
+                Role::User => "user",
+                Role::Assistant => "assistant",
                 _ => unreachable!(), // System handled above
             };
 
-            let content_vec: Vec<crate::provider::types::InputContentBlock> = msg
+            let content_vec: Vec<InputContentBlock> = msg
                 .content
                 .iter()
                 .map(|block| match block {
-                    crate::message::ContentBlock::Text { text } => {
-                        crate::provider::types::InputContentBlock::Text { text: text.clone() }
-                    }
-                    crate::message::ContentBlock::Thinking { thinking } => {
-                        crate::provider::types::InputContentBlock::Thinking {
-                            thinking: thinking.clone(),
-                        }
-                    }
-                    crate::message::ContentBlock::ToolUse { id, name, input } => {
-                        crate::provider::types::InputContentBlock::ToolUse {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: input.clone(),
-                        }
-                    }
-                    crate::message::ContentBlock::ToolResult {
+                    ContentBlock::Text { text } => InputContentBlock::Text { text: text.clone() },
+                    ContentBlock::Thinking { thinking } => InputContentBlock::Thinking {
+                        thinking: thinking.clone(),
+                    },
+                    ContentBlock::ToolUse { id, name, input } => InputContentBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    },
+                    ContentBlock::ToolResult {
                         tool_use_id,
                         output,
                         is_error,
-                    } => crate::provider::types::InputContentBlock::ToolResult {
+                    } => InputContentBlock::ToolResult {
                         tool_use_id: tool_use_id.clone(),
                         output: output.clone(),
                         is_error: *is_error,
@@ -94,7 +91,7 @@ impl LlmClient for AnthropicClient {
                 })
                 .collect();
 
-            input_messages.push(crate::provider::types::InputMessage {
+            input_messages.push(InputMessage {
                 role: role.to_string(),
                 content: content_vec,
             });
@@ -120,8 +117,8 @@ impl LlmClient for AnthropicClient {
 
         // Constraints: if thinking is enabled, temperature must be 1.0
         if let Some(budget) = config.thinking_budget {
-            body.thinking = Some(crate::provider::types::ThinkingConfig {
-                kind: crate::provider::types::ThinkingMode::Enabled,
+            body.thinking = Some(ThinkingConfig {
+                kind: ThinkingMode::Enabled,
                 budget_tokens: budget,
             });
             body.temperature = Some(1.0);
@@ -180,7 +177,7 @@ impl StreamReceiver for AnthropicStreamReceiver {
             if let Some(event) = self.parser.next_event()? {
                 // Convert StreamEvent to ProviderStreamEvent
                 let provider_event = match event {
-                    crate::provider::types::StreamEvent::ContentBlockStart { content_block, .. } => {
+                    StreamEvent::ContentBlockStart { content_block, .. } => {
                         let block_type = content_block.get("type").and_then(|t| t.as_str());
                         match block_type {
                             Some("tool_use") => {
@@ -210,32 +207,30 @@ impl StreamReceiver for AnthropicStreamReceiver {
                             _ => continue,
                         }
                     }
-                    crate::provider::types::StreamEvent::ContentBlockDelta { delta, .. } => {
-                        match self.current_block_type {
-                            Some(BlockType::Thinking) => {
-                                if let Some(thinking) = delta.get("thinking").and_then(|t| t.as_str()) {
-                                    ProviderStreamEvent::ThinkingDelta(thinking.to_string())
-                                } else {
-                                    continue;
-                                }
-                            }
-                            Some(BlockType::ToolUse) => {
-                                if let Some(partial_json) = delta.get("partial_json").and_then(|p| p.as_str()) {
-                                    ProviderStreamEvent::ToolUseInputDelta(partial_json.to_string())
-                                } else {
-                                    continue;
-                                }
-                            }
-                            _ => {
-                                if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                                    ProviderStreamEvent::TextDelta(text.to_string())
-                                } else {
-                                    continue;
-                                }
+                    StreamEvent::ContentBlockDelta { delta, .. } => match self.current_block_type {
+                        Some(BlockType::Thinking) => {
+                            if let Some(thinking) = delta.get("thinking").and_then(|t| t.as_str()) {
+                                ProviderStreamEvent::ThinkingDelta(thinking.to_string())
+                            } else {
+                                continue;
                             }
                         }
-                    }
-                    crate::provider::types::StreamEvent::ContentBlockStop { .. } => {
+                        Some(BlockType::ToolUse) => {
+                            if let Some(partial_json) = delta.get("partial_json").and_then(|p| p.as_str()) {
+                                ProviderStreamEvent::ToolUseInputDelta(partial_json.to_string())
+                            } else {
+                                continue;
+                            }
+                        }
+                        _ => {
+                            if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                                ProviderStreamEvent::TextDelta(text.to_string())
+                            } else {
+                                continue;
+                            }
+                        }
+                    },
+                    StreamEvent::ContentBlockStop { .. } => {
                         let was_tool = self.current_block_type == Some(BlockType::ToolUse);
                         self.current_block_type = None;
                         if was_tool {
@@ -248,12 +243,10 @@ impl StreamReceiver for AnthropicStreamReceiver {
                             continue;
                         }
                     }
-                    crate::provider::types::StreamEvent::MessageDelta { delta, .. } => {
+                    StreamEvent::MessageDelta { delta, .. } => {
                         if let Some(stop_reason_val) = delta.get("stop_reason") {
                             if !stop_reason_val.is_null() {
-                                if let Ok(reason) = serde_json::from_value::<crate::provider::types::StopReason>(
-                                    stop_reason_val.clone(),
-                                ) {
+                                if let Ok(reason) = serde_json::from_value::<StopReason>(stop_reason_val.clone()) {
                                     self.pending_stop_reason = Some(reason);
                                 }
                             }
@@ -265,13 +258,11 @@ impl StreamReceiver for AnthropicStreamReceiver {
                             continue;
                         }
                     }
-                    crate::provider::types::StreamEvent::MessageStop { usage } => {
-                        ProviderStreamEvent::MessageComplete {
-                            usage: usage.unwrap_or_default(),
-                            stop_reason: self.pending_stop_reason.take(),
-                        }
-                    }
-                    crate::provider::types::StreamEvent::Error { error } => {
+                    StreamEvent::MessageStop { usage } => ProviderStreamEvent::MessageComplete {
+                        usage: usage.unwrap_or_default(),
+                        stop_reason: self.pending_stop_reason.take(),
+                    },
+                    StreamEvent::Error { error } => {
                         return Err(anyhow!("Anthropic API Error: {}", error));
                     }
                     _ => continue,

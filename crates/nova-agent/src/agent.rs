@@ -1,26 +1,32 @@
+use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
-use serde_json;
-
-use crate::provider::types::ToolDefinition;
-use crate::provider::{LlmClient, ProviderStreamEvent};
-use crate::skill::ToolPolicy;
+use crate::prompt::{
+    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, SideChannelInjector, SystemPromptBuilder,
+    TrimmerConfig, TurnContext,
+};
+use crate::provider::types::{StopReason, ToolDefinition, Usage};
+use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent};
+use crate::skill::{CapabilityPolicy, SkillRegistry, ToolPolicy};
+use crate::tool::builtin::task::TaskStore;
 pub use crate::tool::ToolRegistry;
+use crate::tool::{Tool, ToolContext};
 use anyhow::Result;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde::Serialize;
+use serde_json;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-
-use crate::prompt::{ActiveSkillState, HistoryTrimmer, TrimmerConfig, TurnContext};
-use crate::skill::CapabilityPolicy;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TurnResult {
     pub messages: Vec<Message>,
-    pub usage: crate::provider::types::Usage,
+    pub usage: Usage,
 }
 
 /// Runtime for the zero-nova agent.
@@ -28,17 +34,17 @@ pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
     pub config: AgentConfig,
-    pub task_store: Option<std::sync::Arc<tokio::sync::Mutex<crate::tool::builtin::task::TaskStore>>>,
-    pub skill_registry: Option<std::sync::Arc<crate::skill::SkillRegistry>>,
-    pub read_files: std::sync::Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    pub task_store: Option<Arc<Mutex<TaskStore>>>,
+    pub skill_registry: Option<Arc<SkillRegistry>>,
+    pub read_files: Arc<Mutex<HashSet<String>>>,
     /// 侧信道注入器（Phase 3 新增）
-    pub side_channel_injector: Option<crate::prompt::SideChannelInjector>,
+    pub side_channel_injector: Option<SideChannelInjector>,
 }
 
 /// Configuration for the zero-nova agent.
 pub struct AgentConfig {
     pub max_iterations: usize,
-    pub model_config: crate::provider::ModelConfig,
+    pub model_config: ModelConfig,
     pub tool_timeout: Duration,
     /// 最大 token 限制
     pub max_tokens: usize,
@@ -47,13 +53,13 @@ pub struct AgentConfig {
     /// 历史裁剪配置
     pub trimmer: TrimmerConfig,
     /// 工作区路径
-    pub workspace: std::path::PathBuf,
+    pub workspace: PathBuf,
     /// 提示词目录 (AppConfig::prompts_dir)
-    pub prompts_dir: std::path::PathBuf,
+    pub prompts_dir: PathBuf,
     /// 项目上下文文件路径
-    pub project_context_file: Option<std::path::PathBuf>,
+    pub project_context_file: Option<PathBuf>,
     /// 启动时采集的环境快照
-    pub initial_env_snapshot: Option<crate::prompt::EnvironmentSnapshot>,
+    pub initial_env_snapshot: Option<EnvironmentSnapshot>,
 }
 
 impl<C: LlmClient> AgentRuntime<C> {
@@ -65,7 +71,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             config,
             task_store: None,
             skill_registry: None,
-            read_files: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            read_files: Arc::new(Mutex::new(HashSet::new())),
             side_channel_injector: None,
         }
     }
@@ -76,7 +82,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     /// Registers a new tool with the registry.
-    pub fn register_tool(&self, tool: Box<dyn crate::tool::Tool>) {
+    pub fn register_tool(&self, tool: Box<dyn Tool>) {
         self.tools.register(tool);
     }
 
@@ -86,7 +92,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     /// 设置侧信道注入器。
-    pub fn set_side_channel_injector(&mut self, injector: crate::prompt::SideChannelInjector) {
+    pub fn set_side_channel_injector(&mut self, injector: SideChannelInjector) {
         self.side_channel_injector = Some(injector);
     }
 
@@ -96,7 +102,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     async fn execute_tool_calls(
         &self,
         parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
-        event_tx: &mpsc::Sender<crate::event::AgentEvent>,
+        event_tx: &mpsc::Sender<AgentEvent>,
         cancellation_token: &Option<CancellationToken>,
     ) -> Result<Vec<ContentBlock>> {
         let mut tool_results_fut = FuturesUnordered::new();
@@ -108,7 +114,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             tool_results_fut.push(async move {
                 let _ = tx
-                    .send(crate::event::AgentEvent::ToolStart {
+                    .send(AgentEvent::ToolStart {
                         id: id.clone(),
                         name: name.clone(),
                         input: input_val.clone(),
@@ -120,7 +126,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                     tool_registry.execute(
                         &name,
                         input_val,
-                        Some(crate::tool::ToolContext {
+                        Some(ToolContext {
                             event_tx: tx.clone(),
                             tool_use_id: id.clone(),
                             task_store: self.task_store.clone(),
@@ -146,7 +152,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 };
 
                 let _ = tx
-                    .send(crate::event::AgentEvent::ToolEnd {
+                    .send(AgentEvent::ToolEnd {
                         id: id.clone(),
                         name: name.clone(),
                         output: content.clone(),
@@ -184,7 +190,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         &self,
         history: &[Message],
         user_input: &str,
-        event_tx: mpsc::Sender<crate::event::AgentEvent>,
+        event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
         let mut all_messages = history.to_vec();
@@ -198,7 +204,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         });
 
         let mut turn_messages = Vec::new();
-        let mut cumulative_usage = crate::provider::types::Usage::default();
+        let mut cumulative_usage = Usage::default();
         let mut completed_naturally = false;
 
         for iteration in 0..self.config.max_iterations {
@@ -214,7 +220,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             // let log_msg = format!("Agent iteration {}/{}", iteration + 1, self.config.max_iterations);
             // log::info!("{}", log_msg);
             let _ = event_tx
-                .send(crate::event::AgentEvent::Iteration {
+                .send(AgentEvent::Iteration {
                     current: iteration + 1,
                     total: self.config.max_iterations,
                 })
@@ -231,7 +237,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 Err(e) => {
                     let err_msg = format!("Failed to start stream: {}", e);
                     log::error!("{}", err_msg);
-                    let _ = event_tx.send(crate::event::AgentEvent::SystemLog(err_msg)).await;
+                    let _ = event_tx.send(AgentEvent::SystemLog(err_msg)).await;
                     return Err(e);
                 }
             };
@@ -239,8 +245,8 @@ impl<C: LlmClient> AgentRuntime<C> {
             let mut current_text = String::new();
             let mut current_thinking = String::new();
             let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-            let mut iter_usage = crate::provider::types::Usage::default();
-            let mut last_stop_reason: Option<crate::provider::types::StopReason> = None;
+            let mut iter_usage = Usage::default();
+            let mut last_stop_reason: Option<StopReason> = None;
 
             while let Some(event) = receiver
                 .next_event()
@@ -259,11 +265,11 @@ impl<C: LlmClient> AgentRuntime<C> {
                 match event {
                     ProviderStreamEvent::ThinkingDelta(delta) => {
                         current_thinking.push_str(&delta);
-                        let _ = event_tx.send(crate::event::AgentEvent::ThinkingDelta(delta)).await;
+                        let _ = event_tx.send(AgentEvent::ThinkingDelta(delta)).await;
                     }
                     ProviderStreamEvent::TextDelta(delta) => {
                         current_text.push_str(&delta);
-                        let _ = event_tx.send(crate::event::AgentEvent::TextDelta(delta)).await;
+                        let _ = event_tx.send(AgentEvent::TextDelta(delta)).await;
                     }
                     ProviderStreamEvent::ToolUseStart { id, name } => {
                         tool_calls.push((id, name, String::new()));
@@ -328,7 +334,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             turn_messages.push(assistant_msg);
 
             // 3.4 MaxTokens 自动续写（run_turn 路径）
-            if last_stop_reason == Some(crate::provider::types::StopReason::MaxTokens) {
+            if last_stop_reason == Some(StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
                     true
                 } else {
@@ -351,7 +357,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             if parsed_tool_calls.is_empty() {
                 completed_naturally = true;
                 let _ = event_tx
-                    .send(crate::event::AgentEvent::TextDelta("".to_string())) // No-op to maintain stream if needed, but we removed TurnComplete
+                    .send(AgentEvent::TextDelta("".to_string())) // 保持流式事件边界一致。
                     .await;
                 break;
             }
@@ -371,12 +377,12 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         if !completed_naturally {
             let _ = event_tx
-                .send(crate::event::AgentEvent::IterationLimitReached {
+                .send(AgentEvent::IterationLimitReached {
                     iterations: self.config.max_iterations,
                 })
                 .await;
             let _ = event_tx
-                .send(crate::event::AgentEvent::TurnComplete {
+                .send(AgentEvent::TurnComplete {
                     new_messages: turn_messages.clone(),
                     usage: cumulative_usage.clone(),
                 })
@@ -402,7 +408,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         &self,
         input: &str,
         current_history: Arc<Vec<Message>>,
-        prompt_config: &crate::prompt::PromptConfig,
+        prompt_config: &PromptConfig,
     ) -> Result<TurnContext> {
         // 1. 决定 active skill
         let active_skill = self.decide_active_skill(input, &current_history)?;
@@ -454,7 +460,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         &self,
         ctx: TurnContext,
         message: Message,
-        event_tx: mpsc::Sender<crate::event::AgentEvent>,
+        event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
         let mut all_messages = Arc::try_unwrap(ctx.history)
@@ -492,7 +498,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         // 使用 TurnContext 提供的工具定义流
         let mut turn_messages = Vec::new();
-        let mut cumulative_usage = crate::provider::types::Usage::default();
+        let mut cumulative_usage = Usage::default();
         let mut completed_naturally = false;
 
         for iteration in 0..ctx.iteration_budget {
@@ -508,7 +514,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             // LLM 流 — 使用 TurnContext 中的 tool_definitions
             let _ = event_tx
-                .send(crate::event::AgentEvent::Iteration {
+                .send(AgentEvent::Iteration {
                     current: iteration + 1,
                     total: ctx.iteration_budget,
                 })
@@ -522,8 +528,8 @@ impl<C: LlmClient> AgentRuntime<C> {
             let mut current_text = String::new();
             let mut current_thinking = String::new();
             let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-            let mut iter_usage = crate::provider::types::Usage::default();
-            let mut last_stop_reason: Option<crate::provider::types::StopReason> = None;
+            let mut iter_usage = Usage::default();
+            let mut last_stop_reason: Option<StopReason> = None;
 
             while let Some(event) = receiver
                 .next_event()
@@ -542,11 +548,11 @@ impl<C: LlmClient> AgentRuntime<C> {
                 match event {
                     ProviderStreamEvent::ThinkingDelta(delta) => {
                         current_thinking.push_str(&delta);
-                        let _ = event_tx.send(crate::event::AgentEvent::ThinkingDelta(delta)).await;
+                        let _ = event_tx.send(AgentEvent::ThinkingDelta(delta)).await;
                     }
                     ProviderStreamEvent::TextDelta(delta) => {
                         current_text.push_str(&delta);
-                        let _ = event_tx.send(crate::event::AgentEvent::TextDelta(delta)).await;
+                        let _ = event_tx.send(AgentEvent::TextDelta(delta)).await;
                     }
                     ProviderStreamEvent::ToolUseStart { id, name } => {
                         tool_calls.push((id, name, String::new()));
@@ -612,7 +618,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             turn_messages.push(assistant_msg);
 
             // MaxTokens 自动续写
-            if last_stop_reason == Some(crate::provider::types::StopReason::MaxTokens) {
+            if last_stop_reason == Some(StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
                     true
                 } else {
@@ -651,7 +657,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         if !completed_naturally {
             let _ = event_tx
-                .send(crate::event::AgentEvent::IterationLimitReached {
+                .send(AgentEvent::IterationLimitReached {
                     iterations: ctx.iteration_budget,
                 })
                 .await;
@@ -684,11 +690,11 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// 构建系统提示词。
     ///
     /// 接收 PromptConfig 参数，通过 SystemPromptBuilder::from_config 统一构建。
-    fn build_system_prompt(&self, config: &crate::prompt::PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
-        let empty: crate::skill::SkillRegistry = crate::skill::SkillRegistry::new();
+    fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
+        let empty = SkillRegistry::new();
         let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
 
-        crate::prompt::SystemPromptBuilder::from_config(config, skills)
+        SystemPromptBuilder::from_config(config, skills)
             .with_tool_definitions(tool_definitions)
             .build()
     }

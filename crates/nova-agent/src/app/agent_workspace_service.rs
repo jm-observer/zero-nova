@@ -1,5 +1,6 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
+use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -130,11 +131,11 @@ impl AgentWorkspaceService {
             .sessions
             .override_model(
                 session_id,
-                req.orchestration.map(|m| crate::conversation::control::ModelRef {
+                req.orchestration.map(|m| ModelRef {
                     provider: m.provider,
                     model: m.model,
                 }),
-                req.execution.map(|m| crate::conversation::control::ModelRef {
+                req.execution.map(|m| ModelRef {
                     provider: m.provider,
                     model: m.model,
                 }),

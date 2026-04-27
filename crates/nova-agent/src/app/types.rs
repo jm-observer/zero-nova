@@ -1,3 +1,4 @@
+use crate::event::AgentEvent;
 use crate::message::ContentBlock;
 use crate::prompt::SkillInvocationLevel;
 use crate::provider::types::Usage;
@@ -127,13 +128,13 @@ pub enum AppEvent {
     WorkspaceRestoreAvailable(nova_protocol::observability::WorkspaceRestoreResponse),
 }
 
-impl From<crate::event::AgentEvent> for AppEvent {
-    fn from(event: crate::event::AgentEvent) -> Self {
+impl From<AgentEvent> for AppEvent {
+    fn from(event: AgentEvent) -> Self {
         match event {
-            crate::event::AgentEvent::TextDelta(text) => AppEvent::Token(text),
-            crate::event::AgentEvent::ThinkingDelta(text) => AppEvent::ThinkingDelta(text),
-            crate::event::AgentEvent::ToolStart { id, name, input } => AppEvent::ToolStart { id, name, input },
-            crate::event::AgentEvent::ToolEnd {
+            AgentEvent::TextDelta(text) => AppEvent::Token(text),
+            AgentEvent::ThinkingDelta(text) => AppEvent::ThinkingDelta(text),
+            AgentEvent::ToolStart { id, name, input } => AppEvent::ToolStart { id, name, input },
+            AgentEvent::ToolEnd {
                 id,
                 name,
                 output,
@@ -144,16 +145,14 @@ impl From<crate::event::AgentEvent> for AppEvent {
                 output,
                 is_error,
             },
-            crate::event::AgentEvent::LogDelta { id, name, log, stream } => AppEvent::ToolLog { id, name, log, stream },
-            crate::event::AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
-            crate::event::AgentEvent::IterationLimitReached { iterations } => {
-                AppEvent::IterationLimitReached { iterations }
-            }
-            crate::event::AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
-            crate::event::AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
-            crate::event::AgentEvent::Error(msg) => AppEvent::Error(msg),
-            crate::event::AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),
-            crate::event::AgentEvent::AgentSwitched {
+            AgentEvent::LogDelta { id, name, log, stream } => AppEvent::ToolLog { id, name, log, stream },
+            AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
+            AgentEvent::IterationLimitReached { iterations } => AppEvent::IterationLimitReached { iterations },
+            AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
+            AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
+            AgentEvent::Error(msg) => AppEvent::Error(msg),
+            AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),
+            AgentEvent::AgentSwitched {
                 agent_id,
                 agent_name,
                 description,
@@ -164,8 +163,8 @@ impl From<crate::event::AgentEvent> for AppEvent {
                     description,
                 },
             },
-            crate::event::AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
-            crate::event::AgentEvent::TaskStatusChanged {
+            AgentEvent::TaskCreated { id, subject } => AppEvent::TaskCreated { id, subject },
+            AgentEvent::TaskStatusChanged {
                 id,
                 subject,
                 status,
@@ -176,11 +175,9 @@ impl From<crate::event::AgentEvent> for AppEvent {
                 status,
                 active_form,
             },
-            crate::event::AgentEvent::BackgroundTaskComplete { id, name } => {
-                AppEvent::BackgroundTaskComplete { id, name }
-            }
-            crate::event::AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
-            crate::event::AgentEvent::SkillActivated {
+            AgentEvent::BackgroundTaskComplete { id, name } => AppEvent::BackgroundTaskComplete { id, name },
+            AgentEvent::SkillLoaded { skill_name } => AppEvent::SkillLoaded { skill_name },
+            AgentEvent::SkillActivated {
                 skill_id,
                 skill_name,
                 sticky,
@@ -190,15 +187,15 @@ impl From<crate::event::AgentEvent> for AppEvent {
                 skill_name,
                 sticky,
             },
-            crate::event::AgentEvent::SkillSwitched {
+            AgentEvent::SkillSwitched {
                 from_skill, to_skill, ..
             } => AppEvent::SkillSwitched { from_skill, to_skill },
-            crate::event::AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
-            crate::event::AgentEvent::SkillRouteEvaluated {
+            AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
+            AgentEvent::SkillRouteEvaluated {
                 confidence, reasoning, ..
             } => AppEvent::SkillRouteEvaluated { confidence, reasoning },
-            crate::event::AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
-            crate::event::AgentEvent::SkillInvocation {
+            AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
+            AgentEvent::SkillInvocation {
                 skill_id,
                 skill_name,
                 level,

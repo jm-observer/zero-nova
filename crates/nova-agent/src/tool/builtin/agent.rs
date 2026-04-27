@@ -1,8 +1,10 @@
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::config::{AgentSpec, AppConfig};
+use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::TrimmerConfig;
 use crate::provider::openai_compat::OpenAiCompatClient;
+use crate::provider::ModelConfig;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
 use anyhow::Result;
@@ -10,6 +12,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -106,7 +109,7 @@ impl Tool for AgentTool {
         let mut model_config = if let Some(s) = spec {
             if let Some(m) = &s.model_config {
                 // Map AgentModelConfig to provider::ModelConfig
-                crate::provider::ModelConfig {
+                ModelConfig {
                     model: m.model.clone(),
                     max_tokens: m.max_tokens.unwrap_or(8192),
                     temperature: Some(m.temperature as f64),
@@ -128,7 +131,7 @@ impl Tool for AgentTool {
         let agent_config = AgentConfig {
             max_iterations: self.config.gateway.max_iterations,
             model_config,
-            tool_timeout: std::time::Duration::from_secs(self.config.gateway.subagent_timeout_secs),
+            tool_timeout: Duration::from_secs(self.config.gateway.subagent_timeout_secs),
             max_tokens: self.config.gateway.max_tokens,
             use_turn_context: self.config.gateway.use_turn_context,
             trimmer: TrimmerConfig {
@@ -182,9 +185,9 @@ impl Tool for AgentTool {
             Some(tokio::spawn(async move {
                 while let Some(event) = rx.recv().await {
                     match event {
-                        crate::event::AgentEvent::TextDelta(text) => {
+                        AgentEvent::TextDelta(text) => {
                             let _ = parent_tx
-                                .send(crate::event::AgentEvent::LogDelta {
+                                .send(AgentEvent::LogDelta {
                                     id: parent_tool_id.clone(),
                                     name: "Agent".to_string(),
                                     log: text.clone(),
@@ -193,10 +196,10 @@ impl Tool for AgentTool {
                                 .await;
                             logs.lock().await.push(text);
                         }
-                        crate::event::AgentEvent::ToolStart { name, input, .. } => {
+                        AgentEvent::ToolStart { name, input, .. } => {
                             let log = format!("\n[Agent] 🚀 Executing {}: {}\n", name, input);
                             let _ = parent_tx
-                                .send(crate::event::AgentEvent::LogDelta {
+                                .send(AgentEvent::LogDelta {
                                     id: parent_tool_id.clone(),
                                     name: "Agent".to_string(),
                                     log: log.clone(),
@@ -205,7 +208,7 @@ impl Tool for AgentTool {
                                 .await;
                             logs.lock().await.push(log);
                         }
-                        crate::event::AgentEvent::ToolEnd {
+                        AgentEvent::ToolEnd {
                             name,
                             output: _,
                             is_error,
@@ -214,7 +217,7 @@ impl Tool for AgentTool {
                             let status = if is_error { "❌ FAILED" } else { "✅ SUCCESS" };
                             let log = format!("[Agent] {} finished: {}\n", name, status);
                             let _ = parent_tx
-                                .send(crate::event::AgentEvent::LogDelta {
+                                .send(AgentEvent::LogDelta {
                                     id: parent_tool_id.clone(),
                                     name: "Agent".to_string(),
                                     log: log.clone(),

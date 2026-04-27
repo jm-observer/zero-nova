@@ -1,6 +1,8 @@
-use crate::message::Message;
+use crate::message::{ContentBlock, Message, Role};
 use crate::provider::types::ToolDefinition;
-use crate::skill::CapabilityPolicy;
+use crate::skill::{CapabilityPolicy, SkillRegistry};
+#[cfg(test)]
+use crate::skill::{SkillPackage, ToolPolicy};
 use crate::tool::ToolRegistry;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -647,7 +649,7 @@ impl SystemPromptBuilder {
     ///
     /// 构建的 section 顺序：
     ///   Base (agent prompt) → BehaviorGuards → Skill → ProjectContext → Environment
-    pub fn from_config(config: &PromptConfig, skills: &crate::skill::SkillRegistry) -> Self {
+    pub fn from_config(config: &PromptConfig, skills: &SkillRegistry) -> Self {
         let mut builder = Self::new();
 
         // L0: 平台身份（agent prompt 文件内容，经模板替换）
@@ -910,19 +912,17 @@ impl HistoryTrimmer {
     ///
     /// 使用字符数 / 3 的粗略估算（英文约 4 chars/token，中文约 1.5 chars/token）。
     /// 取折中值 3 chars/token。
-    fn estimate_tokens(messages: &[crate::message::Message]) -> usize {
+    fn estimate_tokens(messages: &[Message]) -> usize {
         let total_chars: usize = messages
             .iter()
             .map(|m| {
                 m.content
                     .iter()
                     .map(|block| match block {
-                        crate::message::ContentBlock::Text { text } => text.len(),
-                        crate::message::ContentBlock::Thinking { thinking } => thinking.len(),
-                        crate::message::ContentBlock::ToolUse { name, input, .. } => {
-                            name.len() + input.to_string().len()
-                        }
-                        crate::message::ContentBlock::ToolResult { output, .. } => output.len(),
+                        ContentBlock::Text { text } => text.len(),
+                        ContentBlock::Thinking { thinking } => thinking.len(),
+                        ContentBlock::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
+                        ContentBlock::ToolResult { output, .. } => output.len(),
                     })
                     .sum::<usize>()
             })
@@ -952,10 +952,8 @@ impl HistoryTrimmer {
             .saturating_sub(self.config.output_reserve);
 
         // 分离 system 消息和对话消息
-        let (system_msgs, conversation_msgs): (Vec<_>, Vec<_>) = messages
-            .iter()
-            .enumerate()
-            .partition(|(_, m)| m.role == crate::message::Role::System);
+        let (system_msgs, conversation_msgs): (Vec<_>, Vec<_>) =
+            messages.iter().enumerate().partition(|(_, m)| m.role == Role::System);
 
         let system_msgs: Vec<_> = system_msgs.into_iter().map(|(_, m)| m.clone()).collect();
         let conversation_msgs: Vec<_> = conversation_msgs.into_iter().map(|(_, m)| m.clone()).collect();
@@ -997,9 +995,9 @@ impl HistoryTrimmer {
         let mut result = system_msgs;
         // 如果有裁剪，插入一条摘要提示
         if removed_count > 0 {
-            result.push(crate::message::Message {
-                role: crate::message::Role::User,
-                content: vec![crate::message::ContentBlock::Text {
+            result.push(Message {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
                     text: format!(
                         "[System: {} earlier messages were trimmed to fit context window. \
                          The conversation continues from the most recent messages below.]",
@@ -1065,7 +1063,7 @@ impl SideChannelInjector {
     /// 生成要附加到 tool result 后的侧信道内容。
     ///
     /// 返回 None 表示本次不注入。
-    pub fn generate_injection(&self, skills: &crate::skill::SkillRegistry) -> Option<String> {
+    pub fn generate_injection(&self, skills: &SkillRegistry) -> Option<String> {
         if !self.config.enabled {
             return None;
         }
@@ -1113,7 +1111,7 @@ impl SideChannelInjector {
     }
 
     /// 将侧信道内容附加到 tool result 输出后面。
-    pub fn inject_into_tool_result(&self, tool_output: &str, skills: &crate::skill::SkillRegistry) -> String {
+    pub fn inject_into_tool_result(&self, tool_output: &str, skills: &SkillRegistry) -> String {
         match self.generate_injection(skills) {
             Some(injection) => format!("{}\n\n{}", tool_output, injection),
             None => tool_output.to_string(),
@@ -1453,14 +1451,14 @@ mod tests {
         });
         let messages = vec![
             Message {
-                role: crate::message::Role::System,
-                content: vec![crate::message::ContentBlock::Text {
+                role: Role::System,
+                content: vec![ContentBlock::Text {
                     text: "system".to_string(),
                 }],
             },
             Message {
-                role: crate::message::Role::User,
-                content: vec![crate::message::ContentBlock::Text {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
                     text: "short".to_string(),
                 }],
             },
@@ -1481,22 +1479,22 @@ mod tests {
         });
         let messages = vec![
             Message {
-                role: crate::message::Role::System,
-                content: vec![crate::message::ContentBlock::Text {
+                role: Role::System,
+                content: vec![ContentBlock::Text {
                     text: "system prompt".to_string(),
                 }],
             },
             Message {
-                role: crate::message::Role::User,
-                content: vec![crate::message::ContentBlock::Text { text: "1".repeat(40) }],
+                role: Role::User,
+                content: vec![ContentBlock::Text { text: "1".repeat(40) }],
             },
             Message {
-                role: crate::message::Role::Assistant,
-                content: vec![crate::message::ContentBlock::Text { text: "2".repeat(5) }],
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text { text: "2".repeat(5) }],
             },
             Message {
-                role: crate::message::Role::User,
-                content: vec![crate::message::ContentBlock::Text { text: "3".repeat(5) }],
+                role: Role::User,
+                content: vec![ContentBlock::Text { text: "3".repeat(5) }],
             },
         ];
 
@@ -1504,8 +1502,8 @@ mod tests {
         assert!(result.was_trimmed);
         assert_eq!(result.removed_count, 1);
         assert_eq!(result.messages.len(), 4);
-        assert!(matches!(result.messages[2].role, crate::message::Role::Assistant));
-        assert!(matches!(result.messages[3].role, crate::message::Role::User));
+        assert!(matches!(result.messages[2].role, Role::Assistant));
+        assert!(matches!(result.messages[3].role, Role::User));
     }
 
     #[test]
@@ -1518,18 +1516,18 @@ mod tests {
         });
         let messages = vec![
             Message {
-                role: crate::message::Role::System,
-                content: vec![crate::message::ContentBlock::Text { text: "s".repeat(120) }],
+                role: Role::System,
+                content: vec![ContentBlock::Text { text: "s".repeat(120) }],
             },
             Message {
-                role: crate::message::Role::User,
-                content: vec![crate::message::ContentBlock::Text {
+                role: Role::User,
+                content: vec![ContentBlock::Text {
                     text: "small".to_string(),
                 }],
             },
             Message {
-                role: crate::message::Role::Assistant,
-                content: vec![crate::message::ContentBlock::Text {
+                role: Role::Assistant,
+                content: vec![ContentBlock::Text {
                     text: "small".to_string(),
                 }],
             },
@@ -1547,7 +1545,7 @@ mod tests {
             inject_date: false,
             custom_reminders: vec![],
         });
-        let registry = crate::skill::SkillRegistry::new();
+        let registry = SkillRegistry::new();
 
         assert_eq!(
             injector.inject_into_tool_result("tool output", &registry),
@@ -1563,14 +1561,14 @@ mod tests {
             inject_date: false,
             custom_reminders: vec!["Remember policy".to_string()],
         });
-        let mut registry = crate::skill::SkillRegistry::new();
-        registry.packages.push(crate::skill::SkillPackage {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
             id: "skill-1".to_string(),
             slug: "skill-1".to_string(),
             display_name: "Skill One".to_string(),
             description: "First".to_string(),
             instructions: "Do work".to_string(),
-            tool_policy: crate::skill::ToolPolicy::InheritAll,
+            tool_policy: ToolPolicy::InheritAll,
             sticky: false,
             aliases: vec![],
             examples: vec![],
@@ -1592,7 +1590,7 @@ mod tests {
             inject_date: false,
             custom_reminders: vec!["interval".to_string()],
         });
-        let registry = crate::skill::SkillRegistry::new();
+        let registry = SkillRegistry::new();
 
         let first = injector.inject_into_tool_result("tool output", &registry);
         let second = injector.inject_into_tool_result("tool output", &registry);
@@ -1632,7 +1630,7 @@ mod tests {
         let config = PromptConfig::new("agent", "base", dir.clone())
             .with_template_vars(vars)
             .with_workflow_prompt_path(workflow_file);
-        let skills = crate::skill::SkillRegistry::new();
+        let skills = SkillRegistry::new();
 
         let prompt = SystemPromptBuilder::from_config(&config, &skills).build();
         assert!(prompt.contains("## Workflow State"));

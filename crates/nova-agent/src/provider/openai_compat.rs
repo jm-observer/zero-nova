@@ -1,6 +1,7 @@
+use crate::message::{ContentBlock, Message, Role};
 use crate::provider::openai_compat::types::ChatCompletionChunk;
 use crate::provider::sse::{RawSseEvent, SseParser};
-use crate::provider::types::{StopReason, ToolDefinition};
+use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -32,7 +33,7 @@ impl OpenAiCompatClient {
 impl LlmClient for OpenAiCompatClient {
     async fn stream(
         &self,
-        messages: &[crate::message::Message],
+        messages: &[Message],
         tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
@@ -40,9 +41,9 @@ impl LlmClient for OpenAiCompatClient {
 
         for msg in messages {
             let role = match msg.role {
-                crate::message::Role::System => "system",
-                crate::message::Role::User => "user",
-                crate::message::Role::Assistant => "assistant",
+                Role::System => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
             };
 
             let mut text_parts = Vec::new();
@@ -51,14 +52,14 @@ impl LlmClient for OpenAiCompatClient {
 
             for block in &msg.content {
                 match block {
-                    crate::message::ContentBlock::Text { text } => {
+                    ContentBlock::Text { text } => {
                         text_parts.push(text.clone());
                     }
-                    crate::message::ContentBlock::Thinking { .. } => {
+                    ContentBlock::Thinking { .. } => {
                         // 3.6.2 OpenAI compatibility: Skip thinking for requests
                         continue;
                     }
-                    crate::message::ContentBlock::ToolUse { id, name, input } => {
+                    ContentBlock::ToolUse { id, name, input } => {
                         tool_calls.push(json!({
                             "id": id,
                             "type": "function",
@@ -68,7 +69,7 @@ impl LlmClient for OpenAiCompatClient {
                             }
                         }));
                     }
-                    crate::message::ContentBlock::ToolResult {
+                    ContentBlock::ToolResult {
                         tool_use_id, output, ..
                     } => {
                         tool_results.push(json!({
@@ -250,7 +251,7 @@ impl OpenAiCompatStreamReceiver {
         // --- Usage 处理 ---
         if let Some(usage) = chunk.usage {
             self.event_queue.push_back(ProviderStreamEvent::MessageComplete {
-                usage: crate::provider::types::Usage {
+                usage: Usage {
                     input_tokens: usage.prompt_tokens,
                     output_tokens: usage.completion_tokens,
                     cache_creation_input_tokens: 0,
@@ -345,7 +346,7 @@ impl OpenAiCompatStreamReceiver {
         // 如果还有未发射的 MessageComplete
         if let Some(reason) = self.pending_stop_reason.take() {
             self.event_queue.push_back(ProviderStreamEvent::MessageComplete {
-                usage: crate::provider::types::Usage::default(),
+                usage: Usage::default(),
                 stop_reason: Some(reason),
             });
         }

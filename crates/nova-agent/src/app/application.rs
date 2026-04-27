@@ -1,11 +1,14 @@
 use super::conversation_service::ConversationService;
 use super::types::{AppAgent, AppEvent, AppMessage, AppSession};
+use crate::agent::TurnResult;
 use crate::config::AppConfig;
+use crate::message::Role;
 use crate::provider::LlmClient;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::sync::mpsc;
@@ -13,12 +16,7 @@ use tokio::sync::mpsc;
 #[async_trait]
 pub trait AgentApplication: Send + Sync {
     async fn session_exists(&self, session_id: &str) -> Result<bool>;
-    async fn start_turn(
-        &self,
-        session_id: &str,
-        input: &str,
-        sender: mpsc::Sender<AppEvent>,
-    ) -> Result<crate::agent::TurnResult>;
+    async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<TurnResult>;
     async fn stop_turn(&self, session_id: &str) -> Result<()>;
 
     async fn list_sessions(&self) -> Result<Vec<AppSession>>;
@@ -120,12 +118,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         Ok(self.conversation_service.sessions.get(session_id).await?.is_some())
     }
 
-    async fn start_turn(
-        &self,
-        session_id: &str,
-        input: &str,
-        sender: mpsc::Sender<AppEvent>,
-    ) -> Result<crate::agent::TurnResult> {
+    async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<TurnResult> {
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
         let sender_clone = sender.clone();
@@ -182,9 +175,9 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .into_iter()
             .map(|m| AppMessage {
                 role: match m.role {
-                    crate::message::Role::System => "system".to_string(),
-                    crate::message::Role::User => "user".to_string(),
-                    crate::message::Role::Assistant => "assistant".to_string(),
+                    Role::System => "system".to_string(),
+                    Role::User => "user".to_string(),
+                    Role::Assistant => "assistant".to_string(),
                 },
                 content: m.content,
                 timestamp: 0,
@@ -215,7 +208,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .active_agent
             .clone();
         let created_at = session.created_at;
-        let updated_at = session.updated_at.load(std::sync::atomic::Ordering::SeqCst);
+        let updated_at = session.updated_at.load(Ordering::SeqCst);
         let message_count = session
             .history
             .read()
@@ -253,7 +246,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .active_agent
             .clone();
         let created_at = session.created_at;
-        let updated_at = session.updated_at.load(std::sync::atomic::Ordering::SeqCst);
+        let updated_at = session.updated_at.load(Ordering::SeqCst);
         let message_count = session
             .history
             .read()

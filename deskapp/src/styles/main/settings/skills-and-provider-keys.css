@@ -1,0 +1,268 @@
+/* ========== 技能管理样�?========== */
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.skill-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.skill-card:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+}
+.skill-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.skill-card-toggle {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.skill-card.expanded .skill-card-toggle {
+  transform: rotate(90deg);
+}
+.skill-card-title {
+  flex: 1;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skill-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.skill-card-actions button {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  transition: color 0.15s, background 0.15s;
+}
+.skill-card-actions button:hover {
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.skill-card-actions button.skill-delete-btn:hover {
+  color: #f5222d;
+}
+/* 技能开�?*/
+.skill-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.skill-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.skill-switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  transition: background 0.2s;
+}
+.skill-switch-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.skill-switch input:checked+.skill-switch-slider {
+  background: var(--color-primary);
+}
+.skill-switch input:checked+.skill-switch-slider::before {
+  transform: translateX(14px);
+}
+/* 展开的内容区 */
+.skill-card-body {
+  display: none;
+  padding: 0 14px 12px;
+  flex-direction: column;
+  gap: 8px;
+}
+.skill-card.expanded .skill-card-body {
+  display: flex;
+}
+.skill-card-body .skill-title-input {
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  outline: none;
+}
+.skill-card-body .skill-title-input:focus {
+  border-color: var(--color-primary);
+}
+.skill-card-body .skill-content-textarea {
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  line-height: 1.5;
+  min-height: 100px;
+  max-height: 300px;
+  resize: vertical;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  outline: none;
+  white-space: pre-wrap;
+}
+.skill-card-body .skill-content-textarea:focus {
+  border-color: var(--color-primary);
+}
+.skills-empty {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+  padding: 16px 0;
+}
+/* 供应商密钥列�?*/
+.settings-provider-keys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+.settings-provider-key-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+.settings-provider-key-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-provider-key-name {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.settings-provider-key-status {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.settings-provider-key-status.configured {
+  background: rgba(82, 196, 26, 0.15);
+  color: #52c41a;
+}
+.settings-provider-key-status.not-configured {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+}
+.settings-provider-key-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.settings-provider-key-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono, monospace);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.settings-provider-key-input:focus {
+  border-color: var(--color-primary);
+}
+.settings-provider-key-input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}
+.settings-provider-key-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.settings-provider-key-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+/* 状态标�?*/
+.settings-badge {
+  font-size: 0.8rem;
+  padding: 3px 10px;
+  border-radius: var(--radius-base);
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--color-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+/* 保存�?*/
+.settings-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--spacing-sm);
+}
+.settings-save-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+.settings-save-hint.success {
+  color: #52c41a;
+}
+.settings-save-hint.error {
+  color: #f5222d;
+}
+.settings-save-btn {
+  padding: 6px 20px;
+  font-size: 0.8125rem;
+}

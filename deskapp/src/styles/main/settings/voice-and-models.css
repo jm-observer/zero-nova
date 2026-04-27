@@ -1,0 +1,347 @@
+/* ========== 语音功能样式 ========== */
+/* 麦克风按�?*/
+.mic-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  position: relative;
+}
+.mic-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+.mic-btn.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.mic-btn.disabled:hover {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+}
+/* 录音中状�?*/
+.mic-btn.recording {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+.mic-btn .hidden {
+  display: none;
+}
+/* 录音状态指示器 */
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  color: #ef4444;
+}
+.recording-indicator.hidden {
+  display: none;
+}
+.recording-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: recording-blink 1s ease-in-out infinite;
+}
+@keyframes recording-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+/* TTS 播放按钮 */
+.tts-play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: 6px;
+  vertical-align: middle;
+  padding: 0;
+}
+.tts-play-btn:hover {
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+.tts-play-btn.active {
+  color: var(--color-primary);
+}
+.tts-play-btn .hidden {
+  display: none;
+}
+/* TTS loading 旋转动画 */
+.tts-icon-loading {
+  animation: tts-spin 1s linear infinite;
+}
+@keyframes tts-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* message-time 调整：支持内联播放按�?*/
+.message.assistant .message-time {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+/* 设置面板：模型配置分组卡�?*/
+.settings-model-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.settings-model-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-model-group-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.settings-model-group-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.settings-model-group-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.settings-model-group-desc {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+}
+.settings-model-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.settings-model-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-model-field-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* 设置面板：分区标�?*/
+.settings-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 12px 0 4px 0;
+  border-top: 1px solid var(--color-border);
+  margin-top: 8px;
+}
+/* 语音不可用提�?*/
+.voice-unavailable-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: var(--radius-md);
+  color: var(--color-warning, #f59e0b);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.voice-unavailable-notice svg {
+  flex-shrink: 0;
+}
+.voice-unavailable-notice span {
+  color: var(--color-text-secondary);
+}
+/* 设置面板：下拉选择�?*/
+.settings-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8fa3' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+.settings-select:focus {
+  border-color: var(--color-primary);
+}
+.settings-select option {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+/* 设置面板：文本输入框 */
+.settings-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.settings-input:focus {
+  border-color: var(--color-primary);
+}
+.settings-input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+}
+/* 智能体角色设�?textarea */
+.agent-prompt-textarea {
+  margin-top: 8px;
+  min-height: 160px;
+  max-height: 400px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+/* ========== Agent 模型配置样式 ========== */
+.agent-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.agent-model-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-model-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-model-card-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+.agent-model-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.agent-model-card-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.agent-model-card-desc {
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-model-card-fields {
+  display: flex;
+  gap: 8px;
+}
+.agent-model-card-fields select {
+  flex: 1;
+  padding: 5px 28px 5px 8px;
+  font-size: 0.8rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238b8fa3' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.agent-model-card-fields select:focus {
+  border-color: var(--color-primary);
+}
+.agent-model-card-fields select option {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.agent-model-card-fields input {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  outline: none;
+}
+.agent-model-card-fields input:focus {
+  border-color: var(--color-primary);
+}
+.agent-model-card-fields input::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}

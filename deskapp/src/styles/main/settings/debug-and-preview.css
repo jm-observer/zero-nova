@@ -1,0 +1,694 @@
+/* ========== Debug 面板 ========== */
+.debug-panel {
+  height: 220px;
+  min-height: 80px;
+  max-height: 70vh;
+  flex-shrink: 0;
+  background: #0c0e14;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+.debug-panel.hidden {
+  display: none;
+}
+/* 拖拽调整高度的手�?*/
+.debug-resize-handle {
+  height: 4px;
+  cursor: ns-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  transition: background 0.15s;
+}
+.debug-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: background 0.15s, width 0.15s;
+}
+.debug-resize-handle:hover::after,
+.debug-resize-handle.dragging::after {
+  background: var(--color-primary);
+  width: 48px;
+}
+.debug-resize-handle:hover,
+.debug-resize-handle.dragging {
+  background: rgba(99, 102, 241, 0.1);
+}
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-xs) var(--spacing-md);
+  background: #111420;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+.debug-panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.debug-panel-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+.debug-log-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: 0.6875rem;
+  line-height: 1.6;
+}
+.debug-log-entry {
+  display: flex;
+  gap: var(--spacing-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  padding: 1px 0;
+}
+.debug-log-entry:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.debug-log-time {
+  color: #555;
+  flex-shrink: 0;
+}
+.debug-log-level {
+  flex-shrink: 0;
+  font-weight: 600;
+  min-width: 36px;
+}
+.debug-log-level.info {
+  color: #4fc3f7;
+}
+.debug-log-level.warn {
+  color: var(--color-warning);
+}
+.debug-log-level.error {
+  color: var(--color-error);
+}
+.debug-log-level.debug {
+  color: #888;
+}
+.debug-log-module {
+  color: #b388ff;
+  flex-shrink: 0;
+}
+.debug-log-message {
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* ========== 文件预览弹窗 ========== */
+/* ========== 浮动预览面板（多实例�?========== */
+.floating-preview-panel {
+  position: fixed;
+  width: 55vw;
+  max-width: 820px;
+  min-width: 360px;
+  height: 65vh;
+  max-height: 75vh;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  resize: both;
+  animation: fp-slide-in 0.2s ease-out;
+}
+@keyframes fp-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.fp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+.fp-header:active {
+  cursor: grabbing;
+}
+.fp-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.fp-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.fp-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fp-size {
+  font-size: 11px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.fp-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.fp-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+  position: relative;
+}
+[data-theme="light"] .floating-preview-panel {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .fp-header {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .fp-name {
+  color: #333;
+}
+/* ========== �?Modal 预览（保留兼容） ========== */
+.file-preview-modal-content {
+  width: 70vw;
+  max-width: 900px;
+  height: 75vh;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.file-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+.file-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.file-preview-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.file-preview-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-preview-size-badge {
+  font-size: 11px;
+  color: #888;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.file-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.file-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+  position: relative;
+}
+/* 文本/代码预览 */
+.file-preview-body pre {
+  margin: 0;
+  padding: 16px;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text, #d4d4d4);
+  white-space: pre-wrap;
+  word-break: break-all;
+  tab-size: 4;
+}
+/* 带行号的代码 */
+.file-preview-code {
+  display: flex;
+  min-height: 100%;
+}
+.file-preview-line-numbers {
+  padding: 16px 0;
+  text-align: right;
+  user-select: none;
+  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
+  flex-shrink: 0;
+  color: var(--color-text-tertiary, #555);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  min-width: 44px;
+}
+.file-preview-line-numbers span {
+  display: block;
+  padding: 0 12px 0 8px;
+}
+.file-preview-code-content {
+  flex: 1;
+  overflow-x: auto;
+}
+.file-preview-code-content pre {
+  padding: 16px;
+  white-space: pre;
+  word-break: normal;
+  color: var(--color-text, #d4d4d4);
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+/* 图片预览 */
+.file-preview-image-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  background: repeating-conic-gradient(#2a2a2a 0% 25%, #222 0% 50%) 0 0 / 20px 20px;
+}
+.file-preview-image-container img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+/* 不支持类型提�?*/
+.file-preview-unsupported {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: var(--color-text-secondary, #888);
+}
+.file-preview-unsupported-icon {
+  font-size: 48px;
+  opacity: 0.5;
+}
+.file-preview-unsupported-text {
+  font-size: 14px;
+}
+.file-preview-unsupported-hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary, #666);
+}
+/* 加载动画 */
+.file-preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-secondary, #888);
+  font-size: 13px;
+  gap: 8px;
+}
+.file-preview-loading::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-top-color: var(--color-text-secondary, #888);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* ---- Markdown 预览 ---- */
+.file-preview-markdown {
+  padding: 32px 48px;
+  overflow: auto;
+  height: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  color: #d4d4d4;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.file-preview-markdown h1,
+.file-preview-markdown h2,
+.file-preview-markdown h3,
+.file-preview-markdown h4,
+.file-preview-markdown h5,
+.file-preview-markdown h6 {
+  color: #e8eaed;
+  margin: 1.4em 0 0.6em;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.file-preview-markdown h1 {
+  font-size: 26px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.file-preview-markdown h2 {
+  font-size: 22px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.file-preview-markdown h3 {
+  font-size: 18px;
+}
+.file-preview-markdown h4 {
+  font-size: 16px;
+}
+.file-preview-markdown p {
+  margin: 0.6em 0;
+}
+.file-preview-markdown a {
+  color: #7dd3fc;
+  text-decoration: none;
+}
+.file-preview-markdown a:hover {
+  text-decoration: underline;
+}
+.file-preview-markdown blockquote {
+  margin: 12px 0;
+  padding: 8px 16px;
+  border-left: 3px solid rgba(125, 211, 252, 0.4);
+  background: rgba(255, 255, 255, 0.03);
+  color: #aaa;
+}
+.file-preview-markdown ul,
+.file-preview-markdown ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+.file-preview-markdown li {
+  margin: 4px 0;
+}
+.file-preview-markdown code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.9em;
+}
+.file-preview-markdown pre {
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.file-preview-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.file-preview-markdown img {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+.file-preview-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 24px 0;
+}
+.file-preview-markdown .table-wrapper {
+  overflow-x: auto;
+  margin: 12px 0;
+}
+.file-preview-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+.file-preview-markdown th,
+.file-preview-markdown td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 12px;
+  text-align: left;
+}
+.file-preview-markdown th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: #e0e0e0;
+}
+.file-preview-markdown tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.file-preview-markdown .mermaid-rendered {
+  margin: 16px 0;
+  display: flex;
+  justify-content: center;
+}
+.file-preview-markdown .mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
+}
+.file-preview-markdown .code-block-wrapper {
+  margin: 12px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+}
+.file-preview-markdown .code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12px;
+  color: #888;
+}
+.file-preview-markdown .code-copy-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #888;
+  padding: 2px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.file-preview-markdown .code-copy-btn:hover {
+  color: #ccc;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+/* ---- 视频预览 ---- */
+.file-preview-video-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+.file-preview-video {
+  max-width: 100%;
+  max-height: 100%;
+  outline: none;
+}
+/* ---- PDF 预览 ---- */
+.file-preview-pdf {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+/* ---- HTML 内容预览 (Office 文档) ---- */
+.file-preview-html-content {
+  padding: 24px;
+  overflow: auto;
+  height: 100%;
+  color: #d4d4d4;
+  font-size: 14px;
+  line-height: 1.7;
+}
+/* Word (.docx) */
+.file-preview-office-docx {
+  max-width: 800px;
+  margin: 0 auto;
+  background: #1e1e2e;
+  padding: 32px 48px;
+}
+.file-preview-office-docx h1,
+.file-preview-office-docx h2,
+.file-preview-office-docx h3,
+.file-preview-office-docx h4 {
+  color: #e0e0e0;
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+}
+.file-preview-office-docx h1 {
+  font-size: 24px;
+}
+.file-preview-office-docx h2 {
+  font-size: 20px;
+}
+.file-preview-office-docx h3 {
+  font-size: 17px;
+}
+.file-preview-office-docx p {
+  margin: 0.5em 0;
+}
+.file-preview-office-docx table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 16px 0;
+}
+.file-preview-office-docx td,
+.file-preview-office-docx th {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 12px;
+  text-align: left;
+}
+.file-preview-office-docx th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+.file-preview-office-docx img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+/* Excel (.xlsx) */
+.file-preview-office-xlsx {
+  padding: 16px;
+}
+.file-preview-office-xlsx .xlsx-sheet {
+  margin-bottom: 24px;
+}
+.file-preview-office-xlsx .xlsx-sheet-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #7dd3fc;
+  padding: 8px 0;
+  border-bottom: 2px solid rgba(125, 211, 252, 0.3);
+  margin-bottom: 12px;
+}
+.file-preview-office-xlsx table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.file-preview-office-xlsx td,
+.file-preview-office-xlsx th {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-preview-office-xlsx th,
+.file-preview-office-xlsx tr:first-child td {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+  color: #e0e0e0;
+  position: sticky;
+  top: 0;
+}
+.file-preview-office-xlsx tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.file-preview-office-xlsx tr:hover td {
+  background: rgba(125, 211, 252, 0.05);
+}
+/* PowerPoint (.pptx) */
+.file-preview-office-pptx {
+  padding: 16px;
+}
+.file-preview-office-pptx .pptx-slides {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.file-preview-office-pptx .pptx-slide {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 20px 24px;
+  position: relative;
+}
+.file-preview-office-pptx .pptx-slide-number {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 11px;
+  color: #666;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.file-preview-office-pptx .pptx-slide-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #7dd3fc;
+  margin-bottom: 12px;
+  line-height: 1.3;
+}
+.file-preview-office-pptx .pptx-slide-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.file-preview-office-pptx .pptx-slide-text {
+  font-size: 14px;
+  color: #ccc;
+  line-height: 1.5;
+  padding-left: 12px;
+  border-left: 2px solid rgba(255, 255, 255, 0.06);
+}
+.file-preview-office-pptx .pptx-slide-empty {
+  color: #666;
+  font-style: italic;
+  font-size: 13px;
+}

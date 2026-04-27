@@ -5,13 +5,9 @@ edition = "2021"
 description = "WebSocket server for zero-nova"
 
 [dependencies]
-nova-core = { workspace = true }
-nova-conversation = { workspace = true }
-nova-app = { workspace = true }
 nova-protocol = { workspace = true }
 nova-gateway-core = { workspace = true }
 channel-core = { workspace = true }
-channel-websocket = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }

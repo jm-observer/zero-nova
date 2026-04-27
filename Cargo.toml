@@ -2,12 +2,12 @@
 resolver = "2"
 members = [
   "crates/nova-agent",
-
   "crates/nova-protocol",
   "crates/nova-gateway-core",
   "crates/nova-server",
   "crates/nova-cli",
   "deskapp/src-tauri",
+  "crates/channel-core",
 ]
 
 [workspace.package]
@@ -46,3 +46,4 @@ nova-protocol = { path = "crates/nova-protocol" }
 nova-gateway-core = { path = "crates/nova-gateway-core" }
 nova-server = { path = "crates/nova-server" }
 nova-cli = { path = "crates/nova-cli" }
+channel-core = { path = "crates/channel-core" }

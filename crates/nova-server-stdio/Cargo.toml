@@ -1,0 +1,21 @@
+[package]
+name = "nova-server-stdio"
+version = "0.1.0"
+edition = "2021"
+description = "stdio server for zero-nova"
+
+[dependencies]
+nova-core = { workspace = true }
+nova-app = { workspace = true }
+nova-protocol = { workspace = true }
+nova-gateway-core = { workspace = true }
+channel-stdio = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+custom-utils = { workspace = true }
+
+[[bin]]
+name = "nova_gateway_stdio"
+path = "src/bin/nova_gateway_stdio.rs"

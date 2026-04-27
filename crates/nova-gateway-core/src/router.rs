@@ -1,7 +1,7 @@
 use crate::handlers::{agents, chat, config, sessions, system};
-use crate::transport::ResponseSink;
+use channel_core::ResponseSink;
 use log::warn;
-use nova_agent::AgentApplication;
+use nova_app::AgentApplication;
 use nova_protocol::{GatewayMessage, MessageEnvelope};
 
 /// 消息路由将请求分发到具体处理器

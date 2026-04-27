@@ -1,7 +1,0 @@
-{
-  "type": "error",
-  "payload": {
-    "message": "Gateway connection lost",
-    "code": "CONNECTION_LOST"
-  }
-}

@@ -1,16 +1,14 @@
 [package]
-name = "nova-gateway-core"
+name = "channel-stdio"
 version = "0.1.0"
 edition = "2021"
-description = "Gateway core for zero-nova"
+description = "NDJSON over stdin/stdout for zero-nova"
 
 [dependencies]
-nova-app = { workspace = true }
-nova-protocol = { workspace = true }
 channel-core = { workspace = true }
-async-trait = { workspace = true }
 tokio = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
-nova-core = { workspace = true }
+async-trait = { workspace = true }

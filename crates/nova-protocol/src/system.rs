@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct WelcomePayload {
     pub require_auth: bool,
-    #[serde(default)]
     pub setup_required: bool,
 }
 

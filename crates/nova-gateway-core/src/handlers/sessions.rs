@@ -1,7 +1,7 @@
 use crate::bridge::{app_message_to_protocol, app_session_to_protocol};
-use crate::transport::ResponseSink;
+use channel_core::ResponseSink;
 use log::error;
-use nova_agent::AgentApplication;
+use nova_app::AgentApplication;
 use nova_protocol::{
     GatewayMessage, MessageEnvelope, SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload,
     SessionsListResponse, SessionsMessagesResponse, SuccessResponse,

@@ -1,7 +1,0 @@
-{
-  "id": "chat-002",
-  "type": "chat",
-  "payload": {
-    "sessionId": "session-123"
-  }
-}

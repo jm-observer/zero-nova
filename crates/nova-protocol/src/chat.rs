@@ -20,7 +20,6 @@ pub struct ChatPayload {
     pub input: String,
     pub session_id: Option<String>,
     pub agent_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<Value>>,
 }
 

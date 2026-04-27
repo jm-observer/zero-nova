@@ -1,17 +1,16 @@
 pub mod bridge;
 pub mod handlers;
 pub mod router;
-pub mod transport;
 
 pub use bridge::{app_agent_to_protocol, app_event_to_gateway, app_message_to_protocol, app_session_to_protocol};
 pub use router::dispatch;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use nova_agent::AgentApplication;
+use channel_core::{ChannelHandler, PeerId, ResponseSink};
+use nova_app::AgentApplication;
 use nova_protocol::GatewayMessage;
 use std::sync::Arc;
-use transport::{ChannelHandler, PeerId, ResponseSink};
 
 pub struct GatewayHandler {
     app: Arc<dyn AgentApplication>,

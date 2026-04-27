@@ -1,7 +1,0 @@
-{
-  "type": "welcome",
-  "payload": {
-    "requireAuth": false,
-    "setupRequired": true
-  }
-}

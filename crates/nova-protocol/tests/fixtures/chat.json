@@ -1,9 +1,0 @@
-{
-  "id": "chat-001",
-  "type": "chat",
-  "payload": {
-    "input": "Hello, how are you?",
-    "sessionId": "session-123",
-    "agentId": "agent-default"
-  }
-}

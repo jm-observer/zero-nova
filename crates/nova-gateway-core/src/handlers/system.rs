@@ -1,4 +1,4 @@
-use crate::transport::ResponseSink;
+use channel_core::ResponseSink;
 use nova_protocol::{ErrorPayload, GatewayMessage, MessageEnvelope};
 
 pub async fn send_general_error(

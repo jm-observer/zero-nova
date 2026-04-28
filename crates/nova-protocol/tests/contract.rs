@@ -25,6 +25,12 @@ fn valid_contract_fixtures_deserialize() {
         "task_status_changed.json",
         "progress_event.json",
         "workspace_restore.json",
+        "voice_transcribe_request.json",
+        "voice_transcribe_response.json",
+        "voice_tts_request.json",
+        "voice_tts_response.json",
+        "voice_capabilities_response.json",
+        "voice_error.json",
     ];
 
     for fixture in fixtures {
@@ -51,6 +57,8 @@ fn invalid_contract_fixtures_fail_deserialize() {
         "invalid_error_missing_code.json",
         "invalid_welcome_missing_optional_field.json",
         "invalid_workspace_restore_missing_payload.json",
+        "invalid_voice_transcribe_missing_audio_base64.json",
+        "invalid_voice_error_missing_code.json",
     ] {
         let raw = load_fixture(fixture);
         let parsed = serde_json::from_str::<GatewayMessage>(&raw);

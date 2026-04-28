@@ -1,0 +1,16 @@
+{
+  "id": "voice-cap-res-1",
+  "type": "voice.capabilities.response",
+  "payload": {
+    "stt": {
+      "enabled": true,
+      "available": true
+    },
+    "tts": {
+      "enabled": true,
+      "available": true,
+      "voice": "alloy",
+      "autoPlay": true
+    }
+  }
+}

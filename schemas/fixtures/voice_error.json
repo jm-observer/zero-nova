@@ -1,0 +1,11 @@
+{
+  "id": "voice-err-1",
+  "type": "voice.error",
+  "payload": {
+    "code": "voice_stt_unavailable",
+    "message": "stt unavailable",
+    "capability": "stt",
+    "requestId": "voice-transcribe-req-1",
+    "sessionId": "session-123"
+  }
+}

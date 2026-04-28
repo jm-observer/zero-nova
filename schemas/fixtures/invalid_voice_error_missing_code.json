@@ -1,0 +1,8 @@
+{
+  "id": "voice-err-invalid",
+  "type": "voice.error",
+  "payload": {
+    "message": "missing code",
+    "capability": "stt"
+  }
+}

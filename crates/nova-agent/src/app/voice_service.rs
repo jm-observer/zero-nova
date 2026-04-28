@@ -199,3 +199,143 @@ impl VoiceErrorCodeExt for VoiceErrorCode {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{encode_base64, VoiceService};
+    use crate::config::VoiceConfig;
+    use crate::voice::{SttProvider, SynthesizeResult, TranscribeResult, TtsProvider};
+    use anyhow::{anyhow, Result};
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use tokio::time::Duration;
+
+    struct FixedSttProvider;
+
+    #[async_trait]
+    impl SttProvider for FixedSttProvider {
+        async fn transcribe(&self, _audio: &[u8], _format: &str, _language: Option<&str>) -> Result<TranscribeResult> {
+            Ok(TranscribeResult {
+                text: "这是一段测试语音".to_string(),
+                confidence: Some(0.95),
+                duration_ms: Some(800),
+                segments: Vec::new(),
+            })
+        }
+    }
+
+    struct SlowSttProvider;
+
+    #[async_trait]
+    impl SttProvider for SlowSttProvider {
+        async fn transcribe(&self, _audio: &[u8], _format: &str, _language: Option<&str>) -> Result<TranscribeResult> {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            Ok(TranscribeResult {
+                text: "slow".to_string(),
+                confidence: Some(1.0),
+                duration_ms: Some(80),
+                segments: Vec::new(),
+            })
+        }
+    }
+
+    struct FixedTtsProvider;
+
+    #[async_trait]
+    impl TtsProvider for FixedTtsProvider {
+        async fn synthesize(&self, _text: &str, _voice: Option<&str>) -> Result<SynthesizeResult> {
+            Ok(SynthesizeResult {
+                audio: vec![1_u8, 2_u8, 3_u8],
+                audio_format: "mp3".to_string(),
+            })
+        }
+    }
+
+    struct FailingTtsProvider;
+
+    #[async_trait]
+    impl TtsProvider for FailingTtsProvider {
+        async fn synthesize(&self, _text: &str, _voice: Option<&str>) -> Result<SynthesizeResult> {
+            Err(anyhow!("provider unavailable"))
+        }
+    }
+
+    fn test_config() -> VoiceConfig {
+        VoiceConfig {
+            enabled: true,
+            stt_timeout_ms: 1_000,
+            tts_timeout_ms: 1_000,
+            ..VoiceConfig::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn transcribe_success_returns_provider_payload() {
+        let service = VoiceService::new(test_config(), Arc::new(FixedSttProvider), Arc::new(FixedTtsProvider));
+        let audio_base64 = encode_base64(&[1_u8, 2_u8, 3_u8, 4_u8]);
+
+        let response = service
+            .transcribe(Some("session-1"), &audio_base64, "wav", Some("zh"))
+            .await
+            .expect("transcribe should succeed");
+
+        assert_eq!(response.text, "这是一段测试语音");
+        assert_eq!(response.confidence, Some(0.95));
+        assert_eq!(response.duration_ms, Some(800));
+    }
+
+    #[tokio::test]
+    async fn transcribe_rejects_concurrent_requests_for_same_session() {
+        let service = Arc::new(VoiceService::new(
+            test_config(),
+            Arc::new(SlowSttProvider),
+            Arc::new(FixedTtsProvider),
+        ));
+        let audio_base64 = encode_base64(&[1_u8, 2_u8, 3_u8, 4_u8]);
+
+        let first_service = Arc::clone(&service);
+        let first_audio = audio_base64.clone();
+        let first = tokio::spawn(async move {
+            first_service
+                .transcribe(Some("session-2"), &first_audio, "wav", None)
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let second = service.transcribe(Some("session-2"), &audio_base64, "wav", None).await;
+        assert!(second.is_err());
+        assert!(second
+            .expect_err("second request should fail")
+            .to_string()
+            .contains("voice_request_in_progress"));
+
+        let first_result = first.await.expect("join handle should succeed");
+        assert!(first_result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn synthesize_returns_base64_audio() {
+        let service = VoiceService::new(test_config(), Arc::new(FixedSttProvider), Arc::new(FixedTtsProvider));
+
+        let response = service
+            .synthesize("hello", Some("alloy"))
+            .await
+            .expect("tts should succeed");
+
+        assert_eq!(response.audio_format, "mp3");
+        assert_eq!(response.audio_base64, encode_base64(&[1_u8, 2_u8, 3_u8]));
+    }
+
+    #[tokio::test]
+    async fn synthesize_propagates_provider_error() {
+        let service = VoiceService::new(test_config(), Arc::new(FixedSttProvider), Arc::new(FailingTtsProvider));
+
+        let result = service.synthesize("hello", None).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .expect_err("tts should fail")
+            .to_string()
+            .contains("provider unavailable"));
+    }
+}

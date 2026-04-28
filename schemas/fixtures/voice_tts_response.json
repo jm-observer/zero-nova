@@ -1,0 +1,8 @@
+{
+  "id": "voice-tts-res-1",
+  "type": "voice.tts.response",
+  "payload": {
+    "audioFormat": "mp3",
+    "audioBase64": "AQID"
+  }
+}

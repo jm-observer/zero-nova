@@ -1,0 +1,9 @@
+{
+  "id": "voice-transcribe-req-invalid",
+  "type": "voice.transcribe.request",
+  "payload": {
+    "sessionId": "session-123",
+    "audioFormat": "wav",
+    "mode": "once"
+  }
+}

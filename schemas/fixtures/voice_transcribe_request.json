@@ -1,0 +1,13 @@
+{
+  "id": "voice-transcribe-req-1",
+  "type": "voice.transcribe.request",
+  "payload": {
+    "sessionId": "session-123",
+    "audioFormat": "wav",
+    "sampleRate": 16000,
+    "channelCount": 1,
+    "language": "zh",
+    "mode": "once",
+    "audioBase64": "AQIDBA=="
+  }
+}

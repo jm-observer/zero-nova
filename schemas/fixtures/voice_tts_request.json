@@ -1,0 +1,9 @@
+{
+  "id": "voice-tts-req-1",
+  "type": "voice.tts.request",
+  "payload": {
+    "text": "你好，世界",
+    "voice": "alloy",
+    "sessionId": "session-123"
+  }
+}

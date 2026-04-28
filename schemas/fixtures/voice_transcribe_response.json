@@ -1,0 +1,16 @@
+{
+  "id": "voice-transcribe-res-1",
+  "type": "voice.transcribe.response",
+  "payload": {
+    "text": "这是一段测试语音",
+    "confidence": 0.95,
+    "durationMs": 800,
+    "segments": [
+      {
+        "startMs": 0,
+        "endMs": 800,
+        "text": "这是一段测试语音"
+      }
+    ]
+  }
+}

@@ -87,15 +87,15 @@ def run_loop(
         all_queries = train_set + test_set
         t0 = time.time()
         all_results = run_eval(
-            eval_set=all_queries,
-            skill_name=name,
-            description=current_description,
+            all_queries,
+            skill_path=skill_path,
             num_workers=num_workers,
             timeout=timeout,
             project_root=project_root,
             runs_per_query=runs_per_query,
             trigger_threshold=trigger_threshold,
             model=model,
+            description_override=current_description,
         )
         eval_elapsed = time.time() - t0
 

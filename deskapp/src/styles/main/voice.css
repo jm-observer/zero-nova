@@ -281,6 +281,11 @@
   transition: color 0.3s;
   text-align: center;
 }
+.voice-duration-text {
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
 /* 实时转写文字 */
 .voice-transcript {
   max-width: 500px;
@@ -293,6 +298,16 @@
   opacity: 0.9;
 }
 .voice-transcript:empty {
+  display: none;
+}
+.voice-error-text {
+  max-width: 500px;
+  color: #f87171;
+  text-align: center;
+  line-height: 1.5;
+}
+.voice-error-text.hidden,
+.voice-duration-text.hidden {
   display: none;
 }
 /* 底部控制按钮 */
@@ -331,6 +346,23 @@
   color: #ef4444;
 }
 .voice-main-btn .hidden {
+  display: none;
+}
+.voice-secondary-btn {
+  min-width: 96px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.voice-secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.voice-secondary-btn.hidden {
   display: none;
 }
 /* 嵌入模型重建进度�?*/

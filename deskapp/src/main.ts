@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
-import { initI18n } from './i18n/index';
+import { initI18n, t } from './i18n/index';
 import zhPack from './i18n/zh';
 import enPack from './i18n/en';
-import { GatewayClient } from './gateway-client';
+import { GatewayClient, GatewayRequestError } from './gateway-client';
 import { EventBus, Events } from './core/event-bus';
 import { AppState } from './core/state';
 import { ChatService } from './services/chat-service';
+import { bargeInDetector, player, recorder, setVoiceSynthesizeCallback, streamingTtsManager, ttsManager } from './voice';
 
 import type { Session } from './core/types';
 
@@ -66,6 +67,307 @@ async function init() {
         const chatService = new ChatService(state, bus, gatewayClient);
         chatService.init();
 
+        setVoiceSynthesizeCallback(async (text: string) => {
+            try {
+                const audio = await gatewayClient.synthesizeVoice(text, state.currentSessionId || undefined, state.voiceStatus?.tts.voice);
+                return { audio };
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return { error: message };
+            }
+        });
+
+        let voiceTurnId = 0;
+        let voiceTranscriptMessageId: string | null = null;
+        let voiceAwaitingAssistant = false;
+        let voiceInterrupted = false;
+
+        const nextVoiceTurn = () => {
+            voiceTurnId += 1;
+            return voiceTurnId;
+        };
+
+        const stopVoiceOutput = () => {
+            streamingTtsManager.cancel();
+            ttsManager.cancelAll();
+            player.stop();
+            bargeInDetector.stop();
+        };
+
+        const setVoiceError = (message: string) => {
+            state.updateVoiceConversation({
+                active: state.voiceModeActive,
+                phase: 'error',
+                error: message,
+                canRetry: true,
+            });
+        };
+
+        const startVoiceTurn = async () => {
+            if (recorder.getState() !== 'idle' || state.voiceConversation.phase === 'requesting_permission') {
+                return;
+            }
+
+            if (!state.voiceStatus?.stt.enabled || !state.voiceStatus.stt.available) {
+                setVoiceError(t('voice.chat_unavailable'));
+                return;
+            }
+
+            const turnId = nextVoiceTurn();
+            voiceInterrupted = false;
+
+            state.updateVoiceConversation({
+                active: true,
+                phase: 'requesting_permission',
+                transcript: '',
+                transcriptState: 'idle',
+                error: null,
+                durationSeconds: 0,
+                canRetry: false,
+            });
+
+            recorder.setAutoStopCallback(() => {
+                void finishVoiceTurn(turnId);
+            });
+
+            try {
+                await recorder.start({
+                    vad: true,
+                    vadSilenceMs: 1500,
+                    minDurationMs: 800,
+                });
+            } catch (error) {
+                setVoiceError(t('voice.mic_failed'));
+            }
+        };
+
+        const finishVoiceTurn = async (turnId: number) => {
+            if (turnId !== voiceTurnId || recorder.getState() !== 'recording') {
+                return;
+            }
+
+            state.updateVoiceConversation({
+                phase: 'uploading_audio',
+                canRetry: false,
+            });
+
+            try {
+                const audio = await recorder.stop();
+                if (turnId !== voiceTurnId) {
+                    return;
+                }
+
+                voiceTranscriptMessageId = `voice-transcript-${Date.now()}`;
+                state.upsertVoiceTranscriptMessage(voiceTranscriptMessageId, '', 'pending');
+                state.updateVoiceConversation({
+                    phase: 'recognizing',
+                    transcriptState: 'pending',
+                });
+
+                const result = await gatewayClient.transcribeVoice({
+                    sessionId: state.currentSessionId || undefined,
+                    audioFormat: 'audio/webm',
+                    sampleRate: 16000,
+                    channelCount: 1,
+                    mode: 'once',
+                    audio,
+                });
+
+                if (turnId !== voiceTurnId) {
+                    return;
+                }
+
+                const transcript = result.text.trim();
+                if (!transcript) {
+                    if (voiceTranscriptMessageId) {
+                        state.removeMessageById(voiceTranscriptMessageId);
+                        voiceTranscriptMessageId = null;
+                    }
+                    setVoiceError(t('voice.not_recognized'));
+                    return;
+                }
+
+                if (voiceTranscriptMessageId) {
+                    state.upsertVoiceTranscriptMessage(voiceTranscriptMessageId, transcript, 'final');
+                }
+
+                state.updateVoiceConversation({
+                    phase: 'submitting_text',
+                    transcript,
+                    transcriptState: 'final',
+                    error: null,
+                });
+
+                voiceAwaitingAssistant = true;
+                bus.emit('message:send', { text: transcript, skipOptimisticMessage: true });
+                state.updateVoiceConversation({
+                    phase: 'waiting_assistant',
+                    canRetry: false,
+                });
+            } catch (error) {
+                if (error instanceof GatewayRequestError) {
+                    setVoiceError(error.kind === 'unsupported' ? t('voice.chat_unavailable') : t('voice.recognition_failed'));
+                    return;
+                }
+
+                setVoiceError(t('voice.process_failed'));
+            }
+        };
+
+        const closeVoiceMode = () => {
+            nextVoiceTurn();
+            voiceAwaitingAssistant = false;
+            voiceInterrupted = false;
+            recorder.setAutoStopCallback(null);
+            recorder.cancel();
+            if (voiceTranscriptMessageId) {
+                state.removeMessageById(voiceTranscriptMessageId);
+                voiceTranscriptMessageId = null;
+            }
+            stopVoiceOutput();
+            state.resetVoiceConversation();
+        };
+
+        recorder.setStateCallback((recordingState, duration) => {
+            if (recordingState === 'recording') {
+                state.updateVoiceConversation({
+                    active: true,
+                    phase: 'recording',
+                    error: null,
+                    durationSeconds: duration ?? 0,
+                });
+            }
+        });
+
+        player.setStateCallback((playbackState) => {
+            if (playbackState === 'playing') {
+                state.updateVoiceConversation({
+                    active: true,
+                    phase: 'speaking',
+                    canRetry: false,
+                });
+
+                if (!bargeInDetector.isActive()) {
+                    void bargeInDetector.start();
+                }
+                return;
+            }
+
+            if (playbackState === 'idle') {
+                bargeInDetector.stop();
+            }
+        });
+
+        bargeInDetector.setCallback(() => {
+            voiceInterrupted = true;
+            stopVoiceOutput();
+            state.updateVoiceConversation({
+                active: state.voiceModeActive,
+                phase: 'interrupted',
+                canRetry: true,
+            });
+        });
+
+        bus.on(Events.VOICE_MODE_SET_REQUEST, (payload: { active: boolean }) => {
+            state.setVoiceMode(payload.active);
+        });
+
+        bus.on(Events.VOICE_MODE_TOGGLE, (payload: { active: boolean }) => {
+            if (!payload.active) {
+                closeVoiceMode();
+                return;
+            }
+
+            state.updateVoiceConversation({
+                active: true,
+                phase: 'idle',
+                transcript: '',
+                transcriptState: 'idle',
+                error: null,
+                durationSeconds: 0,
+                canRetry: false,
+            });
+
+            void startVoiceTurn();
+        });
+
+        bus.on(Events.VOICE_CONTROL_START, () => {
+            if (!state.voiceModeActive) {
+                state.setVoiceMode(true);
+                return;
+            }
+
+            void startVoiceTurn();
+        });
+
+        bus.on(Events.VOICE_CONTROL_STOP, () => {
+            if (recorder.getState() === 'recording') {
+                void finishVoiceTurn(voiceTurnId);
+                return;
+            }
+
+            stopVoiceOutput();
+            state.updateVoiceConversation({
+                active: state.voiceModeActive,
+                phase: 'idle',
+                canRetry: false,
+                error: null,
+            });
+        });
+
+        bus.on(Events.VOICE_CONTROL_RETRY, () => {
+            if (!state.voiceModeActive) {
+                state.setVoiceMode(true);
+                return;
+            }
+
+            void startVoiceTurn();
+        });
+
+        bus.on('chat:complete', async (payload: { sessionId?: string }) => {
+            if (!voiceAwaitingAssistant || payload.sessionId !== state.currentSessionId) {
+                return;
+            }
+
+            voiceAwaitingAssistant = false;
+            let assistantMessage = [...state.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+
+            if (!assistantMessage && payload.sessionId) {
+                try {
+                    const refreshedMessages = await gatewayClient.getMessages(payload.sessionId);
+                    if (payload.sessionId === state.currentSessionId) {
+                        state.setMessages(refreshedMessages as any[]);
+                        assistantMessage = [...state.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content.trim());
+                    }
+                } catch (error) {
+                    console.warn('[Main] Failed to refresh messages before voice autoplay:', error);
+                }
+            }
+
+            if (assistantMessage && state.ttsAutoPlay && state.voiceStatus?.tts.enabled && state.voiceStatus.tts.available) {
+                try {
+                    await ttsManager.speak(String(assistantMessage.content), assistantMessage.id);
+                } catch (error) {
+                    console.error('[Main] Voice autoplay failed:', error);
+                    setVoiceError(t('voice.process_failed'));
+                    return;
+                }
+            }
+
+            state.updateVoiceConversation({
+                active: state.voiceModeActive,
+                phase: 'idle',
+                durationSeconds: 0,
+                canRetry: false,
+            });
+
+            voiceTranscriptMessageId = null;
+
+            if (state.voiceModeActive && !voiceInterrupted) {
+                void startVoiceTurn();
+            }
+        });
+
         // 7. Initial Data Load & Connection Handling
         console.log('[Main] Establishing WebSocket connection...');
         
@@ -86,6 +388,17 @@ async function init() {
                 console.log('[Main] Fetching sessions...');
                 const sessions = await gatewayClient.getSessions();
                 state.setSessions(sessions as Session[]);
+
+                try {
+                    const voiceCapabilities = await gatewayClient.getVoiceCapabilities();
+                    state.setVoiceCapabilities(voiceCapabilities);
+                } catch (error) {
+                    if (error instanceof GatewayRequestError && error.kind === 'unsupported') {
+                        state.setVoiceCapabilities(null);
+                    } else {
+                        console.warn('[Main] Failed to fetch voice capabilities:', error);
+                    }
+                }
 
                 // Initial session selection (only if not already set)
                 if (!state.currentSessionId) {

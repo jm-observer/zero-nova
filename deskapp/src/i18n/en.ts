@@ -620,6 +620,9 @@ const en: Record<string, string> = {
     'voice.mic_failed': 'Microphone access failed',
     'voice.recognition_failed': 'Recognition failed',
     'voice.process_failed': 'Voice processing failed',
+    'voice.start_recording': 'Start Recording',
+    'voice.stop_recording': 'Stop Recording',
+    'voice.retry': 'Retry',
 
     // ========================
     // Memory (extended)

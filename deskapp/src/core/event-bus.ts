@@ -69,6 +69,12 @@
    THEME_CHANGED: 'theme:changed',         // { theme: string }
    NOTIFICATION: 'notification',           // { type: 'success'|'error', message: string }
    VOICE_MODE_TOGGLE: 'voice:toggle',      // { active: boolean }
+   VOICE_MODE_SET_REQUEST: 'voice:mode:set',
+   VOICE_STATE_UPDATED: 'voice:state',
+   VOICE_CAPABILITIES_UPDATED: 'voice:capabilities',
+   VOICE_CONTROL_START: 'voice:start',
+   VOICE_CONTROL_STOP: 'voice:stop',
+   VOICE_CONTROL_RETRY: 'voice:retry',
    PROGRESS_UPDATE: 'progress:update',     // { event: any }
    GATEWAY_STATUS: 'gateway:status',       // { status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
    CHAT_INTENT: 'chat:intent',             // { sessionId: string, intent: string, agentId?: string }

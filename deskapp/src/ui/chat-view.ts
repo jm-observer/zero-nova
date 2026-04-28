@@ -284,6 +284,7 @@ export class ChatView {
     private renderMessage(message: any, index: number): string {
         const isAssistant = message.role === 'assistant';
         const content = message.content;
+        const voiceTranscriptState = message.metadata?.voiceTranscriptState as 'pending' | 'final' | undefined;
         let contentHtml = '';
         if (!content) {
             contentHtml = '<span class="empty-content">...</span>';
@@ -374,10 +375,14 @@ export class ChatView {
         
         const intentText = message.metadata?.intentText || (isAssistant && this.currentIntentText ? this.currentIntentText : '');
         const intentHtml = intentText ? `<div class="message-intent">${escapeHtml(intentText)}</div>` : '';
+        const voiceBadgeHtml = voiceTranscriptState
+            ? `<div class="message-intent">${voiceTranscriptState === 'pending' ? t('voice.recognizing') : t('voice.title')}</div>`
+            : '';
 
         return `
-            <div class="message ${roleClass}" data-index="${index}">
+            <div class="message ${roleClass} ${voiceTranscriptState ? `voice-transcript ${voiceTranscriptState}` : ''}" data-index="${index}">
                 <div class="message-bubble">
+                    ${voiceBadgeHtml}
                     ${intentHtml}
                     <div class="markdown-body">${contentHtml}</div>
                 </div>

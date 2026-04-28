@@ -58,6 +58,28 @@ type ProgressHandler = (event: ProgressEvent) => void;
 type ChatIntentHandler = (payload: ChatIntentPayload) => void;
 type ConnectionHandler = (status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed') => void;
 
+interface VoiceCapabilitiesView {
+    stt: { enabled: boolean; available: boolean };
+    tts: { enabled: boolean; available: boolean; voice: string; autoPlay: boolean };
+}
+
+interface VoiceTranscribePayload {
+    sessionId?: string;
+    audioFormat: string;
+    sampleRate?: number;
+    channelCount?: number;
+    language?: string;
+    mode?: 'once';
+    audio: ArrayBuffer;
+}
+
+interface VoiceTranscribeResult {
+    text: string;
+    confidence?: number;
+    durationMs?: number;
+    segments?: Array<{ startMs: number; endMs: number; text: string }>;
+}
+
 export class GatewayRequestError extends Error {
     kind: 'unsupported' | 'request_failed';
     capability?: string;
@@ -93,6 +115,28 @@ export class GatewayClient {
     private maxReconnectAttempts = 10;
     private reconnectDelay = 1000;
     private shouldReconnect = true;
+
+    private encodeAudioBase64(audio: ArrayBuffer): string {
+        let binary = '';
+        const bytes = new Uint8Array(audio);
+
+        bytes.forEach(byte => {
+            binary += String.fromCharCode(byte);
+        });
+
+        return btoa(binary);
+    }
+
+    private decodeAudioBase64(audioBase64: string): ArrayBuffer {
+        const binary = atob(audioBase64);
+        const bytes = new Uint8Array(binary.length);
+
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        return bytes.buffer;
+    }
 
     private normalizeToolUnlockedEvent(payload: unknown): ToolUnlockedEvent {
         const record = (payload ?? {}) as Record<string, unknown>;
@@ -596,6 +640,32 @@ export class GatewayClient {
         const result = await this.request<{ output?: string }>('chat', payload, 0);
         console.log('[GatewayClient] Chat response:', result);
         return result?.output || '';
+    }
+
+    async getVoiceCapabilities(): Promise<VoiceCapabilitiesView> {
+        return this.request<VoiceCapabilitiesView>('voice.capabilities.get', {});
+    }
+
+    async transcribeVoice(payload: VoiceTranscribePayload): Promise<VoiceTranscribeResult> {
+        return this.request<VoiceTranscribeResult>('voice.transcribe.request', {
+            sessionId: payload.sessionId,
+            audioFormat: payload.audioFormat,
+            sampleRate: payload.sampleRate,
+            channelCount: payload.channelCount,
+            language: payload.language,
+            mode: payload.mode ?? 'once',
+            audioBase64: this.encodeAudioBase64(payload.audio),
+        });
+    }
+
+    async synthesizeVoice(text: string, sessionId?: string, voice?: string): Promise<ArrayBuffer> {
+        const response = await this.request<{ audioFormat: string; audioBase64: string }>('voice.tts.request', {
+            text,
+            sessionId,
+            voice,
+        });
+
+        return this.decodeAudioBase64(response.audioBase64);
     }
 
     /**

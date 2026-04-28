@@ -623,6 +623,9 @@ const zh: Record<string, string> = {
     'voice.mic_failed': '麦克风访问失败',
     'voice.recognition_failed': '识别失败',
     'voice.process_failed': '语音处理失败',
+    'voice.start_recording': '开始录音',
+    'voice.stop_recording': '停止录音',
+    'voice.retry': '重试',
 
     // ========================
     // Memory (extended)

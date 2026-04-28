@@ -37,6 +37,28 @@ interface ChatTokenUsageUpdate {
     usage: TokenUsageView;
 }
 
+export type VoiceConversationPhase =
+    | 'idle'
+    | 'requesting_permission'
+    | 'recording'
+    | 'uploading_audio'
+    | 'recognizing'
+    | 'submitting_text'
+    | 'waiting_assistant'
+    | 'speaking'
+    | 'interrupted'
+    | 'error';
+
+export interface VoiceConversationState {
+    active: boolean;
+    phase: VoiceConversationPhase;
+    transcript: string;
+    transcriptState: 'idle' | 'pending' | 'final';
+    error: string | null;
+    durationSeconds: number;
+    canRetry: boolean;
+}
+
 /**
  * 全局状态管理类
  */
@@ -70,6 +92,15 @@ export class AppState {
     } | null = null;
     ttsAutoPlay = false;
     voiceModeActive = false;
+    voiceConversation: VoiceConversationState = {
+        active: false,
+        phase: 'idle',
+        transcript: '',
+        transcriptState: 'idle',
+        error: null,
+        durationSeconds: 0,
+        canRetry: false,
+    };
     
     // 工作模式
     currentWorkingMode: WorkingMode = 'standalone';
@@ -473,6 +504,73 @@ export class AppState {
             this.voiceModeActive = active;
             this.bus.emit(Events.VOICE_MODE_TOGGLE, { active });
         }
+    }
+
+    setVoiceCapabilities(status: AppState['voiceStatus']) {
+        this.voiceStatus = status;
+        this.ttsAutoPlay = status?.tts.autoPlay ?? false;
+        this.bus.emit(Events.VOICE_CAPABILITIES_UPDATED, {
+            status,
+            ttsAutoPlay: this.ttsAutoPlay,
+        });
+    }
+
+    updateVoiceConversation(patch: Partial<VoiceConversationState>) {
+        this.voiceConversation = {
+            ...this.voiceConversation,
+            ...patch,
+        };
+
+        this.bus.emit(Events.VOICE_STATE_UPDATED, {
+            ...this.voiceConversation,
+        });
+    }
+
+    resetVoiceConversation() {
+        this.updateVoiceConversation({
+            active: false,
+            phase: 'idle',
+            transcript: '',
+            transcriptState: 'idle',
+            error: null,
+            durationSeconds: 0,
+            canRetry: false,
+        });
+    }
+
+    upsertMessage(message: Message) {
+        const index = this.messages.findIndex(item => item.id === message.id);
+        if (index >= 0) {
+            this.messages[index] = message;
+            this.bus.emit(Events.MESSAGES_UPDATED, { sessionId: this.currentSessionId, messages: [...this.messages] });
+            return;
+        }
+
+        this.addMessage(message);
+    }
+
+    removeMessageById(messageId: string) {
+        const nextMessages = this.messages.filter(message => message.id !== messageId);
+        if (nextMessages.length === this.messages.length) {
+            return;
+        }
+
+        this.messages = nextMessages;
+        this.bus.emit(Events.MESSAGES_UPDATED, { sessionId: this.currentSessionId, messages: [...this.messages] });
+    }
+
+    upsertVoiceTranscriptMessage(messageId: string, text: string, transcriptState: 'pending' | 'final') {
+        const content = text || (transcriptState === 'pending' ? '...' : '');
+
+        this.upsertMessage({
+            id: messageId,
+            role: 'user',
+            content,
+            createdAt: Date.now(),
+            metadata: {
+                voiceTranscriptState: transcriptState,
+            },
+        });
     }
 
     addPendingAttachment(attachment: PendingAttachment) {

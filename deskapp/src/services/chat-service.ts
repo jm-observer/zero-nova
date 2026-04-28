@@ -19,16 +19,17 @@ export class ChatService {
         });
 
         // Listen for outgoing messages
-        this.bus.on('message:send', async (payload: { text: string }) => {
+        this.bus.on('message:send', async (payload: { text: string; skipOptimisticMessage?: boolean }) => {
             console.log('[ChatService] Outgoing message:', payload.text);
             
-            // Optimistically add user message
-            this.state.addMessage({
-                id: 'tmp-' + Date.now(),
-                role: 'user',
-                content: payload.text,
-                createdAt: Date.now()
-            });
+            if (!payload.skipOptimisticMessage) {
+                this.state.addMessage({
+                    id: 'tmp-' + Date.now(),
+                    role: 'user',
+                    content: payload.text,
+                    createdAt: Date.now()
+                });
+            }
 
             await this.sendMessage(payload.text);
         });

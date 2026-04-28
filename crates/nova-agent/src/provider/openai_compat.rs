@@ -5,6 +5,7 @@ use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use log::debug;
 use reqwest::{header, Client};
 use serde_json::json;
 use std::collections::VecDeque;
@@ -162,6 +163,12 @@ impl LlmClient for OpenAiCompatClient {
         }
 
         let url = format!("{}/chat/completions", self.base_url);
+        debug!(
+            "[OUTBOUND] LLM HTTP request: URL={}, model={}, msg_count={}",
+            url,
+            config.model,
+            messages.len()
+        );
         let resp = self
             .http
             .post(&url)
@@ -207,6 +214,10 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
         loop {
             // 1. 先消费缓冲队列
             if let Some(event) = self.event_queue.pop_front() {
+                debug!(
+                    "[INBOUND] SSE stream: event from buffer, event_type={}",
+                    std::any::type_name_of_val(&event)
+                );
                 return Ok(Some(event));
             }
 
@@ -214,6 +225,7 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
             match self.parser.next_raw()? {
                 Some(RawSseEvent::Done) => {
                     // [DONE] 信号：发射所有未关闭的 tool calls 的 End 事件，再发 MessageComplete
+                    debug!("[INBOUND] SSE stream: [DONE] received from LLM");
                     self.flush_pending_tool_calls();
                     return Ok(self.event_queue.pop_front());
                 }

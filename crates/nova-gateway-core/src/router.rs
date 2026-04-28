@@ -1,6 +1,6 @@
 use crate::handlers::{agents, chat, config, sessions, system, voice};
 use channel_core::ResponseSink;
-use log::warn;
+use log::{debug, warn};
 use nova_agent::app::AgentApplication;
 use nova_protocol::{GatewayMessage, MessageEnvelope};
 
@@ -13,6 +13,12 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
             return;
         }
     };
+
+    debug!(
+        "[INBOUND] dispatch: msg_id={}, envelope_type={}",
+        msg_id,
+        std::any::type_name_of_val(&msg.envelope)
+    );
 
     match msg.envelope {
         MessageEnvelope::Chat(payload) => {

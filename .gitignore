@@ -17,3 +17,5 @@ tech*
 crates/nova-server/.nova
 # Worktree directory (shared with other branches)
 .worktrees
+tmp
+nul

@@ -1,6 +1,6 @@
 use crate::{ChannelHandler, ResponseSink};
 use futures_util::{SinkExt, StreamExt};
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use serde::{de::DeserializeOwned, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -85,6 +85,14 @@ where
             match msg {
                 InternalMessage::Protocol(p) => match serde_json::to_string(&p) {
                     Ok(json_str) => {
+                        let max_chars = 500usize;
+                        let preview = if json_str.chars().nth(max_chars).is_some() {
+                            let truncated: String = json_str.chars().take(max_chars).collect();
+                            format!("{}... ({} bytes)", truncated, json_str.len())
+                        } else {
+                            json_str.to_string()
+                        };
+                        debug!("[OUTBOUND] Sending response to peer: {}: {}", peer, preview);
                         if ws_sink.send(WsMessage::Text(json_str)).await.is_err() {
                             break;
                         }
@@ -168,6 +176,11 @@ async fn handle_text_message<H, Req, Resp>(
 {
     match serde_json::from_str::<Req>(text) {
         Ok(req) => {
+            debug!(
+                "[INBOUND] Received request from peer: {} (type={})",
+                peer_id,
+                text.chars().take(200).collect::<String>()
+            );
             let handler_clone = handler.clone();
             let peer_id_clone = peer_id.to_string();
             let sink_clone = response_sink.clone();

@@ -11,7 +11,7 @@ export class ChatView {
     private inspectBtn: HTMLButtonElement;
     
     private streamingMessageEl: HTMLElement | null = null;
-    private streamingContent = '';
+    private streamingContent = ''; // 仅作向后兼容和备份
     private currentIntentText: string | null = null;
     private layoutObserver: ResizeObserver | null = null;
 
@@ -207,7 +207,6 @@ export class ChatView {
     renderMessages(messages: any[]) {
         // 保存当前的流式状态，避免在渲染历史消息时冲掉正在产生的回复
         const prevStreamingEl = this.streamingMessageEl;
-        const prevStreamingContent = this.streamingContent;
         const isStreaming = !!prevStreamingEl;
 
         this.streamingMessageEl = null;
@@ -229,7 +228,6 @@ export class ChatView {
         // 如果之前正在流式输出，将其重新追加到容器末尾
         if (isStreaming) {
             this.streamingMessageEl = prevStreamingEl;
-            this.streamingContent = prevStreamingContent;
             this.messagesContainer.appendChild(this.streamingMessageEl);
         }
 
@@ -396,11 +394,23 @@ export class ChatView {
             this.streamingMessageEl = this.createStreamingMessage();
             this.messagesContainer.appendChild(this.streamingMessageEl);
         }
-        this.streamingContent += token;
-        const contentEl = this.streamingMessageEl.querySelector('.markdown-body');
-        if (contentEl) {
-            contentEl.innerHTML = renderMarkdown(this.streamingContent);
+        
+        const markdownBody = this.streamingMessageEl.querySelector('.markdown-body');
+        if (!markdownBody) return;
+
+        // 查找或创建当前的文本块容器
+        // 如果最后一个子元素不是文本块（可能是工具卡片），则新建一个
+        let textBlock = markdownBody.lastElementChild as HTMLElement;
+        if (!textBlock || !textBlock.classList.contains('streaming-text-block')) {
+            textBlock = document.createElement('div');
+            textBlock.className = 'streaming-text-block';
+            (textBlock as any)._rawContent = ''; // 用于增量 Markdown 渲染
+            markdownBody.appendChild(textBlock);
         }
+
+        (textBlock as any)._rawContent += token;
+        textBlock.innerHTML = renderMarkdown((textBlock as any)._rawContent);
+        
         this.scrollToBottom();
     }
 

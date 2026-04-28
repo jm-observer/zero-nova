@@ -8,6 +8,7 @@ pub use router::dispatch;
 use anyhow::Result;
 use async_trait::async_trait;
 use channel_core::{ChannelHandler, PeerId, ResponseSink};
+use log::debug;
 use nova_agent::app::AgentApplication;
 use nova_protocol::GatewayMessage;
 use std::sync::Arc;
@@ -37,6 +38,7 @@ impl ChannelHandler for GatewayHandler {
     }
 
     async fn on_message(&self, _peer: PeerId, req: Self::Req, sink: ResponseSink<Self::Resp>) -> Result<()> {
+        debug!("[INBOUND] GatewayHandler::on_message: {:?}", req);
         dispatch(req, &*self.app, sink).await;
         Ok(())
     }

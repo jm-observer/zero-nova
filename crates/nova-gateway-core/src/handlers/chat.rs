@@ -1,6 +1,7 @@
 use crate::bridge::app_event_to_gateway;
 use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
+use log::debug;
 use nova_agent::app::AgentApplication;
 use nova_protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload, Usage};
 use tokio::sync::mpsc;
@@ -33,6 +34,12 @@ pub async fn handle_chat(
     // 适配器：将应用层事件桥接到渠道层协议
     let event_forwarder = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
+            debug!(
+                "[OUTBOUND] Event forwarder: sending event type={:?} to client (req={}, session={})",
+                std::any::type_name_of_val(&event),
+                request_id_clone,
+                session_id_clone
+            );
             let gateway_msg = app_event_to_gateway(event, &request_id_clone, &session_id_clone);
             if outbound_tx_clone.send_async(gateway_msg).await.is_err() {
                 break;
@@ -73,6 +80,11 @@ pub async fn handle_chat(
         ))
         .await;
 
+    debug!(
+        "[OUTBOUND] Calling start_turn for session={}, input_len={}",
+        session_id,
+        payload.input.len()
+    );
     let turn_result = match app.start_turn(&session_id, &payload.input, event_tx).await {
         Ok(res) => res,
         Err(e) => {

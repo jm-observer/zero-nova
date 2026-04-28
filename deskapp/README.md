@@ -115,6 +115,31 @@ cp nova.example.yaml config.toml
 pnpm tauri dev
 ```
 
+### E2E Testing
+
+Playwright E2E assets live in `deskapp/e2e` and are launched from the `deskapp` root.
+
+```bash
+# install frontend dependencies
+pnpm install
+
+# install Playwright browsers on first run
+pnpm exec playwright install chromium
+
+# run all E2E tests
+pnpm test:e2e
+
+# run with a visible browser window
+pnpm test:e2e:headed
+
+# open Playwright UI mode
+pnpm test:e2e:ui
+```
+
+- Windows is supported for local E2E development.
+- The first browser installation is slower than normal regression runs.
+- The Playwright config starts `pnpm dev` automatically; no manual Vite startup is required.
+
 ### Build
 
 ```bash

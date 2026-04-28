@@ -117,6 +117,31 @@ cp nova.example.yaml config.toml
 pnpm tauri dev
 ```
 
+### E2E 测试
+
+Playwright E2E 资源位于 `deskapp/e2e`，统一从 `deskapp` 根目录启动。
+
+```bash
+# 安装前端依赖
+pnpm install
+
+# 首次运行时安装 Playwright 浏览器
+pnpm exec playwright install chromium
+
+# 执行全部 E2E 测试
+pnpm test:e2e
+
+# 可视化模式运行
+pnpm test:e2e:headed
+
+# 打开 Playwright UI 模式
+pnpm test:e2e:ui
+```
+
+- Windows 可作为本地 E2E 开发环境。
+- 首次浏览器安装通常会比日常回归更慢，属于正常现象。
+- Playwright 配置会自动拉起 `pnpm dev`，无需手动先启动 Vite。
+
 ### 构建安装包
 
 ```bash

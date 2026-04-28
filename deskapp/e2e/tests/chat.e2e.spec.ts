@@ -11,7 +11,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Chat functionality', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:1420');
+    await page.goto('/');
   });
 
   test('sends message and receives streaming response', async ({ page }) => {

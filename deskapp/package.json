@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "pnpm exec playwright test --config e2e/playwright.config.ts",
+    "test:e2e:headed": "pnpm exec playwright test --config e2e/playwright.config.ts --headed",
+    "test:e2e:ui": "pnpm exec playwright test --config e2e/playwright.config.ts --ui",
     "tauri": "tauri",
     "generate:schemas": "node scripts/generate-schemas.js",
     "generate:schemas:watch": "node scripts/generate-schemas.js --watch"
@@ -30,6 +33,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tauri-apps/cli": "^2",
     "jsdom": "^29.1.0",
     "typescript": "~5.6.2",

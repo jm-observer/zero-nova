@@ -10,14 +10,14 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Agent switching', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:1420');
+    await page.goto('/');
   });
 
   test('displays available agents', async ({ page }) => {
     await expect(page.locator('#agent-list')).toBeVisible();
 
     // 至少有一个 Agent
-    await expect(page.locator('#agent-list .agent-item')).toHaveCount({ gte: 1 });
+    expect(await page.locator('#agent-list .agent-item').count()).toBeGreaterThanOrEqual(1);
   });
 
   test('switches to a different agent', async ({ page }) => {

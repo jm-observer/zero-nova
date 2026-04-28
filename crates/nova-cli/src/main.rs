@@ -23,7 +23,6 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::runtime::Handle;
 use tokio::signal::ctrl_c;
 use tokio::sync::{mpsc, Mutex};
 
@@ -276,11 +275,11 @@ async fn run_repl(
                 continue;
             }
             "/tasks" => {
-                print_tasks(agent);
+                print_tasks(agent).await;
                 continue;
             }
             "/status" => {
-                print_status(agent);
+                print_status(agent).await;
                 continue;
             }
             "/exit-skill" => {
@@ -423,7 +422,15 @@ fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
 fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
     if let Some(skill_registry) = &agent.skill_registry {
         println!("{}", "Available Skills:".bold());
-        for candidate in skill_registry.all_candidates() {
+        let candidates = skill_registry.all_candidates();
+        if candidates.is_empty() {
+            println!(
+                "  (none loaded) Add a skill under `{}` with `SKILL.md` or `skill.toml`.",
+                agent.config.workspace.join("skills").display()
+            );
+            return;
+        }
+        for candidate in candidates {
             println!("- {} ({})", candidate.id, candidate.display_name);
         }
     } else {
@@ -432,15 +439,14 @@ fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
 }
 
 /// Prints the task status.
-fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
+async fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
     if let Some(task_store) = &agent.task_store {
-        let store = Handle::current().block_on(async { task_store.lock().await });
-        let tasks = store.list();
+        let tasks = snapshot_tasks(task_store).await;
         if tasks.is_empty() {
             println!("{}", "No tasks found.".blue());
         } else {
             println!("{}", "Tasks:".bold());
-            for task in tasks {
+            for task in &tasks {
                 let is_main = task.is_main_task;
                 let main_marker = if is_main { "*" } else { " " };
                 println!(
@@ -459,7 +465,7 @@ fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
 }
 
 /// Prints the overall status (skill/agent/tool-policy).
-fn print_status(agent: &AgentRuntime<impl LlmClient>) {
+async fn print_status(agent: &AgentRuntime<impl LlmClient>) {
     println!("{}", "Overall Status:".bold());
     println!();
 
@@ -469,8 +475,7 @@ fn print_status(agent: &AgentRuntime<impl LlmClient>) {
     println!();
 
     if let Some(task_store) = &agent.task_store {
-        let store = Handle::current().block_on(async { task_store.lock().await });
-        println!("  Tasks: {} registered", store.list().len());
+        println!("  Tasks: {} registered", snapshot_tasks(task_store).await.len());
     }
 
     if let Some(skill_registry) = &agent.skill_registry {
@@ -482,6 +487,11 @@ fn print_status(agent: &AgentRuntime<impl LlmClient>) {
     println!("    - Always enabled tools: {}", agent.tools().tool_definitions().len());
     let deferred = agent.tools().deferred_definitions();
     println!("    - Deferred tools: {}", deferred.len());
+}
+
+async fn snapshot_tasks(task_store: &Arc<Mutex<TaskStore>>) -> Vec<nova_agent::tool::builtin::task::Task> {
+    let store = task_store.lock().await;
+    store.list().into_iter().cloned().collect()
 }
 
 /// Tests the MCP server by invoking the first tool.
@@ -527,10 +537,14 @@ impl EventPrinter {
                     let _ = std::io::stdout().flush();
                 }
                 AgentEvent::ToolStart { name, input, .. } => {
+                    let summary = summarize_tool_start(name, input);
                     if self.verbose {
-                        println!("\n{} {input:?}", format!("[tool: {name}]").cyan());
-                    } else {
+                        println!("\n{} {}", format!("[tool: {name}]").cyan(), summary.bright_black());
+                        println!("{} {input:?}", "  input:".bright_black());
+                    } else if summary.is_empty() {
                         println!("\n{}", format!("[tool: {name}]").cyan());
+                    } else {
+                        println!("\n{} {}", format!("[tool: {name}]").cyan(), summary.bright_black());
                     }
                 }
                 AgentEvent::ToolEnd {
@@ -540,6 +554,11 @@ impl EventPrinter {
                         println!("{}", format!("[tool: {name}] ERROR: {output}").red());
                     } else if self.verbose {
                         println!("{}", format!("[tool: {name}] OK: {output}").green());
+                    } else {
+                        let summary = summarize_tool_end(name, output);
+                        if !summary.is_empty() {
+                            println!("{} {}", format!("[tool: {name}] OK").green(), summary.bright_black());
+                        }
                     }
                 }
                 AgentEvent::TurnComplete { usage, .. } => {
@@ -645,9 +664,66 @@ impl EventPrinter {
     }
 }
 
+fn summarize_tool_start(name: &str, input: &serde_json::Value) -> String {
+    match name {
+        "Read" => input
+            .get("path")
+            .and_then(|value| value.as_str())
+            .map(|path| format!("path={}", path))
+            .unwrap_or_default(),
+        "Bash" => {
+            let description = input.get("description").and_then(|value| value.as_str()).unwrap_or("");
+            let command = input.get("command").and_then(|value| value.as_str()).unwrap_or("");
+            if !description.is_empty() {
+                format!("desc={}, cmd={}", description, truncate_inline(command, 80))
+            } else if !command.is_empty() {
+                format!("cmd={}", truncate_inline(command, 80))
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn summarize_tool_end(name: &str, output: &str) -> String {
+    match name {
+        "Read" => first_non_empty_line(output)
+            .map(|line| truncate_inline(line, 100))
+            .unwrap_or_default(),
+        "Bash" => output
+            .lines()
+            .find(|line| line.starts_with("exit_code:"))
+            .map(|line| line.to_string())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn first_non_empty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+fn truncate_inline(text: &str, max_chars: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_chars).collect();
+    format!("{}...", truncated)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::first_non_empty_line;
+    use super::snapshot_tasks;
+    use super::summarize_tool_start;
+    use super::truncate_inline;
     use super::CliCommand;
+    use nova_agent::tool::builtin::task::TaskStore;
+    use serde_json::json;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[test]
     fn test_parse_skills_command() {
@@ -723,5 +799,46 @@ mod tests {
     fn test_clicommand_display_with_target() {
         let cmd = format!("{}", CliCommand::SkillActivate("test-skill".to_string()));
         assert_eq!(cmd, "/skill test-skill");
+    }
+
+    #[tokio::test]
+    async fn snapshot_tasks_can_run_inside_runtime() {
+        let task_store = Arc::new(Mutex::new(TaskStore::new()));
+        {
+            let mut store = task_store.lock().await;
+            store.create(
+                "status check".to_string(),
+                "verify async snapshot path".to_string(),
+                Some("checking status".to_string()),
+                None,
+                true,
+            );
+        }
+
+        let tasks = snapshot_tasks(&task_store).await;
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].subject, "status check");
+    }
+
+    #[test]
+    fn summarize_bash_tool_start_prefers_description() {
+        let input = json!({
+            "description": "列出源码目录",
+            "command": "Get-ChildItem src -Force"
+        });
+        let summary = summarize_tool_start("Bash", &input);
+        assert!(summary.contains("desc=列出源码目录"));
+        assert!(summary.contains("cmd=Get-ChildItem src -Force"));
+    }
+
+    #[test]
+    fn truncate_inline_adds_ellipsis() {
+        let result = truncate_inline("abcdefghijklmnopqrstuvwxyz", 5);
+        assert_eq!(result, "abcde...");
+    }
+
+    #[test]
+    fn first_non_empty_line_skips_blank_lines() {
+        assert_eq!(first_non_empty_line("\n\nhello\nworld"), Some("hello"));
     }
 }

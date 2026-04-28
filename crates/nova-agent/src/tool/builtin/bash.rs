@@ -161,7 +161,7 @@ impl Tool for BashTool {
         ToolDefinition {
             name: "Bash".to_string(),
             description: format!(
-                "Execute a shell command (using {}). Returns stdout, stderr and exit code.",
+                "Execute a shell command (using {}). Returns stdout, stderr and exit code. On Windows PowerShell, prefer PowerShell syntax such as `Get-ChildItem -Force` instead of Unix flags like `-la`.",
                 self.shell.name()
             ),
             input_schema: json!({

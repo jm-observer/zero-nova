@@ -15,6 +15,8 @@ pub struct OriginAppConfig {
     pub tool: ToolConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    #[serde(default)]
+    pub voice: VoiceConfig,
     /// Application data directory. When None, defaults to `{workspace}/.nova/data`.
     #[serde(default)]
     pub data_dir: Option<String>,
@@ -33,11 +35,33 @@ pub struct AppConfig {
     pub tool: ToolConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    #[serde(default)]
+    pub voice: VoiceConfig,
     pub workspace: PathBuf,
     /// Application data directory. When None, defaults to `{workspace}/.nova/data`.
     pub data_dir: Option<String>,
     /// Path to the configuration file relative to workspace. When None, defaults to `config.toml`.
     pub config_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VoiceConfig {
+    #[serde(default = "default_voice_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_stt_model")]
+    pub stt_model: String,
+    #[serde(default = "default_tts_model")]
+    pub tts_model: String,
+    #[serde(default = "default_tts_voice")]
+    pub tts_voice: String,
+    #[serde(default = "default_stt_timeout_ms")]
+    pub stt_timeout_ms: u64,
+    #[serde(default = "default_tts_timeout_ms")]
+    pub tts_timeout_ms: u64,
+    #[serde(default = "default_voice_max_input_bytes")]
+    pub max_input_bytes: usize,
+    #[serde(default)]
+    pub auto_play: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -53,6 +77,34 @@ fn default_base_url() -> String {
     "http://127.0.0.1:8082/v1".to_string()
 }
 
+fn default_voice_enabled() -> bool {
+    true
+}
+
+fn default_stt_model() -> String {
+    "whisper-1".to_string()
+}
+
+fn default_tts_model() -> String {
+    "tts-1".to_string()
+}
+
+fn default_tts_voice() -> String {
+    "alloy".to_string()
+}
+
+fn default_stt_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_tts_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_voice_max_input_bytes() -> usize {
+    5 * 1024 * 1024
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
@@ -66,6 +118,21 @@ impl Default for LlmConfig {
                 thinking_budget: None,
                 reasoning_effort: None,
             },
+        }
+    }
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_voice_enabled(),
+            stt_model: default_stt_model(),
+            tts_model: default_tts_model(),
+            tts_voice: default_tts_voice(),
+            stt_timeout_ms: default_stt_timeout_ms(),
+            tts_timeout_ms: default_tts_timeout_ms(),
+            max_input_bytes: default_voice_max_input_bytes(),
+            auto_play: false,
         }
     }
 }
@@ -242,6 +309,7 @@ impl AppConfig {
             search: origin.search,
             tool: origin.tool,
             gateway: origin.gateway,
+            voice: origin.voice,
             workspace,
             data_dir: origin.data_dir,
             config_path: origin.config_path,

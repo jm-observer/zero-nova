@@ -6,6 +6,7 @@ pub mod observability;
 pub mod schema;
 pub mod session;
 pub mod system;
+pub mod voice;
 
 pub use agent::*;
 pub use chat::*;
@@ -13,6 +14,7 @@ pub use envelope::*;
 pub use observability::*;
 pub use session::*;
 pub use system::*;
+pub use voice::*;
 
 #[cfg(test)]
 mod tests {

@@ -10,6 +10,10 @@ use crate::session::{
     SessionsMessagesResponse, SuccessResponse,
 };
 use crate::system::{ErrorPayload, WelcomePayload};
+use crate::voice::{
+    VoiceCapabilitiesRequest, VoiceCapabilitiesResponse, VoiceTranscribeRequest, VoiceTranscribeResponse,
+    VoiceTtsRequest, VoiceTtsResponse,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -105,6 +109,19 @@ pub enum MessageEnvelope {
     ConfigUpdate(Value),
     #[serde(rename = "config.update.response")]
     ConfigUpdateResponse(SuccessResponse),
+
+    #[serde(rename = "voice.capabilities.get")]
+    VoiceCapabilitiesGet(VoiceCapabilitiesRequest),
+    #[serde(rename = "voice.capabilities.response")]
+    VoiceCapabilitiesResponse(VoiceCapabilitiesResponse),
+    #[serde(rename = "voice.transcribe.request")]
+    VoiceTranscribeRequest(VoiceTranscribeRequest),
+    #[serde(rename = "voice.transcribe.response")]
+    VoiceTranscribeResponse(VoiceTranscribeResponse),
+    #[serde(rename = "voice.tts.request")]
+    VoiceTtsRequest(VoiceTtsRequest),
+    #[serde(rename = "voice.tts.response")]
+    VoiceTtsResponse(VoiceTtsResponse),
 
     // --- Skill Events (Plan 4) ---
     #[serde(rename = "skill.activated")]

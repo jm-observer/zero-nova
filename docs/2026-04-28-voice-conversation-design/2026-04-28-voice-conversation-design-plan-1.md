@@ -1,5 +1,7 @@
 # Plan 1：前端语音交互与状态机收敛
 
+> **状态：✅ 已完成**（2026-04-28，提交 `30c24fb`）
+
 ## 前置依赖
 - 无
 
@@ -43,18 +45,19 @@
   - 所有异步步骤都要有超时、取消和错误出口，避免 UI 悬挂在“处理中”。
 
 ### 3. MVP 交互流程
-- 用户点击语音按钮或按住快捷键。
+- 用户点击语音按钮（点击式，非按住说话）。
 - 前端进入 `requesting_permission`，成功后进入 `recording`。
+- 录音输出格式：**16kHz mono WAV**（由 `AudioRecorder` 统一转换，不使用浏览器 `MediaRecorder` 的 webm/opus）。
 - 录音结束条件：
   - 手动停止；
-  - VAD 静音超时自动停止；
+  - VAD 静音超时自动停止（两阶段验证：候选期 150ms + 验证期 120ms）；
   - 达到最大时长自动停止。
 - 停止录音后：
-  - 前端生成音频 Blob/ArrayBuffer；
+  - 前端生成 WAV ArrayBuffer；
   - 进入 `uploading_audio`；
-  - 调用 Gateway `voice.transcribe`；
+  - 调用 Gateway `transcribeVoice()`（对应协议类型 `VoiceTranscribeRequest`）；
   - 收到转写后进入 `submitting_text`；
-  - 将识别文本显示在输入框或作为临时用户消息；
+  - 通过 `upsertVoiceTranscriptMessage()` 将识别文本插入消息列表（`transcriptState: 'pending'` → `'final'`）；
   - 继续调用现有聊天发送流程；
   - 助手回复完成后，若开启 `ttsAutoPlay`，进入 `speaking` 并调用 TTS。
 
@@ -78,9 +81,9 @@
   - 转写中的加载态
   - 识别文本预览
   - 错误提示与重试入口
-- 聊天主时间线建议增加两类临时消息：
-  - `voice_transcript_pending`
-  - `voice_transcript_final`
+- 聊天主时间线通过 `upsertVoiceTranscriptMessage(messageId, text, transcriptState)` 管理转录消息：
+  - `transcriptState: 'pending'` — 识别中的临时文本
+  - `transcriptState: 'final'` — 最终确认的转录文本
 - 这样即便识别或聊天失败，用户也能看到本轮输入到底走到了哪一步。
 
 ### 7. 与聊天发送链路的衔接

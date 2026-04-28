@@ -2,8 +2,8 @@
 # LLM 服务的 API Key
 api_key = "your-anthropic-key"
 # 模型服务的 Base URL，默认为 Anthropic 官方地址
-base_url = "http://192.168.0.68:8000/v1"
-#base_url = "http://192.168.0.68:8082/v1"
+#base_url = "http://192.168.0.68:8000/v1"
+base_url = "http://192.168.0.68:8082/v1"
 # 使用的模型名称
 #model = "google/gemma-4-26B-A4B-it"
 #model = "qwen3.6-35b-a3b-dflash"

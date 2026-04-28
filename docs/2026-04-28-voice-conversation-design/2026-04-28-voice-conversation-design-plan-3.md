@@ -8,11 +8,17 @@
 - 控制超时、重试、日志和降级行为，避免语音链路在多个模块内分散实现。
 
 ## 涉及文件
-- `crates/nova-gateway-core/src/`
-- `crates/nova-server/src/bin/nova_gateway_ws.rs`
-- `crates/nova-agent/src/app/`
-- `crates/nova-agent/src/config.rs`
-- `crates/nova-protocol/src/`
+- `crates/nova-gateway-core/src/handlers/mod.rs` — 注册语音 handler
+- `crates/nova-gateway-core/src/handlers/voice.rs` — **新增**，语音请求 handler（传输适配层）
+- `crates/nova-gateway-core/src/router.rs` — 路由表增加语音消息分发
+- `crates/nova-agent/src/app/mod.rs` — Application facade 暴露语音编排入口
+- `crates/nova-agent/src/app/voice_service.rs` — **新增**，语音编排层（串联 STT → LLM → TTS）
+- `crates/nova-agent/src/voice/mod.rs` — **新增**，供应商适配层 trait 定义
+- `crates/nova-agent/src/voice/openai_compat.rs` — **新增**，OpenAI 兼容 STT/TTS 供应商实现
+- `crates/nova-agent/src/voice/mock.rs` — **新增**，mock 供应商（用于测试和灰度）
+- `crates/nova-agent/src/config.rs` — `VoiceConfig` 已存在，需补充供应商选择字段
+- `crates/nova-protocol/src/voice.rs` — 已有基础类型，按需扩展错误类型
+- `crates/nova-server/src/bin/nova_gateway_ws.rs` — 如需调整 WebSocket handler 签名
 
 ## 详细设计
 
@@ -33,25 +39,85 @@
   - 若前端请求 TTS 或用户配置开启自动朗读，再调用 TTS。
 - 将 TTS 音频作为单独响应返回，避免把“聊天完成”和“语音合成完成”强耦合到一个超长请求中。
 
-### 3. 推荐的后端职责边界
-- STT 只负责“音频 -> 文本”。
-- 现有对话服务继续负责“文本 -> 助手回复”。
-- TTS 只负责“文本 -> 音频”。
+### 3. 供应商适配层 trait 定义
+
+```rust
+/// STT 供应商 trait
+#[async_trait]
+pub trait SttProvider: Send + Sync {
+    /// 将音频数据转写为文本
+    async fn transcribe(
+        &self,
+        audio: &[u8],
+        format: &str,          // e.g. “wav”
+        language: Option<&str>,
+    ) -> Result<TranscribeResult>;
+}
+
+pub struct TranscribeResult {
+    pub text: String,
+    pub confidence: Option<f32>,
+    pub duration_ms: Option<u64>,
+    pub segments: Vec<VoiceSegment>,
+}
+
+/// TTS 供应商 trait
+#[async_trait]
+pub trait TtsProvider: Send + Sync {
+    /// 将文本合成为音频
+    async fn synthesize(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+    ) -> Result<SynthesizeResult>;
+}
+
+pub struct SynthesizeResult {
+    pub audio: Vec<u8>,
+    pub audio_format: String,  // e.g. “mp3”
+}
+```
+
+- 首版提供两个实现：
+  - `OpenAiCompatSttProvider` / `OpenAiCompatTtsProvider`：兼容 OpenAI API 格式（whisper-1 / tts-1），可对接本地或第三方服务
+  - `MockSttProvider` / `MockTtsProvider`：返回固定文本/静音音频，用于测试和灰度
+
+### 4. 推荐的后端职责边界
+- STT 只负责”音频 -> 文本”。
+- 现有对话服务继续负责”文本 -> 助手回复”。
+- TTS 只负责”文本 -> 音频”。
 - 语音编排层负责串联这三步，并补充 trace、超时、取消、错误映射。
 
-### 4. 超时与重试策略
-- 建议显式配置常量或配置项，而不是散落 magic number：
-  - `voice_stt_timeout_secs`
-  - `voice_tts_timeout_secs`
-  - `voice_max_audio_bytes`
-  - `voice_max_audio_duration_secs`
-  - `voice_partial_result_debounce_ms`
+### 5. TTS 与聊天回复的时序关系
+- MVP 采用**独立请求模式**：STT 和 TTS 是两个独立的请求/响应周期，不在同一个请求中耦合。
+- 具体流程：
+  1. 前端发送 `voice.transcribe.request` → 后端返回转写文本（`voice.transcribe.response`）
+  2. 前端将转写文本作为普通用户消息发送 → 后端返回助手回复（现有 chat 流程）
+  3. 前端在助手回复完成后，若开启自动朗读，**单独调用** `voice.tts.request` → 后端返回合成音频
+- 三步请求共享同一个 `sessionId`，便于日志串联，但彼此独立，任一步失败不阻塞其他步骤的结果。
+- 前端通过 `synthesizeVoice()` 独立发起 TTS 请求（已在 `gateway-client.ts` 中实现）。
+
+### 6. 并发控制
+- 同一用户的语音请求应串行处理：新的 `voice.transcribe.request` 到达时，若前一轮仍在处理中：
+  - 首版建议**拒绝并返回错误**（`voice_request_in_progress`），由前端控制发送时序。
+  - 不建议首版做自动取消前一轮，因为取消逻辑会引入状态竞争。
+- TTS 请求不受此限制（因为 TTS 是幂等的，且可能需要重试）。
+- 连续语音模式下，前端负责在前一轮完全结束后（状态回到 `idle`）才发起下一轮录音。
+
+### 7. 超时与重试策略
+- `VoiceConfig`（`crates/nova-agent/src/config.rs`）已定义以下配置项：
+  - `stt_timeout_ms`（默认值待确认）— STT 请求超时
+  - `tts_timeout_ms`（默认值待确认）— TTS 请求超时
+  - `max_input_bytes`（默认值待确认）— 音频最大输入字节数
+- 建议补充的配置项（如需要）：
+  - `voice_max_audio_duration_secs` — 最大录音时长（秒）
+  - `voice_partial_result_debounce_ms` — 流式阶段增量结果防抖间隔
 - STT/TTS 默认不建议自动重试超过 1 次：
   - 语音请求通常体积较大；
   - 重试会放大时延与费用；
   - 失败更适合尽快向前端暴露并允许用户重试。
 
-### 5. 持久化与审计建议
+### 8. 持久化与审计建议
 - 建议首版只持久化：
   - 用户最终转写文本
   - 助手最终回复文本
@@ -60,7 +126,7 @@
   - 存储成本和隐私风险更高；
   - 当前主要目标是验证语音交互闭环，而不是做语音资产留存。
 
-### 6. 能力发现与降级
+### 9. 能力发现与降级
 - Gateway 应提供 `voice.capabilities.get` 或在 welcome/capabilities 中声明：
   - 是否支持 STT
   - 是否支持 TTS

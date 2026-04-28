@@ -9,6 +9,7 @@ configs/
 ├── README.md                              # 本文件
 ├── prompts/                               # 提示词模板
 │   ├── agent-nova.md                      # Nova（默认助手）的 system prompt
+│   ├── agent-nova-code.md                 # 基于真实编码代理请求提炼的工程向 system prompt
 │   ├── agent-openclaw.md                  # OpenClaw（架构师）的 system prompt
 │   ├── turn-router.md                     # TurnRouter 意图分类提示词（LLM 模式）
 │   ├── interaction-resolver.md            # InteractionResolver 自然语言解析提示词
@@ -26,6 +27,7 @@ configs/
 | 文件 | 加载方式 | 说明 |
 |------|---------|------|
 | `agent-nova.md` | `SystemPromptBuilder::with_agent()` | Nova 的角色定义与行为准则 |
+| `agent-nova-code.md` | `SystemPromptBuilder::with_agent()` | 基于真实编码代理请求提炼的工程向 system prompt |
 | `agent-openclaw.md` | `SystemPromptBuilder::with_agent()` | OpenClaw 的角色定义与行为准则 |
 | `turn-router.md` | `gateway.router.use_llm_classification = true` 时使用 | TurnRouter 在 LLM 分类模式下的 system prompt |
 | `interaction-resolver.md` | 后续 LLM 辅助解析模式时使用 | InteractionResolver 的 system prompt |

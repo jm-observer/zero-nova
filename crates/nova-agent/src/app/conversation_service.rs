@@ -10,6 +10,7 @@ use crate::prompt::{load_project_context_with_config_async, PromptConfig};
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -84,6 +85,18 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         self.sessions.set_active_agent(session_id, agent_id).await?;
 
         Ok(agent)
+    }
+
+    pub async fn set_project_dir(&self, session_id: &str, path: &Path) -> Result<PathBuf> {
+        self.sessions.set_project_dir(session_id, path).await
+    }
+
+    pub async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        self.sessions.reset_project_dir(session_id).await
+    }
+
+    pub async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        self.sessions.get_project_dir(session_id).await
     }
 
     async fn execute_agent_turn(
@@ -191,26 +204,31 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         // 渐进切换策略（Phase 3 G11）
         let use_turn_context = self.agent.config.use_turn_context;
         if use_turn_context {
+            let project_dir = self.sessions.get_project_dir(session_id).await?;
             // 预加载项目上下文（R2 修复）
-            let project_context = load_project_context_with_config_async(
-                &self.agent.config.config_dir,
-                self.agent.config.project_context_file.as_deref(),
-            )
-            .await;
+            let project_context =
+                load_project_context_with_config_async(&project_dir, self.agent.config.project_context_file.as_deref())
+                    .await;
 
             // 新路径：prepare_turn + run_turn_with_context
             let mut prompt_config = PromptConfig::new(
                 agent_descriptor.id.clone(),
                 agent_descriptor.system_prompt_base.clone(),
-                self.agent.config.config_dir.clone(),
+                project_dir.clone(),
             )
             .with_project_context_path_opt(self.agent.config.project_context_file.clone())
             .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
             .with_template_vars(agent_descriptor.initial_template_vars.clone());
 
-            if let Some(env) = &self.agent.config.initial_env_snapshot {
-                prompt_config = prompt_config.with_environment(env.clone());
-            }
+            let mut env =
+                crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, &project_dir).await;
+            env.model_id = self
+                .agent
+                .config
+                .initial_env_snapshot
+                .as_ref()
+                .and_then(|e| e.model_id.clone());
+            prompt_config = prompt_config.with_environment(env);
 
             if let Some(content) = project_context {
                 prompt_config = prompt_config.with_project_context_content(content);

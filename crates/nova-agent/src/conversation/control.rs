@@ -1,12 +1,19 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Represents the stable control state attached to a Session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlState {
     pub active_agent: String,
+    #[serde(default = "default_project_dir")]
+    pub project_dir: PathBuf,
     pub model_override: SessionModelOverride,
     pub last_turn_snapshot: Option<LastTurnSnapshot>,
     pub token_counters: SessionTokenCounters,
+}
+
+fn default_project_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -55,6 +62,7 @@ impl ControlState {
     pub fn new(default_agent: &str) -> Self {
         Self {
             active_agent: default_agent.to_string(),
+            project_dir: default_project_dir(),
             model_override: SessionModelOverride::default(),
             last_turn_snapshot: None,
             token_counters: SessionTokenCounters::default(),

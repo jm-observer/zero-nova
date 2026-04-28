@@ -180,6 +180,8 @@ impl TemplateContext {
 pub struct EnvironmentSnapshot {
     /// 配置目录
     pub config_dir: String,
+    /// 项目目录
+    pub project_dir: String,
     /// 操作系统平台
     pub platform: String,
     /// Shell 类型
@@ -201,9 +203,11 @@ impl EnvironmentSnapshot {
     ///
     /// git 命令失败时（非 git 目录或无 git 可执行文件）静默跳过，
     /// 确保在任何环境下都能正常工作。
-    pub async fn collect(config_dir: &Path) -> Self {
+    pub async fn collect(config_dir: &Path, project_dir: &Path) -> Self {
         let config_dir_path = config_dir;
         let config_dir = config_dir_path.to_string_lossy().to_string();
+        let project_dir_path = project_dir;
+        let project_dir = project_dir_path.to_string_lossy().to_string();
 
         let platform = std::env::consts::OS.to_string();
 
@@ -211,9 +215,9 @@ impl EnvironmentSnapshot {
             .or_else(|_| std::env::var("COMSPEC"))
             .unwrap_or_else(|_| "unknown".to_string());
 
-        let git_branch = Self::run_git(config_dir_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
+        let git_branch = Self::run_git(project_dir_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
 
-        let git_status_summary = Self::run_git(config_dir_path, &["status", "--short"]).await.map(|s| {
+        let git_status_summary = Self::run_git(project_dir_path, &["status", "--short"]).await.map(|s| {
             let count = s.lines().filter(|l| !l.is_empty()).count();
             if count == 0 {
                 "clean".to_string()
@@ -222,12 +226,13 @@ impl EnvironmentSnapshot {
             }
         });
 
-        let recent_commits = Self::run_git(config_dir_path, &["log", "--oneline", "-5"]).await;
+        let recent_commits = Self::run_git(project_dir_path, &["log", "--oneline", "-5"]).await;
 
         let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         Self {
             config_dir,
+            project_dir,
             platform,
             shell,
             git_branch,
@@ -266,6 +271,7 @@ impl EnvironmentSnapshot {
     pub fn to_prompt_text(&self) -> String {
         let mut lines = vec![
             format!("Config directory: {}", self.config_dir),
+            format!("Project directory: {}", self.project_dir),
             format!("Platform: {}", self.platform),
             format!("Shell: {}", self.shell),
             format!("Date: {}", self.current_date),
@@ -1334,6 +1340,7 @@ mod tests {
     fn env_snapshot_to_prompt_includes_cwd() {
         let snapshot = EnvironmentSnapshot {
             config_dir: "D:/workspace".to_string(),
+            project_dir: "D:/project".to_string(),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: None,
@@ -1345,6 +1352,7 @@ mod tests {
 
         let prompt = snapshot.to_prompt_text();
         assert!(prompt.contains("Config directory: D:/workspace"));
+        assert!(prompt.contains("Project directory: D:/project"));
         assert!(prompt.contains("Date: 2026-04-26"));
     }
 
@@ -1352,6 +1360,7 @@ mod tests {
     fn env_snapshot_to_prompt_optional_git() {
         let snapshot = EnvironmentSnapshot {
             config_dir: "D:/workspace".to_string(),
+            project_dir: "D:/project".to_string(),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: Some("main".to_string()),
@@ -1370,6 +1379,7 @@ mod tests {
     fn env_snapshot_to_prompt_with_commits() {
         let snapshot = EnvironmentSnapshot {
             config_dir: "D:/workspace".to_string(),
+            project_dir: "D:/project".to_string(),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: None,

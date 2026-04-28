@@ -43,7 +43,7 @@ pub async fn build_application<C: LlmClient + 'static>(
     let skill_registry = Arc::new(skill_registry);
 
     // 在 agent 循环之前采集一次环境快照
-    let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir).await;
+    let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &config.config_dir).await;
     let env_snapshot = {
         let mut e = env_snapshot;
         e.model_id = Some(config.llm.model_config.model.clone());

@@ -27,6 +27,9 @@ pub trait AgentApplication: Send + Sync {
     async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession>;
 
     async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgent>;
+    async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf>;
+    async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf>;
+    async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf>;
     fn list_agents(&self) -> Vec<AppAgent>;
     fn get_agent(&self, agent_id: &str) -> Option<AppAgent>;
 
@@ -283,6 +286,20 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             name: agent.display_name.clone(),
             description: Some(agent.description.clone()),
         })
+    }
+
+    async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf> {
+        self.conversation_service
+            .set_project_dir(session_id, &project_dir)
+            .await
+    }
+
+    async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        self.conversation_service.reset_project_dir(session_id).await
+    }
+
+    async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        self.conversation_service.get_project_dir(session_id).await
     }
 
     fn list_agents(&self) -> Vec<AppAgent> {

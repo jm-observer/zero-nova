@@ -6,6 +6,7 @@ use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -379,5 +380,53 @@ impl SessionService {
         self.repository.update_session_runtime_control(session_id, &rc).await?;
 
         Ok(())
+    }
+
+    pub async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        let session = self.get(session_id).await?.context("Session not found")?;
+        let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        Ok(control.project_dir.clone())
+    }
+
+    pub async fn set_project_dir(&self, session_id: &str, project_dir: &Path) -> Result<PathBuf> {
+        let session = self.get(session_id).await?.context("Session not found")?;
+        let normalized = normalize_project_dir(project_dir).await;
+
+        {
+            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.project_dir = normalized.clone();
+        }
+
+        let rc = {
+            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            runtime_control.clone()
+        };
+        self.repository.update_session_runtime_control(session_id, &rc).await?;
+        log::info!(
+            "Session project_dir updated: session_id={}, project_dir={}",
+            session_id,
+            normalized.display()
+        );
+
+        Ok(normalized)
+    }
+
+    pub async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        let cwd = std::env::current_dir().context("Failed to get process current directory")?;
+        self.set_project_dir(session_id, &cwd).await
+    }
+}
+
+async fn normalize_project_dir(path: &Path) -> PathBuf {
+    match tokio::fs::canonicalize(path).await {
+        Ok(canonical) => canonical,
+        Err(err) => {
+            log::warn!(
+                "Failed to canonicalize project_dir '{}': {}. Using raw path.",
+                path.display(),
+                err
+            );
+            path.to_path_buf()
+        }
     }
 }

@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
     let client = OpenAiCompatClient::new(config.provider.api_key.clone(), config.provider.base_url.clone());
 
     let env_snapshot = {
-        let mut snapshot = EnvironmentSnapshot::collect(&config.config_dir).await;
+        let mut snapshot = EnvironmentSnapshot::collect(&config.config_dir, &config.config_dir).await;
         snapshot.model_id = Some(config.llm.model_config.model.clone());
         snapshot
     };

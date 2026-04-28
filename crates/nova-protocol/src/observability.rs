@@ -240,6 +240,7 @@ pub struct RunRecord {
     pub duration_ms: Option<u64>,
     pub orchestration_model: Option<ModelRef>,
     pub execution_model: Option<ModelRef>,
+    pub tool_call_count: Option<u32>,
     pub usage: Option<TurnUsage>,
     pub error_summary: Option<String>,
     pub waiting_reason: Option<String>,

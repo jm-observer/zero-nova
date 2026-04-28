@@ -1,5 +1,5 @@
 use crate::message::{ContentBlock, Message, Role};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -198,41 +198,76 @@ impl SqliteSessionRepository {
     // --- Plan 2: Runs & Steps ---
 
     pub async fn create_run(&self, run: &super::model::RunRecord) -> Result<()> {
-        sqlx::query("INSERT INTO runs (id, session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
-            .bind(&run.id)
+        let agent_id: String = sqlx::query("SELECT agent_id FROM sessions WHERE id = ?")
             .bind(&run.session_id)
-            .bind(&run.status)
-            .bind(run.created_at)
-            .bind(run.updated_at)
-            .execute(&self.pool)
-            .await?;
+            .fetch_one(&self.pool)
+            .await
+            .context("Failed to load session agent_id for run record")?
+            .get("agent_id");
+        let orchestration_model = run
+            .orchestration_model
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        let execution_model = run.execution_model.as_ref().map(serde_json::to_string).transpose()?;
+
+        sqlx::query(
+            "INSERT INTO runs (run_id, session_id, turn_id, agent_id, status, started_at, finished_at, duration_ms, orchestration_model, execution_model, usage, error_summary, waiting_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&run.id)
+        .bind(&run.session_id)
+        .bind(&run.id)
+        .bind(agent_id)
+        .bind(&run.status)
+        .bind(run.created_at)
+        .bind(if is_terminal_run_status(&run.status) { Some(run.updated_at) } else { None })
+        .bind(if is_terminal_run_status(&run.status) { Some(run.updated_at - run.created_at) } else { None })
+        .bind(orchestration_model)
+        .bind(execution_model)
+        .bind(Option::<String>::None)
+        .bind(Option::<String>::None)
+        .bind(Option::<String>::None)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     pub async fn update_run_status(&self, id: &str, status: &str, now: i64) -> Result<()> {
-        sqlx::query("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?")
-            .bind(status)
-            .bind(now)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE runs SET status = ?, finished_at = CASE WHEN ? THEN ? ELSE finished_at END, duration_ms = CASE WHEN ? THEN (? - started_at) ELSE duration_ms END WHERE run_id = ?",
+        )
+        .bind(status)
+        .bind(is_terminal_run_status(status))
+        .bind(now)
+        .bind(is_terminal_run_status(status))
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     pub async fn create_run_step(&self, step: &super::model::RunStepRecord) -> Result<()> {
-        let input_json = step.input.as_ref().map(|v| serde_json::to_string(v).unwrap());
-        let output_json = step.output.as_ref().map(|v| serde_json::to_string(v).unwrap());
-        sqlx::query("INSERT INTO run_steps (id, run_id, step_type, status, input, output, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(&step.id)
-            .bind(&step.run_id)
-            .bind(&step.step_type)
-            .bind(&step.status)
-            .bind(input_json)
-            .bind(output_json)
-            .bind(step.created_at)
-            .bind(step.updated_at)
-            .execute(&self.pool)
-            .await?;
+        let payload_json = serde_json::to_string(&serde_json::json!({
+            "input": step.input,
+            "output": step.output,
+        }))?;
+        let title = step.step_type.clone();
+
+        sqlx::query(
+            "INSERT INTO run_steps (step_id, run_id, step_type, title, tool_name, status, started_at, finished_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&step.id)
+        .bind(&step.run_id)
+        .bind(&step.step_type)
+        .bind(title)
+        .bind(Option::<String>::None)
+        .bind(&step.status)
+        .bind(step.created_at)
+        .bind(if is_terminal_step_status(&step.status) { Some(step.updated_at) } else { None })
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -243,14 +278,30 @@ impl SqliteSessionRepository {
         output: Option<&serde_json::Value>,
         now: i64,
     ) -> Result<()> {
-        let output_json = output.map(|v| serde_json::to_string(v).unwrap());
-        sqlx::query("UPDATE run_steps SET status = ?, output = ?, updated_at = ? WHERE id = ?")
-            .bind(status)
-            .bind(output_json)
-            .bind(now)
+        let existing_payload: Option<String> = sqlx::query("SELECT payload FROM run_steps WHERE step_id = ?")
             .bind(id)
-            .execute(&self.pool)
-            .await?;
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|row| row.get("payload"));
+        let mut payload = existing_payload
+            .as_deref()
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(output) = output {
+            payload["output"] = output.clone();
+        }
+        let payload_json = serde_json::to_string(&payload)?;
+
+        sqlx::query(
+            "UPDATE run_steps SET status = ?, payload = ?, finished_at = CASE WHEN ? THEN ? ELSE finished_at END WHERE step_id = ?",
+        )
+        .bind(status)
+        .bind(payload_json)
+        .bind(is_terminal_step_status(status))
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -294,24 +345,37 @@ impl SqliteSessionRepository {
     // --- Plan 2: Permissions ---
 
     pub async fn create_permission_request(&self, req: &super::model::PermissionRequestRecord) -> Result<()> {
-        sqlx::query("INSERT INTO permission_requests (id, session_id, run_id, capability, resource, status, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(&req.id)
-            .bind(&req.session_id)
-            .bind(&req.run_id)
-            .bind(&req.capability)
-            .bind(&req.resource)
-            .bind(&req.status)
-            .bind(&req.reason)
-            .bind(req.created_at)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO permission_requests (request_id, session_id, run_id, step_id, agent_id, kind, title, reason, target, risk_level, status, created_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&req.id)
+        .bind(&req.session_id)
+        .bind(&req.run_id)
+        .bind("")
+        .bind("")
+        .bind(&req.capability)
+        .bind(&req.resource)
+        .bind(&req.reason)
+        .bind(&req.resource)
+        .bind("unknown")
+        .bind(&req.status)
+        .bind(req.created_at)
+        .bind(Option::<i64>::None)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
-    pub async fn resolve_permission_request(&self, id: &str, status: &str, reason: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE permission_requests SET status = ?, reason = ? WHERE id = ?")
+    pub async fn resolve_permission_request(&self, id: &str, status: &str, _reason: Option<&str>) -> Result<()> {
+        let resolved_at = if matches!(status, "allowed" | "denied") {
+            Some(chrono::Utc::now().timestamp_millis())
+        } else {
+            None
+        };
+
+        sqlx::query("UPDATE permission_requests SET status = ?, resolved_at = ? WHERE request_id = ?")
             .bind(status)
-            .bind(reason)
+            .bind(resolved_at)
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -413,19 +477,21 @@ impl SqliteSessionRepository {
         &self,
         session_id: &str,
     ) -> Result<Vec<super::model::PermissionRequestRecord>> {
-        let rows = sqlx::query("SELECT id, session_id, run_id, capability, resource, status, reason, created_at FROM permission_requests WHERE session_id = ? ORDER BY created_at DESC")
-            .bind(session_id)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT request_id, session_id, run_id, kind, target, status, reason, created_at FROM permission_requests WHERE session_id = ? ORDER BY created_at DESC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         let mut requests = Vec::new();
         for row in rows {
             requests.push(super::model::PermissionRequestRecord {
-                id: row.get("id"),
+                id: row.get("request_id"),
                 session_id: row.get("session_id"),
                 run_id: row.get("run_id"),
-                capability: row.get("capability"),
-                resource: row.get("resource"),
+                capability: row.get("kind"),
+                resource: row.get("target"),
                 status: row.get("status"),
                 reason: row.get("reason"),
                 created_at: row.get("created_at"),
@@ -477,40 +543,206 @@ impl SqliteSessionRepository {
     }
 
     pub async fn list_runs(&self, session_id: &str) -> Result<Vec<super::model::RunRecord>> {
-        let rows = sqlx::query("SELECT id, session_id, status, created_at, updated_at FROM runs WHERE session_id = ? ORDER BY created_at DESC")
-            .bind(session_id)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(
+            "SELECT run_id, session_id, status, started_at, COALESCE(finished_at, started_at) AS updated_at, orchestration_model, execution_model, (SELECT COUNT(*) FROM run_steps WHERE run_steps.run_id = runs.run_id AND run_steps.step_type = 'tool_use') AS tool_call_count FROM runs WHERE session_id = ? ORDER BY started_at DESC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         let mut runs = Vec::new();
         for row in rows {
+            let orchestration_model = parse_model_ref(row.get("orchestration_model"))?;
+            let execution_model = parse_model_ref(row.get("execution_model"))?;
             runs.push(super::model::RunRecord {
-                id: row.get("id"),
+                id: row.get("run_id"),
                 session_id: row.get("session_id"),
                 status: row.get("status"),
-                created_at: row.get("created_at"),
+                created_at: row.get("started_at"),
                 updated_at: row.get("updated_at"),
+                orchestration_model,
+                execution_model,
+                tool_call_count: Some(row.get::<i64, _>("tool_call_count") as u32),
             });
         }
         Ok(runs)
     }
 
     pub async fn get_run(&self, run_id: &str) -> Result<Option<super::model::RunRecord>> {
-        let row = sqlx::query("SELECT id, session_id, status, created_at, updated_at FROM runs WHERE id = ?")
-            .bind(run_id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            "SELECT run_id, session_id, status, started_at, COALESCE(finished_at, started_at) AS updated_at, orchestration_model, execution_model, (SELECT COUNT(*) FROM run_steps WHERE run_steps.run_id = runs.run_id AND run_steps.step_type = 'tool_use') AS tool_call_count FROM runs WHERE run_id = ?",
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         if let Some(row) = row {
+            let orchestration_model = parse_model_ref(row.get("orchestration_model"))?;
+            let execution_model = parse_model_ref(row.get("execution_model"))?;
             Ok(Some(super::model::RunRecord {
-                id: row.get("id"),
+                id: row.get("run_id"),
                 session_id: row.get("session_id"),
                 status: row.get("status"),
-                created_at: row.get("created_at"),
+                created_at: row.get("started_at"),
                 updated_at: row.get("updated_at"),
+                orchestration_model,
+                execution_model,
+                tool_call_count: Some(row.get::<i64, _>("tool_call_count") as u32),
             }))
         } else {
             Ok(None)
         }
+    }
+}
+
+fn parse_model_ref(raw: Option<String>) -> Result<Option<super::control::ModelRef>> {
+    raw.map(|value| serde_json::from_str(&value).context("Failed to parse run model metadata"))
+        .transpose()
+}
+
+fn is_terminal_run_status(status: &str) -> bool {
+    matches!(status, "success" | "failed" | "cancelled" | "stopped")
+}
+
+fn is_terminal_step_status(status: &str) -> bool {
+    matches!(status, "success" | "failed" | "cancelled" | "stopped")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SqliteSessionRepository;
+    use crate::conversation::control::ControlState;
+    use crate::conversation::model::{RunRecord, RunStepRecord};
+    use crate::conversation::sqlite_manager::SqliteManager;
+    use anyhow::Result;
+    use serde_json::json;
+    use sqlx::Row;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn permission_repository_matches_current_schema() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+        repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
+            .await?;
+
+        repo.create_run(&RunRecord {
+            id: "run-1".to_string(),
+            session_id: "session-1".to_string(),
+            status: "running".to_string(),
+            created_at: 100,
+            updated_at: 100,
+            orchestration_model: Some(crate::conversation::control::ModelRef {
+                provider: "default".to_string(),
+                model: "gpt-4.1".to_string(),
+            }),
+            execution_model: Some(crate::conversation::control::ModelRef {
+                provider: "default".to_string(),
+                model: "gpt-4.1-mini".to_string(),
+            }),
+            tool_call_count: Some(0),
+        })
+        .await?;
+
+        repo.create_permission_request(&crate::conversation::model::PermissionRequestRecord {
+            id: "perm-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: "run-1".to_string(),
+            capability: "filesystem".to_string(),
+            resource: "D:/tmp/file.txt".to_string(),
+            status: "pending".to_string(),
+            reason: Some("need access".to_string()),
+            created_at: 100,
+        })
+        .await?;
+
+        let pending = repo.list_permission_requests("session-1").await?;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "perm-1");
+        assert_eq!(pending[0].capability, "filesystem");
+        assert_eq!(pending[0].resource, "D:/tmp/file.txt");
+        assert_eq!(pending[0].status, "pending");
+
+        repo.resolve_permission_request("perm-1", "allowed", None).await?;
+
+        let rows = sqlx::query("SELECT request_id, status, resolved_at FROM permission_requests WHERE request_id = ?")
+            .bind("perm-1")
+            .fetch_all(&manager.pool)
+            .await?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get::<String, _>("request_id"), "perm-1");
+        assert_eq!(rows[0].get::<String, _>("status"), "allowed");
+        assert!(rows[0].get::<Option<i64>, _>("resolved_at").is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_repository_matches_current_schema() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+        repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
+            .await?;
+
+        repo.create_run(&RunRecord {
+            id: "run-1".to_string(),
+            session_id: "session-1".to_string(),
+            status: "running".to_string(),
+            created_at: 100,
+            updated_at: 100,
+            orchestration_model: Some(crate::conversation::control::ModelRef {
+                provider: "default".to_string(),
+                model: "gpt-4.1".to_string(),
+            }),
+            execution_model: Some(crate::conversation::control::ModelRef {
+                provider: "default".to_string(),
+                model: "gpt-4.1-mini".to_string(),
+            }),
+            tool_call_count: Some(0),
+        })
+        .await?;
+
+        repo.create_run_step(&RunStepRecord {
+            id: "step-1".to_string(),
+            run_id: "run-1".to_string(),
+            step_type: "tool_use".to_string(),
+            status: "running".to_string(),
+            input: Some(json!({"x": 1})),
+            output: None,
+            created_at: 110,
+            updated_at: 110,
+        })
+        .await?;
+
+        repo.update_run_step("step-1", "success", Some(&json!({"ok": true})), 120)
+            .await?;
+        repo.update_run_status("run-1", "success", 130).await?;
+
+        let run = repo.get_run("run-1").await?.expect("run should exist");
+        assert_eq!(run.id, "run-1");
+        assert_eq!(run.session_id, "session-1");
+        assert_eq!(run.status, "success");
+        assert_eq!(run.created_at, 100);
+        assert_eq!(run.updated_at, 130);
+        assert_eq!(
+            run.orchestration_model.as_ref().map(|model| model.model.as_str()),
+            Some("gpt-4.1")
+        );
+        assert_eq!(
+            run.execution_model.as_ref().map(|model| model.model.as_str()),
+            Some("gpt-4.1-mini")
+        );
+        assert_eq!(run.tool_call_count, Some(1));
+
+        let runs = repo.list_runs("session-1").await?;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].id, "run-1");
+        assert_eq!(runs[0].tool_call_count, Some(1));
+
+        Ok(())
     }
 }

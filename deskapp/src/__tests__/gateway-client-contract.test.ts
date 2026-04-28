@@ -96,4 +96,45 @@ describe('GatewayClient contract guards', () => {
     });
   });
 
+  it('getSessionRuns 会归一化运行模型和工具调用数', async () => {
+    const client = new GatewayClient('ws://localhost:3000');
+
+    vi.spyOn(client, 'request').mockResolvedValue({
+      runs: [
+        {
+          runId: 'run-1',
+          sessionId: 'session-1',
+          status: 'success',
+          startedAt: 100,
+          finishedAt: 180,
+          durationMs: 80,
+          orchestrationModel: { provider: 'openai', model: 'gpt-5' },
+          executionModel: { provider: 'openai', model: 'gpt-5-mini' },
+          toolCallCount: 3,
+          usage: { inputTokens: 10, outputTokens: 5 },
+        },
+      ],
+      total: 1,
+    });
+
+    await expect(client.getSessionRuns('session-1')).resolves.toEqual({
+      runs: [
+        expect.objectContaining({
+          id: 'run-1',
+          sessionId: 'session-1',
+          status: 'completed',
+          modelSummary: 'gpt-5 / gpt-5-mini',
+          toolCount: 3,
+          tokenUsage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheCreationInputTokens: undefined,
+            cacheReadInputTokens: undefined,
+          },
+        }),
+      ],
+      total: 1,
+    });
+  });
+
 });

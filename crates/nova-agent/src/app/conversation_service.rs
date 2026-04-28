@@ -1,7 +1,7 @@
 use crate::agent::AgentRuntime;
 use crate::agent::TurnResult;
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
-use crate::conversation::control::LastTurnSnapshot;
+use crate::conversation::control::{LastTurnSnapshot, ModelRef};
 use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
 use crate::event::AgentEvent;
@@ -28,6 +28,32 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             agent_registry,
             sessions,
         }
+    }
+
+    fn resolve_run_models(
+        &self,
+        session: &crate::conversation::session::Session,
+        agent_descriptor: &AgentDescriptor,
+    ) -> (Option<ModelRef>, Option<ModelRef>) {
+        let control = session.control.read().unwrap();
+        let default_model_name = agent_descriptor
+            .model_config
+            .as_ref()
+            .map(|config| config.model.clone())
+            .unwrap_or_else(|| self.agent.config.model_config.model.clone());
+        let default_model = ModelRef {
+            provider: "default".to_string(),
+            model: default_model_name,
+        };
+
+        let orchestration_model = control
+            .model_override
+            .orchestration
+            .clone()
+            .or(Some(default_model.clone()));
+        let execution_model = control.model_override.execution.clone().or(Some(default_model));
+
+        (orchestration_model, execution_model)
     }
 
     /// 执行一轮对话逻辑
@@ -70,6 +96,15 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let run_id = turn_id.clone(); // Use turn_id as run_id for simplicity
         let now = Utc::now().timestamp_millis();
 
+        let session = self.sessions.get(session_id).await?.context("Session not found")?;
+        let agent_id = session.get_active_agent();
+        let agent_descriptor = self
+            .agent_registry
+            .get(&agent_id)
+            .cloned()
+            .with_context(|| format!("Agent '{}' not found", agent_id))?;
+        let (orchestration_model, execution_model) = self.resolve_run_models(&session, &agent_descriptor);
+
         // Phase 2: Create Run record
         self.sessions
             .get_repository()
@@ -79,6 +114,9 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 status: "running".to_string(),
                 created_at: now,
                 updated_at: now,
+                orchestration_model,
+                execution_model,
+                tool_call_count: Some(0),
             })
             .await?;
 
@@ -124,7 +162,6 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         });
         let event_tx = recorded_tx;
 
-        let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let _lock = session.chat_lock.lock().await;
 
         self.sessions

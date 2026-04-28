@@ -1,3 +1,4 @@
+use super::control::ModelRef;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -8,6 +9,9 @@ pub struct RunRecord {
     pub status: String, // pending, running, success, failed, cancelled
     pub created_at: i64,
     pub updated_at: i64,
+    pub orchestration_model: Option<ModelRef>,
+    pub execution_model: Option<ModelRef>,
+    pub tool_call_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

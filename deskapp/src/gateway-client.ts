@@ -85,6 +85,83 @@ interface VoiceTranscribeResult {
     segments?: Array<{ startMs: number; endMs: number; text: string }>;
 }
 
+interface RawRunModelRef {
+    provider?: string;
+    model?: string;
+}
+
+interface RawTurnUsage {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+}
+
+interface RawRunRecord {
+    id?: string;
+    runId?: string;
+    sessionId?: string;
+    session_id?: string;
+    turnId?: string;
+    turn_id?: string;
+    agentId?: string;
+    agent_id?: string;
+    status?: string;
+    title?: string;
+    startedAt?: number;
+    started_at?: number;
+    finishedAt?: number;
+    finished_at?: number;
+    durationMs?: number;
+    duration_ms?: number;
+    modelSummary?: string;
+    orchestrationModel?: RawRunModelRef;
+    orchestration_model?: RawRunModelRef;
+    executionModel?: RawRunModelRef;
+    execution_model?: RawRunModelRef;
+    toolCount?: number;
+    toolCallCount?: number;
+    tool_call_count?: number;
+    artifactCount?: number;
+    artifact_count?: number;
+    usage?: RawTurnUsage;
+    tokenUsage?: RawTurnUsage;
+    errorSummary?: string;
+    error_summary?: string;
+    waitingReason?: 'permission' | 'user_input' | 'external_callback' | string;
+    waiting_reason?: 'permission' | 'user_input' | 'external_callback' | string;
+    steps?: RawRunStepRecord[];
+    artifacts?: SessionArtifactView[];
+    permissions?: PermissionRequestView[];
+    diagnostics?: DiagnosticIssueView[];
+    auditLogs?: AuditLogView[];
+    audit_logs?: AuditLogView[];
+}
+
+interface RawRunStepRecord {
+    id?: string;
+    stepId?: string;
+    step_id?: string;
+    runId?: string;
+    run_id?: string;
+    type?: string;
+    stepType?: string;
+    step_type?: string;
+    title?: string;
+    status?: string;
+    toolName?: string;
+    tool_name?: string;
+    startedAt?: number;
+    started_at?: number;
+    finishedAt?: number;
+    finished_at?: number;
+    description?: string;
+}
+
 export class GatewayRequestError extends Error {
     kind: 'unsupported' | 'request_failed';
     capability?: string;
@@ -219,6 +296,105 @@ export class GatewayClient {
                 : (typeof record.skill_name === 'string' ? record.skill_name : undefined),
             sticky: typeof record.sticky === 'boolean' ? record.sticky : undefined,
             timestamp: typeof record.timestamp === 'number' ? record.timestamp : Date.now(),
+        };
+    }
+
+    private normalizeRunStatus(status: unknown): RunSummaryView['status'] {
+        switch (status) {
+            case 'success':
+                return 'completed';
+            case 'cancelled':
+                return 'stopped';
+            case 'queued':
+            case 'running':
+            case 'waiting_user':
+            case 'paused':
+            case 'stopped':
+            case 'failed':
+            case 'completed':
+                return status;
+            default:
+                return 'running';
+        }
+    }
+
+    private buildRunModelSummary(record: RawRunRecord): string | undefined {
+        if (typeof record.modelSummary === 'string' && record.modelSummary.trim()) {
+            return record.modelSummary;
+        }
+
+        const orchestration = record.orchestrationModel ?? record.orchestration_model;
+        const execution = record.executionModel ?? record.execution_model;
+        const orchestrationModel = orchestration?.model?.trim();
+        const executionModel = execution?.model?.trim();
+
+        if (orchestrationModel && executionModel && orchestrationModel !== executionModel) {
+            return `${orchestrationModel} / ${executionModel}`;
+        }
+
+        return orchestrationModel || executionModel || undefined;
+    }
+
+    private normalizeRunUsage(raw: RawTurnUsage | undefined): TokenUsageView | undefined {
+        if (!raw) {
+            return undefined;
+        }
+
+        return {
+            inputTokens: raw.inputTokens ?? raw.input_tokens ?? 0,
+            outputTokens: raw.outputTokens ?? raw.output_tokens ?? 0,
+            cacheCreationInputTokens: raw.cacheCreationInputTokens ?? raw.cache_creation_input_tokens,
+            cacheReadInputTokens: raw.cacheReadInputTokens ?? raw.cache_read_input_tokens,
+        };
+    }
+
+    private normalizeRunStep(step: RawRunStepRecord): RunDetailView['steps'][number] {
+        const rawType = step.type ?? step.stepType ?? step.step_type ?? 'system';
+        const type = rawType === 'tool_use' ? 'tool' : rawType;
+        const rawStatus = step.status ?? 'running';
+        const status = rawStatus === 'success' ? 'completed' : rawStatus === 'cancelled' ? 'skipped' : rawStatus;
+
+        return {
+            id: String(step.id ?? step.stepId ?? step.step_id ?? ''),
+            runId: String(step.runId ?? step.run_id ?? ''),
+            type: (['thinking', 'tool', 'approval', 'message', 'artifact', 'system'].includes(type) ? type : 'system') as RunDetailView['steps'][number]['type'],
+            title: String(step.title ?? rawType),
+            status: (['running', 'completed', 'failed', 'skipped'].includes(status) ? status : 'running') as RunDetailView['steps'][number]['status'],
+            startedAt: step.startedAt ?? step.started_at,
+            finishedAt: step.finishedAt ?? step.finished_at,
+            toolName: step.toolName ?? step.tool_name,
+            description: step.description,
+        };
+    }
+
+    private normalizeRunRecord(record: RawRunRecord): RunSummaryView {
+        return {
+            id: String(record.id ?? record.runId ?? ''),
+            sessionId: String(record.sessionId ?? record.session_id ?? ''),
+            turnId: typeof (record.turnId ?? record.turn_id) === 'string' ? String(record.turnId ?? record.turn_id) : undefined,
+            agentId: typeof (record.agentId ?? record.agent_id) === 'string' ? String(record.agentId ?? record.agent_id) : undefined,
+            status: this.normalizeRunStatus(record.status),
+            title: typeof record.title === 'string' ? record.title : undefined,
+            startedAt: Number(record.startedAt ?? record.started_at ?? Date.now()),
+            finishedAt: typeof (record.finishedAt ?? record.finished_at) === 'number' ? Number(record.finishedAt ?? record.finished_at) : undefined,
+            durationMs: typeof (record.durationMs ?? record.duration_ms) === 'number' ? Number(record.durationMs ?? record.duration_ms) : undefined,
+            modelSummary: this.buildRunModelSummary(record),
+            toolCount: Number(record.toolCount ?? record.toolCallCount ?? record.tool_call_count ?? 0),
+            artifactCount: typeof (record.artifactCount ?? record.artifact_count) === 'number' ? Number(record.artifactCount ?? record.artifact_count) : undefined,
+            tokenUsage: this.normalizeRunUsage(record.tokenUsage ?? record.usage),
+            errorSummary: typeof (record.errorSummary ?? record.error_summary) === 'string' ? String(record.errorSummary ?? record.error_summary) : undefined,
+            waitingReason: (record.waitingReason ?? record.waiting_reason) as RunSummaryView['waitingReason'],
+        };
+    }
+
+    private normalizeRunDetail(record: RawRunRecord): RunDetailView {
+        return {
+            ...this.normalizeRunRecord(record),
+            steps: Array.isArray(record.steps) ? record.steps.map(step => this.normalizeRunStep(step)) : [],
+            artifacts: record.artifacts ?? [],
+            permissions: record.permissions ?? [],
+            diagnostics: record.diagnostics ?? [],
+            auditLogs: record.auditLogs ?? record.audit_logs ?? [],
         };
     }
 
@@ -1346,20 +1522,30 @@ export class GatewayClient {
      * 鑾峰彇浼氳瘽鎵ц鍘嗗彶鍒楄〃
      */
     async getSessionRuns(sessionId: string, page = 1, pageSize = 20): Promise<{ runs: RunSummaryView[]; total: number }> {
-        return this.request('session.runs', { sessionId, page, pageSize });
+        const result = await this.request<{ runs?: RawRunRecord[]; total?: number }>('session.runs', { sessionId, page, pageSize });
+        const runs = (result.runs ?? []).map(run => this.normalizeRunRecord(run));
+        return {
+            runs,
+            total: result.total ?? runs.length,
+        };
     }
 
     /**
      * 鑾峰彇鏌愭鎵ц鐨勮缁嗘楠や俊鎭?     */
     async getRunDetail(runId: string): Promise<RunDetailView> {
-        return this.request('run.detail', { runId });
+        const result = await this.request<RawRunRecord>('run.detail', { runId });
+        return this.normalizeRunDetail(result);
     }
 
     /**
      * 鎺у埗鏌愭鎵ц
      */
     async controlRun(runId: string, action: 'stop' | 'resume_waiting' | 'pause' | 'resume' | 'retry'): Promise<{ success: boolean; run?: RunSummaryView }> {
-        return this.request('run.control', { runId, action });
+        const result = await this.request<{ success: boolean; run?: RawRunRecord }>('run.control', { runId, action });
+        return {
+            success: result.success,
+            run: result.run ? this.normalizeRunRecord(result.run) : undefined,
+        };
     }
 
     /**

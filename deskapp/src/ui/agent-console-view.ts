@@ -6,6 +6,7 @@ import { AGENT_CONSOLE_TEMPLATE } from './templates/agent-console-template';
 import { t } from '../i18n/index';
 import { escapeHtml, formatTime } from '../utils/html';
 import {
+    buildOverviewSummary,
     filterRunsByFilter,
     hasSessionOverride,
     renderAuditList,
@@ -75,10 +76,15 @@ interface NavigateTarget {
 
 export class AgentConsoleView {
     private static readonly WORKSPACE_RESTORE_KEY = 'openflux-console-restore';
+    private static readonly CONSOLE_WIDTH_KEY = 'openflux-agent-console-width';
+    private static readonly CONSOLE_DEFAULT_WIDTH = 360;
+    private static readonly CONSOLE_MIN_WIDTH = 280;
+    private static readonly CONSOLE_MAX_WIDTH = 720;
     private container: HTMLElement | null = null;
     private tabs: NodeListOf<HTMLButtonElement> | null = null;
     private refreshBtn: HTMLButtonElement | null = null;
     private closeBtn: HTMLButtonElement | null = null;
+    private resizeHandle: HTMLElement | null = null;
     private isDisposed = false;
     private connectionStatus: ConnectionStatus = 'connecting';
     private artifactsPanelWasOpen = false;
@@ -103,9 +109,11 @@ export class AgentConsoleView {
         this.tabs = this.container.querySelectorAll('.agent-console-tab');
         this.refreshBtn = this.container.querySelector('.agent-console-refresh');
         this.closeBtn = this.container.querySelector('.agent-console-close');
+        this.resizeHandle = this.container.querySelector('#agent-console-resize-handle');
 
         this.bindEvents();
         this.listenBus();
+        this.restoreConsoleWidth();
         this.restoreLocalUiState();
         this.updateTabUI(this.state.consoleActiveTab);
         this.renderCurrentTab();
@@ -139,6 +147,8 @@ export class AgentConsoleView {
         this.closeBtn?.addEventListener('click', () => {
             this.state.setConsoleVisible(false);
         });
+
+        this.initResize();
 
         this.container?.addEventListener('click', event => {
             const target = event.target as HTMLElement;
@@ -227,6 +237,60 @@ export class AgentConsoleView {
                 }
             })
         );
+    }
+
+    private initResize() {
+        this.resizeHandle?.addEventListener('mousedown', (event: MouseEvent) => {
+            if (!this.container || window.innerWidth < 1024) {
+                return;
+            }
+
+            const startX = event.clientX;
+            const startWidth = this.container.getBoundingClientRect().width;
+            this.resizeHandle?.classList.add('active');
+            document.body.classList.add('resizing');
+
+            const onMove = (moveEvent: MouseEvent) => {
+                const delta = startX - moveEvent.clientX;
+                const nextWidth = Math.min(
+                    AgentConsoleView.CONSOLE_MAX_WIDTH,
+                    Math.max(AgentConsoleView.CONSOLE_MIN_WIDTH, startWidth + delta),
+                );
+                this.applyConsoleWidth(nextWidth);
+            };
+
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                this.resizeHandle?.classList.remove('active');
+                document.body.classList.remove('resizing');
+
+                if (!this.container) {
+                    return;
+                }
+
+                const width = Math.round(this.container.getBoundingClientRect().width);
+                localStorage.setItem(AgentConsoleView.CONSOLE_WIDTH_KEY, String(width));
+                window.dispatchEvent(new Event('resize'));
+            };
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    }
+
+    private restoreConsoleWidth() {
+        const saved = localStorage.getItem(AgentConsoleView.CONSOLE_WIDTH_KEY);
+        const width = saved ? Number(saved) : AgentConsoleView.CONSOLE_DEFAULT_WIDTH;
+        this.applyConsoleWidth(Number.isFinite(width) ? width : AgentConsoleView.CONSOLE_DEFAULT_WIDTH);
+    }
+
+    private applyConsoleWidth(width: number) {
+        const nextWidth = Math.min(
+            AgentConsoleView.CONSOLE_MAX_WIDTH,
+            Math.max(AgentConsoleView.CONSOLE_MIN_WIDTH, Math.round(width)),
+        );
+        document.documentElement.style.setProperty('--agent-console-width', `${nextWidth}px`);
     }
 
     private syncLayout(consoleVisible: boolean) {
@@ -318,35 +382,77 @@ export class AgentConsoleView {
         if (!this.state.gatewayClient || this.isDisposed) return;
 
         const agentState = this.state.agentRuntimeState;
+        const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime');
         const tokenState = this.state.getSessionResourceState(sessionId, 'tokenUsage');
+        const toolsState = this.state.getSessionResourceState(sessionId, 'tools');
+        const skillsState = this.state.getSessionResourceState(sessionId, 'skills');
         const runState = this.state.getSessionResourceState(sessionId, 'runs');
-        if (!force && agentState.loaded && tokenState?.loaded && runState?.loaded) {
+        if (!force && agentState.loaded && runtimeState?.loaded && tokenState?.loaded && toolsState?.loaded && skillsState?.loaded && runState?.loaded) {
             this.renderOverview();
             return;
         }
 
         this.state.updateResourceState('agentRuntime', this.state.setLoadingResource(agentState));
+        const currentRuntimeState = (runtimeState as ResourceState<SessionRuntimeSnapshot> | undefined) ?? this.state.createEmptyResource();
+        this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadingResource(currentRuntimeState));
         const currentTokenState = (tokenState as ResourceState<TokenUsageView> | undefined) ?? this.state.createEmptyResource();
         this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setLoadingResource(currentTokenState));
+        const currentToolsState = (toolsState as ResourceState<ToolDescriptorView[]> | undefined) ?? this.state.createEmptyResource();
+        this.state.updateSessionResourceState(sessionId, 'tools', this.state.setLoadingResource(currentToolsState));
+        const currentSkillsState = (skillsState as ResourceState<SkillBindingView[]> | undefined) ?? this.state.createEmptyResource();
+        this.state.updateSessionResourceState(sessionId, 'skills', this.state.setLoadingResource(currentSkillsState));
         const currentRunState = (runState as ResourceState<RunSummaryView[]> | undefined) ?? this.state.createEmptyResource();
         this.state.updateSessionResourceState(sessionId, 'runs', this.state.setLoadingResource(currentRunState));
 
-        try {
-            const [snapshot, usage, runResult] = await Promise.all([
-                this.state.gatewayClient.getAgentInspect({ sessionId, agentId: this.state.currentAgentId! }),
-                this.state.gatewayClient.getSessionTokenUsage(sessionId),
-                this.state.gatewayClient.getSessionRuns(sessionId),
-            ]);
+        const [snapshotResult, runtimeResult, usageResult, toolsResult, skillsResult, runsResult] = await Promise.allSettled([
+            this.state.gatewayClient.getAgentInspect({ sessionId, agentId: this.state.currentAgentId! }),
+            this.state.gatewayClient.getSessionRuntime(sessionId),
+            this.state.gatewayClient.getSessionTokenUsage(sessionId),
+            this.state.gatewayClient.getSessionTools(sessionId),
+            this.state.gatewayClient.getSessionSkillBindings(sessionId),
+            this.state.gatewayClient.getSessionRuns(sessionId),
+        ]);
 
-            this.state.updateResourceState('agentRuntime', this.state.setLoadedResource(snapshot));
-            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setLoadedResource(usage));
-            this.state.updateSessionResourceState(sessionId, 'runs', this.state.setLoadedResource(runResult.runs ?? []));
-            this.ensureSelectedRun(sessionId);
-        } catch (error) {
-            this.state.updateResourceState('agentRuntime', this.state.toResourceError(error, t('common.load_failed')));
-            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.toResourceError(error, t('common.load_failed')));
-            this.state.updateSessionResourceState(sessionId, 'runs', this.state.toResourceError(error, t('common.load_failed')));
+        if (snapshotResult.status === 'fulfilled') {
+            this.state.updateResourceState('agentRuntime', this.state.setLoadedResource(snapshotResult.value));
+        } else {
+            this.state.updateResourceState('agentRuntime', this.state.toResourceError(snapshotResult.reason, t('common.load_failed')));
         }
+
+        if (runtimeResult.status === 'fulfilled') {
+            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtimeResult.value));
+        } else {
+            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.toResourceError(runtimeResult.reason, t('common.load_failed')));
+        }
+
+        if (usageResult.status === 'fulfilled') {
+            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.setLoadedResource(usageResult.value));
+        } else {
+            this.state.updateSessionResourceState(sessionId, 'tokenUsage', this.state.toResourceError(usageResult.reason, t('common.load_failed')));
+        }
+
+        if (toolsResult.status === 'fulfilled') {
+            const mergedTools = toolsResult.value.map(tool => ({ ...tool, ...this.state.getToolStatus(sessionId, tool.name) }));
+            this.state.updateSessionResourceState(sessionId, 'tools', this.state.setLoadedResource(mergedTools));
+        } else {
+            this.state.updateSessionResourceState(sessionId, 'tools', this.state.toResourceError(toolsResult.reason, t('common.load_failed')));
+        }
+
+        if (skillsResult.status === 'fulfilled') {
+            this.state.setSkillBindings(sessionId, skillsResult.value);
+            this.state.updateSessionResourceState(sessionId, 'skills', this.state.setLoadedResource(skillsResult.value));
+        } else {
+            this.state.updateSessionResourceState(sessionId, 'skills', this.state.toResourceError(skillsResult.reason, t('common.load_failed')));
+        }
+
+        if (runsResult.status === 'fulfilled') {
+            this.state.updateSessionResourceState(sessionId, 'runs', this.state.setLoadedResource(runsResult.value.runs ?? []));
+            this.ensureSelectedRun(sessionId);
+        } else {
+            this.state.updateSessionResourceState(sessionId, 'runs', this.state.toResourceError(runsResult.reason, t('common.load_failed')));
+        }
+
+        this.renderOverview();
     }
 
     private async loadModelData(sessionId: string, force = false) {
@@ -652,20 +758,35 @@ export class AgentConsoleView {
         const agentState = this.state.agentRuntimeState;
         const agentData = agentState.data;
         const sessionId = this.state.currentSessionId;
+        const runtimeState = sessionId
+            ? (this.state.getSessionResourceState(sessionId, 'runtime') as ResourceState<SessionRuntimeSnapshot> | undefined)
+            : undefined;
         const usageState = sessionId
             ? (this.state.getSessionResourceState(sessionId, 'tokenUsage') as ResourceState<TokenUsageView> | undefined)
             : undefined;
-        const usageData = usageState?.data;
+        const toolsState = sessionId
+            ? (this.state.getSessionResourceState(sessionId, 'tools') as ResourceState<ToolDescriptorView[]> | undefined)
+            : undefined;
+        const skillsState = sessionId
+            ? (this.state.getSessionResourceState(sessionId, 'skills') as ResourceState<SkillBindingView[]> | undefined)
+            : undefined;
+        const overviewSummary = buildOverviewSummary({
+            agent: agentData,
+            runtime: runtimeState?.data,
+            usage: usageState?.data,
+            tools: toolsState?.data,
+            skillBindings: skillsState?.data,
+        });
 
         const statusCard = document.getElementById('console-runtime-card');
         if (statusCard) {
             statusCard.innerHTML = this.renderStatusCard(agentState);
         }
 
-        this.setTextContent('summary-model-name', agentData?.model?.model ?? '—');
-        this.setTextContent('summary-tokens-total', usageData ? String(usageData.inputTokens + usageData.outputTokens) : '0');
-        this.setTextContent('summary-tools-count', String(agentData?.availableTools?.length ?? 0));
-        this.setTextContent('summary-skills-count', String(agentData?.skills?.length ?? agentData?.activeSkills?.length ?? 0));
+        this.setTextContent('summary-model-name', overviewSummary.modelName);
+        this.setTextContent('summary-tokens-total', overviewSummary.tokensTotal);
+        this.setTextContent('summary-tools-count', overviewSummary.toolsCount);
+        this.setTextContent('summary-skills-count', overviewSummary.skillsCount);
 
         this.renderRecentRuns();
     }

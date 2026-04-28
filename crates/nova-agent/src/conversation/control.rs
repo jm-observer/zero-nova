@@ -22,6 +22,15 @@ pub struct ModelRef {
     pub model: String,
 }
 
+impl From<&ModelRef> for nova_protocol::ModelRef {
+    fn from(value: &ModelRef) -> Self {
+        Self {
+            provider: value.provider.clone(),
+            model: value.model.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LastTurnSnapshot {
     pub turn_id: String,

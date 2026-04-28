@@ -1,4 +1,5 @@
 export const AGENT_CONSOLE_TEMPLATE = `
+<div class="agent-console-resize-handle" id="agent-console-resize-handle" aria-hidden="true"></div>
 <div class="agent-console-inner">
   <header class="agent-console-header">
     <div class="agent-console-title-group">

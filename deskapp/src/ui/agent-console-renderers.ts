@@ -1,6 +1,7 @@
 import { t } from '../i18n/index';
 import { escapeHtml, formatFileSize, formatTime } from '../utils/html';
 import type {
+    AgentRuntimeSnapshot,
     AuditLogView,
     DiagnosticIssueView,
     ModelBindingDetailView,
@@ -11,11 +12,63 @@ import type {
     RunStepView,
     RunSummaryView,
     SessionArtifactView,
+    SessionRuntimeSnapshot,
+    SkillBindingView,
+    ToolDescriptorView,
+    TokenUsageView,
 } from '../core/types';
 
 export type RunFilter = 'all' | 'running' | 'waiting' | 'failed' | 'artifacts';
 
 type ResourceHintGetter = <T>(state: ResourceState<T>) => string;
+
+export interface OverviewSummaryView {
+    modelName: string;
+    tokensTotal: string;
+    toolsCount: string;
+    skillsCount: string;
+}
+
+function pickOverviewModelName(
+    runtime: SessionRuntimeSnapshot | undefined,
+    agent: AgentRuntimeSnapshot | undefined,
+): string {
+    return runtime?.orchestrationDetail?.model
+        ?? runtime?.modelOverride?.orchestration?.model
+        ?? agent?.model?.model
+        ?? '—';
+}
+
+function countOverviewSkills(
+    skillBindings: SkillBindingView[] | undefined,
+    agent: AgentRuntimeSnapshot | undefined,
+): number {
+    if (skillBindings) {
+        return skillBindings.length;
+    }
+
+    const skillIds = new Set<string>();
+    agent?.skills?.forEach(skill => skillIds.add(skill.id));
+    agent?.activeSkills?.forEach(skillId => skillIds.add(skillId));
+    return skillIds.size;
+}
+
+export function buildOverviewSummary(params: {
+    agent?: AgentRuntimeSnapshot;
+    runtime?: SessionRuntimeSnapshot;
+    usage?: TokenUsageView;
+    tools?: ToolDescriptorView[];
+    skillBindings?: SkillBindingView[];
+}): OverviewSummaryView {
+    const { agent, runtime, usage, tools, skillBindings } = params;
+
+    return {
+        modelName: pickOverviewModelName(runtime, agent),
+        tokensTotal: String((usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)),
+        toolsCount: String(tools?.length ?? agent?.availableTools?.length ?? 0),
+        skillsCount: String(countOverviewSkills(skillBindings, agent)),
+    };
+}
 
 export function renderTokenRow(label: string, value: number | string, className = ''): string {
     return `

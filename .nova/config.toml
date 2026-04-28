@@ -49,12 +49,12 @@ id = "nova"
 display_name = "Nova"
 description = "默认通用助手，负责日常问答与任务分发"
 aliases = ["小助手", "助手"]
-
-[[gateway.agents]]
-id = "openclaw"
-display_name = "OpenClaw"
-description = "擅长编写代码与系统部署的资深架构师"
-aliases = ["oc", "claw", "架构师"]
+system_prompt_template = "agent-nova.md"
+#[[gateway.agents]]
+#id = "openclaw"
+#display_name = "OpenClaw"
+#description = "擅长编写代码与系统部署的资深架构师"
+#aliases = ["oc", "claw", "架构师"]
 
 # ── 挂起交互配置 ─────────────────────────────────────────────────
 [gateway.interaction]

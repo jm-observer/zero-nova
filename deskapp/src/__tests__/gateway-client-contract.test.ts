@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { GatewayClient } from '../gateway-client';
+import { GatewayClient, GatewayRequestError } from '../gateway-client';
 
 describe('GatewayClient contract guards', () => {
   afterEach(() => {
@@ -61,4 +61,39 @@ describe('GatewayClient contract guards', () => {
       payload: { sessionId: 'session-123', agentId: 'agent-default' },
     });
   });
+
+
+  it('getAgentInspect ?????????????', async () => {
+    const client = new GatewayClient('ws://localhost:3000');
+
+    vi.spyOn(client, 'request').mockResolvedValue({
+      agentId: 'agent-default',
+      name: 'Default Agent',
+      model: { provider: 'openai', model: 'gpt-4.1', source: 'global' },
+      systemPrompt: 'prompt',
+      capabilityPolicy: {},
+    } as Awaited<ReturnType<typeof client.getAgentInspect>>);
+
+    await expect(
+      client.getAgentInspect({ sessionId: 'session-123', agentId: 'agent-default' }),
+    ).resolves.toMatchObject({
+      activeSkills: [],
+      availableTools: [],
+      skills: [],
+    });
+  });
+
+  it('getVoiceCapabilities ???????????????', async () => {
+    const client = new GatewayClient('ws://localhost:3000');
+
+    vi.spyOn(client, 'request').mockRejectedValue(
+      new GatewayRequestError('Not implemented', { code: 'not_implemented' }),
+    );
+
+    await expect(client.getVoiceCapabilities()).resolves.toEqual({
+      stt: { enabled: false, available: false },
+      tts: { enabled: false, available: false, voice: '', autoPlay: false },
+    });
+  });
+
 });

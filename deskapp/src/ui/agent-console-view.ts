@@ -664,8 +664,8 @@ export class AgentConsoleView {
 
         this.setTextContent('summary-model-name', agentData?.model?.model ?? '—');
         this.setTextContent('summary-tokens-total', usageData ? String(usageData.inputTokens + usageData.outputTokens) : '0');
-        this.setTextContent('summary-tools-count', String(agentData?.availableTools.length ?? 0));
-        this.setTextContent('summary-skills-count', String(agentData?.skills?.length ?? agentData?.activeSkills.length ?? 0));
+        this.setTextContent('summary-tools-count', String(agentData?.availableTools?.length ?? 0));
+        this.setTextContent('summary-skills-count', String(agentData?.skills?.length ?? agentData?.activeSkills?.length ?? 0));
 
         this.renderRecentRuns();
     }

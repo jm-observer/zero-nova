@@ -15,7 +15,7 @@ use crate::skill::SkillRegistry;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::builtin::task::TaskStore;
 use crate::tool::ToolRegistry;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -147,10 +147,7 @@ pub async fn build_application<C: LlmClient + 'static>(
     let config_path = config.config_path();
 
     let data_dir_path = config.data_dir_path();
-    let data_dir = data_dir_path
-        .to_str()
-        .context("Data directory contains non-UTF8 characters")?;
-    let sqlite_manager = SqliteManager::new(data_dir).await?;
+    let sqlite_manager = SqliteManager::new(&data_dir_path).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
     let session_cache = Arc::new(SessionCache::new());
     let session_service = SessionService::new(session_cache, repository);

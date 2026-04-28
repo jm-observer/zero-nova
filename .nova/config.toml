@@ -1,18 +1,22 @@
+# ── 供应商接入 ──────────────────────────────────────────────────
+# api_key 建议通过环境变量 NOVA_API_KEY 设置，避免明文提交到仓库
 [provider]
-api_key = ""
+# api_key = ""
 base_url = "http://127.0.0.1:8082/v1"
 
+# ── 模型调用参数 ────────────────────────────────────────────────
 [llm]
 model = "gpt-oss-120b"
 max_tokens = 8192
 temperature = 0.7
-top_p = 1.0
-thinking_budget = 4096
 
+# ── 搜索 ───────────────────────────────────────────────────────
+# tavily_api_key 建议通过环境变量 TAVILY_API_KEY 设置
 [search]
 backend = "tavily"
-tavily_api_key = ""
+# tavily_api_key = ""
 
+# ── 工具与能力 ──────────────────────────────────────────────────
 [tool]
 skills_dir = "skills"
 prompts_dir = "prompts"
@@ -23,6 +27,7 @@ default_policy = "workflow"
 shell = "powershell"
 sandbox = false
 
+# ── 网关 ───────────────────────────────────────────────────────
 [gateway]
 host = "127.0.0.1"
 port = 18801
@@ -45,18 +50,21 @@ enabled = false
 skill_reminder_interval = 5
 inject_date = true
 
+# ── Agent 注册 ──────────────────────────────────────────────────
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
-description = "默认通用助手，负责日常问答与任务分发"
-aliases = ["小助手", "助手"]
+description = "默认通用助手"
+aliases = ["助手"]
 prompt_file = "agent-nova.md"
 
+# ── 桌面端远程连接 ──────────────────────────────────────────────
 [remote]
 enabled = true
 host = "127.0.0.1"
 port = 18801
 
+# ── Sidecar 启动 ───────────────────────────────────────────────
 [sidecar]
 mode = "auto"
 name = "Built-in Gateway"

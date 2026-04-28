@@ -1,68 +1,89 @@
-# configs/ 目录说明
+# .nova 配置说明
 
-本目录存放会话控制层（Conversation Control Plane）的提示词模板、测试样例与配置示例。
+## 配置消费边界
 
-## 目录结构
+- `crates/nova-agent/src/config.rs`：负责 `config.toml` 的 load/migrate/env override/validate。
+- `crates/nova-server/src/bin/nova_gateway_ws.rs`：读取 `OriginAppConfig`，再组装运行时 `AppConfig`。
+- `deskapp/src-tauri/src/config.rs`：只消费 `[remote]`、`[gateway].port`、`[sidecar]`，其他区块会被忽略。
 
+## 最小可运行配置
+
+```toml
+[provider]
+# api_key = ""
+base_url = "http://127.0.0.1:8082/v1"
+
+[llm]
+model = "gpt-oss-120b"
+max_tokens = 8192
+
+[search]
+backend = "tavily"
+# tavily_api_key = ""
+
+[gateway]
+host = "127.0.0.1"
+port = 18801
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "默认助手"
+prompt_file = "agent-nova.md"
+
+[remote]
+host = "127.0.0.1"
+port = 18801
+
+[sidecar]
+mode = "auto"
+name = "Built-in Gateway"
+command = "nova_gateway_ws"
 ```
-configs/
-├── README.md                              # 本文件
-├── prompts/                               # 提示词模板
-│   ├── agent-nova.md                      # Nova（默认助手）的 system prompt
-│   ├── agent-nova-code.md                 # 基于真实编码代理请求提炼的工程向 system prompt
-│   ├── agent-openclaw.md                  # OpenClaw（架构师）的 system prompt
-│   ├── turn-router.md                     # TurnRouter 意图分类提示词（LLM 模式）
-│   ├── interaction-resolver.md            # InteractionResolver 自然语言解析提示词
-│   └── workflow-stages.md                 # Workflow 各阶段的动态注入 prompt 片段
-└── examples/                              # 配置与测试示例
-    ├── agents.toml                        # Agent 注册配置示例（含字段说明）
-    ├── interaction-samples.json           # PendingInteraction 测试样例集
-    └── workflow-e2e.json                  # SolutionWorkflow 端到端测试场景
+
+## 为什么拆分 `provider` 与 `llm`
+
+- `provider` 仅描述连接信息（`api_key`、`base_url`）。
+- `llm` 仅描述模型参数（`model`、`max_tokens` 等）。
+- 这样可以避免“切模型时误改连接配置”，并让迁移与覆盖规则更清晰。
+
+## Agent Prompt 两种方式
+
+- `prompt_file`：引用 prompts 目录中的模板文件，适合长期维护。
+- `prompt_inline`：内联短 prompt，适合快速实验。
+- 两者互斥，同时设置会在校验阶段报错。
+
+## `remote` 与 `sidecar` 的区别
+
+- `remote`：DeskApp 连接哪个网关地址。
+- `sidecar`：DeskApp 是否自动拉起本地网关进程，以及如何拼接启动参数。
+
+## 环境变量覆盖
+
+```powershell
+$env:NOVA_API_KEY = "sk-xxx"
+$env:TAVILY_API_KEY = "tvly-xxx"
 ```
 
-## 各文件用途
+- `NOVA_API_KEY` 会覆盖 `provider.api_key`。
+- `TAVILY_API_KEY` 会覆盖 `search.tavily_api_key`。
 
-### prompts/
+## 旧字段迁移表
 
-| 文件 | 加载方式 | 说明 |
-|------|---------|------|
-| `agent-nova.md` | `[[gateway.agents]].prompt_file = "agent-nova.md"` | Nova 的角色定义与行为准则 |
-| `agent-nova-code.md` | `SystemPromptBuilder::with_agent()` | 基于真实编码代理请求提炼的工程向 system prompt |
-| `agent-openclaw.md` | `[[gateway.agents]].prompt_file = "agent-openclaw.md"` | OpenClaw 的角色定义与行为准则 |
-| `turn-router.md` | `gateway.router.use_llm_classification = true` 时使用 | TurnRouter 在 LLM 分类模式下的 system prompt |
-| `interaction-resolver.md` | 后续 LLM 辅助解析模式时使用 | InteractionResolver 的 system prompt |
-| `workflow-stages.md` | `SystemPromptBuilder` 根据 `WorkflowStage` 动态注入 | 每个 Workflow 阶段的行为指导片段 |
+| 旧写法 | 新写法 | 兼容状态 | 说明 |
+|---|---|---|---|
+| `[llm].api_key` | `[provider].api_key` | 自动映射 + warning | 连接信息迁移到 provider |
+| `[llm].base_url` | `[provider].base_url` | 自动映射 + warning | 连接信息迁移到 provider |
+| `system_prompt_template = "agent-nova.md"` | `prompt_file = "agent-nova.md"` | 自动映射 + warning | 文件语义显式化 |
+| `system_prompt_template = "长文本..."` | `prompt_inline = "长文本..."` | 自动映射 + warning | 内联语义显式化 |
+| `gateway.trimmer.max_history_tokens` | `gateway.trimmer.context_window` + `output_reserve` | 自动折算 + warning | 新模型与实现对齐 |
+| `gateway.trimmer.preserve_recent` | `gateway.trimmer.min_recent_messages` | 自动映射 + warning | 名称与代码一致 |
+| `gateway.trimmer.preserve_tool_pairs` | （移除） | warning 提示未实现 | 代码无消费路径 |
+| `[gateway.router]` | （移除） | warning 提示未实现 | 代码无对应模型 |
+| `[gateway.interaction]` | （移除） | warning 提示未实现 | 代码无对应模型 |
+| `[gateway.workflow]` | （移除） | warning 提示未实现 | 代码无对应模型 |
+| 绝对路径 `sidecar.command` | 命令名或相对路径 | 仍可使用 | 提升可移植性 |
+| 仓库内明文密钥 | 注释占位 + 环境变量 | — | 提升安全性 |
 
-### examples/
-
-| 文件 | 用途 |
-|------|------|
-| `agents.toml` | 展示 `config.toml` 中 `[[gateway.agents]]` 的完整配置写法，可直接复制到 `config.toml` |
-| `interaction-samples.json` | 提供 `SelectOption`、`ApproveAction`（高/低风险）、`FillInput` 四类挂起交互的测试用例 |
-| `workflow-e2e.json` | TTS 方案搜索部署的完整 7 步端到端测试场景，含边界用例 |
-
-## 占位符说明
-
-提示词模板中使用 `{{variable}}` 格式的占位符，由 runtime 在构建 system prompt 时替换：
-
-| 占位符 | 注入来源 | 示例值 |
-|--------|---------|--------|
-| `{{workflow_stage}}` | `WorkflowState.stage` | `AwaitSelection` |
-| `{{pending_interaction}}` | `ControlState.pending_interaction` | `SelectOption: tts_solution_selection` |
-| `{{topic}}` | `WorkflowState.topic` | `tts` |
-| `{{constraints}}` | `WorkflowState.constraints` | `{"gpu": true, "os": "ubuntu"}` |
-| `{{candidates}}` | `WorkflowState.candidates` | 候选方案列表 |
-| `{{selected_candidate}}` | `WorkflowState.selected_candidate` | `fish-speech` |
-| `{{active_agent}}` | `ControlState.active_agent` | `openclaw` |
-| `{{available_agents}}` | `AgentRegistry.list()` | Agent 描述列表 |
-| `{{interaction_kind}}` | `PendingInteraction.kind` | `Select` |
-| `{{subject}}` | `PendingInteraction.subject` | `tts_solution_selection` |
-| `{{prompt}}` | `PendingInteraction.prompt` | 挂起交互的提示文本 |
-| `{{risk_level}}` | `PendingInteraction.risk_level` | `High` |
-| `{{options}}` | `PendingInteraction.options` | 选项列表 |
-
-## 如何添加新 Agent
-
-1. 在 `prompts/` 下创建 `agent-{id}.md`，参照 `agent-nova.md` 的结构编写
-2. 在 `config.toml` 中添加 `[[gateway.agents]]` 条目，并设置 `prompt_file = "agent-{id}.md"`（参照 `examples/agents.toml`）
-3. 重启 `nova-gateway`，新 Agent 会自动注册到 `AgentRegistry`
+- 标记为“自动映射”的字段当前版本仍可用，但启动会输出 warning。
+- 计划在下一个 major 版本标记 deprecated，再下一个 major 版本移除兼容映射。

@@ -1,28 +1,34 @@
-# Agent 配置示例
-#
-# 每个 [[gateway.agents]] 条目定义一个 Agent。
-# 第一个条目为默认活跃 Agent（primary agent）。
+# Agent 配置示例（与 [[gateway.agents]] 字段一致）
 #
 # 字段说明：
-#   id             - 内部唯一标识符，用于协议通信和代码引用
-#   display_name   - 前端界面显示的名称
-#   description    - Agent 的职能描述，用于路由判断和前端展示
-#   aliases        - 自然语言点名时的匹配词（支持中英文，大小写不敏感）
-#   prompt_file    - Agent 的 system prompt 模板文件（相对于 [tool].prompts_dir）
+#   prompt_file    - 从 [tool].prompts_dir 加载模板文件
 #   prompt_inline  - 直接内联 prompt 文本（与 prompt_file 互斥）
-#   tool_whitelist - 该 Agent 可使用的工具白名单，省略或为空表示可使用全部工具
+#   tool_whitelist - 允许调用的工具白名单，省略表示不限制
+#   model_config   - 覆盖全局 [llm] 的模型参数（仅当前 Agent 生效）
 
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
-description = "默认通用助手，负责日常问答与任务分发"
-aliases = ["小助手", "助手"]
+description = "默认通用助手"
+aliases = ["助手"]
 prompt_file = "agent-nova.md"
 
 [[gateway.agents]]
 id = "openclaw"
 display_name = "OpenClaw"
-description = "擅长编写代码与系统部署的资深架构师"
-aliases = ["oc", "claw", "架构师", "open-claw"]
+description = "代码助手：偏向工程实现与调试"
+aliases = ["oc", "架构师"]
 prompt_file = "agent-openclaw.md"
-tool_whitelist = ["bash", "file_read", "file_write", "web_search"]
+
+[ gateway.agents.model_config ]
+model = "gpt-oss-120b"
+max_tokens = 6144
+temperature = 0.2
+
+[[gateway.agents]]
+id = "safe-tool"
+display_name = "Safe Tool Agent"
+description = "工具受限助手：只允许白名单工具"
+aliases = ["安全助手"]
+prompt_inline = "你是一个受限工具助手，只能使用允许的工具完成任务。"
+tool_whitelist = ["read_file", "web_search"]

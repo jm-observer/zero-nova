@@ -703,10 +703,80 @@ fn looks_like_prompt_file(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, OriginAppConfig};
+    use super::{AppConfig, GatewayConfig, OriginAppConfig, RawAppConfig};
     use anyhow::Result;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn new_config_deserializes_correctly() {
+        let toml = r#"
+[provider]
+api_key = "test-key"
+base_url = "http://localhost:8082/v1"
+
+[llm]
+model = "test-model"
+max_tokens = 4096
+"#;
+        let config: OriginAppConfig = toml::from_str(toml).expect("config should deserialize");
+        assert_eq!(config.provider.api_key, "test-key");
+        assert_eq!(config.llm.model_config.model, "test-model");
+    }
+
+    #[test]
+    fn legacy_llm_api_key_migrates_to_provider() {
+        let toml = r#"
+[llm]
+api_key = "old-key"
+base_url = "http://old-host/v1"
+model = "old-model"
+max_tokens = 2048
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, warnings) = raw.migrate();
+        assert_eq!(config.provider.api_key, "old-key");
+        assert_eq!(config.provider.base_url, "http://old-host/v1");
+        assert_eq!(config.llm.model_config.model, "old-model");
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn prompt_file_and_inline_conflict_fails_validation() {
+        let toml = r#"
+[[gateway.agents]]
+id = "test"
+display_name = "Test"
+description = "test"
+aliases = []
+prompt_file = "test.md"
+prompt_inline = "You are a test agent."
+"#;
+        let config: OriginAppConfig = toml::from_str(toml).expect("config should deserialize");
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_trimmer_fields_migrate_correctly() {
+        let toml = r#"
+[gateway.trimmer]
+max_history_tokens = 50000
+preserve_recent = 5
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, warnings) = raw.migrate();
+        assert_eq!(config.gateway.trimmer.context_window, 58_192);
+        assert_eq!(config.gateway.trimmer.output_reserve, 8_192);
+        assert_eq!(config.gateway.trimmer.min_recent_messages, 5);
+        assert!(config.gateway.trimmer.enabled);
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn default_gateway_port_is_18801() {
+        let config = GatewayConfig::default();
+        assert_eq!(config.port, 18801);
+    }
 
     #[test]
     fn skills_dir_defaults_to_workspace_nova_skills() {
@@ -778,9 +848,9 @@ mod tests {
     #[test]
     fn config_path_uses_relative_override_from_workspace() {
         let mut origin = OriginAppConfig::default();
-        origin.config_path = Some("conf.toml".to_string());
+        origin.config_path = Some("custom.toml".to_string());
         let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
-        assert_eq!(config.config_path(), PathBuf::from("D:/workspace/conf.toml"));
+        assert_eq!(config.config_path(), PathBuf::from("D:/workspace/custom.toml"));
     }
 
     #[test]
@@ -846,6 +916,14 @@ description = "d"
         let _ = std::fs::remove_file(&file);
         assert!(error.to_string().contains("tavily_api_key"));
         Ok(())
+    }
+
+    #[test]
+    fn skills_dir_resolves_relative_to_workspace() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.skills_dir = Some("my-skills".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/my-skills"));
     }
 
     fn write_temp_config(content: &str) -> Result<PathBuf> {

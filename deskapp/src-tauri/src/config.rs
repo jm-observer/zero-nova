@@ -114,3 +114,65 @@ pub fn load_config(_app: &tauri::AppHandle) -> anyhow::Result<AppConfig> {
         sidecar,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TomlConfig;
+
+    #[test]
+    fn deskapp_toml_ignores_unknown_sections() {
+        let toml = r#"
+[provider]
+api_key = "test"
+base_url = "http://localhost:8082/v1"
+
+[llm]
+model = "test-model"
+max_tokens = 4096
+
+[gateway]
+host = "127.0.0.1"
+port = 18801
+
+[remote]
+host = "127.0.0.1"
+port = 18801
+
+[sidecar]
+mode = "auto"
+name = "Test"
+command = "nova_gateway_ws"
+"#;
+        let config: TomlConfig = toml::from_str(toml).expect("config should deserialize");
+        assert_eq!(config.remote.port, Some(18801));
+        assert_eq!(config.sidecar.name, "Test");
+    }
+
+    #[test]
+    fn remote_defaults_to_localhost_18801() {
+        let toml = r#"
+[remote]
+
+[sidecar]
+name = "Test"
+command = "test"
+"#;
+        let config: TomlConfig = toml::from_str(toml).expect("config should deserialize");
+        assert_eq!(config.remote.host, None);
+        assert_eq!(config.remote.port, None);
+    }
+
+    #[test]
+    fn sidecar_command_accepts_plain_name() {
+        let toml = r#"
+[remote]
+
+[sidecar]
+mode = "auto"
+name = "Test"
+command = "nova_gateway_ws"
+"#;
+        let config: TomlConfig = toml::from_str(toml).expect("config should deserialize");
+        assert_eq!(config.sidecar.command, "nova_gateway_ws");
+    }
+}

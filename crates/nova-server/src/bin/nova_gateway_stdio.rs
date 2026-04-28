@@ -10,7 +10,7 @@ pub struct Args {
     #[arg(long, default_value = "127.0.0.1")]
     pub host: String,
 
-    #[arg(long, default_value_t = 9090)]
+    #[arg(long, default_value_t = 18801)]
     pub port: u16,
 
     #[arg(long)]
@@ -46,12 +46,15 @@ async fn main() -> anyhow::Result<()> {
     }
     origin_config.llm.model_config.max_tokens = args.max_tokens;
     if let Some(ref url) = args.base_url {
-        origin_config.llm.base_url = url.clone();
+        origin_config.provider.base_url = url.clone();
     }
 
     let final_config = AppConfig::from_origin(origin_config, workspace.clone());
 
-    let client = OpenAiCompatClient::new(final_config.llm.api_key.clone(), final_config.llm.base_url.clone());
+    let client = OpenAiCompatClient::new(
+        final_config.provider.api_key.clone(),
+        final_config.provider.base_url.clone(),
+    );
     let app = build_application(final_config, client).await?;
 
     nova_server_ws::run_stdio(app).await

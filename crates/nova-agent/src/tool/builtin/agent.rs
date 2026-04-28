@@ -89,7 +89,10 @@ impl Tool for AgentTool {
         let spec = subagent_type.and_then(|t| self.agent_types.get(t));
 
         // 2. Setup Client
-        let client = OpenAiCompatClient::new(self.config.llm.api_key.clone(), self.config.llm.base_url.clone());
+        let client = OpenAiCompatClient::new(
+            self.config.provider.api_key.clone(),
+            self.config.provider.base_url.clone(),
+        );
 
         // 3. Setup Tool Registry for subagent
         let sub_registry = ToolRegistry::new();

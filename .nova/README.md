@@ -26,9 +26,9 @@ configs/
 
 | 文件 | 加载方式 | 说明 |
 |------|---------|------|
-| `agent-nova.md` | `SystemPromptBuilder::with_agent()` | Nova 的角色定义与行为准则 |
+| `agent-nova.md` | `[[gateway.agents]].prompt_file = "agent-nova.md"` | Nova 的角色定义与行为准则 |
 | `agent-nova-code.md` | `SystemPromptBuilder::with_agent()` | 基于真实编码代理请求提炼的工程向 system prompt |
-| `agent-openclaw.md` | `SystemPromptBuilder::with_agent()` | OpenClaw 的角色定义与行为准则 |
+| `agent-openclaw.md` | `[[gateway.agents]].prompt_file = "agent-openclaw.md"` | OpenClaw 的角色定义与行为准则 |
 | `turn-router.md` | `gateway.router.use_llm_classification = true` 时使用 | TurnRouter 在 LLM 分类模式下的 system prompt |
 | `interaction-resolver.md` | 后续 LLM 辅助解析模式时使用 | InteractionResolver 的 system prompt |
 | `workflow-stages.md` | `SystemPromptBuilder` 根据 `WorkflowStage` 动态注入 | 每个 Workflow 阶段的行为指导片段 |
@@ -63,6 +63,6 @@ configs/
 
 ## 如何添加新 Agent
 
-1. 在 `configs/prompts/` 下创建 `agent-{id}.md`，参照 `agent-nova.md` 的结构编写
-2. 在 `config.toml` 中添加 `[[gateway.agents]]` 条目（参照 `examples/agents.toml`）
+1. 在 `prompts/` 下创建 `agent-{id}.md`，参照 `agent-nova.md` 的结构编写
+2. 在 `config.toml` 中添加 `[[gateway.agents]]` 条目，并设置 `prompt_file = "agent-{id}.md"`（参照 `examples/agents.toml`）
 3. 重启 `nova-gateway`，新 Agent 会自动注册到 `AgentRegistry`

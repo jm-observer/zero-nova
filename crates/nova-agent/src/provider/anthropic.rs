@@ -1,4 +1,4 @@
-use crate::config::LlmConfig;
+use crate::config::ProviderConfig;
 use crate::message::{ContentBlock, Message, Role};
 use crate::provider::sse::SseParser;
 use crate::provider::types::{
@@ -18,7 +18,7 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     /// Constructs an `AnthropicClient` using the provided configuration.
-    pub fn from_config(config: &LlmConfig) -> Self {
+    pub fn from_config(config: &ProviderConfig) -> Self {
         Self {
             http: Client::new(),
             api_key: config.api_key.clone(),

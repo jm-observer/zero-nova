@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct OriginAppConfig {
     #[serde(default)]
+    pub provider: ProviderConfig,
+    #[serde(default)]
     pub llm: LlmConfig,
     #[serde(default)]
     pub search: SearchConfig,
@@ -24,6 +26,8 @@ pub struct OriginAppConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub provider: ProviderConfig,
     #[serde(default)]
     pub llm: LlmConfig,
     #[serde(default)]
@@ -61,11 +65,16 @@ pub struct VoiceConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmConfig {
+    #[serde(flatten)]
+    pub model_config: ModelConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProviderConfig {
+    #[serde(default)]
     pub api_key: String,
     #[serde(default = "default_base_url")]
     pub base_url: String,
-    #[serde(flatten)]
-    pub model_config: ModelConfig,
 }
 
 fn default_base_url() -> String {
@@ -103,8 +112,6 @@ fn default_voice_max_input_bytes() -> usize {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            api_key: String::new(),
-            base_url: default_base_url(),
             model_config: ModelConfig {
                 model: "gpt-oss-120b".to_string(),
                 max_tokens: 8192,
@@ -113,6 +120,15 @@ impl Default for LlmConfig {
                 thinking_budget: None,
                 reasoning_effort: None,
             },
+        }
+    }
+}
+
+impl Default for ProviderConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            base_url: default_base_url(),
         }
     }
 }
@@ -170,6 +186,13 @@ pub struct AgentSpec {
     pub display_name: String,
     pub description: String,
     pub aliases: Vec<String>,
+    /// 指向 prompts_dir 下的模板文件名
+    #[serde(default)]
+    pub prompt_file: Option<String>,
+    /// 直接内联的 prompt 内容
+    #[serde(default)]
+    pub prompt_inline: Option<String>,
+    #[serde(default)]
     pub system_prompt_template: Option<String>,
     pub tool_whitelist: Option<Vec<String>>,
     pub model_config: Option<AgentModelConfig>,
@@ -213,7 +236,7 @@ fn default_host() -> String {
     "127.0.0.1".to_string()
 }
 fn default_port() -> u16 {
-    9090
+    18801
 }
 fn default_max_iterations() -> usize {
     30
@@ -300,6 +323,7 @@ impl Default for GatewayConfig {
 impl AppConfig {
     pub fn from_origin(origin: OriginAppConfig, workspace: PathBuf) -> Self {
         Self {
+            provider: origin.provider,
             llm: origin.llm,
             search: origin.search,
             tool: origin.tool,
@@ -324,7 +348,8 @@ impl AppConfig {
     /// Return the prompts directory for agent template files.
     /// Defaults to `{workspace}/prompts`.
     pub fn prompts_dir(&self) -> PathBuf {
-        self.workspace.join(self.tool.prompts_dir.as_deref().unwrap_or("prompts"))
+        self.workspace
+            .join(self.tool.prompts_dir.as_deref().unwrap_or("prompts"))
     }
 
     /// Return the configured project context file path when provided.
@@ -342,7 +367,17 @@ impl AppConfig {
     /// Return the path to the configuration file.
     /// Defaults to `{workspace}/config.toml`.
     pub fn config_path(&self) -> PathBuf {
-        self.workspace.join("config.toml")
+        match &self.config_path {
+            Some(path) => {
+                let path = PathBuf::from(path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.workspace.join(path)
+                }
+            }
+            None => self.workspace.join("config.toml"),
+        }
     }
 }
 
@@ -362,7 +397,7 @@ mod tests {
     #[test]
     fn skills_dir_defaults_to_workspace_nova_skills() {
         let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
-        assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/.nova/skills"));
+        assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/skills"));
     }
 
     #[test]
@@ -376,7 +411,7 @@ mod tests {
     #[test]
     fn data_dir_defaults_to_workspace_nova_data() {
         let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
-        assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/.nova/data"));
+        assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
     }
 
     #[test]

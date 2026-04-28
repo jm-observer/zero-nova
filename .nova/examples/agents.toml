@@ -4,49 +4,25 @@
 # 第一个条目为默认活跃 Agent（primary agent）。
 #
 # 字段说明：
-#   id                    - 内部唯一标识符，用于协议通信和代码引用
-#   display_name          - 前端界面显示的名称
-#   description           - Agent 的职能描述，用于 TurnRouter 判断和前端展示
-#   aliases               - 自然语言点名时的匹配词（支持中英文，大小写不敏感）
-#   system_prompt_template - Agent 的 system prompt 模板文件路径（相对于 configs/prompts/）
-#   tool_whitelist        - 该 Agent 可使用的工具白名单，省略或为空表示可使用全部工具
-#   model                 - 该 Agent 使用的模型（省略则使用 [llm].model 的全局配置）
-#   temperature           - 该 Agent 的温度值（省略则使用 [llm].temperature 的全局配置）
+#   id             - 内部唯一标识符，用于协议通信和代码引用
+#   display_name   - 前端界面显示的名称
+#   description    - Agent 的职能描述，用于路由判断和前端展示
+#   aliases        - 自然语言点名时的匹配词（支持中英文，大小写不敏感）
+#   prompt_file    - Agent 的 system prompt 模板文件（相对于 [tool].prompts_dir）
+#   prompt_inline  - 直接内联 prompt 文本（与 prompt_file 互斥）
+#   tool_whitelist - 该 Agent 可使用的工具白名单，省略或为空表示可使用全部工具
 
-# ── 默认 Agent: Nova ─────────────────────────────────────────────
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
 description = "默认通用助手，负责日常问答与任务分发"
 aliases = ["小助手", "助手"]
-system_prompt_template = "configs/prompts/agent-nova.md"
-# Nova 可使用全部工具，不设白名单
-# tool_whitelist = []
-# 使用全局模型配置
-# model = ""
-# temperature = 0.7
+prompt_file = "agent-nova.md"
 
-# ── 专业 Agent: OpenClaw ────────────────────────────────────────
 [[gateway.agents]]
 id = "openclaw"
 display_name = "OpenClaw"
 description = "擅长编写代码与系统部署的资深架构师"
 aliases = ["oc", "claw", "架构师", "open-claw"]
-system_prompt_template = "configs/prompts/agent-openclaw.md"
-# OpenClaw 专注于代码与部署相关工具
+prompt_file = "agent-openclaw.md"
 tool_whitelist = ["bash", "file_read", "file_write", "web_search"]
-# 代码生成场景建议低温度
-# model = "claude-3-5-sonnet"
-temperature = 0.1
-
-# ── 添加自定义 Agent 示例 ────────────────────────────────────────
-# 取消注释以下内容来添加一个新 Agent:
-#
-# [[gateway.agents]]
-# id = "researcher"
-# display_name = "Researcher"
-# description = "专注于信息检索与研究分析的研究员"
-# aliases = ["研究员", "分析师"]
-# system_prompt_template = "configs/prompts/agent-researcher.md"
-# tool_whitelist = ["web_search", "file_read"]
-# temperature = 0.3

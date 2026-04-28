@@ -74,8 +74,16 @@ fn build_sidecar_execution_context(app: &AppHandle) -> Result<SidecarExecutionCo
     }
 
     // 2.2 注入 Workspace 参数
-    args.push("--workspace".to_string());
-    args.push(config.config_dir.to_string_lossy().to_string());
+    if let Some(arg_fmt) = &config.sidecar.workspace_arg {
+        args.push(arg_fmt.clone());
+        let workspace = config
+            .sidecar
+            .workspace
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| config.config_dir.clone());
+        args.push(workspace.to_string_lossy().to_string());
+    }
 
     // 3. 构建命令路径
     let mut cmd_path = config.sidecar.command.clone();

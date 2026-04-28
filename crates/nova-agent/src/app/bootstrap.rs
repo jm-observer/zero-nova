@@ -15,7 +15,7 @@ use crate::skill::SkillRegistry;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::builtin::task::TaskStore;
 use crate::tool::ToolRegistry;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -30,6 +30,8 @@ pub async fn build_application<C: LlmClient + 'static>(
     config: AppConfig,
     client: C,
 ) -> Result<Arc<dyn AgentApplication>> {
+    warn_unused_gateway_sections(&config)?;
+
     let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
     if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
@@ -75,18 +77,7 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
     for agent in &config.gateway.agents {
-        let prompt_file = format!("agent-{}.md", agent.id);
-        let prompt_path = config.prompts_dir().join(&prompt_file);
-        let agent_prompt = match &agent.system_prompt_template {
-            Some(prompt) => prompt.clone(),
-            None => match tokio::fs::read_to_string(&prompt_path).await {
-                Ok(content) => content,
-                Err(e) => {
-                    log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
-                    String::new()
-                }
-            },
-        };
+        let agent_prompt = load_agent_prompt(agent, &config).await?;
 
         // 统一通过 SystemPromptBuilder 构建
         let mut template_vars = HashMap::new();
@@ -162,4 +153,70 @@ pub async fn build_application<C: LlmClient + 'static>(
         config_arc,
         config_path,
     )))
+}
+
+async fn load_agent_prompt(agent: &crate::config::AgentSpec, config: &AppConfig) -> Result<String> {
+    if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
+        bail!(
+            "Agent '{}' has both prompt_file and prompt_inline configured; only one is allowed",
+            agent.id
+        );
+    }
+
+    if let Some(file) = &agent.prompt_file {
+        let prompt_path = config.prompts_dir().join(file);
+        let content = tokio::fs::read_to_string(&prompt_path)
+            .await
+            .with_context(|| format!("Failed to read prompt_file for agent '{}': {:?}", agent.id, prompt_path))?;
+        return Ok(content);
+    }
+
+    if let Some(inline) = &agent.prompt_inline {
+        return Ok(inline.clone());
+    }
+
+    if let Some(legacy) = &agent.system_prompt_template {
+        log::warn!(
+            "Agent '{}' uses legacy system_prompt_template. This field is deprecated; use prompt_file/prompt_inline.",
+            agent.id
+        );
+        return Ok(legacy.clone());
+    }
+
+    let prompt_file = format!("agent-{}.md", agent.id);
+    let prompt_path = config.prompts_dir().join(&prompt_file);
+    match tokio::fs::read_to_string(&prompt_path).await {
+        Ok(content) => Ok(content),
+        Err(e) => {
+            log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
+            Ok(String::new())
+        }
+    }
+}
+
+fn warn_unused_gateway_sections(config: &AppConfig) -> Result<()> {
+    let config_path = config.config_path();
+    let content = std::fs::read_to_string(&config_path).ok();
+    if let Some(content) = content {
+        let legacy_sections = [
+            "[gateway.router]",
+            "[gateway.interaction]",
+            "[gateway.interaction.risk]",
+            "[gateway.workflow]",
+        ];
+        let mut warned = false;
+        for section in legacy_sections {
+            if content.contains(section) {
+                if !warned {
+                    log::warn!(
+                        "Found unimplemented gateway sections in {:?}; these sections are currently ignored.",
+                        config_path
+                    );
+                    warned = true;
+                }
+                log::warn!("Ignored section: {}", section);
+            }
+        }
+    }
+    Ok(())
 }

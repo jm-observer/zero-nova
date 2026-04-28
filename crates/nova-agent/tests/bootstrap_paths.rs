@@ -17,8 +17,8 @@ fn make_test_config(workspace: PathBuf) -> AppConfig {
 fn default_paths_are_consistent() {
     let config = make_test_config(PathBuf::from("D:/workspace"));
 
-    assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/.nova/skills"));
-    assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/.nova/data"));
+    assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/skills"));
+    assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
     assert_eq!(config.config_path(), PathBuf::from("D:/workspace/config.toml"));
     assert_eq!(config.prompts_dir(), PathBuf::from("D:/workspace/prompts"));
 }
@@ -28,7 +28,6 @@ fn default_paths_are_consistent() {
 #[test]
 fn relative_overrides_are_resolved_from_workspace() {
     let mut origin = OriginAppConfig::default();
-    origin.data_dir = Some("var".to_string());
     origin.tool.skills_dir = Some("mods".to_string());
     origin.tool.prompts_dir = Some("prompts".to_string());
     origin.config_path = Some("conf/custom.toml".to_string());
@@ -36,7 +35,7 @@ fn relative_overrides_are_resolved_from_workspace() {
     let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
 
     assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/mods"));
-    assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/var"));
+    assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
     assert_eq!(config.config_path(), PathBuf::from("D:/workspace/conf/custom.toml"));
     assert_eq!(config.prompts_dir(), PathBuf::from("D:/workspace/prompts"));
 }
@@ -46,7 +45,6 @@ fn relative_overrides_are_resolved_from_workspace() {
 #[test]
 fn absolute_paths_are_used_directly() {
     let mut origin = OriginAppConfig::default();
-    origin.data_dir = Some("D:/shared/data".to_string());
     origin.tool.skills_dir = Some("D:/shared/skills".to_string());
     origin.tool.prompts_dir = Some("D:/shared/prompts".to_string());
     origin.config_path = Some("D:/shared/config.toml".to_string());
@@ -54,7 +52,7 @@ fn absolute_paths_are_used_directly() {
     let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
 
     // Absolute paths should NOT be joined with workspace
-    assert_eq!(config.data_dir_path(), PathBuf::from("D:/shared/data"));
+    assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
     assert_eq!(config.skills_dir(), PathBuf::from("D:/shared/skills"));
     assert_eq!(config.config_path(), PathBuf::from("D:/shared/config.toml"));
     assert_eq!(config.prompts_dir(), PathBuf::from("D:/shared/prompts"));
@@ -78,10 +76,7 @@ fn prompt_file_path_construction() {
 
 #[test]
 fn bootstrap_path_sequence_is_consistent() {
-    let origin = OriginAppConfig {
-        data_dir: Some("runtime".to_string()),
-        ..Default::default()
-    };
+    let origin = OriginAppConfig::default();
     let config = AppConfig::from_origin(origin, PathBuf::from("D:/project"));
 
     // bootstrap.rs reads these in sequence:
@@ -118,15 +113,12 @@ fn bootstrap_path_sequence_is_consistent() {
     let default_data_dir = default_config.data_dir_path();
     // Windows normalize paths with forward slashes; check common variants
     assert!(
-        default_data_dir.to_string_lossy().contains(".nova") && default_data_dir.to_string_lossy().ends_with("data"),
-        "default data_dir should contain .nova/data, got {}",
+        default_data_dir.to_string_lossy().ends_with("data"),
+        "default data_dir should end with data, got {}",
         default_data_dir.to_string_lossy()
     );
 
-    assert!(
-        actual_data_dir.to_string_lossy().contains("project") && actual_data_dir.to_string_lossy().contains("runtime"),
-        "data_dir should use configured value"
-    );
+    assert_eq!(actual_data_dir, PathBuf::from("D:/project/data"));
 }
 
 // --- Config path holds by-reference for re-export ---

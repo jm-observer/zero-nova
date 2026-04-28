@@ -23,6 +23,8 @@ pub struct SidecarConfig {
     pub args: Option<Vec<String>>,
     /// 端口参数的格式。例如: "--port" 或 "-p"。如果为 None，默认使用 "--port"。
     pub port_arg: Option<String>,
+    /// workspace 路径参数名。例如 "--workspace"。若为 None，则不传递 workspace 参数给 sidecar。
+    pub workspace_arg: Option<String>,
     /// 工作区路径 (Workspace)，传递给 nova-gateway 的 --workspace 参数
     pub workspace: Option<PathBuf>,
 }

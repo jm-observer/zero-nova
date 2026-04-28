@@ -147,13 +147,13 @@ async fn main() -> Result<()> {
         config.llm.model_config.model = model.to_string();
     }
     if let Some(base_url) = &cli.base_url {
-        config.llm.base_url = base_url.to_string();
+        config.provider.base_url = base_url.to_string();
     }
 
     let config = AppConfig::from_origin(config, workspace.clone());
 
     log::info!("Starting Nova CLI with : {:?}", config);
-    let client = OpenAiCompatClient::new(config.llm.api_key.clone(), config.llm.base_url.clone());
+    let client = OpenAiCompatClient::new(config.provider.api_key.clone(), config.provider.base_url.clone());
 
     let env_snapshot = {
         let mut snapshot = EnvironmentSnapshot::collect().await;

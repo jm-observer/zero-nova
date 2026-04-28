@@ -81,6 +81,11 @@
 - 依赖：Plan 1、Plan 2
 - 执行顺序：第 3 步
 
+### Plan 状态
+- Plan 1：已完成
+- Plan 2：待开始
+- Plan 3：待开始
+
 ## 变更影响矩阵
 
 | 变更项 | nova_cli | nova_gateway_ws | nova_gateway_stdio | deskapp | Breaking |

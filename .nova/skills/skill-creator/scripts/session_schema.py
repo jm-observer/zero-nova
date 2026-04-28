@@ -20,7 +20,7 @@ SESSION_STATUSES = (
 ALLOWED_STATUS_TRANSITIONS: dict[str, tuple[str, ...]] = {
     "initialized": ("evaluating", "failed"),
     "evaluating": ("optimizing", "paused", "failed"),
-    "optimizing": ("optimizing", "completed", "failed"),
+    "optimizing": ("optimizing", "paused", "completed", "failed"),
     "paused": ("evaluating", "failed"),
     "completed": (),
     "failed": (),

@@ -1,327 +1,290 @@
 #!/usr/bin/env python3
-"""Run the eval + improve loop until all pass or max iterations reached.
+"""Run the full skill-improvement loop with promotion, rollback, and convergence."""
 
-Combines run_eval.py and improve_description.py in a loop, tracking history
-and returning the best description found. Supports train/test split to prevent
-overfitting.
-"""
+from __future__ import annotations
 
 import argparse
-import json
-import random
-import sys
-import tempfile
-import time
-import webbrowser
+import shutil
 from pathlib import Path
+from typing import Any
 
-from scripts.generate_report import generate_html
-from scripts.improve_description import improve_description
-from scripts.run_eval import find_project_root, run_eval
-from scripts.utils import parse_skill_md
+from scripts.apply_candidate import apply_candidate_plan
+from scripts.improve_skill import improve_skill
+from scripts.run_eval import RUN_MODE_CANDIDATE, RUN_MODE_BASELINE_ORIGINAL
+from scripts.run_iteration import ITERATION_NAME_TEMPLATE, run_iteration
+from scripts.score_iteration import (
+    BEHAVIOR_PASS_THRESHOLD,
+    TRIGGER_PASS_THRESHOLD,
+    score_iteration_result,
+)
+from scripts.utils import read_json, session_file_path, update_session_status, write_json
+
+MAX_ITERATIONS = 5
+MIN_SCORE_DELTA = 0.01
+MAX_CONSECUTIVE_NO_IMPROVEMENT = 2
 
 
-def split_eval_set(eval_set: list[dict], holdout: float, seed: int = 42) -> tuple[list[dict], list[dict]]:
-    """Split eval set into train and test sets, stratified by should_trigger."""
-    random.seed(seed)
+def ensure_best_skill(session: dict[str, Any], workspace_path: Path) -> Path:
+    """Initialize the best-skill directory from snapshot when needed."""
+    best_skill_path = workspace_path / "best-skill"
+    snapshot_path = Path(session["snapshot_path"])
+    if not best_skill_path.exists() or not any(best_skill_path.iterdir()):
+        if best_skill_path.exists():
+            shutil.rmtree(best_skill_path)
+        shutil.copytree(snapshot_path, best_skill_path)
+    return best_skill_path
 
-    # Separate by should_trigger
-    trigger = [e for e in eval_set if e["should_trigger"]]
-    no_trigger = [e for e in eval_set if not e["should_trigger"]]
 
-    # Shuffle each group
-    random.shuffle(trigger)
-    random.shuffle(no_trigger)
+def has_material_improvement(iteration_score: dict[str, Any], best_score: dict[str, Any] | None) -> bool:
+    """Decide whether a promoted candidate clears the explicit delta threshold."""
+    if best_score is None:
+        return True
+    overall_delta = float(iteration_score["comparisons"]["candidate_vs_best"]["overall_delta"])
+    tie_break_only = bool(iteration_score["decision_hints"]["promoted"]) and abs(overall_delta) < MIN_SCORE_DELTA
+    return overall_delta >= MIN_SCORE_DELTA or tie_break_only
 
-    # Calculate split points
-    n_trigger_test = max(1, int(len(trigger) * holdout))
-    n_no_trigger_test = max(1, int(len(no_trigger) * holdout))
 
-    # Split
-    test_set = trigger[:n_trigger_test] + no_trigger[:n_no_trigger_test]
-    train_set = trigger[n_trigger_test:] + no_trigger[n_no_trigger_test:]
+def build_iteration_note(
+    iteration_number: int,
+    plan: dict[str, Any],
+    diff_summary: dict[str, Any],
+    iteration_score: dict[str, Any],
+    promoted: bool,
+) -> str:
+    """Create a readable per-iteration explanation note."""
+    focus = ", ".join(plan.get("focus_areas", [])) or "refresh_description"
+    lines = [
+        f"# Iteration {iteration_number}",
+        "",
+        f"- focus: {focus}",
+        f"- promoted: {promoted}",
+        f"- applied changes: {len(diff_summary.get('applied_changes', []))}",
+        "",
+        "## Why This Candidate",
+        "",
+    ]
+    for change in diff_summary.get("applied_changes", []):
+        lines.append(f"- {change['type']}: {change['reason']}")
 
-    return train_set, test_set
+    lines.extend(["", "## Failure Clusters", ""])
+    candidate_clusters = iteration_score["failure_clusters"][RUN_MODE_CANDIDATE]
+    if not candidate_clusters:
+        lines.append("- none")
+    for cluster_name, cluster in candidate_clusters.items():
+        preview = ", ".join(cluster.get("queries", [])[:3])
+        lines.append(f"- {cluster_name}: {cluster['count']} ({preview})")
+
+    comparison = iteration_score["comparisons"]["candidate_vs_best"]
+    lines.extend(
+        [
+            "",
+            "## Comparison",
+            "",
+            f"- overall delta vs best: {comparison['overall_delta']:.4f}",
+            f"- false trigger delta vs best: {comparison['false_trigger_delta']}",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def update_best_skill(best_skill_path: Path, candidate_skill_path: Path) -> None:
+    """Promote candidate skill to the durable best-skill directory."""
+    if best_skill_path.exists():
+        shutil.rmtree(best_skill_path)
+    shutil.copytree(candidate_skill_path, best_skill_path)
+
+
+def upsert_session_iteration(session: dict[str, Any], iteration_record: dict[str, Any]) -> dict[str, Any]:
+    """Insert or replace one iteration record in the in-memory session."""
+    iterations = [item for item in session.get("iterations", []) if item.get("iteration") != iteration_record["iteration"]]
+    iterations.append(iteration_record)
+    session["iterations"] = iterations
+    return iteration_record
 
 
 def run_loop(
-    eval_set: list[dict],
-    skill_path: Path,
-    description_override: str | None,
+    workspace_path: Path,
+    trigger_eval_path: Path,
+    *,
     num_workers: int,
     timeout: int,
     max_iterations: int,
     runs_per_query: int,
     trigger_threshold: float,
-    holdout: float,
-    model: str,
-    verbose: bool,
-    live_report_path: Path | None = None,
-    log_dir: Path | None = None,
-) -> dict:
-    """Run the eval + improvement loop."""
-    project_root = find_project_root()
-    name, original_description, content = parse_skill_md(skill_path)
-    current_description = description_override or original_description
+    model: str | None,
+) -> dict[str, Any]:
+    """Run session-driven candidate generation, scoring, rollback, and convergence."""
+    session_path = session_file_path(workspace_path)
+    session = read_json(session_path)
+    update_session_status(session, "optimizing")
+    write_json(session_path, session)
 
-    # Split into train/test if holdout > 0
-    if holdout > 0:
-        train_set, test_set = split_eval_set(eval_set, holdout)
-        if verbose:
-            print(f"Split: {len(train_set)} train, {len(test_set)} test (holdout={holdout})", file=sys.stderr)
-    else:
-        train_set = eval_set
-        test_set = []
+    best_skill_path = ensure_best_skill(session, workspace_path)
+    best_score = session.get("best_score")
+    best_iteration = session.get("best_iteration")
+    no_improvement_count = 0
+    exit_reason = "max_iterations"
 
-    history = []
-    exit_reason = "unknown"
+    for iteration_number in range(1, max_iterations + 1):
+        iteration_dir = workspace_path / "iterations" / ITERATION_NAME_TEMPLATE.format(number=iteration_number)
+        candidate_skill_path = iteration_dir / "candidate-skill"
+        iteration_dir.mkdir(parents=True, exist_ok=True)
 
-    for iteration in range(1, max_iterations + 1):
-        if verbose:
-            print(f"\n{'='*60}", file=sys.stderr)
-            print(f"Iteration {iteration}/{max_iterations}", file=sys.stderr)
-            print(f"Description: {current_description}", file=sys.stderr)
-            print(f"{'='*60}", file=sys.stderr)
+        failed_results: list[dict[str, Any]] = []
+        if session.get("iterations"):
+            last_iteration = session["iterations"][-1]
+            score_path = Path(last_iteration["score_summary_path"])
+            if score_path.exists():
+                previous_score = read_json(score_path)
+                previous_eval_path = Path(last_iteration["eval_results_path"])
+                previous_eval = read_json(previous_eval_path)
+                failed_results = [
+                    item for item in previous_eval[RUN_MODE_CANDIDATE]["results"] if not item.get("pass")
+                ]
+                best_score = best_score or previous_score.get("score")
 
-        # Evaluate train + test together in one batch for parallelism
-        all_queries = train_set + test_set
-        t0 = time.time()
-        all_results = run_eval(
-            all_queries,
-            skill_path=skill_path,
+        plan = improve_skill(
+            best_skill_path=best_skill_path,
+            candidate_skill_path=candidate_skill_path,
+            failed_results=failed_results,
+            score_summary={"trigger_threshold": trigger_threshold},
+            history=session.get("iterations", []),
+            model=model,
+        )
+        write_json(iteration_dir / "candidate-plan.json", plan)
+
+        try:
+            diff_summary = apply_candidate_plan(best_skill_path, candidate_skill_path, plan)
+        except Exception as exc:
+            update_session_status(session, "paused")
+            session["last_error"] = f"apply_candidate_failed: {exc}"
+            write_json(session_path, session)
+            return {
+                "status": "paused",
+                "exit_reason": "apply_candidate_failed",
+                "error": str(exc),
+            }
+        if not candidate_skill_path.exists():
+            shutil.copytree(best_skill_path, candidate_skill_path)
+
+        iteration_output = run_iteration(
+            workspace_path,
+            trigger_eval_path,
+            iteration_number=iteration_number,
             num_workers=num_workers,
             timeout=timeout,
-            project_root=project_root,
             runs_per_query=runs_per_query,
             trigger_threshold=trigger_threshold,
             model=model,
-            description_override=current_description,
         )
-        eval_elapsed = time.time() - t0
+        session = read_json(session_path)
+        existing_iteration = next(
+            (item for item in session.get("iterations", []) if item.get("iteration") == iteration_number),
+            None,
+        )
+        if existing_iteration is None:
+            existing_iteration = upsert_session_iteration(
+                session,
+                {
+                    "iteration": iteration_number,
+                    "iteration_path": str(iteration_dir.resolve()),
+                    "candidate_skill_path": str(candidate_skill_path.resolve()),
+                    "eval_results_path": str((iteration_dir / "eval-results.json").resolve()),
+                    "score_summary_path": str((iteration_dir / "score-summary.json").resolve()),
+                    "notes_path": str((iteration_dir / "notes.md").resolve()),
+                    "candidate_pass_rate": iteration_output["results"][RUN_MODE_CANDIDATE]["summary"]["pass_rate"],
+                },
+            )
+        iteration_score = score_iteration_result(
+            iteration_output["results"],
+            best_score=best_score,
+            trigger_pass_threshold=TRIGGER_PASS_THRESHOLD,
+            behavior_pass_threshold=BEHAVIOR_PASS_THRESHOLD,
+        )
 
-        # Split results back into train/test by matching queries
-        train_queries_set = {q["query"] for q in train_set}
-        train_result_list = [r for r in all_results["results"] if r["query"] in train_queries_set]
-        test_result_list = [r for r in all_results["results"] if r["query"] not in train_queries_set]
+        write_json(iteration_dir / "eval-results.json", iteration_output["results"])
+        write_json(iteration_dir / "candidate-diff-summary.json", diff_summary)
+        score_path = iteration_dir / "score-summary.json"
+        notes_path = iteration_dir / "notes.md"
+        write_json(score_path, iteration_score)
 
-        train_passed = sum(1 for r in train_result_list if r["pass"])
-        train_total = len(train_result_list)
-        train_summary = {"passed": train_passed, "failed": train_total - train_passed, "total": train_total}
-        train_results = {"results": train_result_list, "summary": train_summary}
+        promoted = bool(iteration_score["decision_hints"]["promoted"]) and has_material_improvement(iteration_score, best_score)
+        notes_path.write_text(
+            build_iteration_note(iteration_number, plan, diff_summary, iteration_score, promoted),
+            encoding="utf-8",
+        )
 
-        if test_set:
-            test_passed = sum(1 for r in test_result_list if r["pass"])
-            test_total = len(test_result_list)
-            test_summary = {"passed": test_passed, "failed": test_total - test_passed, "total": test_total}
-            test_results = {"results": test_result_list, "summary": test_summary}
-        else:
-            test_results = None
-            test_summary = None
+        session_iteration = next(item for item in session["iterations"] if item["iteration"] == iteration_number)
+        session_iteration["candidate_plan_path"] = str((iteration_dir / "candidate-plan.json").resolve())
+        session_iteration["candidate_diff_summary_path"] = str((iteration_dir / "candidate-diff-summary.json").resolve())
+        session_iteration["score_summary_path"] = str(score_path.resolve())
+        session_iteration["notes_path"] = str(notes_path.resolve())
+        session_iteration["promoted"] = promoted
 
-        history.append({
-            "iteration": iteration,
-            "description": current_description,
-            "train_passed": train_summary["passed"],
-            "train_failed": train_summary["failed"],
-            "train_total": train_summary["total"],
-            "train_results": train_results["results"],
-            "test_passed": test_summary["passed"] if test_summary else None,
-            "test_failed": test_summary["failed"] if test_summary else None,
-            "test_total": test_summary["total"] if test_summary else None,
-            "test_results": test_results["results"] if test_results else None,
-            # For backward compat with report generator
-            "passed": train_summary["passed"],
-            "failed": train_summary["failed"],
-            "total": train_summary["total"],
-            "results": train_results["results"],
-        })
-
-        # Write live report if path provided
-        if live_report_path:
-            partial_output = {
-                "original_description": original_description,
-                "best_description": current_description,
-                "best_score": "in progress",
-                "iterations_run": len(history),
-                "holdout": holdout,
-                "train_size": len(train_set),
-                "test_size": len(test_set),
-                "history": history,
+        if promoted:
+            update_best_skill(best_skill_path, candidate_skill_path)
+            best_score = iteration_score["score"] | {
+                "false_trigger_count": iteration_score["decision_hints"]["false_trigger_count"]
             }
-            live_report_path.write_text(generate_html(partial_output, auto_refresh=True, skill_name=name))
+            best_iteration = iteration_number
+            session["best_iteration"] = best_iteration
+            session["best_score"] = best_score
+            no_improvement_count = 0
+            if best_score["trigger_pass_rate"] >= TRIGGER_PASS_THRESHOLD:
+                exit_reason = "threshold_reached"
+                break
+        else:
+            no_improvement_count += 1
+            if iteration_score["decision_hints"]["severe_regression"]:
+                exit_reason = "severe_regression"
+                break
+            if no_improvement_count >= MAX_CONSECUTIVE_NO_IMPROVEMENT:
+                exit_reason = "converged"
+                break
 
-        if verbose:
-            def print_eval_stats(label, results, elapsed):
-                pos = [r for r in results if r["should_trigger"]]
-                neg = [r for r in results if not r["should_trigger"]]
-                tp = sum(r["triggers"] for r in pos)
-                pos_runs = sum(r["runs"] for r in pos)
-                fn = pos_runs - tp
-                fp = sum(r["triggers"] for r in neg)
-                neg_runs = sum(r["runs"] for r in neg)
-                tn = neg_runs - fp
-                total = tp + tn + fp + fn
-                precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
-                recall = tp / (tp + fn) if (tp + fn) > 0 else 1.0
-                accuracy = (tp + tn) / total if total > 0 else 0.0
-                print(f"{label}: {tp+tn}/{total} correct, precision={precision:.0%} recall={recall:.0%} accuracy={accuracy:.0%} ({elapsed:.1f}s)", file=sys.stderr)
-                for r in results:
-                    status = "PASS" if r["pass"] else "FAIL"
-                    rate_str = f"{r['triggers']}/{r['runs']}"
-                    print(f"  [{status}] rate={rate_str} expected={r['should_trigger']}: {r['query'][:60]}", file=sys.stderr)
+        write_json(session_path, session)
 
-            print_eval_stats("Train", train_results["results"], eval_elapsed)
-            if test_summary:
-                print_eval_stats("Test ", test_results["results"], 0)
-
-        if train_summary["failed"] == 0:
-            exit_reason = f"all_passed (iteration {iteration})"
-            if verbose:
-                print(f"\nAll train queries passed on iteration {iteration}!", file=sys.stderr)
-            break
-
-        if iteration == max_iterations:
-            exit_reason = f"max_iterations ({max_iterations})"
-            if verbose:
-                print(f"\nMax iterations reached ({max_iterations}).", file=sys.stderr)
-            break
-
-        # Improve the description based on train results
-        if verbose:
-            print(f"\nImproving description...", file=sys.stderr)
-
-        t0 = time.time()
-        # Strip test scores from history so improvement model can't see them
-        blinded_history = [
-            {k: v for k, v in h.items() if not k.startswith("test_")}
-            for h in history
-        ]
-        new_description = improve_description(
-            skill_name=name,
-            skill_content=content,
-            current_description=current_description,
-            eval_results=train_results,
-            history=blinded_history,
-            model=model,
-            log_dir=log_dir,
-            iteration=iteration,
-        )
-        improve_elapsed = time.time() - t0
-
-        if verbose:
-            print(f"Proposed ({improve_elapsed:.1f}s): {new_description}", file=sys.stderr)
-
-        current_description = new_description
-
-    # Find the best iteration by TEST score (or train if no test set)
-    if test_set:
-        best = max(history, key=lambda h: h["test_passed"] or 0)
-        best_score = f"{best['test_passed']}/{best['test_total']}"
-    else:
-        best = max(history, key=lambda h: h["train_passed"])
-        best_score = f"{best['train_passed']}/{best['train_total']}"
-
-    if verbose:
-        print(f"\nExit reason: {exit_reason}", file=sys.stderr)
-        print(f"Best score: {best_score} (iteration {best['iteration']})", file=sys.stderr)
-
+    if exit_reason in {"threshold_reached", "converged", "max_iterations", "severe_regression"}:
+        update_session_status(session, "completed")
+    session["best_iteration"] = best_iteration
+    session["best_score"] = best_score
+    session["exit_reason"] = exit_reason
+    write_json(session_path, session)
     return {
+        "status": session["status"],
         "exit_reason": exit_reason,
-        "original_description": original_description,
-        "best_description": best["description"],
+        "best_iteration": best_iteration,
         "best_score": best_score,
-        "best_train_score": f"{best['train_passed']}/{best['train_total']}",
-        "best_test_score": f"{best['test_passed']}/{best['test_total']}" if test_set else None,
-        "final_description": current_description,
-        "iterations_run": len(history),
-        "holdout": holdout,
-        "train_size": len(train_set),
-        "test_size": len(test_set),
-        "history": history,
+        "iterations_run": len(session.get("iterations", [])),
+        "workspace_path": str(workspace_path.resolve()),
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run eval + improve loop")
-    parser.add_argument("--eval-set", required=True, help="Path to eval set JSON file")
-    parser.add_argument("--skill-path", required=True, help="Path to skill directory")
-    parser.add_argument("--description", default=None, help="Override starting description")
-    parser.add_argument("--num-workers", type=int, default=10, help="Number of parallel workers")
-    parser.add_argument("--timeout", type=int, default=30, help="Timeout per query in seconds")
-    parser.add_argument("--max-iterations", type=int, default=5, help="Max improvement iterations")
-    parser.add_argument("--runs-per-query", type=int, default=3, help="Number of runs per query")
-    parser.add_argument("--trigger-threshold", type=float, default=0.5, help="Trigger rate threshold")
-    parser.add_argument("--holdout", type=float, default=0.4, help="Fraction of eval set to hold out for testing (0 to disable)")
-    parser.add_argument("--model", required=True, help="Model for improvement")
-    parser.add_argument("--verbose", action="store_true", help="Print progress to stderr")
-    parser.add_argument("--report", default="auto", help="Generate HTML report at this path (default: 'auto' for temp file, 'none' to disable)")
-    parser.add_argument("--results-dir", default=None, help="Save all outputs (results.json, report.html, log.txt) to a timestamped subdirectory here")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the full skill improvement loop")
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--trigger-evals", default=None)
+    parser.add_argument("--num-workers", type=int, default=10)
+    parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--max-iterations", type=int, default=MAX_ITERATIONS)
+    parser.add_argument("--runs-per-query", type=int, default=3)
+    parser.add_argument("--trigger-threshold", type=float, default=0.5)
+    parser.add_argument("--model", default=None)
     args = parser.parse_args()
 
-    eval_set = json.loads(Path(args.eval_set).read_text())
-    skill_path = Path(args.skill_path)
-
-    if not (skill_path / "SKILL.md").exists():
-        print(f"Error: No SKILL.md found at {skill_path}", file=sys.stderr)
-        sys.exit(1)
-
-    name, _, _ = parse_skill_md(skill_path)
-
-    # Set up live report path
-    if args.report != "none":
-        if args.report == "auto":
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            live_report_path = Path(tempfile.gettempdir()) / f"skill_description_report_{skill_path.name}_{timestamp}.html"
-        else:
-            live_report_path = Path(args.report)
-        # Open the report immediately so the user can watch
-        live_report_path.write_text("<html><body><h1>Starting optimization loop...</h1><meta http-equiv='refresh' content='5'></body></html>")
-        webbrowser.open(str(live_report_path))
-    else:
-        live_report_path = None
-
-    # Determine output directory (create before run_loop so logs can be written)
-    if args.results_dir:
-        timestamp = time.strftime("%Y-%m-%d_%H%M%S")
-        results_dir = Path(args.results_dir) / timestamp
-        results_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        results_dir = None
-
-    log_dir = results_dir / "logs" if results_dir else None
-
+    workspace = Path(args.workspace).resolve()
+    trigger_eval_path = Path(args.trigger_evals).resolve() if args.trigger_evals else workspace / "evals" / "trigger-evals.json"
     output = run_loop(
-        eval_set=eval_set,
-        skill_path=skill_path,
-        description_override=args.description,
+        workspace,
+        trigger_eval_path,
         num_workers=args.num_workers,
         timeout=args.timeout,
         max_iterations=args.max_iterations,
         runs_per_query=args.runs_per_query,
         trigger_threshold=args.trigger_threshold,
-        holdout=args.holdout,
         model=args.model,
-        verbose=args.verbose,
-        live_report_path=live_report_path,
-        log_dir=log_dir,
     )
-
-    # Save JSON output
-    json_output = json.dumps(output, indent=2)
-    print(json_output)
-    if results_dir:
-        (results_dir / "results.json").write_text(json_output)
-
-    # Write final HTML report (without auto-refresh)
-    if live_report_path:
-        live_report_path.write_text(generate_html(output, auto_refresh=False, skill_name=name))
-        print(f"\nReport: {live_report_path}", file=sys.stderr)
-
-    if results_dir and live_report_path:
-        (results_dir / "report.html").write_text(generate_html(output, auto_refresh=False, skill_name=name))
-
-    if results_dir:
-        print(f"Results saved to: {results_dir}", file=sys.stderr)
+    write_json(workspace / "latest-loop-result.json", output)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.apply_candidate import apply_candidate_plan
+from scripts.generate_report import write_workspace_reports
 from scripts.improve_skill import improve_skill
 from scripts.run_eval import RUN_MODE_CANDIDATE, RUN_MODE_BASELINE_ORIGINAL
 from scripts.run_iteration import ITERATION_NAME_TEMPLATE, run_iteration
@@ -102,6 +103,44 @@ def upsert_session_iteration(session: dict[str, Any], iteration_record: dict[str
     return iteration_record
 
 
+def is_iteration_complete(iteration_record: dict[str, Any]) -> bool:
+    """Return whether an iteration has all durable artifacts required for resume."""
+    required_paths = [
+        iteration_record.get("candidate_skill_path"),
+        iteration_record.get("eval_results_path"),
+        iteration_record.get("score_summary_path"),
+        iteration_record.get("notes_path"),
+        iteration_record.get("candidate_plan_path"),
+        iteration_record.get("candidate_diff_summary_path"),
+    ]
+    return all(path and Path(path).exists() for path in required_paths)
+
+
+def determine_resume_point(session: dict[str, Any]) -> tuple[int, str]:
+    """Return the next iteration number and the reason for that choice."""
+    iterations = sorted(session.get("iterations", []), key=lambda item: item.get("iteration", 0))
+    if not iterations:
+        return 1, "fresh_start"
+
+    last_iteration = iterations[-1]
+    if is_iteration_complete(last_iteration):
+        return int(last_iteration["iteration"]) + 1, "next_iteration"
+    return int(last_iteration["iteration"]), "rerun_iteration"
+
+
+def enter_optimizing(session: dict[str, Any]) -> None:
+    """Move a resumable session into optimizing state."""
+    status = session["status"]
+    if status in {"initialized", "paused"}:
+        update_session_status(session, "evaluating")
+        status = session["status"]
+    if status == "evaluating":
+        update_session_status(session, "optimizing")
+        return
+    if status not in {"optimizing", "completed"}:
+        raise ValueError(f"Session cannot enter optimizing from status: {status}")
+
+
 def run_loop(
     workspace_path: Path,
     trigger_eval_path: Path,
@@ -116,7 +155,7 @@ def run_loop(
     """Run session-driven candidate generation, scoring, rollback, and convergence."""
     session_path = session_file_path(workspace_path)
     session = read_json(session_path)
-    update_session_status(session, "optimizing")
+    enter_optimizing(session)
     write_json(session_path, session)
 
     best_skill_path = ensure_best_skill(session, workspace_path)
@@ -124,8 +163,9 @@ def run_loop(
     best_iteration = session.get("best_iteration")
     no_improvement_count = 0
     exit_reason = "max_iterations"
+    start_iteration, resume_reason = determine_resume_point(session)
 
-    for iteration_number in range(1, max_iterations + 1):
+    for iteration_number in range(start_iteration, max_iterations + 1):
         iteration_dir = workspace_path / "iterations" / ITERATION_NAME_TEMPLATE.format(number=iteration_number)
         candidate_skill_path = iteration_dir / "candidate-skill"
         iteration_dir.mkdir(parents=True, exist_ok=True)
@@ -220,6 +260,7 @@ def run_loop(
         session_iteration["score_summary_path"] = str(score_path.resolve())
         session_iteration["notes_path"] = str(notes_path.resolve())
         session_iteration["promoted"] = promoted
+        session_iteration["report_path"] = str((iteration_dir / "report.html").resolve())
 
         if promoted:
             update_best_skill(best_skill_path, candidate_skill_path)
@@ -243,16 +284,20 @@ def run_loop(
                 break
 
         write_json(session_path, session)
+        write_workspace_reports(workspace_path)
 
     if exit_reason in {"threshold_reached", "converged", "max_iterations", "severe_regression"}:
         update_session_status(session, "completed")
     session["best_iteration"] = best_iteration
     session["best_score"] = best_score
     session["exit_reason"] = exit_reason
+    session["resume_reason"] = resume_reason
     write_json(session_path, session)
+    write_workspace_reports(workspace_path)
     return {
         "status": session["status"],
         "exit_reason": exit_reason,
+        "resume_reason": resume_reason,
         "best_iteration": best_iteration,
         "best_score": best_score,
         "iterations_run": len(session.get("iterations", [])),

@@ -247,11 +247,29 @@ def load_previous_iteration(workspace: Path) -> dict[str, dict]:
     return result
 
 
+def load_session_summary(workspace: Path) -> dict[str, object]:
+    """Load a compact improvement-session summary for the review header."""
+    session_path = workspace / "improvement-session.json"
+    if not session_path.exists():
+        return {}
+    try:
+        session = json.loads(session_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {
+        "status": session.get("status"),
+        "best_iteration": session.get("best_iteration"),
+        "iteration_count": len(session.get("iterations", [])),
+        "exit_reason": session.get("exit_reason"),
+    }
+
+
 def generate_html(
     runs: list[dict],
     skill_name: str,
     previous: dict[str, dict] | None = None,
     benchmark: dict | None = None,
+    session_summary: dict[str, object] | None = None,
 ) -> str:
     """Generate the complete standalone HTML page with embedded data."""
     template_path = Path(__file__).parent / "viewer.html"
@@ -272,6 +290,7 @@ def generate_html(
         "runs": runs,
         "previous_feedback": previous_feedback,
         "previous_outputs": previous_outputs,
+        "session_summary": session_summary or {},
     }
     if benchmark:
         embedded["benchmark"] = benchmark
@@ -339,7 +358,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     benchmark = json.loads(self.benchmark_path.read_text())
                 except (json.JSONDecodeError, OSError):
                     pass
-            html = generate_html(runs, self.skill_name, self.previous, benchmark)
+            html = generate_html(runs, self.skill_name, self.previous, benchmark, load_session_summary(self.workspace))
             content = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -429,7 +448,7 @@ def main() -> None:
             pass
 
     if args.static:
-        html = generate_html(runs, skill_name, previous, benchmark)
+        html = generate_html(runs, skill_name, previous, benchmark, load_session_summary(workspace))
         args.static.parent.mkdir(parents=True, exist_ok=True)
         args.static.write_text(html)
         print(f"\n  Static viewer written to: {args.static}\n")

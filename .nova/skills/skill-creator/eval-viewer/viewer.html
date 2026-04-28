@@ -62,6 +62,11 @@
       opacity: 0.8;
       text-align: right;
     }
+    .header .session-summary {
+      font-size: 0.8rem;
+      opacity: 0.85;
+      margin-top: 0.25rem;
+    }
 
     /* ---- Main content ---- */
     .main {
@@ -546,6 +551,7 @@
       <div>
         <h1>Eval Review: <span id="skill-name"></span></h1>
         <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+        <div class="session-summary" id="session-summary"></div>
       </div>
       <div class="progress" id="progress"></div>
     </div>
@@ -672,6 +678,17 @@
       }
 
       document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      const sessionSummary = EMBEDDED_DATA.session_summary || {};
+      const summaryParts = [];
+      if (sessionSummary.status) summaryParts.push(`status: ${sessionSummary.status}`);
+      if (sessionSummary.best_iteration !== null && sessionSummary.best_iteration !== undefined) {
+        summaryParts.push(`best iteration: ${sessionSummary.best_iteration}`);
+      }
+      if (sessionSummary.iteration_count !== null && sessionSummary.iteration_count !== undefined) {
+        summaryParts.push(`iterations: ${sessionSummary.iteration_count}`);
+      }
+      if (sessionSummary.exit_reason) summaryParts.push(`exit: ${sessionSummary.exit_reason}`);
+      document.getElementById("session-summary").textContent = summaryParts.join(" · ");
       showRun(0);
 
       // Wire up feedback auto-save

@@ -143,7 +143,7 @@ impl Tool for AgentTool {
                 min_recent_messages: self.config.gateway.trimmer.min_recent_messages,
                 enable_summary: false,
             },
-            workspace: self.config.workspace.clone(),
+            config_dir: self.config.config_dir.clone(),
             prompts_dir: self.config.prompts_dir(),
             project_context_file: self.config.project_context_file(),
             initial_env_snapshot: context.as_ref().and_then(|ctx| ctx.environment.clone()),

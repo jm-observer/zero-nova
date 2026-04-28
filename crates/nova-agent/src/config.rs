@@ -21,7 +21,7 @@ pub struct OriginAppConfig {
     pub gateway: GatewayConfig,
     #[serde(default)]
     pub voice: VoiceConfig,
-    /// Path to the configuration file relative to workspace. When None, defaults to `config.toml`.
+    /// Path to the configuration file relative to config_dir. When None, defaults to `config.toml`.
     #[serde(default)]
     pub config_path: Option<String>,
 }
@@ -40,8 +40,9 @@ pub struct AppConfig {
     pub gateway: GatewayConfig,
     #[serde(default)]
     pub voice: VoiceConfig,
-    pub workspace: PathBuf,
-    /// Path to the configuration file relative to workspace. When None, defaults to `config.toml`.
+    #[serde(alias = "workspace")]
+    pub config_dir: PathBuf,
+    /// Path to the configuration file relative to config_dir. When None, defaults to `config.toml`.
     pub config_path: Option<String>,
 }
 
@@ -171,7 +172,7 @@ pub struct ToolConfig {
     #[serde(default)]
     pub bash: BashConfig,
     pub skills_dir: Option<String>,
-    /// Prompts directory for agent template files. When None, defaults to `{workspace}/prompts`.
+    /// Prompts directory for agent template files. When None, defaults to `{config_dir}/prompts`.
     #[serde(default)]
     pub prompts_dir: Option<String>,
     /// 项目上下文文件路径。为空时按默认候选文件自动查找。
@@ -330,7 +331,7 @@ impl Default for GatewayConfig {
 }
 
 impl AppConfig {
-    pub fn from_origin(origin: OriginAppConfig, workspace: PathBuf) -> Self {
+    pub fn from_origin(origin: OriginAppConfig, config_dir: PathBuf) -> Self {
         Self {
             provider: origin.provider,
             llm: origin.llm,
@@ -338,26 +339,27 @@ impl AppConfig {
             tool: origin.tool,
             gateway: origin.gateway,
             voice: origin.voice,
-            workspace,
+            config_dir,
             config_path: origin.config_path,
         }
     }
 
-    /// Return the skills directory. Defaults to `{workspace}/.nova/skills`.
+    /// Return the skills directory. Defaults to `{config_dir}/skills`.
     pub fn skills_dir(&self) -> PathBuf {
-        self.workspace.join(self.tool.skills_dir.as_deref().unwrap_or("skills"))
+        self.config_dir
+            .join(self.tool.skills_dir.as_deref().unwrap_or("skills"))
     }
 
     /// Return the data directory for application runtime data.
-    /// Defaults to `{workspace}/.nova/data`.
+    /// Defaults to `{config_dir}/data`.
     pub fn data_dir_path(&self) -> PathBuf {
-        self.workspace.join("data")
+        self.config_dir.join("data")
     }
 
     /// Return the prompts directory for agent template files.
-    /// Defaults to `{workspace}/prompts`.
+    /// Defaults to `{config_dir}/prompts`.
     pub fn prompts_dir(&self) -> PathBuf {
-        self.workspace
+        self.config_dir
             .join(self.tool.prompts_dir.as_deref().unwrap_or("prompts"))
     }
 
@@ -368,13 +370,13 @@ impl AppConfig {
             if path.is_absolute() {
                 path
             } else {
-                self.workspace.join(path)
+                self.config_dir.join(path)
             }
         })
     }
 
     /// Return the path to the configuration file.
-    /// Defaults to `{workspace}/config.toml`.
+    /// Defaults to `{config_dir}/config.toml`.
     pub fn config_path(&self) -> PathBuf {
         match &self.config_path {
             Some(path) => {
@@ -382,10 +384,10 @@ impl AppConfig {
                 if path.is_absolute() {
                     path
                 } else {
-                    self.workspace.join(path)
+                    self.config_dir.join(path)
                 }
             }
-            None => self.workspace.join("config.toml"),
+            None => self.config_dir.join("config.toml"),
         }
     }
 }

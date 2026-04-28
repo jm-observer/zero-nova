@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
     let client = OpenAiCompatClient::new(config.provider.api_key.clone(), config.provider.base_url.clone());
 
     let env_snapshot = {
-        let mut snapshot = EnvironmentSnapshot::collect().await;
+        let mut snapshot = EnvironmentSnapshot::collect(&config.config_dir).await;
         snapshot.model_id = Some(config.llm.model_config.model.clone());
         snapshot
     };
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
             min_recent_messages: config.gateway.trimmer.min_recent_messages,
             enable_summary: false,
         },
-        workspace: config.workspace.clone(),
+        config_dir: config.config_dir.clone(),
         prompts_dir: config.prompts_dir(),
         project_context_file: config.project_context_file(),
         initial_env_snapshot: Some(env_snapshot),
@@ -426,7 +426,7 @@ fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
         if candidates.is_empty() {
             println!(
                 "  (none loaded) Add a skill under `{}` with `SKILL.md` or `skill.toml`.",
-                agent.config.workspace.join("skills").display()
+                agent.config.config_dir.join("skills").display()
             );
             return;
         }

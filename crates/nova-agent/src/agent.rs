@@ -52,8 +52,8 @@ pub struct AgentConfig {
     pub use_turn_context: bool,
     /// 历史裁剪配置
     pub trimmer: TrimmerConfig,
-    /// 工作区路径
-    pub workspace: PathBuf,
+    /// 配置目录路径
+    pub config_dir: PathBuf,
     /// 提示词目录 (AppConfig::prompts_dir)
     pub prompts_dir: PathBuf,
     /// 项目上下文文件路径

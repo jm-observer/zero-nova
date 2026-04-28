@@ -178,8 +178,8 @@ impl TemplateContext {
 /// 运行时环境快照，在会话创建时采集一次。
 #[derive(Debug, Clone, Default)]
 pub struct EnvironmentSnapshot {
-    /// 当前工作目录
-    pub working_directory: String,
+    /// 配置目录
+    pub config_dir: String,
     /// 操作系统平台
     pub platform: String,
     /// Shell 类型
@@ -201,10 +201,9 @@ impl EnvironmentSnapshot {
     ///
     /// git 命令失败时（非 git 目录或无 git 可执行文件）静默跳过，
     /// 确保在任何环境下都能正常工作。
-    pub async fn collect() -> Self {
-        let working_directory = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
+    pub async fn collect(config_dir: &Path) -> Self {
+        let config_dir_path = config_dir;
+        let config_dir = config_dir_path.to_string_lossy().to_string();
 
         let platform = std::env::consts::OS.to_string();
 
@@ -212,9 +211,9 @@ impl EnvironmentSnapshot {
             .or_else(|_| std::env::var("COMSPEC"))
             .unwrap_or_else(|_| "unknown".to_string());
 
-        let git_branch = Self::run_git(&["rev-parse", "--abbrev-ref", "HEAD"]).await;
+        let git_branch = Self::run_git(config_dir_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
 
-        let git_status_summary = Self::run_git(&["status", "--short"]).await.map(|s| {
+        let git_status_summary = Self::run_git(config_dir_path, &["status", "--short"]).await.map(|s| {
             let count = s.lines().filter(|l| !l.is_empty()).count();
             if count == 0 {
                 "clean".to_string()
@@ -223,12 +222,12 @@ impl EnvironmentSnapshot {
             }
         });
 
-        let recent_commits = Self::run_git(&["log", "--oneline", "-5"]).await;
+        let recent_commits = Self::run_git(config_dir_path, &["log", "--oneline", "-5"]).await;
 
         let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         Self {
-            working_directory,
+            config_dir,
             platform,
             shell,
             git_branch,
@@ -241,9 +240,10 @@ impl EnvironmentSnapshot {
 
     /// 运行 git 命令并返回 stdout 输出。
     /// 失败时返回 None（不报错）。
-    async fn run_git(args: &[&str]) -> Option<String> {
+    async fn run_git(config_dir: &Path, args: &[&str]) -> Option<String> {
         let result = tokio::process::Command::new("git")
             .args(args)
+            .current_dir(config_dir)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .output()
@@ -265,7 +265,7 @@ impl EnvironmentSnapshot {
     /// 生成 prompt section 文本。
     pub fn to_prompt_text(&self) -> String {
         let mut lines = vec![
-            format!("Working directory: {}", self.working_directory),
+            format!("Config directory: {}", self.config_dir),
             format!("Platform: {}", self.platform),
             format!("Shell: {}", self.shell),
             format!("Date: {}", self.current_date),
@@ -1333,7 +1333,7 @@ mod tests {
     #[test]
     fn env_snapshot_to_prompt_includes_cwd() {
         let snapshot = EnvironmentSnapshot {
-            working_directory: "D:/workspace".to_string(),
+            config_dir: "D:/workspace".to_string(),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: None,
@@ -1344,14 +1344,14 @@ mod tests {
         };
 
         let prompt = snapshot.to_prompt_text();
-        assert!(prompt.contains("Working directory: D:/workspace"));
+        assert!(prompt.contains("Config directory: D:/workspace"));
         assert!(prompt.contains("Date: 2026-04-26"));
     }
 
     #[test]
     fn env_snapshot_to_prompt_optional_git() {
         let snapshot = EnvironmentSnapshot {
-            working_directory: "D:/workspace".to_string(),
+            config_dir: "D:/workspace".to_string(),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: Some("main".to_string()),
@@ -1369,7 +1369,7 @@ mod tests {
     #[test]
     fn env_snapshot_to_prompt_with_commits() {
         let snapshot = EnvironmentSnapshot {
-            working_directory: "D:/workspace".to_string(),
+            config_dir: "D:/workspace".to_string(),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: None,

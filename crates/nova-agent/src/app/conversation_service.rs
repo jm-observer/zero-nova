@@ -193,7 +193,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         if use_turn_context {
             // 预加载项目上下文（R2 修复）
             let project_context = load_project_context_with_config_async(
-                &self.agent.config.workspace,
+                &self.agent.config.config_dir,
                 self.agent.config.project_context_file.as_deref(),
             )
             .await;
@@ -202,7 +202,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             let mut prompt_config = PromptConfig::new(
                 agent_descriptor.id.clone(),
                 agent_descriptor.system_prompt_base.clone(),
-                self.agent.config.workspace.clone(),
+                self.agent.config.config_dir.clone(),
             )
             .with_project_context_path_opt(self.agent.config.project_context_file.clone())
             .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))

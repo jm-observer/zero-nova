@@ -46,7 +46,10 @@ pub struct AppConfig {
 /// config.toml 中的配置
 #[derive(Deserialize)]
 struct TomlConfig {
+    #[serde(default)]
     remote: RemoteConfig,
+    #[serde(default)]
+    gateway: GatewayConfig,
     sidecar: SidecarConfig,
 }
 
@@ -55,6 +58,11 @@ struct RemoteConfig {
     host: Option<String>,
     port: Option<u16>,
     token: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct GatewayConfig {
+    port: Option<u16>,
 }
 
 /// 加载配置
@@ -82,11 +90,22 @@ pub fn load_config(_app: &tauri::AppHandle) -> anyhow::Result<AppConfig> {
     let toml_config: TomlConfig = toml::from_str(&content)?;
 
     let remote = toml_config.remote;
+    let gateway = toml_config.gateway;
     let sidecar = toml_config.sidecar;
+    let remote_port = remote.port.unwrap_or(18801);
+    if let Some(gateway_port) = gateway.port {
+        if gateway_port != remote_port {
+            log::warn!(
+                "gateway.port ({}) differs from remote.port ({}). DeskApp will use remote.port for connection defaults.",
+                gateway_port,
+                remote_port
+            );
+        }
+    }
 
     Ok(AppConfig {
         host: remote.host.unwrap_or_else(|| "localhost".to_string()),
-        port: remote.port.unwrap_or(18801),
+        port: remote_port,
         token: remote.token,
         config_dir: final_config_path
             .parent()

@@ -10,11 +10,11 @@ use tokio::time::sleep;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    #[arg(long, default_value = "127.0.0.1")]
-    pub host: String,
+    #[arg(long)]
+    pub host: Option<String>,
 
-    #[arg(long, default_value_t = 18801)]
-    pub port: u16,
+    #[arg(long)]
+    pub port: Option<u16>,
 
     #[arg(long)]
     pub model: Option<String>,
@@ -56,20 +56,23 @@ async fn main() -> anyhow::Result<()> {
     if let Some(ref url) = args.base_url {
         origin_config.provider.base_url = url.clone();
     }
-    origin_config.gateway.host = args.host.clone();
-    origin_config.gateway.port = args.port;
+    if let Some(host) = &args.host {
+        origin_config.gateway.host = host.clone();
+    }
+    if let Some(port) = args.port {
+        origin_config.gateway.port = port;
+    }
 
     let final_config = AppConfig::from_origin(origin_config.clone(), workspace.clone());
 
     log::info!("Starting Nova Gateway WS with config: {:?}", final_config);
 
+    let addr = format!("{}:{}", final_config.gateway.host, final_config.gateway.port);
     let client = OpenAiCompatClient::new(
         final_config.provider.api_key.clone(),
         final_config.provider.base_url.clone(),
     );
     let app = build_application(final_config, client).await?;
-
-    let addr = format!("{}:{}", args.host, args.port);
 
     tokio::select! {
         res = nova_server_ws::run_server(&addr, app) => {

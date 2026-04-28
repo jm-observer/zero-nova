@@ -1,7 +1,9 @@
 use crate::agent_catalog::ModelConfig as AgentModelConfig;
 use crate::provider::ModelConfig;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -384,15 +386,327 @@ impl AppConfig {
 impl OriginAppConfig {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let content = fs::read_to_string(path)?;
-        let config: OriginAppConfig = toml::from_str(&content)?;
+        let raw_config: RawAppConfig = toml::from_str(&content)?;
+        let (mut config, warnings) = raw_config.migrate();
+        config.apply_env_overrides();
+        config.validate()?;
+        for warning in warnings {
+            log::warn!("{}", warning);
+        }
         Ok(config)
     }
+
+    fn apply_env_overrides(&mut self) {
+        if let Ok(api_key) = env::var("NOVA_API_KEY") {
+            if !api_key.is_empty() {
+                self.provider.api_key = api_key;
+            }
+        }
+        if let Ok(tavily_api_key) = env::var("TAVILY_API_KEY") {
+            if !tavily_api_key.is_empty() {
+                self.search.tavily_api_key = Some(tavily_api_key);
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.gateway.agents.is_empty() {
+            bail!("gateway.agents cannot be empty");
+        }
+        let mut ids = HashSet::new();
+        for agent in &self.gateway.agents {
+            if !ids.insert(agent.id.clone()) {
+                bail!("duplicate agent id found: {}", agent.id);
+            }
+            if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
+                bail!("agent '{}' cannot set both prompt_file and prompt_inline", agent.id);
+            }
+        }
+
+        if !matches!(
+            self.gateway.skill_history_strategy.as_str(),
+            "global" | "per_skill" | "segments"
+        ) {
+            bail!(
+                "gateway.skill_history_strategy must be one of: global, per_skill, segments; got '{}'",
+                self.gateway.skill_history_strategy
+            );
+        }
+
+        if self.llm.model_config.thinking_budget.is_some() && self.llm.model_config.reasoning_effort.is_some() {
+            bail!("llm.thinking_budget and llm.reasoning_effort cannot both be set");
+        }
+
+        if self.search.backend.as_deref() == Some("tavily")
+            && self
+                .search
+                .tavily_api_key
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .is_empty()
+        {
+            bail!("search.backend is tavily but tavily_api_key is missing (or TAVILY_API_KEY is not set)");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawAppConfig {
+    #[serde(default)]
+    provider: Option<ProviderConfig>,
+    #[serde(default)]
+    llm: Option<RawLlmConfig>,
+    #[serde(default)]
+    search: SearchConfig,
+    #[serde(default)]
+    tool: ToolConfig,
+    #[serde(default)]
+    gateway: RawGatewayConfig,
+    #[serde(default)]
+    voice: VoiceConfig,
+    #[serde(default)]
+    config_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawLlmConfig {
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    base_url: Option<String>,
+    #[serde(flatten)]
+    model_config: RawModelConfig,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawModelConfig {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+    #[serde(default)]
+    temperature: Option<f64>,
+    #[serde(default)]
+    top_p: Option<f64>,
+    #[serde(default)]
+    thinking_budget: Option<u32>,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawGatewayConfig {
+    #[serde(default = "default_host")]
+    host: String,
+    #[serde(default = "default_port")]
+    port: u16,
+    #[serde(default = "default_max_iterations")]
+    max_iterations: usize,
+    #[serde(default)]
+    tool_timeout_secs: Option<u64>,
+    #[serde(default = "default_subagent_timeout")]
+    subagent_timeout_secs: u64,
+    #[serde(default = "default_max_tokens")]
+    max_tokens: usize,
+    #[serde(default)]
+    agents: Vec<RawAgentSpec>,
+    #[serde(default)]
+    skill_routing_enabled: bool,
+    #[serde(default = "default_skill_history_strategy")]
+    skill_history_strategy: String,
+    #[serde(default)]
+    use_turn_context: bool,
+    #[serde(default)]
+    trimmer: RawTrimmerConfigToml,
+    #[serde(default)]
+    side_channel: SideChannelConfigToml,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+struct RawAgentSpec {
+    id: String,
+    display_name: String,
+    description: String,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    prompt_file: Option<String>,
+    #[serde(default)]
+    prompt_inline: Option<String>,
+    #[serde(default)]
+    system_prompt_template: Option<String>,
+    #[serde(default)]
+    tool_whitelist: Option<Vec<String>>,
+    #[serde(default)]
+    model_config: Option<AgentModelConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+struct RawTrimmerConfigToml {
+    #[serde(default = "default_trimmer_enabled")]
+    enabled: bool,
+    #[serde(default = "default_context_window")]
+    context_window: usize,
+    #[serde(default = "default_output_reserve")]
+    output_reserve: usize,
+    #[serde(default = "default_min_recent")]
+    min_recent_messages: usize,
+    #[serde(default)]
+    max_history_tokens: Option<usize>,
+    #[serde(default)]
+    preserve_recent: Option<usize>,
+    #[serde(default)]
+    preserve_tool_pairs: Option<bool>,
+}
+
+impl RawAppConfig {
+    fn migrate(self) -> (OriginAppConfig, Vec<String>) {
+        let mut warnings = Vec::new();
+
+        let mut provider = self.provider.unwrap_or_default();
+        let default_model = LlmConfig::default().model_config;
+        let mut llm = LlmConfig {
+            model_config: default_model.clone(),
+        };
+        if let Some(raw_llm) = self.llm {
+            llm.model_config.model = raw_llm.model_config.model.unwrap_or(default_model.model);
+            llm.model_config.max_tokens = raw_llm.model_config.max_tokens.unwrap_or(default_model.max_tokens);
+            llm.model_config.temperature = raw_llm.model_config.temperature;
+            llm.model_config.top_p = raw_llm.model_config.top_p;
+            llm.model_config.thinking_budget = raw_llm.model_config.thinking_budget;
+            llm.model_config.reasoning_effort = raw_llm.model_config.reasoning_effort;
+
+            if !raw_llm.api_key.as_deref().unwrap_or_default().is_empty() {
+                if provider.api_key.is_empty() {
+                    provider.api_key = raw_llm.api_key.unwrap_or_default();
+                    warnings.push("Detected deprecated field llm.api_key; migrated to provider.api_key.".to_string());
+                } else {
+                    warnings.push(
+                        "Both provider.api_key and deprecated llm.api_key exist; using provider.api_key.".to_string(),
+                    );
+                }
+            }
+            if let Some(legacy_base_url) = raw_llm.base_url {
+                if provider.base_url == default_base_url() {
+                    provider.base_url = legacy_base_url;
+                    warnings.push("Detected deprecated field llm.base_url; migrated to provider.base_url.".to_string());
+                } else {
+                    warnings.push(
+                        "Both provider.base_url and deprecated llm.base_url exist; using provider.base_url."
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        if llm.model_config.thinking_budget.is_some() && llm.model_config.reasoning_effort.is_some() {
+            llm.model_config.reasoning_effort = None;
+            warnings.push(
+                "Both llm.thinking_budget and llm.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort."
+                    .to_string(),
+            );
+        }
+
+        let mut migrated_agents = Vec::with_capacity(self.gateway.agents.len());
+        for mut agent in self.gateway.agents {
+            if agent.prompt_file.is_none() && agent.prompt_inline.is_none() {
+                if let Some(legacy_prompt) = agent.system_prompt_template.take() {
+                    if looks_like_prompt_file(&legacy_prompt) {
+                        agent.prompt_file = Some(legacy_prompt);
+                        warnings.push(format!(
+                            "Agent '{}' uses deprecated system_prompt_template; migrated to prompt_file.",
+                            agent.id
+                        ));
+                    } else {
+                        agent.prompt_inline = Some(legacy_prompt);
+                        warnings.push(format!(
+                            "Agent '{}' uses deprecated system_prompt_template; migrated to prompt_inline.",
+                            agent.id
+                        ));
+                    }
+                }
+            }
+            migrated_agents.push(AgentSpec {
+                id: agent.id,
+                display_name: agent.display_name,
+                description: agent.description,
+                aliases: agent.aliases,
+                prompt_file: agent.prompt_file,
+                prompt_inline: agent.prompt_inline,
+                system_prompt_template: None,
+                tool_whitelist: agent.tool_whitelist,
+                model_config: agent.model_config,
+            });
+        }
+
+        let mut trimmer = TrimmerConfigToml {
+            enabled: self.gateway.trimmer.enabled,
+            context_window: self.gateway.trimmer.context_window,
+            output_reserve: self.gateway.trimmer.output_reserve,
+            min_recent_messages: self.gateway.trimmer.min_recent_messages,
+        };
+        if let Some(max_history_tokens) = self.gateway.trimmer.max_history_tokens {
+            trimmer.enabled = true;
+            trimmer.context_window = max_history_tokens + trimmer.output_reserve;
+            warnings.push(
+                "Detected deprecated gateway.trimmer.max_history_tokens; migrated to context_window + output_reserve."
+                    .to_string(),
+            );
+        }
+        if let Some(preserve_recent) = self.gateway.trimmer.preserve_recent {
+            trimmer.min_recent_messages = preserve_recent;
+            warnings.push(
+                "Detected deprecated gateway.trimmer.preserve_recent; migrated to min_recent_messages.".to_string(),
+            );
+        }
+        if self.gateway.trimmer.preserve_tool_pairs.is_some() {
+            warnings.push(
+                "gateway.trimmer.preserve_tool_pairs is deprecated and currently not implemented; this field is ignored."
+                    .to_string(),
+            );
+        }
+
+        (
+            OriginAppConfig {
+                provider,
+                llm,
+                search: self.search,
+                tool: self.tool,
+                gateway: GatewayConfig {
+                    host: self.gateway.host,
+                    port: self.gateway.port,
+                    max_iterations: self.gateway.max_iterations,
+                    tool_timeout_secs: self.gateway.tool_timeout_secs,
+                    subagent_timeout_secs: self.gateway.subagent_timeout_secs,
+                    max_tokens: self.gateway.max_tokens,
+                    agents: migrated_agents,
+                    skill_routing_enabled: self.gateway.skill_routing_enabled,
+                    skill_history_strategy: self.gateway.skill_history_strategy,
+                    use_turn_context: self.gateway.use_turn_context,
+                    trimmer,
+                    side_channel: self.gateway.side_channel,
+                },
+                voice: self.voice,
+                config_path: self.config_path,
+            },
+            warnings,
+        )
+    }
+}
+
+fn looks_like_prompt_file(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.ends_with(".md") || trimmed.ends_with(".txt") || trimmed.contains('/') || trimmed.contains('\\')
 }
 
 #[cfg(test)]
 mod tests {
     use super::{AppConfig, OriginAppConfig};
+    use anyhow::Result;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn skills_dir_defaults_to_workspace_nova_skills() {
@@ -475,5 +789,69 @@ mod tests {
         origin.config_path = Some("D:/etc/app.toml".to_string());
         let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
         assert_eq!(config.config_path(), PathBuf::from("D:/etc/app.toml"));
+    }
+
+    #[test]
+    fn legacy_llm_api_key_is_migrated_to_provider() -> Result<()> {
+        let raw = r#"
+[llm]
+api_key = "legacy-key"
+model = "gpt-oss-120b"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+"#;
+        let file = write_temp_config(raw)?;
+        let config = OriginAppConfig::load_from_file(&file)?;
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(config.provider.api_key, "legacy-key");
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_agent_id_is_rejected() -> Result<()> {
+        let raw = r#"
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova2"
+description = "d2"
+"#;
+        let file = write_temp_config(raw)?;
+        let error = OriginAppConfig::load_from_file(&file).expect_err("should reject duplicate id");
+        let _ = std::fs::remove_file(&file);
+        assert!(error.to_string().contains("duplicate agent id"));
+        Ok(())
+    }
+
+    #[test]
+    fn tavily_backend_without_api_key_is_rejected() -> Result<()> {
+        let raw = r#"
+[search]
+backend = "tavily"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+"#;
+        let file = write_temp_config(raw)?;
+        let error = OriginAppConfig::load_from_file(&file).expect_err("should reject missing tavily key");
+        let _ = std::fs::remove_file(&file);
+        assert!(error.to_string().contains("tavily_api_key"));
+        Ok(())
+    }
+
+    fn write_temp_config(content: &str) -> Result<PathBuf> {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("nova-agent-config-test-{}.toml", nanos));
+        std::fs::write(&path, content)?;
+        Ok(path)
     }
 }

@@ -12,6 +12,7 @@ pub mod prompt;
 pub mod provider;
 pub mod skill;
 pub mod tool;
+pub mod voice;
 
 pub mod app;
 pub mod conversation;

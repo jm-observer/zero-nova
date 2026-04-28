@@ -1,5 +1,6 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
+use super::voice_service::VoiceService;
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
@@ -15,6 +16,8 @@ use crate::skill::SkillRegistry;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::builtin::task::TaskStore;
 use crate::tool::ToolRegistry;
+use crate::voice::mock::{MockSttProvider, MockTtsProvider};
+use crate::voice::openai_compat::{OpenAiCompatSttProvider, OpenAiCompatTtsProvider};
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -146,13 +149,37 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());
     let workspace_service = super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service);
+    let voice_service = build_voice_service(&config);
 
     Ok(Arc::new(AgentApplicationImpl::new(
         conversation_service,
         workspace_service,
         config_arc,
         config_path,
+        voice_service,
     )))
+}
+
+fn build_voice_service(config: &AppConfig) -> VoiceService {
+    let voice_config = config.voice.clone();
+    if voice_config.provider.eq_ignore_ascii_case("mock") {
+        return VoiceService::new(voice_config, Arc::new(MockSttProvider), Arc::new(MockTtsProvider));
+    }
+
+    VoiceService::new(
+        voice_config.clone(),
+        Arc::new(OpenAiCompatSttProvider::new(
+            config.provider.api_key.clone(),
+            config.provider.base_url.clone(),
+            voice_config.stt_model.clone(),
+        )),
+        Arc::new(OpenAiCompatTtsProvider::new(
+            config.provider.api_key.clone(),
+            config.provider.base_url.clone(),
+            voice_config.tts_model.clone(),
+            voice_config.tts_voice.clone(),
+        )),
+    )
 }
 
 async fn load_agent_prompt(agent: &crate::config::AgentSpec, config: &AppConfig) -> Result<String> {

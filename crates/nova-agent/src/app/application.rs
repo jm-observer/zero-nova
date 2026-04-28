@@ -1,5 +1,6 @@
 use super::conversation_service::ConversationService;
 use super::types::{AppAgent, AppEvent, AppMessage, AppSession};
+use super::voice_service::VoiceService;
 use crate::agent::TurnResult;
 use crate::config::AppConfig;
 use crate::message::Role;
@@ -86,6 +87,15 @@ pub trait AgentApplication: Send + Sync {
     async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse>;
     async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse>;
     async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse>;
+    async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse>;
+    async fn voice_transcribe(
+        &self,
+        req: &nova_protocol::voice::VoiceTranscribeRequest,
+    ) -> Result<nova_protocol::voice::VoiceTranscribeResponse>;
+    async fn voice_tts(
+        &self,
+        req: &nova_protocol::voice::VoiceTtsRequest,
+    ) -> Result<nova_protocol::voice::VoiceTtsResponse>;
 }
 
 /// Agent 应用门面实现
@@ -94,6 +104,7 @@ pub struct AgentApplicationImpl<C: LlmClient> {
     workspace_service: super::agent_workspace_service::AgentWorkspaceService,
     config: Arc<RwLock<AppConfig>>,
     config_path: PathBuf,
+    voice_service: VoiceService,
 }
 
 impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
@@ -102,12 +113,14 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         workspace_service: super::agent_workspace_service::AgentWorkspaceService,
         config: Arc<RwLock<AppConfig>>,
         config_path: PathBuf,
+        voice_service: VoiceService,
     ) -> Self {
         Self {
             conversation_service,
             workspace_service,
             config,
             config_path,
+            voice_service,
         }
     }
 }
@@ -434,5 +447,45 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 
     async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse> {
         self.workspace_service.restore_workspace().await
+    }
+
+    async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {
+        let config = self
+            .config
+            .read()
+            .map_err(|_| anyhow!("Application config lock poisoned"))?;
+        Ok(nova_protocol::voice::VoiceCapabilitiesResponse {
+            stt: nova_protocol::voice::VoiceCapabilityStatus {
+                enabled: config.voice.enabled,
+                available: config.voice.enabled,
+            },
+            tts: nova_protocol::voice::VoiceTtsCapabilityStatus {
+                enabled: config.voice.enabled,
+                available: config.voice.enabled,
+                voice: config.voice.tts_voice.clone(),
+                auto_play: config.voice.auto_play,
+            },
+        })
+    }
+
+    async fn voice_transcribe(
+        &self,
+        req: &nova_protocol::voice::VoiceTranscribeRequest,
+    ) -> Result<nova_protocol::voice::VoiceTranscribeResponse> {
+        self.voice_service
+            .transcribe(
+                req.session_id.as_deref(),
+                &req.audio_base64,
+                &req.audio_format,
+                req.language.as_deref(),
+            )
+            .await
+    }
+
+    async fn voice_tts(
+        &self,
+        req: &nova_protocol::voice::VoiceTtsRequest,
+    ) -> Result<nova_protocol::voice::VoiceTtsResponse> {
+        self.voice_service.synthesize(&req.text, req.voice.as_deref()).await
     }
 }

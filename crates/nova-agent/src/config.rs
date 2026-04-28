@@ -63,6 +63,8 @@ pub struct VoiceConfig {
     pub max_input_bytes: usize,
     #[serde(default)]
     pub auto_play: bool,
+    #[serde(default = "default_voice_provider")]
+    pub provider: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -111,6 +113,10 @@ fn default_voice_max_input_bytes() -> usize {
     5 * 1024 * 1024
 }
 
+fn default_voice_provider() -> String {
+    "openai_compat".to_string()
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
@@ -146,6 +152,7 @@ impl Default for VoiceConfig {
             tts_timeout_ms: default_tts_timeout_ms(),
             max_input_bytes: default_voice_max_input_bytes(),
             auto_play: false,
+            provider: default_voice_provider(),
         }
     }
 }

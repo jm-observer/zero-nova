@@ -1,4 +1,4 @@
-use crate::handlers::{agents, chat, config, sessions, system};
+use crate::handlers::{agents, chat, config, sessions, system, voice};
 use channel_core::ResponseSink;
 use log::warn;
 use nova_agent::app::AgentApplication;
@@ -47,6 +47,15 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
         }
         MessageEnvelope::ConfigUpdate(payload) => {
             config::handle_config_update(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::VoiceCapabilitiesGet(_) => {
+            voice::handle_voice_capabilities(app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::VoiceTranscribeRequest(payload) => {
+            voice::handle_voice_transcribe(payload, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::VoiceTtsRequest(payload) => {
+            voice::handle_voice_tts(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::AgentInspect(payload) => {
             agents::handle_agent_inspect(payload, app, outbound_tx, msg_id).await;

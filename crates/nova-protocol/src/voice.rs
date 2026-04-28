@@ -23,6 +23,7 @@ pub enum VoiceErrorCode {
     VoiceDecodeFailed,
     VoiceSttTimeout,
     VoiceSttUnavailable,
+    VoiceRequestInProgress,
     VoiceTtsTimeout,
     VoiceTtsUnavailable,
 }

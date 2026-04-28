@@ -42,8 +42,10 @@ pub async fn build_application<C: LlmClient + 'static>(
     }
     let skill_registry = Arc::new(skill_registry);
 
+    let default_project_dir = std::env::current_dir().context("Failed to get current_dir for default project_dir")?;
+
     // 在 agent 循环之前采集一次环境快照
-    let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &config.config_dir).await;
+    let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &default_project_dir).await;
     let env_snapshot = {
         let mut e = env_snapshot;
         e.model_id = Some(config.llm.model_config.model.clone());
@@ -54,7 +56,7 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     // 预加载项目上下文（R2 修复）
     let project_context =
-        load_project_context_with_config_async(&config.config_dir, config.project_context_file().as_deref()).await;
+        load_project_context_with_config_async(&default_project_dir, config.project_context_file().as_deref()).await;
 
     let tools = ToolRegistry::new();
     // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
@@ -88,7 +90,7 @@ pub async fn build_application<C: LlmClient + 'static>(
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), config.config_dir.clone())
+        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), default_project_dir.clone())
             .with_environment(env_snapshot.clone())
             .with_project_context_path_opt(config.project_context_file())
             .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))

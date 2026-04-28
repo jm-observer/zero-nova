@@ -41,8 +41,8 @@ pub struct PromptConfig {
     pub agent_id: String,
     /// 从文件加载的 agent prompt 内容（已读取为字符串）
     pub agent_prompt: String,
-    /// 工作区路径（用于加载项目上下文文件等）
-    pub workspace_path: PathBuf,
+    /// 项目目录（用于加载项目上下文文件等）
+    pub project_dir: PathBuf,
     /// 当前活跃的 skill id（如果有）
     pub active_skill: Option<String>,
     /// 模板变量键值对（用于替换 {{key}} 占位符）
@@ -58,11 +58,11 @@ pub struct PromptConfig {
 }
 
 impl PromptConfig {
-    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, workspace_path: PathBuf) -> Self {
+    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, project_dir: PathBuf) -> Self {
         Self {
             agent_id: agent_id.into(),
             agent_prompt: agent_prompt.into(),
-            workspace_path,
+            project_dir,
             active_skill: None,
             template_vars: HashMap::new(),
             environment: None,
@@ -301,13 +301,13 @@ impl EnvironmentSnapshot {
 /// 按优先级查找 PROJECT.md → NOVA.md，找到第一个非空文件即返回。
 /// 所有文件都不存在或为空时返回 None。
 /// 异步从工作区加载项目上下文文件（Plan 2 规范建议修复）。
-pub async fn load_project_context_async(workspace: &Path) -> Option<String> {
-    load_project_context_with_config_async(workspace, None).await
+pub async fn load_project_context_async(project_dir: &Path) -> Option<String> {
+    load_project_context_with_config_async(project_dir, None).await
 }
 
 /// 异步从工作区加载项目上下文文件，支持显式路径。
 pub async fn load_project_context_with_config_async(
-    workspace: &Path,
+    project_dir: &Path,
     configured_path: Option<&Path>,
 ) -> Option<String> {
     if let Some(path) = configured_path {
@@ -315,7 +315,7 @@ pub async fn load_project_context_with_config_async(
     }
 
     for filename in PROJECT_CONTEXT_FILES {
-        let path = workspace.join(filename);
+        let path = project_dir.join(filename);
         if let Some(content) = load_single_project_context_async(&path).await {
             return Some(content);
         }
@@ -344,18 +344,18 @@ async fn load_single_project_context_async(path: &Path) -> Option<String> {
     }
 }
 
-pub fn load_project_context(workspace: &Path) -> Option<String> {
-    load_project_context_with_config(workspace, None)
+pub fn load_project_context(project_dir: &Path) -> Option<String> {
+    load_project_context_with_config(project_dir, None)
 }
 
 /// 从工作区加载项目上下文文件，支持显式配置文件路径。
-pub fn load_project_context_with_config(workspace: &Path, configured_path: Option<&Path>) -> Option<String> {
+pub fn load_project_context_with_config(project_dir: &Path, configured_path: Option<&Path>) -> Option<String> {
     if let Some(path) = configured_path {
         return load_single_project_context(path);
     }
 
     for filename in PROJECT_CONTEXT_FILES {
-        let path = workspace.join(filename);
+        let path = project_dir.join(filename);
         if let Some(content) = load_single_project_context(&path) {
             return Some(content);
         }
@@ -681,7 +681,7 @@ impl SystemPromptBuilder {
         if let Some(content) = &config.project_context_content {
             builder = builder.project_context_section(content);
         } else if let Some(content) =
-            load_project_context_with_config(&config.workspace_path, config.project_context_path.as_deref())
+            load_project_context_with_config(&config.project_dir, config.project_context_path.as_deref())
         {
             builder = builder.project_context_section(&content);
         }

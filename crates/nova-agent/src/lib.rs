@@ -8,6 +8,7 @@ pub mod config;
 pub mod event;
 pub mod mcp;
 pub mod message;
+pub mod path_resolver;
 pub mod prompt;
 pub mod provider;
 pub mod skill;

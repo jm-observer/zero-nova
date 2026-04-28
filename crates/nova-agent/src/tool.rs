@@ -1,4 +1,5 @@
 use crate::event::AgentEvent;
+use crate::path_resolver::{resolve_path_ref, PathResolveError};
 use crate::prompt::EnvironmentSnapshot;
 use crate::provider::types::ToolDefinition as ProviderToolDefinition;
 use crate::skill::{CapabilityPolicy, SkillRegistry};
@@ -10,6 +11,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 use serde_json::Value;
+use std::path::Path;
 
 pub mod builtin;
 
@@ -394,7 +396,7 @@ impl ToolRegistry {
     pub async fn execute(
         &self,
         name: &str,
-        input: serde_json::Value,
+        mut input: serde_json::Value,
         context: Option<ToolContext>,
     ) -> anyhow::Result<ToolOutput> {
         if name == builtin::tool_search::TOOL_NAME {
@@ -411,6 +413,12 @@ impl ToolRegistry {
             other => other,
         };
 
+        if matches!(canonical_name, "Read" | "Write" | "Edit") {
+            if let Err(error_output) = preprocess_file_tool_input(canonical_name, &mut input, context.as_ref()) {
+                return Ok(error_output);
+            }
+        }
+
         let tool = self
             .lock_tools()
             .iter()
@@ -425,6 +433,55 @@ impl ToolRegistry {
             content: format!("Tool '{}' not found", canonical_name),
             is_error: true,
         })
+    }
+}
+
+fn preprocess_file_tool_input(
+    tool_name: &str,
+    input: &mut Value,
+    context: Option<&ToolContext>,
+) -> Result<(), ToolOutput> {
+    let raw_path = input
+        .get("file_path")
+        .and_then(Value::as_str)
+        .or_else(|| input.get("path").and_then(Value::as_str))
+        .ok_or_else(|| ToolOutput {
+            content: "Missing 'file_path'".to_string(),
+            is_error: true,
+        })?;
+
+    let Some(ctx) = context else {
+        return Ok(());
+    };
+    let Some(env) = ctx.environment.as_ref() else {
+        return Ok(());
+    };
+
+    let project_dir = Path::new(&env.project_dir);
+    let allowed_root = project_dir;
+
+    let require_exists = !matches!(tool_name, "Write");
+    let resolved =
+        resolve_path_ref(raw_path, project_dir, Some(allowed_root), require_exists).map_err(|err| ToolOutput {
+            content: format_path_resolve_error(tool_name, &err),
+            is_error: true,
+        })?;
+
+    input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
+    Ok(())
+}
+
+fn format_path_resolve_error(tool_name: &str, err: &PathResolveError) -> String {
+    match err {
+        PathResolveError::InvalidPathSyntax { .. } => {
+            format!("{} path resolution failed: {}", tool_name, err)
+        }
+        PathResolveError::PathNotFound { .. } => {
+            format!("{} path resolution failed: {}", tool_name, err)
+        }
+        PathResolveError::PathAccessDenied { .. } => {
+            format!("{} path resolution failed: {}", tool_name, err)
+        }
     }
 }
 

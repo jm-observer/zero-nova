@@ -2,7 +2,7 @@
 
 ## 时间
 - 创建时间：2026-04-28
-- 最后更新：2026-04-28
+- 最后更新：2026-04-28（Plan 4 完成）
 
 ## 项目现状
 - 当前 `nova-agent` 以单一 `workspace` 作为根目录语义。
@@ -28,9 +28,15 @@
 | Plan | 简要描述 | 依赖 | 执行顺序 | 状态 |
 |---|---|---|---|---|
 | Plan 1 | 配置模型重命名与兼容策略（workspace -> config_dir） | 无 | 1 | 已完成 |
-| Plan 2 | 会话态 project_dir 设计与运行中切换机制 | Plan 1 | 2 | 待开始 |
-| Plan 3 | `@` 路径解析器与调用链接入 | Plan 1, Plan 2 | 3 | 待开始 |
-| Plan 4 | 测试、文档迁移与发布策略 | Plan 1, Plan 2, Plan 3 | 4 | 待开始 |
+| Plan 2 | 会话态 project_dir 设计与运行中切换机制 | Plan 1 | 2 | 已完成 |
+| Plan 3 | `@` 路径解析器与调用链接入 | Plan 1, Plan 2 | 3 | 已完成 |
+| Plan 4 | 测试、文档迁移与发布策略 | Plan 1, Plan 2, Plan 3 | 4 | 已完成 |
+
+## 运行示例
+- 运行中切换 `project_dir`：会话默认使用进程 cwd，可通过会话接口切换到任意目录，也可重置回 cwd。
+- `@` 用法示例：
+  - `@src/main.rs`：相对 `project_dir` 解析
+  - `@D:/repo/app/Cargo.toml`（Windows）或 `@/home/user/app/Cargo.toml`（Unix）：按绝对路径解析
 
 ## 范围外事项（后续独立设计）
 - **提示词中的目录认知与 skill 上下文增强**：skills、prompts 目录路径是否需要在提示词中暴露给 LLM，涉及 skill-creator 工具链、动态 skill 发现、提示词模板等，复杂度自成体系，建议新开设计文档。

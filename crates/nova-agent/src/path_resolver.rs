@@ -202,4 +202,27 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn windows_style_relative_path_behavior_is_explicit() {
+        let root = temp_dir("path-resolver-windows-style");
+        let file = root.join("src").join("lib.rs");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "mod a;").unwrap();
+
+        #[cfg(windows)]
+        {
+            let resolved = resolve_path_ref("@src\\lib.rs", &root, None, true).unwrap();
+            assert_eq!(resolved.target_path, file);
+            assert_eq!(resolved.origin, PathRefOrigin::RelativeToProject);
+        }
+
+        #[cfg(not(windows))]
+        {
+            let err = resolve_path_ref("@src\\lib.rs", &root, None, true).unwrap_err();
+            assert!(matches!(err, PathResolveError::PathNotFound { .. }));
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

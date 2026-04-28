@@ -871,6 +871,15 @@ preserve_recent = 5
     }
 
     #[test]
+    fn app_config_accepts_legacy_workspace_field() {
+        let toml = r#"
+workspace = "D:/legacy-workspace"
+"#;
+        let config: AppConfig = toml::from_str(toml).expect("app config should deserialize");
+        assert_eq!(config.config_dir, PathBuf::from("D:/legacy-workspace"));
+    }
+
+    #[test]
     fn legacy_llm_api_key_is_migrated_to_provider() -> Result<()> {
         let raw = r#"
 [llm]

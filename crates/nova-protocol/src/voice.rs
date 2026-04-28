@@ -7,6 +7,40 @@ pub enum VoiceConversationMode {
     Once,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceCapability {
+    Stt,
+    Tts,
+    Transport,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceErrorCode {
+    VoiceInputTooShort,
+    VoiceFormatUnsupported,
+    VoiceDecodeFailed,
+    VoiceSttTimeout,
+    VoiceSttUnavailable,
+    VoiceTtsTimeout,
+    VoiceTtsUnavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceErrorPayload {
+    pub code: VoiceErrorCode,
+    pub message: String,
+    pub capability: VoiceCapability,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VoiceCapabilitiesRequest {}

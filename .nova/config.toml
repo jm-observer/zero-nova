@@ -2,11 +2,11 @@
 # api_key 建议通过环境变量 NOVA_API_KEY 设置，避免明文提交到仓库
 [provider]
 # api_key = ""
-base_url = "http://127.0.0.1:8082/v1"
+base_url = "http://192.168.0.68:8082/v1"
 
 # ── 模型调用参数 ────────────────────────────────────────────────
 [llm]
-model = "gpt-oss-120b"
+model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
 max_tokens = 8192
 temperature = 0.7
 
@@ -14,7 +14,7 @@ temperature = 0.7
 # tavily_api_key 建议通过环境变量 TAVILY_API_KEY 设置
 [search]
 backend = "tavily"
-# tavily_api_key = ""
+tavily_api_key = "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"
 
 # ── 工具与能力 ──────────────────────────────────────────────────
 [tool]

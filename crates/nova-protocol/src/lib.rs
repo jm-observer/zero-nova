@@ -21,6 +21,7 @@ mod tests {
     use crate::chat::*;
     use crate::envelope::*;
     use crate::system::*;
+    use crate::voice::*;
     use serde_json::{from_str, to_string};
 
     #[test]
@@ -111,5 +112,22 @@ mod tests {
 
         let json = to_string(&task_payload).unwrap();
         let _restored: TaskStatusChangedPayload = from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_voice_error_envelope() {
+        let payload = VoiceErrorPayload {
+            code: VoiceErrorCode::VoiceSttTimeout,
+            message: "stt request timed out".to_string(),
+            capability: VoiceCapability::Stt,
+            request_id: Some("req-1".to_string()),
+            session_id: Some("session-1".to_string()),
+            turn_id: Some("turn-1".to_string()),
+        };
+        let msg = GatewayMessage::new_event(MessageEnvelope::VoiceError(payload));
+        let json = to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"voice.error\""));
+        assert!(json.contains("\"code\":\"voice_stt_timeout\""));
+        assert!(json.contains("\"capability\":\"stt\""));
     }
 }

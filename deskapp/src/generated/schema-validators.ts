@@ -1018,6 +1018,14 @@ const GatewayMessageGeneratedSchema = {
         "status": {
           "type": "string"
         },
+        "toolCallCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "turnId": {
           "type": "string"
         },
@@ -1903,6 +1911,265 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
+    "VoiceCapabilitiesRequest": {
+      "type": "object"
+    },
+    "VoiceCapabilitiesResponse": {
+      "properties": {
+        "stt": {
+          "$ref": "#/definitions/VoiceCapabilityStatus"
+        },
+        "tts": {
+          "$ref": "#/definitions/VoiceTtsCapabilityStatus"
+        }
+      },
+      "required": [
+        "stt",
+        "tts"
+      ],
+      "type": "object"
+    },
+    "VoiceCapability": {
+      "enum": [
+        "stt",
+        "tts",
+        "transport"
+      ],
+      "type": "string"
+    },
+    "VoiceCapabilityStatus": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "available",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "VoiceConversationMode": {
+      "enum": [
+        "once"
+      ],
+      "type": "string"
+    },
+    "VoiceErrorCode": {
+      "enum": [
+        "voice_input_too_short",
+        "voice_format_unsupported",
+        "voice_decode_failed",
+        "voice_stt_timeout",
+        "voice_stt_unavailable",
+        "voice_tts_timeout",
+        "voice_tts_unavailable"
+      ],
+      "type": "string"
+    },
+    "VoiceErrorPayload": {
+      "properties": {
+        "capability": {
+          "$ref": "#/definitions/VoiceCapability"
+        },
+        "code": {
+          "$ref": "#/definitions/VoiceErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "capability",
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "VoiceSegment": {
+      "properties": {
+        "endMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "endMs",
+        "startMs",
+        "text"
+      ],
+      "type": "object"
+    },
+    "VoiceTranscribeRequest": {
+      "properties": {
+        "audioBase64": {
+          "type": "string"
+        },
+        "audioFormat": {
+          "type": "string"
+        },
+        "channelCount": {
+          "format": "uint16",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/VoiceConversationMode"
+        },
+        "sampleRate": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "audioBase64",
+        "audioFormat",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "VoiceTranscribeResponse": {
+      "properties": {
+        "confidence": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/definitions/VoiceSegment"
+          },
+          "type": "array"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "VoiceTtsCapabilityStatus": {
+      "properties": {
+        "autoPlay": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "voice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "autoPlay",
+        "available",
+        "enabled",
+        "voice"
+      ],
+      "type": "object"
+    },
+    "VoiceTtsRequest": {
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "voice": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "VoiceTtsResponse": {
+      "properties": {
+        "audioBase64": {
+          "type": "string"
+        },
+        "audioFormat": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "audioBase64",
+        "audioFormat"
+      ],
+      "type": "object"
+    },
     "WelcomePayload": {
       "properties": {
         "requireAuth": {
@@ -2452,6 +2719,132 @@ const GatewayMessageGeneratedSchema = {
         "type": {
           "enum": [
             "config.update.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceCapabilitiesRequest"
+        },
+        "type": {
+          "enum": [
+            "voice.capabilities.get"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceCapabilitiesResponse"
+        },
+        "type": {
+          "enum": [
+            "voice.capabilities.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceTranscribeRequest"
+        },
+        "type": {
+          "enum": [
+            "voice.transcribe.request"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceTranscribeResponse"
+        },
+        "type": {
+          "enum": [
+            "voice.transcribe.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceTtsRequest"
+        },
+        "type": {
+          "enum": [
+            "voice.tts.request"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceTtsResponse"
+        },
+        "type": {
+          "enum": [
+            "voice.tts.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/VoiceErrorPayload"
+        },
+        "type": {
+          "enum": [
+            "voice.error"
           ],
           "type": "string"
         }

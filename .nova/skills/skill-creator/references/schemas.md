@@ -4,6 +4,62 @@ This document defines the JSON schemas used by skill-creator.
 
 ---
 
+## improvement-session.json
+
+Tracks a resumable skill-improvement session. Located at `<workspace>/improvement-session.json`.
+
+```json
+{
+  "session_id": "pdf-helper-20260428T101500Z",
+  "target_skill_path": "/repo/.nova/skills/pdf-helper",
+  "target_skill_name": "pdf-helper",
+  "workspace_path": "/repo/.nova/skills/pdf-helper-improvement-workspace",
+  "snapshot_path": "/repo/.nova/skills/pdf-helper-improvement-workspace/skill-snapshot",
+  "status": "evaluating",
+  "baseline_result_path": "/repo/.nova/skills/pdf-helper-improvement-workspace/baseline-result.json",
+  "best_iteration": 1,
+  "best_score": 0.82,
+  "iterations": [
+    {
+      "iteration": 1,
+      "eval_type": "trigger_evals",
+      "result_path": "/repo/.nova/skills/pdf-helper-improvement-workspace/iteration-1/results.json",
+      "score": 0.82,
+      "status": "completed"
+    }
+  ],
+  "created_at": "2026-04-28T10:15:00Z",
+  "updated_at": "2026-04-28T10:30:00Z"
+}
+```
+
+**Fields:**
+- `session_id`: Stable session identifier for the improvement run
+- `target_skill_path`: Canonical absolute path to the skill being improved
+- `target_skill_name`: Skill name from `SKILL.md` frontmatter
+- `workspace_path`: Canonical workspace root for this session
+- `snapshot_path`: Baseline snapshot directory for the pre-edit skill
+- `status`: One of `initialized`, `evaluating`, `optimizing`, `paused`, `completed`, `failed`
+- `baseline_result_path`: Path to the baseline eval summary used for comparison
+- `best_iteration`: Best-performing iteration number, or `null` before any iteration wins
+- `best_score`: Best score observed so far, or `null` before scoring completes
+- `iterations[]`: Per-iteration summary records written by evaluation/optimization scripts
+- `created_at` / `updated_at`: UTC ISO 8601 timestamps for creation and the latest persisted state
+
+**Status transitions:**
+- `initialized` -> `evaluating` or `failed`
+- `evaluating` -> `optimizing`, `paused`, or `failed`
+- `optimizing` -> `optimizing`, `completed`, or `failed`
+- `paused` -> `evaluating` or `failed`
+
+Any unexpected exit should persist the latest `status` and refresh `updated_at` before terminating so the workflow can resume safely.
+
+**Eval types:**
+- `trigger_evals`: Verify whether the skill should trigger and whether triggering remains stable across paraphrases and ambiguous queries
+- `behavior_evals`: Verify whether the resulting output or behavior improves after the skill has been triggered
+
+---
+
 ## evals.json
 
 Defines the evals for a skill. Located at `evals/evals.json` within the skill directory.

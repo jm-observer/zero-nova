@@ -1,0 +1,14 @@
+{
+  "session_id": "",
+  "target_skill_path": "",
+  "target_skill_name": "",
+  "workspace_path": "",
+  "snapshot_path": "",
+  "status": "initialized",
+  "baseline_result_path": "",
+  "best_iteration": null,
+  "best_score": null,
+  "iterations": [],
+  "created_at": "",
+  "updated_at": ""
+}

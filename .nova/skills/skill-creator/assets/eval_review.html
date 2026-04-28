@@ -12,6 +12,10 @@
     body { font-family: 'Lora', Georgia, serif; background: #faf9f5; padding: 2rem; color: #141413; }
     h1 { font-family: 'Poppins', sans-serif; margin-bottom: 0.5rem; font-size: 1.5rem; }
     .description { color: #b0aea5; margin-bottom: 1.5rem; font-style: italic; max-width: 900px; }
+    .context-panel { background: white; border: 1px solid #e8e6dc; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); max-width: 1100px; padding: 1rem; margin-bottom: 1rem; }
+    .context-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1rem; }
+    .context-label { display: block; color: #b0aea5; font-family: 'Poppins', sans-serif; font-size: 0.75rem; letter-spacing: 0.04em; margin-bottom: 0.15rem; text-transform: uppercase; }
+    .context-value { color: #141413; font-size: 0.9rem; word-break: break-word; }
     .controls { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
     .btn { font-family: 'Poppins', sans-serif; padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
     .btn-add { background: #6a9bcc; color: white; }
@@ -40,6 +44,27 @@
 <body>
   <h1>Eval Set Review: <span id="skill-name">__SKILL_NAME_PLACEHOLDER__</span></h1>
   <p class="description">Current description: <span id="skill-desc">__SKILL_DESCRIPTION_PLACEHOLDER__</span></p>
+
+  <section class="context-panel">
+    <div class="context-grid">
+      <div>
+        <span class="context-label">Target Skill</span>
+        <span class="context-value">__TARGET_SKILL_PATH_PLACEHOLDER__</span>
+      </div>
+      <div>
+        <span class="context-label">Workspace</span>
+        <span class="context-value">__WORKSPACE_PATH_PLACEHOLDER__</span>
+      </div>
+      <div>
+        <span class="context-label">Eval Type</span>
+        <span class="context-value">__EVAL_TYPE_PLACEHOLDER__</span>
+      </div>
+      <div>
+        <span class="context-label">Export Filename</span>
+        <span class="context-value" id="export-filename">__EXPORT_FILENAME_PLACEHOLDER__</span>
+      </div>
+    </div>
+  </section>
 
   <div class="controls">
     <button class="btn btn-add" onclick="addRow()">+ Add Query</button>
@@ -133,7 +158,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'eval_set.json';
+      a.download = document.getElementById('export-filename').textContent.trim() || 'eval_set.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

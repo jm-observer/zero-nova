@@ -7,6 +7,64 @@ description: Create new skills, modify and improve existing skills, and measure 
 
 A skill for creating new skills and iteratively improving them.
 
+## Improve Existing Skill
+
+Use this mode when the user wants to iterate on an existing skill instead of creating one from scratch.
+
+### Trigger this mode when
+
+- The user gives you a concrete skill path.
+- The user names a skill and asks you to improve, fix, optimize, or benchmark it.
+- The user says something equivalent to "help me improve this skill".
+
+### Required flow
+
+When improving an existing skill, prefer this workflow order:
+
+1. Load the target skill.
+2. Validate that `SKILL.md` exists and its frontmatter has `name` and `description`.
+3. Create or recover the improvement workspace.
+4. Snapshot the current skill before editing.
+5. Run evals and record session state.
+6. Generate candidate improvements.
+7. Compare candidates against the baseline.
+8. Write back only the chosen improvement.
+
+### Naming and persistence conventions
+
+- Resolve the target via a canonical `target_skill_path`.
+- Use the skill frontmatter `name` as `target_skill_name`.
+- If the user only gives a skill id, first resolve it from the standard skill roots such as `.nova/skills/`.
+- Use a stable workspace name: `<skill-name>-improvement-workspace/`.
+- Persist session state in `<workspace>/improvement-session.json`.
+- Store the baseline snapshot in `<workspace>/skill-snapshot/`.
+
+### Session state rules
+
+The session file must include at least:
+
+- `session_id`
+- `target_skill_path`
+- `target_skill_name`
+- `workspace_path`
+- `snapshot_path`
+- `status`
+- `baseline_result_path`
+- `best_iteration`
+- `best_score`
+- `iterations`
+- `created_at`
+- `updated_at`
+
+Allowed status transitions:
+
+- `initialized` -> `evaluating` or `failed`
+- `evaluating` -> `optimizing`, `paused`, or `failed`
+- `optimizing` -> `optimizing`, `completed`, or `failed`
+- `paused` -> `evaluating` or `failed`
+
+If the process exits unexpectedly, always write back the latest status and `updated_at` so the run can be resumed instead of restarted blindly.
+
 ## CRITICAL: PHYSICAL EXECUTION ONLY
 - **You are NOT a simulator.** You have real access to `bash`, `write_file`, `read_file`, and `spawn_subagent`.
 - **NEVER roleplay or simulate** a skill's output in the chat.
@@ -379,6 +437,10 @@ Present the eval set to the user for review using the HTML template:
    - `__EVAL_DATA_PLACEHOLDER__` → the JSON array of eval items (no quotes around it — it's a JS variable assignment)
    - `__SKILL_NAME_PLACEHOLDER__` → the skill's name
    - `__SKILL_DESCRIPTION_PLACEHOLDER__` → the skill's current description
+   - `__TARGET_SKILL_PATH_PLACEHOLDER__` → the canonical target skill path
+   - `__WORKSPACE_PATH_PLACEHOLDER__` → the improvement workspace path
+   - `__EVAL_TYPE_PLACEHOLDER__` → either `trigger_evals` or `behavior_evals`
+   - `__EXPORT_FILENAME_PLACEHOLDER__` → the review export filename, such as `trigger_evals.json`
 3. Write to a temp file (e.g., `/tmp/eval_review_<skill-name>.html`) and open it: `open /tmp/eval_review_<skill-name>.html`
 4. The user can edit queries, toggle should-trigger, add/remove entries, then click "Export Eval Set"
 5. The file downloads to `~/Downloads/eval_set.json` — check the Downloads folder for the most recent version in case there are multiple (e.g., `eval_set (1).json`)

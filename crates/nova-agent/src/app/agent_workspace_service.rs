@@ -104,10 +104,15 @@ impl AgentWorkspaceService {
     pub async fn list_session_skill_bindings(&self, session_id: &str) -> Result<SessionSkillBindingsResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().unwrap();
-        Ok(SessionSkillBindingsResponse {
-            skills: deserialize_skill_bindings(&control.skill_bindings),
+        let skills = deserialize_skill_bindings(&control.skill_bindings);
+        let resp = SessionSkillBindingsResponse {
+            skills,
             updated_at: Utc::now().timestamp_millis(),
-        })
+        };
+        if let Ok(json) = serde_json::to_string(&resp) {
+            log::info!("[SKILL_REC] Final Serialization to Frontend: {}", json);
+        }
+        Ok(resp)
     }
 
     pub async fn get_session_memory_hits(

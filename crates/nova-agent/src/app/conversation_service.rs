@@ -174,22 +174,29 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     crate::event::AgentEvent::SkillActivated {
                         skill_id, skill_name, ..
                     } => {
+                        log::info!("[SKILL_REC] Observed SkillActivated: {} ({})", skill_name, skill_id);
                         observed_skills_for_task.lock().await.push(serde_json::json!({
                             "skill_id": skill_id,
+                            "skillId": skill_id,
                             "name": skill_name,
+                            "display_name": skill_name,
                             "status": "active",
                             "description": serde_json::Value::Null
                         }));
                     }
                     crate::event::AgentEvent::SkillSwitched { to_skill, .. } => {
+                        log::info!("[SKILL_REC] Observed SkillSwitched to: {}", to_skill);
                         observed_skills_for_task.lock().await.push(serde_json::json!({
                             "skill_id": to_skill,
+                            "skillId": to_skill,
                             "name": to_skill,
+                            "display_name": to_skill,
                             "status": "active",
                             "description": serde_json::Value::Null
                         }));
                     }
                     crate::event::AgentEvent::SkillExited { skill_id, .. } => {
+                        log::info!("[SKILL_REC] Observed SkillExited: {}", skill_id);
                         observed_skills_for_task.lock().await.push(serde_json::json!({
                             "skill_id": skill_id,
                             "name": skill_id,
@@ -291,13 +298,10 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 memory_hits: None,
                 usage: None,
             };
+            let initial_skills =
+                self.collect_current_skills(turn_ctx.active_skill.as_ref().map(|s| s.skill_id.as_str()));
             self.sessions
-                .update_runtime_state(
-                    session_id,
-                    Some(snapshot_internal.clone()),
-                    None,
-                    Some(snapshot_internal.skills.clone()),
-                )
+                .update_runtime_state(session_id, Some(snapshot_internal.clone()), None, Some(initial_skills))
                 .await?;
 
             let user_message = Message {
@@ -306,6 +310,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     text: input.to_string(),
                 }],
             };
+            let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
             let turn_result = match self
                 .agent
                 .run_turn_with_context(turn_ctx, user_message, event_tx, Some(token))
@@ -327,8 +332,26 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     .await?;
             }
 
-            // Phase C: Update usage
+            // Phase C: Update usage and skills
             let usage = &turn_result.usage;
+            let mut final_skills = self.collect_current_skills(active_skill_id.as_deref());
+            {
+                // 合并运行过程中观察到的技能（动态激活/切换/退出事件）
+                let observed = observed_skills.lock().await;
+                log::info!(
+                    "[SKILL_REC] Merging {} observed events into {} initial skills",
+                    observed.len(),
+                    final_skills.len()
+                );
+                final_skills.extend(observed.clone());
+            }
+
+            log::info!(
+                "[SKILL_REC] Final skill list for session {}: {:?}",
+                session_id,
+                final_skills
+            );
+
             self.sessions
                 .update_runtime_state(
                     session_id,
@@ -339,7 +362,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                         usage.cache_creation_input_tokens,
                         usage.cache_read_input_tokens,
                     )),
-                    Some(snapshot_internal.skills.clone()),
+                    Some(final_skills),
                 )
                 .await?;
 
@@ -376,8 +399,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     .await?;
             }
 
-            // Phase C: Update usage
+            // Phase C: Update usage and skills
             let usage = &turn_result.usage;
+            let mut final_skills = self.collect_current_skills(None);
+            {
+                let observed = observed_skills.lock().await;
+                final_skills.extend(observed.clone());
+            }
+
             self.sessions
                 .update_runtime_state(
                     session_id,
@@ -388,7 +417,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                         usage.cache_creation_input_tokens,
                         usage.cache_read_input_tokens,
                     )),
-                    Some(observed_skills.lock().await.clone()),
+                    Some(final_skills),
                 )
                 .await?;
 
@@ -402,5 +431,27 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             session.touch_updated_at();
             Ok(turn_result)
         }
+    }
+
+    fn collect_current_skills(&self, active_skill_id: Option<&str>) -> Vec<serde_json::Value> {
+        let mut skills = Vec::new();
+        if let Some(ref registry) = self.agent.skill_registry {
+            for pkg in &registry.packages {
+                let status = if active_skill_id == Some(&pkg.id) {
+                    "active"
+                } else {
+                    "available"
+                };
+                skills.push(serde_json::json!({
+                    "skill_id": pkg.id,
+                    "skillId": pkg.id,
+                    "name": pkg.display_name,
+                    "display_name": pkg.display_name,
+                    "status": status,
+                    "description": pkg.description
+                }));
+            }
+        }
+        skills
     }
 }

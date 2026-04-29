@@ -1387,8 +1387,32 @@ export class GatewayClient {
     /**
      * 鑾峰彇褰撳墠浼氳瘽鐨勬妧鑳界粦瀹氬垪琛?     */
     async getSessionSkillBindings(sessionId?: string): Promise<SkillBindingView[]> {
-        const result = await this.request<{ skills?: SkillBindingView[]; bindings?: SkillBindingView[] }>('session.skill.bindings', { sessionId });
-        return result.bindings || result.skills || [];
+        const result = await this.request<{ skills?: unknown[]; bindings?: unknown[] }>('session.skill.bindings', { sessionId });
+        const rawBindings = result.bindings || result.skills || [];
+        return rawBindings.map((entry) => this.normalizeSkillBinding(entry));
+    }
+
+    private normalizeSkillBinding(payload: unknown): SkillBindingView {
+        const record = (payload ?? {}) as Record<string, unknown>;
+        const id = String(record.skillId ?? record.skill_id ?? record.id ?? '');
+        const title = String(record.name ?? record.display_name ?? record.title ?? id);
+        const status = String(record.status ?? '').toLowerCase();
+        const source = this.normalizeSkillBindingSource(record.source);
+
+        return {
+            id,
+            title,
+            source,
+            enabled: status === 'active' || status === 'bound' || status === 'available',
+            summary: typeof record.description === 'string' ? record.description : undefined,
+        };
+    }
+
+    private normalizeSkillBindingSource(source: unknown): SkillBindingView['source'] {
+        if (source === 'global' || source === 'agent' || source === 'runtime') {
+            return source;
+        }
+        return 'runtime';
     }
 
     /**

@@ -1965,6 +1965,7 @@ const GatewayMessageGeneratedSchema = {
         "voice_decode_failed",
         "voice_stt_timeout",
         "voice_stt_unavailable",
+        "voice_request_in_progress",
         "voice_tts_timeout",
         "voice_tts_unavailable"
       ],

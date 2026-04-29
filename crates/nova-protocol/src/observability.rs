@@ -136,6 +136,7 @@ pub struct SessionSkillBindingsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillBindingSnapshot {
+    #[serde(rename = "skillId", alias = "skill_id")]
     pub skill_id: String,
     pub name: String,
     pub status: String, // active, bound, available

@@ -373,7 +373,15 @@ impl SessionService {
                 control.token_counters.updated_at = Utc::now().timestamp_millis();
             }
             if let Some(skills) = new_skills {
+                let prev_len = control.skill_bindings.len();
                 merge_skill_bindings(&mut control.skill_bindings, skills);
+                log::info!(
+                    "[SKILL_REC] DB Update: session_id={}, prev_count={}, new_count={}, incoming_updates={}",
+                    session_id,
+                    prev_len,
+                    control.skill_bindings.len(),
+                    control.skill_bindings.len().saturating_sub(prev_len)
+                );
             }
         }
 

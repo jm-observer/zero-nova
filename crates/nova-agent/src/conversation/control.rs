@@ -9,6 +9,8 @@ pub struct ControlState {
     pub project_dir: PathBuf,
     pub model_override: SessionModelOverride,
     pub last_turn_snapshot: Option<LastTurnSnapshot>,
+    #[serde(default)]
+    pub skill_bindings: Vec<serde_json::Value>,
     pub token_counters: SessionTokenCounters,
 }
 
@@ -65,7 +67,65 @@ impl ControlState {
             project_dir: default_project_dir(),
             model_override: SessionModelOverride::default(),
             last_turn_snapshot: None,
+            skill_bindings: Vec::new(),
             token_counters: SessionTokenCounters::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ControlState;
+
+    #[test]
+    fn deserialize_legacy_control_state_without_skill_bindings() {
+        let raw = r#"{
+            "active_agent":"agent-1",
+            "project_dir":".",
+            "model_override":{"orchestration":null,"execution":null,"updated_at":0},
+            "last_turn_snapshot":null,
+            "token_counters":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"updated_at":0}
+        }"#;
+
+        let state: ControlState = serde_json::from_str(raw).expect("legacy control state should be deserializable");
+        assert!(state.skill_bindings.is_empty());
+    }
+
+    #[test]
+    fn serialize_and_deserialize_control_state_with_skill_bindings() {
+        let mut state = ControlState::new("agent-1");
+        state.skill_bindings = vec![serde_json::json!({
+            "skill_id": "skill-a",
+            "name": "Skill A",
+            "status": "active",
+            "description": "desc"
+        })];
+
+        let encoded = serde_json::to_string(&state).expect("control state should be serializable");
+        let decoded: ControlState = serde_json::from_str(&encoded).expect("control state should be deserializable");
+        assert_eq!(decoded.skill_bindings.len(), 1);
+        assert_eq!(decoded.skill_bindings[0]["skill_id"], "skill-a");
+    }
+
+    #[test]
+    fn skill_bindings_shape_is_stable_for_empty_single_and_multiple() {
+        let state_empty = ControlState::new("agent-1");
+        assert!(state_empty.skill_bindings.is_empty());
+
+        let mut state_one = ControlState::new("agent-1");
+        state_one.skill_bindings = vec![serde_json::json!({
+            "skill_id": "skill-a",
+            "name": "Skill A",
+            "status": "active",
+            "description": "desc"
+        })];
+        assert_eq!(state_one.skill_bindings.len(), 1);
+
+        let mut state_many = ControlState::new("agent-1");
+        state_many.skill_bindings = vec![
+            serde_json::json!({"skill_id":"skill-a","name":"Skill A","status":"active","description":"desc-a"}),
+            serde_json::json!({"skill_id":"skill-b","name":"Skill B","status":"inactive","description":"desc-b"}),
+        ];
+        assert_eq!(state_many.skill_bindings.len(), 2);
     }
 }

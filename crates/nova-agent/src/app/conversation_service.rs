@@ -13,6 +13,7 @@ use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 /// 核心会话业务服务
@@ -137,6 +138,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let repository = self.sessions.get_repository();
         let run_id_clone = run_id.clone();
         let event_tx_clone = event_tx.clone();
+        let observed_skills = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let observed_skills_for_task = observed_skills.clone();
 
         tokio::spawn(async move {
             while let Some(event) = recorded_rx.recv().await {
@@ -167,6 +170,32 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                                 Utc::now().timestamp_millis(),
                             )
                             .await;
+                    }
+                    crate::event::AgentEvent::SkillActivated {
+                        skill_id, skill_name, ..
+                    } => {
+                        observed_skills_for_task.lock().await.push(serde_json::json!({
+                            "skill_id": skill_id,
+                            "name": skill_name,
+                            "status": "active",
+                            "description": serde_json::Value::Null
+                        }));
+                    }
+                    crate::event::AgentEvent::SkillSwitched { to_skill, .. } => {
+                        observed_skills_for_task.lock().await.push(serde_json::json!({
+                            "skill_id": to_skill,
+                            "name": to_skill,
+                            "status": "active",
+                            "description": serde_json::Value::Null
+                        }));
+                    }
+                    crate::event::AgentEvent::SkillExited { skill_id, .. } => {
+                        observed_skills_for_task.lock().await.push(serde_json::json!({
+                            "skill_id": skill_id,
+                            "name": skill_id,
+                            "status": "exited",
+                            "description": serde_json::Value::Null
+                        }));
                     }
                     _ => {}
                 }
@@ -263,7 +292,12 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 usage: None,
             };
             self.sessions
-                .update_runtime_state(session_id, Some(snapshot_internal), None)
+                .update_runtime_state(
+                    session_id,
+                    Some(snapshot_internal.clone()),
+                    None,
+                    Some(snapshot_internal.skills.clone()),
+                )
                 .await?;
 
             let user_message = Message {
@@ -305,6 +339,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                         usage.cache_creation_input_tokens,
                         usage.cache_read_input_tokens,
                     )),
+                    Some(snapshot_internal.skills.clone()),
                 )
                 .await?;
 
@@ -353,6 +388,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                         usage.cache_creation_input_tokens,
                         usage.cache_read_input_tokens,
                     )),
+                    Some(observed_skills.lock().await.clone()),
                 )
                 .await?;
 

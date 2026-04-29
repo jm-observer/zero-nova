@@ -356,6 +356,7 @@ impl SessionService {
         session_id: &str,
         snapshot: Option<super::control::LastTurnSnapshot>,
         token_delta: Option<(u64, u64, u64, u64)>,
+        new_skills: Option<Vec<serde_json::Value>>,
     ) -> Result<()> {
         let session = self.get(session_id).await?.context("Session not found")?;
 
@@ -370,6 +371,9 @@ impl SessionService {
                 control.token_counters.cache_creation_input_tokens += cache_creation;
                 control.token_counters.cache_read_input_tokens += cache_read;
                 control.token_counters.updated_at = Utc::now().timestamp_millis();
+            }
+            if let Some(skills) = new_skills {
+                merge_skill_bindings(&mut control.skill_bindings, skills);
             }
         }
 
@@ -414,6 +418,98 @@ impl SessionService {
     pub async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
         let cwd = std::env::current_dir().context("Failed to get process current directory")?;
         self.set_project_dir(session_id, &cwd).await
+    }
+}
+
+fn merge_skill_bindings(existing: &mut Vec<serde_json::Value>, incoming: Vec<serde_json::Value>) {
+    let mut merged: HashMap<String, serde_json::Value> = HashMap::new();
+    for skill in existing.iter() {
+        if let Some(skill_id) = skill.get("skill_id").and_then(|v| v.as_str()) {
+            merged.insert(skill_id.to_string(), normalize_skill_binding(skill));
+        }
+    }
+
+    for skill in incoming {
+        if let Some(skill_id) = skill.get("skill_id").and_then(|v| v.as_str()) {
+            merged.insert(skill_id.to_string(), normalize_skill_binding(&skill));
+        } else {
+            log::warn!("Skipping invalid skill binding item without skill_id: {}", skill);
+        }
+    }
+
+    *existing = merged.into_values().collect();
+}
+
+fn normalize_skill_binding(skill: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "skill_id": skill.get("skill_id").and_then(|v| v.as_str()).unwrap_or_default(),
+        "name": skill.get("name").and_then(|v| v.as_str()).unwrap_or_default(),
+        "status": skill.get("status").and_then(|v| v.as_str()).unwrap_or_default(),
+        "description": skill.get("description").cloned().unwrap_or(serde_json::Value::Null),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_skill_bindings;
+
+    #[test]
+    fn merge_skill_bindings_is_idempotent_and_deduplicates_by_skill_id() {
+        let mut existing = vec![serde_json::json!({
+            "skill_id": "skill-a",
+            "name": "Skill A",
+            "status": "active",
+            "description": "v1"
+        })];
+        let incoming = vec![
+            serde_json::json!({"skill_id":"skill-a","name":"Skill A","status":"active","description":"v1"}),
+            serde_json::json!({"skill_id":"skill-a","name":"Skill A","status":"active","description":"v1"}),
+        ];
+
+        merge_skill_bindings(&mut existing, incoming);
+        assert_eq!(existing.len(), 1);
+        assert_eq!(existing[0]["skill_id"], "skill-a");
+    }
+
+    #[test]
+    fn merge_skill_bindings_overwrites_existing_fields_with_new_values() {
+        let mut existing = vec![serde_json::json!({
+            "skill_id": "skill-a",
+            "name": "Old Name",
+            "status": "inactive",
+            "description": "old"
+        })];
+        let incoming = vec![serde_json::json!({
+            "skill_id":"skill-a",
+            "name":"New Name",
+            "status":"active",
+            "description":"new"
+        })];
+
+        merge_skill_bindings(&mut existing, incoming);
+        assert_eq!(existing.len(), 1);
+        assert_eq!(existing[0]["name"], "New Name");
+        assert_eq!(existing[0]["status"], "active");
+        assert_eq!(existing[0]["description"], "new");
+    }
+
+    #[test]
+    fn merge_skill_bindings_ignores_invalid_items_without_skill_id() {
+        let mut existing = vec![serde_json::json!({
+            "skill_id": "skill-a",
+            "name": "Skill A",
+            "status": "active",
+            "description": "desc"
+        })];
+        let incoming = vec![serde_json::json!({
+            "name": "Invalid Skill",
+            "status": "active",
+            "description": "invalid"
+        })];
+
+        merge_skill_bindings(&mut existing, incoming);
+        assert_eq!(existing.len(), 1);
+        assert_eq!(existing[0]["skill_id"], "skill-a");
     }
 }
 

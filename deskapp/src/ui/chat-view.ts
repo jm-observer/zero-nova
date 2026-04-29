@@ -114,6 +114,9 @@ export class ChatView {
     private bindEvents() {
         this.sendBtn.addEventListener('click', () => this.sendMessage());
         this.inspectBtn?.addEventListener('click', () => {
+            if (!this.state.consoleVisible) {
+                this.state.setConsoleTab('overview');
+            }
             this.state.setConsoleVisible(!this.state.consoleVisible);
         });
         this.messageInput.addEventListener('keydown', (e) => {

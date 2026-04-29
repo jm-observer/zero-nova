@@ -93,6 +93,9 @@ export class AgentConsoleView {
     private keydownHandler = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
             event.preventDefault();
+            if (!this.state.consoleVisible) {
+                this.state.setConsoleTab('overview');
+            }
             this.state.setConsoleVisible(!this.state.consoleVisible);
         }
     };
@@ -338,7 +341,7 @@ export class AgentConsoleView {
             return;
         }
 
-        await this.loadWorkspaceRestoreSnapshot();
+        await this.loadWorkspaceRestoreSnapshot(false);
         await this.loadOverviewData(sessionId, true);
         if (this.state.consoleActiveTab !== 'overview') {
             await this.loadTabDataIfNeeded(this.state.consoleActiveTab, true);
@@ -689,17 +692,17 @@ export class AgentConsoleView {
             .catch(error => this.state.toResourceError<DiagnosticIssueView[]>(error, t('common.load_failed')));
         this.state.updateSessionResourceState(sessionId, 'diagnostics', diagnosticResult);
 
-        await this.loadWorkspaceRestoreSnapshot();
+        await this.loadWorkspaceRestoreSnapshot(false);
 
         this.renderDiagnostics();
     }
 
-    private async loadWorkspaceRestoreSnapshot() {
+    private async loadWorkspaceRestoreSnapshot(applyTab: boolean = true) {
         if (!this.state.gatewayClient || this.isDisposed) return;
 
         try {
             const restore = await this.state.gatewayClient.getWorkspaceRestore({});
-            this.applyWorkspaceRestore(restore);
+            this.applyWorkspaceRestore(restore, false, applyTab);
         } catch (error) {
             if (error instanceof GatewayRequestError && error.kind === 'unsupported') {
                 this.state.workspaceRestoreState = {
@@ -1512,7 +1515,7 @@ export class AgentConsoleView {
         }
     }
 
-    private applyWorkspaceRestore(restore: WorkspaceRestoreView, fromUserAction = false) {
+    private applyWorkspaceRestore(restore: WorkspaceRestoreView, fromUserAction = false, applyTab = true) {
         this.state.setWorkspaceRestore(restore);
 
         if (restore.sessionId && this.state.sessions.some(session => session.id === restore.sessionId)) {
@@ -1521,8 +1524,8 @@ export class AgentConsoleView {
             this.bus.emit(Events.NOTIFICATION, { type: 'error', message: t('console.restore_missing_session') });
         }
 
-        if (restore.activeTab) {
-            this.state.setConsoleTab(restore.activeTab);
+        if (applyTab && restore.activeTab) {
+            this.state.setConsoleTab(restore.activeTab as ConsoleTab);
         }
         this.state.setConsoleSelection({
             runId: restore.selectedRunId ?? null,

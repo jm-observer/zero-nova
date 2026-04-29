@@ -745,4 +745,60 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn audit_log_repository_matches_current_schema() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = crate::conversation::sqlite_manager::SqliteManager::new(dir.path()).await?;
+        let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+        repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
+            .await?;
+
+        repo.create_audit_log(&crate::conversation::model::AuditLogRecord {
+            id: 0, // id is autoincrement in DB
+            session_id: "session-1".to_string(),
+            run_id: Some("run-1".to_string()),
+            action: "test_action".to_string(),
+            details: serde_json::json!({"info": "test"}),
+            created_at: 100,
+        })
+        .await?;
+
+        let logs = repo.list_audit_logs("session-1").await?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "test_action");
+        assert_eq!(logs[0].details, serde_json::json!({"info": "test"}));
+        assert!(logs[0].id > 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn diagnostic_repository_matches_current_schema() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = crate::conversation::sqlite_manager::SqliteManager::new(dir.path()).await?;
+        let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+        repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
+            .await?;
+
+        repo.create_diagnostic_issue(&crate::conversation::model::DiagnosticIssue {
+            id: "diag-1".to_string(),
+            session_id: "session-1".to_string(),
+            severity: "error".to_string(),
+            message: "Something went wrong".to_string(),
+            details: Some(serde_json::json!({"code": 500})),
+            created_at: 100,
+        })
+        .await?;
+
+        let issues = repo.list_diagnostics("session-1").await?;
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].id, "diag-1");
+        assert_eq!(issues[0].message, "Something went wrong");
+        assert_eq!(issues[0].details, Some(serde_json::json!({"code": 500})));
+
+        Ok(())
+    }
 }

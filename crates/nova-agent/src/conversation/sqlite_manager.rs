@@ -152,12 +152,12 @@ impl SqliteManager {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS audit_logs (
-                log_id TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
                 run_id TEXT,
                 action TEXT NOT NULL,
-                actor TEXT NOT NULL,
-                detail TEXT NOT NULL,
+                actor TEXT,
+                details TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );",
@@ -168,16 +168,12 @@ impl SqliteManager {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS diagnostic_issues (
-                issue_id TEXT PRIMARY KEY,
+                id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
-                category TEXT NOT NULL,
-                title TEXT NOT NULL,
-                message TEXT NOT NULL,
                 severity TEXT NOT NULL,
-                action_hint TEXT,
-                count INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                details TEXT,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );",
         )
@@ -188,6 +184,8 @@ impl SqliteManager {
         self.create_workspace_restore_state_table().await?;
         self.migrate_sessions_runtime_control_column().await?;
         self.migrate_messages_timestamp_column().await?;
+        self.migrate_audit_logs_schema().await?;
+        self.migrate_diagnostics_schema().await?;
         self.migrate_workspace_restore_state_schema().await?;
 
         Ok(())
@@ -404,6 +402,139 @@ impl SqliteManager {
             "Completed workspace_restore_state snapshot migration; migrated_rows={}, skipped_rows={}",
             migrated_rows, skipped_rows
         );
+
+        Ok(())
+    }
+
+    async fn migrate_audit_logs_schema(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(audit_logs)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect audit_logs table schema")?;
+
+        let mut has_id = false;
+        let mut has_log_id = false;
+        let mut has_details = false;
+        let mut has_detail = false;
+
+        for column in columns {
+            let name: String = Row::get(&column, "name");
+            if name == "id" {
+                has_id = true;
+            } else if name == "log_id" {
+                has_log_id = true;
+            } else if name == "details" {
+                has_details = true;
+            } else if name == "detail" {
+                has_detail = true;
+            }
+        }
+
+        if !has_id && has_log_id {
+            warn!("Detected legacy audit_logs schema with log_id; migrating to id (autoincrement)");
+            // SQLite doesn't support renaming primary key with autoincrement easily.
+            // Since this table is mainly for observability and likely new, we'll recreate it.
+            // If it was log_id (TEXT), it's incompatible with id (INTEGER AUTOINCREMENT).
+            // We'll drop and recreate if it's legacy and empty or just rename if we don't care about the data.
+            // To be safe, let's try to preserve data by converting log_id to a new INTEGER id.
+
+            let mut tx = self.pool.begin().await?;
+
+            sqlx::query("ALTER TABLE audit_logs RENAME TO audit_logs_legacy")
+                .execute(&mut *tx)
+                .await?;
+
+            sqlx::query(
+                "CREATE TABLE audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    run_id TEXT,
+                    action TEXT NOT NULL,
+                    actor TEXT,
+                    details TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );",
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            let detail_col = if has_detail { "detail" } else { "details" };
+
+            sqlx::query(&format!(
+                "INSERT INTO audit_logs (session_id, run_id, action, actor, details, created_at) 
+                 SELECT session_id, run_id, action, actor, {}, created_at FROM audit_logs_legacy",
+                detail_col
+            ))
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query("DROP TABLE audit_logs_legacy").execute(&mut *tx).await?;
+
+            tx.commit().await?;
+        } else if !has_details && has_detail {
+            warn!("Detected legacy audit_logs schema with detail column; renaming to details");
+            sqlx::query("ALTER TABLE audit_logs RENAME COLUMN detail TO details")
+                .execute(&self.pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn migrate_diagnostics_schema(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(diagnostic_issues)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect diagnostic_issues table schema")?;
+
+        let mut has_id = false;
+        let mut has_issue_id = false;
+
+        for column in columns {
+            let name: String = Row::get(&column, "name");
+            if name == "id" {
+                has_id = true;
+            } else if name == "issue_id" {
+                has_issue_id = true;
+            }
+        }
+
+        if !has_id && has_issue_id {
+            warn!("Detected legacy diagnostic_issues schema with issue_id; migrating to id");
+            let mut tx = self.pool.begin().await?;
+
+            sqlx::query("ALTER TABLE diagnostic_issues RENAME TO diagnostic_issues_legacy")
+                .execute(&mut *tx)
+                .await?;
+
+            sqlx::query(
+                "CREATE TABLE diagnostic_issues (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    details TEXT,
+                    created_at INTEGER NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );",
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                "INSERT INTO diagnostic_issues (id, session_id, severity, message, details, created_at) 
+                 SELECT issue_id, session_id, severity, message, action_hint, created_at FROM diagnostic_issues_legacy",
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query("DROP TABLE diagnostic_issues_legacy")
+                .execute(&mut *tx)
+                .await?;
+
+            tx.commit().await?;
+        }
 
         Ok(())
     }

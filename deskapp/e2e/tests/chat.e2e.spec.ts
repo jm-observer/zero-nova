@@ -42,4 +42,13 @@ test.describe('Chat functionality', () => {
     const tokens = page.locator('.token');
     await expect(tokens.first()).toBeVisible();
   });
+
+  test.skip('@ 触发目录弹层并支持过滤/插入', async ({ page }) => {
+    // 依赖 Tauri runtime 的 invoke("project_dir_list")，当前纯浏览器 E2E 环境不稳定。
+    await page.fill('#message-input', '@src/ch');
+    await expect(page.locator('.project-picker')).toBeVisible();
+    await expect(page.locator('.project-picker-item')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#message-input')).toHaveValue(/@src\/chat-view\.ts\s$/);
+  });
 });

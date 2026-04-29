@@ -460,3 +460,57 @@ fn base64_encode(data: &[u8]) -> String {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{list_project_dir_entries, sanitize_relative_path};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn make_temp_dir() -> PathBuf {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("openflux-project-dir-test-{}", nanos));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn sanitize_relative_path_rejects_absolute_and_parent_dir() {
+        assert!(sanitize_relative_path("../a").is_err());
+        assert!(sanitize_relative_path("a/../../b").is_err());
+
+        #[cfg(target_os = "windows")]
+        assert!(sanitize_relative_path("C:/temp").is_err());
+        #[cfg(not(target_os = "windows"))]
+        assert!(sanitize_relative_path("/tmp").is_err());
+    }
+
+    #[test]
+    fn sanitize_relative_path_normalizes_current_dir() {
+        let cleaned = sanitize_relative_path("./src/./ui").unwrap();
+        assert_eq!(cleaned.to_string_lossy().replace('\\', "/"), "src/ui");
+    }
+
+    #[test]
+    fn list_project_dir_entries_sorts_dir_first_then_name() {
+        let base = make_temp_dir();
+        let alpha_dir = base.join("Alpha");
+        let beta_file = base.join("beta.txt");
+        let gamma_file = base.join("Gamma.txt");
+
+        fs::create_dir_all(&alpha_dir).unwrap();
+        fs::write(&beta_file, "beta").unwrap();
+        fs::write(&gamma_file, "gamma").unwrap();
+
+        let canonical_base = fs::canonicalize(&base).unwrap();
+        let entries = list_project_dir_entries(canonical_base, PathBuf::new()).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].is_dir);
+        assert_eq!(entries[0].name, "Alpha");
+        assert_eq!(entries[1].name, "beta.txt");
+        assert_eq!(entries[2].name, "Gamma.txt");
+
+        let _ = fs::remove_dir_all(base);
+    }
+}

@@ -3,12 +3,31 @@ import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
 import { renderMarkdown } from '../markdown';
 import { escapeHtml, formatTime } from '../utils/html';
+import { invoke } from '@tauri-apps/api/core';
+
+type ProjectDirEntry = {
+    name: string;
+    relativePath: string;
+    isDir: boolean;
+};
 
 export class ChatView {
     private messagesContainer: HTMLElement;
     private messageInput: HTMLTextAreaElement;
     private sendBtn: HTMLButtonElement;
     private inspectBtn: HTMLButtonElement;
+    private inputContainer: HTMLElement;
+    private projectPickerEl: HTMLElement | null = null;
+    private pickerVisible = false;
+    private pickerLoading = false;
+    private pickerTokenStart = -1;
+    private pickerCurrentPath = '';
+    private pickerEntries: ProjectDirEntry[] = [];
+    private pickerFilteredEntries: ProjectDirEntry[] = [];
+    private pickerFilterKeyword = '';
+    private pickerActiveIndex = 0;
+    private pickerReqSeq = 0;
+    private pickerComposing = false;
     
     private streamingMessageEl: HTMLElement | null = null;
     private streamingContent = ''; // 仅作向后兼容和备份
@@ -20,6 +39,7 @@ export class ChatView {
         this.messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
         this.sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
         this.inspectBtn = document.getElementById('inspect-btn') as HTMLButtonElement;
+        this.inputContainer = document.querySelector('.input-container') as HTMLElement;
     }
 
     init() {
@@ -120,10 +140,32 @@ export class ChatView {
             this.state.setConsoleVisible(!this.state.consoleVisible);
         });
         this.messageInput.addEventListener('keydown', (e) => {
+            if (this.handleProjectPickerKeydown(e)) {
+                return;
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
             }
+        });
+        this.messageInput.addEventListener('input', () => {
+            void this.syncProjectPicker();
+        });
+        this.messageInput.addEventListener('blur', () => {
+            requestAnimationFrame(() => {
+                const active = document.activeElement;
+                if (active && this.projectPickerEl?.contains(active)) {
+                    return;
+                }
+                this.hideProjectPicker();
+            });
+        });
+        this.messageInput.addEventListener('compositionstart', () => {
+            this.pickerComposing = true;
+        });
+        this.messageInput.addEventListener('compositionend', () => {
+            this.pickerComposing = false;
+            void this.syncProjectPicker();
         });
 
         this.messagesContainer.addEventListener('contextmenu', (e) => this.handleContextMenu(e));
@@ -150,6 +192,232 @@ export class ChatView {
                 }
             }
         });
+    }
+
+    private async syncProjectPicker() {
+        const ctx = this.getAtTokenContext();
+        if (!ctx) {
+            this.hideProjectPicker();
+            return;
+        }
+
+        this.pickerTokenStart = ctx.start;
+        const normalized = ctx.tokenValue.replace(/\\/g, '/');
+        const slash = normalized.lastIndexOf('/');
+        const targetPath = slash >= 0 ? normalized.slice(0, slash) : '';
+        const keyword = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+
+        if (!this.pickerVisible || this.pickerCurrentPath !== targetPath) {
+            await this.loadProjectEntries(targetPath);
+        } else {
+            this.pickerFilterKeyword = keyword;
+            this.applyProjectPickerFilter();
+            this.renderProjectPicker();
+        }
+    }
+
+    private getAtTokenContext(): { start: number; tokenValue: string } | null {
+        const cursor = this.messageInput.selectionStart ?? this.messageInput.value.length;
+        const before = this.messageInput.value.slice(0, cursor);
+        const atIdx = before.lastIndexOf('@');
+        if (atIdx < 0) {
+            return null;
+        }
+        const prefix = atIdx > 0 ? before[atIdx - 1] : ' ';
+        if (!/\s/.test(prefix)) {
+            return null;
+        }
+        const token = before.slice(atIdx + 1);
+        if (/\s/.test(token)) {
+            return null;
+        }
+        return { start: atIdx, tokenValue: token };
+    }
+
+    private async loadProjectEntries(relativePath: string) {
+        this.showProjectPicker();
+        this.pickerLoading = true;
+        this.pickerCurrentPath = relativePath;
+        this.renderProjectPicker();
+
+        const reqId = ++this.pickerReqSeq;
+        try {
+            const entries = await invoke<ProjectDirEntry[]>('project_dir_list', {
+                relativePath: relativePath || null,
+            });
+            if (reqId !== this.pickerReqSeq) {
+                return;
+            }
+            this.pickerEntries = entries;
+            this.pickerFilterKeyword = this.getCurrentFilterKeyword();
+            this.applyProjectPickerFilter();
+        } catch (error) {
+            if (reqId !== this.pickerReqSeq) {
+                return;
+            }
+            this.pickerEntries = [];
+            this.pickerFilteredEntries = [];
+            console.error('[ChatView] project_dir_list failed:', error);
+        } finally {
+            if (reqId === this.pickerReqSeq) {
+                this.pickerLoading = false;
+                this.renderProjectPicker();
+            }
+        }
+    }
+
+    private getCurrentFilterKeyword(): string {
+        const ctx = this.getAtTokenContext();
+        if (!ctx) {
+            return '';
+        }
+        const normalized = ctx.tokenValue.replace(/\\/g, '/');
+        const slash = normalized.lastIndexOf('/');
+        return slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    }
+
+    private applyProjectPickerFilter() {
+        const keyword = this.pickerFilterKeyword.toLowerCase();
+        this.pickerFilteredEntries = this.pickerEntries.filter((entry) => {
+            if (!keyword) {
+                return true;
+            }
+            return entry.name.toLowerCase().includes(keyword) || entry.relativePath.toLowerCase().includes(keyword);
+        });
+        this.pickerActiveIndex = this.pickerFilteredEntries.length === 0 ? -1 : 0;
+    }
+
+    private showProjectPicker() {
+        if (!this.projectPickerEl) {
+            this.projectPickerEl = document.createElement('div');
+            this.projectPickerEl.className = 'project-picker';
+            this.projectPickerEl.addEventListener('mousedown', (event) => {
+                event.preventDefault();
+            });
+            this.inputContainer.appendChild(this.projectPickerEl);
+        }
+        this.pickerVisible = true;
+        this.projectPickerEl.classList.add('visible');
+    }
+
+    private hideProjectPicker() {
+        this.pickerVisible = false;
+        this.pickerCurrentPath = '';
+        this.pickerEntries = [];
+        this.pickerFilteredEntries = [];
+        this.pickerFilterKeyword = '';
+        this.pickerActiveIndex = 0;
+        if (this.projectPickerEl) {
+            this.projectPickerEl.classList.remove('visible');
+            this.projectPickerEl.innerHTML = '';
+        }
+    }
+
+    private renderProjectPicker() {
+        if (!this.projectPickerEl || !this.pickerVisible) {
+            return;
+        }
+        const breadcrumb = this.pickerCurrentPath ? this.pickerCurrentPath : '.';
+        const filterTip = this.pickerFilterKeyword ? `筛选: ${escapeHtml(this.pickerFilterKeyword)}` : '';
+        const items: string[] = [];
+        if (this.pickerCurrentPath) {
+            items.push(`<button class="project-picker-item up" data-up="1">../</button>`);
+        }
+        for (let i = 0; i < this.pickerFilteredEntries.length; i += 1) {
+            const entry = this.pickerFilteredEntries[i];
+            const activeClass = i === this.pickerActiveIndex ? 'active' : '';
+            const typeClass = entry.isDir ? 'dir' : 'file';
+            items.push(
+                `<button class="project-picker-item ${typeClass} ${activeClass}" data-index="${i}">${escapeHtml(entry.name)}</button>`
+            );
+        }
+        const empty = !this.pickerLoading && items.length === 0 ? '<div class="project-picker-empty">无匹配项</div>' : '';
+        this.projectPickerEl.innerHTML = `
+            <div class="project-picker-header">
+                <span class="project-picker-path">@${escapeHtml(breadcrumb)}</span>
+                <span class="project-picker-filter">${filterTip}</span>
+            </div>
+            <div class="project-picker-list">
+                ${this.pickerLoading ? '<div class="project-picker-empty">加载中...</div>' : items.join('') || empty}
+            </div>
+        `;
+
+        this.projectPickerEl.querySelectorAll('.project-picker-item[data-index]').forEach((el) => {
+            el.addEventListener('click', () => {
+                const idx = Number((el as HTMLElement).getAttribute('data-index') ?? '-1');
+                if (idx < 0 || idx >= this.pickerFilteredEntries.length) {
+                    return;
+                }
+                void this.selectProjectPickerEntry(this.pickerFilteredEntries[idx]);
+            });
+        });
+        const upButton = this.projectPickerEl.querySelector('.project-picker-item.up');
+        if (upButton) {
+            upButton.addEventListener('click', () => {
+                void this.navigateProjectPickerUp();
+            });
+        }
+    }
+
+    private async navigateProjectPickerUp() {
+        if (!this.pickerCurrentPath) {
+            return;
+        }
+        const parts = this.pickerCurrentPath.split('/').filter(Boolean);
+        parts.pop();
+        await this.loadProjectEntries(parts.join('/'));
+    }
+
+    private async selectProjectPickerEntry(entry: ProjectDirEntry) {
+        if (entry.isDir) {
+            await this.loadProjectEntries(entry.relativePath);
+            return;
+        }
+        const cursor = this.messageInput.selectionStart ?? this.messageInput.value.length;
+        const before = this.messageInput.value.slice(0, this.pickerTokenStart);
+        const after = this.messageInput.value.slice(cursor);
+        this.messageInput.value = `${before}@${entry.relativePath} ${after}`;
+        const nextCursor = (before + `@${entry.relativePath} `).length;
+        this.messageInput.setSelectionRange(nextCursor, nextCursor);
+        this.hideProjectPicker();
+        this.messageInput.focus();
+    }
+
+    private handleProjectPickerKeydown(e: KeyboardEvent): boolean {
+        if (!this.pickerVisible || this.pickerComposing) {
+            return false;
+        }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this.hideProjectPicker();
+            return true;
+        }
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (this.pickerFilteredEntries.length > 0) {
+                this.pickerActiveIndex = (this.pickerActiveIndex + 1) % this.pickerFilteredEntries.length;
+                this.renderProjectPicker();
+            }
+            return true;
+        }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (this.pickerFilteredEntries.length > 0) {
+                this.pickerActiveIndex =
+                    (this.pickerActiveIndex - 1 + this.pickerFilteredEntries.length) % this.pickerFilteredEntries.length;
+                this.renderProjectPicker();
+            }
+            return true;
+        }
+        if ((e.key === 'Enter' || e.key === 'Tab') && this.pickerActiveIndex >= 0) {
+            e.preventDefault();
+            const target = this.pickerFilteredEntries[this.pickerActiveIndex];
+            if (target) {
+                void this.selectProjectPickerEntry(target);
+            }
+            return true;
+        }
+        return false;
     }
 
     private hideContextMenu() {

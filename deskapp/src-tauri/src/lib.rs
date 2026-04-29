@@ -135,6 +135,7 @@ pub fn run() {
             commands::file::file_open,
             commands::file::file_reveal,
             commands::file::file_save_as,
+            commands::file::project_dir_list,
             commands::gateway::get_gateway_config,
             commands::gateway::get_gateway_status,
             commands::gateway::start_gateway,

@@ -1,6 +1,7 @@
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
+use tauri::Manager;
 
 /// ============================================================
 /// Phase 3: 异步统一 — 使用 spawn_blocking 转换阻塞 I/O
@@ -33,6 +34,106 @@ pub async fn file_read_large(file_path: String, max_buffer: u64) -> Result<FileB
 pub struct FileBuffer {
     pub size: u64,
     pub mime: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDirEntry {
+    pub name: String,
+    pub relative_path: String,
+    pub is_dir: bool,
+}
+
+#[tauri::command]
+pub async fn project_dir_list(
+    app: tauri::AppHandle,
+    relative_path: Option<String>,
+) -> Result<Vec<ProjectDirEntry>, String> {
+    let base_dir = resolve_project_dir(&app)?;
+    let safe_relative = sanitize_relative_path(relative_path.as_deref().unwrap_or(""))?;
+    tokio::task::spawn_blocking(move || list_project_dir_entries(base_dir, safe_relative))
+        .await
+        .map_err(|e| format!("目录读取任务失败: {}", e))?
+}
+
+fn list_project_dir_entries(base_dir: PathBuf, safe_relative: PathBuf) -> Result<Vec<ProjectDirEntry>, String> {
+    let target_dir = if safe_relative.as_os_str().is_empty() {
+        base_dir.clone()
+    } else {
+        base_dir.join(&safe_relative)
+    };
+    let target_dir = std::fs::canonicalize(&target_dir).map_err(|e| format!("目录不可访问: {}", e))?;
+    if !target_dir.starts_with(&base_dir) {
+        return Err("路径越界：仅允许访问项目目录内文件".to_string());
+    }
+    if !target_dir.is_dir() {
+        return Err("目标路径不是目录".to_string());
+    }
+
+    let mut entries = Vec::new();
+    for entry_result in std::fs::read_dir(&target_dir).map_err(|e| format!("读取目录失败: {}", e))? {
+        let entry = entry_result.map_err(|e| format!("读取目录项失败: {}", e))?;
+        let file_type = entry.file_type().map_err(|e| format!("读取目录项类型失败: {}", e))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full_path = entry.path();
+        let relative = full_path
+            .strip_prefix(&base_dir)
+            .map_err(|_| "计算相对路径失败".to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        entries.push(ProjectDirEntry {
+            name,
+            relative_path: relative,
+            is_dir: file_type.is_dir(),
+        });
+    }
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(entries)
+}
+
+fn resolve_project_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let config = app.state::<crate::config::AppConfig>();
+    let workspace = config
+        .sidecar
+        .workspace
+        .as_ref()
+        .cloned()
+        .unwrap_or_else(|| config.config_dir.clone());
+    let candidate = if workspace.file_name().is_some_and(|n| n == ".nova") {
+        workspace.parent().map(Path::to_path_buf).unwrap_or(workspace)
+    } else {
+        workspace
+    };
+    std::fs::canonicalize(candidate).map_err(|e| format!("项目目录不可访问: {}", e))
+}
+
+fn sanitize_relative_path(input: &str) -> Result<PathBuf, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(PathBuf::new());
+    }
+    let raw = Path::new(trimmed);
+    if raw.is_absolute() {
+        return Err("relativePath 必须是相对路径".to_string());
+    }
+    if raw.components().any(|part| matches!(part, Component::ParentDir)) {
+        return Err("relativePath 不能包含 ..".to_string());
+    }
+
+    let mut cleaned = PathBuf::new();
+    for part in raw.components() {
+        match part {
+            Component::CurDir => {}
+            Component::Normal(seg) => cleaned.push(seg),
+            _ => return Err("relativePath 包含非法路径片段".to_string()),
+        }
+    }
+    Ok(cleaned)
 }
 
 /// 检测 MIME 类型（从文件路径）

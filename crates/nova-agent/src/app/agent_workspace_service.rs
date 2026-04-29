@@ -102,10 +102,11 @@ impl AgentWorkspaceService {
     }
 
     pub async fn list_session_skill_bindings(&self, session_id: &str) -> Result<SessionSkillBindingsResponse> {
-        let runtime = self.get_session_runtime(session_id).await?;
+        let session = self.sessions.get(session_id).await?.context("Session not found")?;
+        let control = session.control.read().unwrap();
         Ok(SessionSkillBindingsResponse {
-            skills: runtime.last_turn.map(|t| t.skills).unwrap_or_default(),
-            updated_at: runtime.updated_at,
+            skills: deserialize_skill_bindings(&control.skill_bindings),
+            updated_at: Utc::now().timestamp_millis(),
         })
     }
 
@@ -405,5 +406,50 @@ impl AgentWorkspaceService {
                 })
             }
         }
+    }
+}
+
+fn deserialize_skill_bindings(
+    bindings: &[serde_json::Value],
+) -> Vec<nova_protocol::observability::SkillBindingSnapshot> {
+    bindings
+        .iter()
+        .filter_map(|value| {
+            let skill_id = value
+                .get("skill_id")
+                .or_else(|| value.get("skillId"))
+                .and_then(|item| item.as_str())?;
+            let name = value.get("name").and_then(|item| item.as_str())?;
+            let status = value.get("status").and_then(|item| item.as_str())?;
+            let description = value
+                .get("description")
+                .and_then(|item| item.as_str())
+                .map(ToString::to_string);
+            Some(nova_protocol::observability::SkillBindingSnapshot {
+                skill_id: skill_id.to_string(),
+                name: name.to_string(),
+                status: status.to_string(),
+                description,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::deserialize_skill_bindings;
+
+    #[test]
+    fn session_skill_bindings_reading_does_not_depend_on_last_turn() {
+        let bindings = vec![serde_json::json!({
+            "skill_id":"skill-a",
+            "name":"Skill A",
+            "status":"active",
+            "description": serde_json::Value::Null
+        })];
+
+        let snapshots = deserialize_skill_bindings(&bindings);
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].skill_id, "skill-a");
     }
 }

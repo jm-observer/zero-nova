@@ -135,6 +135,13 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<TurnResult> {
+        let before_skill_bindings = self
+            .workspace_service
+            .list_session_skill_bindings(session_id)
+            .await
+            .ok()
+            .map(|response| response.skills)
+            .unwrap_or_default();
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
         let sender_clone = sender.clone();
@@ -156,6 +163,13 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
                 usage: turn_result.usage.clone(),
             })
             .await;
+        if let Ok(after) = self.workspace_service.list_session_skill_bindings(session_id).await {
+            if should_emit_skill_bindings_updated(&before_skill_bindings, &after.skills) {
+                if let Err(err) = sender.send(AppEvent::SessionSkillBindingsUpdated(after)).await {
+                    log::warn!("Failed to emit SessionSkillBindingsUpdated event: {}", err);
+                }
+            }
+        }
         Ok(turn_result)
     }
 
@@ -504,5 +518,82 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         req: &nova_protocol::voice::VoiceTtsRequest,
     ) -> Result<nova_protocol::voice::VoiceTtsResponse> {
         self.voice_service.synthesize(&req.text, req.voice.as_deref()).await
+    }
+}
+
+fn should_emit_skill_bindings_updated(
+    before: &[nova_protocol::observability::SkillBindingSnapshot],
+    after: &[nova_protocol::observability::SkillBindingSnapshot],
+) -> bool {
+    let before_fingerprint = skill_binding_fingerprint(before);
+    let after_fingerprint = skill_binding_fingerprint(after);
+    before_fingerprint != after_fingerprint
+}
+
+fn skill_binding_fingerprint(
+    skills: &[nova_protocol::observability::SkillBindingSnapshot],
+) -> Vec<(String, String, String, Option<String>)> {
+    let mut entries = skills
+        .iter()
+        .map(|skill| {
+            (
+                skill.skill_id.clone(),
+                skill.name.clone(),
+                skill.status.clone(),
+                skill.description.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    entries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_emit_skill_bindings_updated;
+    use nova_protocol::observability::SkillBindingSnapshot;
+
+    #[test]
+    fn emits_event_when_skill_bindings_changed() {
+        let before = vec![SkillBindingSnapshot {
+            skill_id: "skill-a".to_string(),
+            name: "Skill A".to_string(),
+            status: "active".to_string(),
+            description: None,
+        }];
+        let after = vec![
+            SkillBindingSnapshot {
+                skill_id: "skill-a".to_string(),
+                name: "Skill A".to_string(),
+                status: "active".to_string(),
+                description: None,
+            },
+            SkillBindingSnapshot {
+                skill_id: "skill-b".to_string(),
+                name: "Skill B".to_string(),
+                status: "active".to_string(),
+                description: None,
+            },
+        ];
+
+        assert!(should_emit_skill_bindings_updated(&before, &after));
+    }
+
+    #[test]
+    fn does_not_emit_event_when_skill_bindings_unchanged() {
+        let before = vec![SkillBindingSnapshot {
+            skill_id: "skill-a".to_string(),
+            name: "Skill A".to_string(),
+            status: "active".to_string(),
+            description: None,
+        }];
+        let after = vec![SkillBindingSnapshot {
+            skill_id: "skill-a".to_string(),
+            name: "Skill A".to_string(),
+            status: "active".to_string(),
+            description: None,
+        }];
+
+        assert!(!should_emit_skill_bindings_updated(&before, &after));
     }
 }

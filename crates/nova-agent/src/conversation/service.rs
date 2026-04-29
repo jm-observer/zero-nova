@@ -452,6 +452,12 @@ fn normalize_skill_binding(skill: &serde_json::Value) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::merge_skill_bindings;
+    use super::SessionService;
+    use crate::conversation::cache::SessionCache;
+    use crate::conversation::sqlite_manager::SqliteManager;
+    use anyhow::Result;
+    use std::sync::Arc;
+    use tempfile::tempdir;
 
     #[test]
     fn merge_skill_bindings_is_idempotent_and_deduplicates_by_skill_id() {
@@ -510,6 +516,101 @@ mod tests {
         merge_skill_bindings(&mut existing, incoming);
         assert_eq!(existing.len(), 1);
         assert_eq!(existing[0]["skill_id"], "skill-a");
+    }
+
+    #[tokio::test]
+    async fn skill_bindings_are_persisted_after_service_rebuild() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+
+        let session = service
+            .create(Some("s".to_string()), "agent-1".to_string(), String::new())
+            .await?;
+        service
+            .update_runtime_state(
+                &session.id,
+                None,
+                None,
+                Some(vec![serde_json::json!({
+                    "skill_id":"skill-a",
+                    "name":"Skill A",
+                    "status":"active",
+                    "description": serde_json::Value::Null
+                })]),
+            )
+            .await?;
+
+        let rebuilt = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let loaded = rebuilt.get(&session.id).await?.expect("session should exist");
+        let control = loaded.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(control.skill_bindings.len(), 1);
+        assert_eq!(control.skill_bindings[0]["skill_id"], "skill-a");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_skill_updates_do_not_lose_or_duplicate_bindings() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+        let session = service
+            .create(Some("s".to_string()), "agent-1".to_string(), String::new())
+            .await?;
+        let session_id = session.id.clone();
+
+        let service_left = service.clone();
+        let service_right = service.clone();
+        let left = tokio::spawn(async move {
+            service_left
+                .update_runtime_state(
+                    &session_id,
+                    None,
+                    None,
+                    Some(vec![serde_json::json!({
+                        "skill_id":"skill-a",
+                        "name":"Skill A",
+                        "status":"active",
+                        "description": serde_json::Value::Null
+                    })]),
+                )
+                .await
+        });
+
+        let session_id_for_right = session.id.clone();
+        let right = tokio::spawn(async move {
+            service_right
+                .update_runtime_state(
+                    &session_id_for_right,
+                    None,
+                    None,
+                    Some(vec![serde_json::json!({
+                        "skill_id":"skill-b",
+                        "name":"Skill B",
+                        "status":"active",
+                        "description": serde_json::Value::Null
+                    })]),
+                )
+                .await
+        });
+
+        left.await??;
+        right.await??;
+
+        let loaded = service.get(&session.id).await?.expect("session should exist");
+        let control = loaded.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(control.skill_bindings.len(), 2);
+        let mut ids = control
+            .skill_bindings
+            .iter()
+            .filter_map(|value| value.get("skill_id").and_then(|skill_id| skill_id.as_str()))
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["skill-a", "skill-b"]);
+        Ok(())
     }
 }
 

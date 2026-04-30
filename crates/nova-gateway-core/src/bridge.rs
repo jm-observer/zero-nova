@@ -245,6 +245,7 @@ pub fn app_agent_to_protocol(agent: AppAgent) -> Agent {
 
 pub fn app_message_to_protocol(message: AppMessage) -> MessageDTO {
     MessageDTO {
+        id: message.id,
         role: message.role,
         content: message
             .content
@@ -265,5 +266,6 @@ pub fn app_message_to_protocol(message: AppMessage) -> MessageDTO {
             })
             .collect(),
         timestamp: message.timestamp,
+        metadata: message.metadata,
     }
 }

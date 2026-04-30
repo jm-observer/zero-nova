@@ -1,5 +1,6 @@
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
+use serde_json::Value;
 use sqlx::Row;
 
 #[derive(Clone)]
@@ -60,8 +61,10 @@ impl SqliteSessionRepository {
     pub async fn save_message(
         &self,
         session_id: &str,
+        message_id: &str,
         role: Role,
         content: Vec<ContentBlock>,
+        metadata: Option<Value>,
         created_at: i64,
     ) -> Result<()> {
         let role_str = match role {
@@ -70,14 +73,17 @@ impl SqliteSessionRepository {
             Role::Assistant => "assistant",
         };
         let content_json = serde_json::to_string(&content)?;
+        let metadata_json = metadata.map(|v| serde_json::to_string(&v)).transpose()?;
 
         sqlx::query(
-            "INSERT INTO messages (session_id, role, content, created_at) 
-             VALUES (?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, message_id, role, content, metadata, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(session_id)
+        .bind(message_id)
         .bind(role_str)
         .bind(content_json)
+        .bind(metadata_json)
         .bind(created_at)
         .execute(&self.pool)
         .await?;
@@ -119,8 +125,9 @@ impl SqliteSessionRepository {
                 super::control::ControlState::new(&agent_id)
             };
 
-            let messages_rows =
-                sqlx::query("SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at, id")
+            let messages_rows = sqlx::query(
+                "SELECT message_id, role, content, metadata, created_at FROM messages WHERE session_id = ? ORDER BY created_at, id",
+            )
                     .bind(&id)
                     .fetch_all(&self.pool)
                     .await?;
@@ -129,13 +136,26 @@ impl SqliteSessionRepository {
             for m_row in messages_rows {
                 let role_str: String = m_row.get("role");
                 let content_str: String = m_row.get("content");
+                let message_id: String = m_row.get("message_id");
+                let metadata_str: Option<String> = m_row.get("metadata");
+                let created_at: i64 = m_row.get("created_at");
                 let role = match role_str.as_str() {
                     "system" => Role::System,
                     "user" => Role::User,
                     _ => Role::Assistant,
                 };
                 let content: Vec<ContentBlock> = serde_json::from_str(&content_str)?;
-                history.push(Message { role, content });
+                let metadata = metadata_str
+                    .as_deref()
+                    .map(serde_json::from_str::<crate::message::MessageMetadata>)
+                    .transpose()?;
+                history.push(Message {
+                    id: message_id,
+                    role,
+                    content,
+                    created_at,
+                    metadata,
+                });
             }
 
             return Ok(Some((

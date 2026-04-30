@@ -201,18 +201,21 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .context("Session not found")?;
 
         let messages = session.get_internal_messages();
-        Ok(messages
-            .into_iter()
-            .map(|m| AppMessage {
+        let mut app_messages = Vec::with_capacity(messages.len());
+        for m in messages {
+            app_messages.push(AppMessage {
+                id: m.id,
                 role: match m.role {
                     Role::System => "system".to_string(),
                     Role::User => "user".to_string(),
                     Role::Assistant => "assistant".to_string(),
                 },
                 content: m.content,
-                timestamp: 0,
-            })
-            .collect())
+                timestamp: m.created_at,
+                metadata: m.metadata.map(serde_json::to_value).transpose()?,
+            });
+        }
+        Ok(app_messages)
     }
 
     async fn create_session(&self, title: Option<String>, agent_id: String) -> Result<AppSession> {

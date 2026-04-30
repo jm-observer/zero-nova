@@ -169,10 +169,11 @@ impl Tool for AgentTool {
             system_prompt = "You are a helpful assistant.".to_string();
         }
 
-        let history = vec![Message {
-            role: Role::System,
-            content: vec![ContentBlock::Text { text: system_prompt }],
-        }];
+        let history = vec![Message::new(
+            Role::System,
+            vec![ContentBlock::Text { text: system_prompt }],
+            chrono::Utc::now().timestamp_millis(),
+        )];
 
         // 6. Execute
         let start_time = Instant::now();

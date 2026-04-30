@@ -235,12 +235,13 @@ async fn run_repl(
     let mut history: Vec<Message> = Vec::new();
 
     if !system_prompt.is_empty() {
-        history.push(Message {
-            role: Role::System,
-            content: vec![ContentBlock::Text {
+        history.push(Message::new(
+            Role::System,
+            vec![ContentBlock::Text {
                 text: system_prompt.to_string(),
             }],
-        });
+            chrono::Utc::now().timestamp_millis(),
+        ));
     }
 
     while let Ok(line) = rl.readline("you> ") {
@@ -383,12 +384,13 @@ async fn run_oneshot(
 
     let mut history = Vec::new();
     if !system_prompt.is_empty() {
-        history.push(Message {
-            role: Role::System,
-            content: vec![ContentBlock::Text {
+        history.push(Message::new(
+            Role::System,
+            vec![ContentBlock::Text {
                 text: system_prompt.to_string(),
             }],
-        });
+            chrono::Utc::now().timestamp_millis(),
+        ));
     }
 
     let result = agent.run_turn(&history, user_input, tx, None).await;

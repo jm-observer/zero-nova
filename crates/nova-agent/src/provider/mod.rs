@@ -1,5 +1,6 @@
 use crate::message::Message;
 use crate::provider::types::{ToolDefinition, Usage};
+use serde_json::Value;
 
 pub mod anthropic;
 pub mod openai_compat;
@@ -26,6 +27,12 @@ pub trait LlmClient: Send + Sync {
 /// Trait for receiving streamed events from the LLM.
 pub trait StreamReceiver: Send {
     async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>>;
+    fn request_body(&self) -> Option<Value> {
+        None
+    }
+    fn response_body(&self) -> Option<Value> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

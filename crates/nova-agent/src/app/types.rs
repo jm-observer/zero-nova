@@ -23,9 +23,11 @@ pub struct AppAgent {
 
 #[derive(Debug, Clone)]
 pub struct AppMessage {
+    pub id: String,
     pub role: String,
     pub content: Vec<ContentBlock>,
     pub timestamp: i64,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]

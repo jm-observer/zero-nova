@@ -56,8 +56,10 @@ impl SqliteManager {
             "CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                metadata TEXT,
                 created_at INTEGER NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );",
@@ -184,6 +186,7 @@ impl SqliteManager {
         self.create_workspace_restore_state_table().await?;
         self.migrate_sessions_runtime_control_column().await?;
         self.migrate_messages_timestamp_column().await?;
+        self.migrate_messages_contract_columns().await?;
         self.migrate_audit_logs_schema().await?;
         self.migrate_diagnostics_schema().await?;
         self.migrate_workspace_restore_state_schema().await?;
@@ -262,6 +265,39 @@ impl SqliteManager {
                 .context("Failed to backfill created_at from timestamp")?;
         }
 
+        Ok(())
+    }
+
+    async fn migrate_messages_contract_columns(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(messages)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect messages table schema")?;
+
+        let mut has_message_id = false;
+        let mut has_metadata = false;
+
+        for column in columns {
+            let name: String = Row::get(&column, "name");
+            if name == "message_id" {
+                has_message_id = true;
+            } else if name == "metadata" {
+                has_metadata = true;
+            }
+        }
+
+        if !has_message_id {
+            sqlx::query("ALTER TABLE messages ADD COLUMN message_id TEXT NOT NULL DEFAULT ''")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add message_id column to messages table")?;
+        }
+        if !has_metadata {
+            sqlx::query("ALTER TABLE messages ADD COLUMN metadata TEXT")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add metadata column to messages table")?;
+        }
         Ok(())
     }
 

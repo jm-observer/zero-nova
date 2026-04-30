@@ -60,9 +60,12 @@ pub struct Session {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDTO {
+    pub id: String,
     pub role: String,
     pub content: Vec<ContentBlockDTO>,
     pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

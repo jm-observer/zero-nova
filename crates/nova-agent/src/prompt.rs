@@ -1001,16 +1001,17 @@ impl HistoryTrimmer {
         let mut result = system_msgs;
         // 如果有裁剪，插入一条摘要提示
         if removed_count > 0 {
-            result.push(Message {
-                role: Role::User,
-                content: vec![ContentBlock::Text {
+            result.push(Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
                     text: format!(
                         "[System: {} earlier messages were trimmed to fit context window. \
                          The conversation continues from the most recent messages below.]",
                         removed_count
                     ),
                 }],
-            });
+                chrono::Utc::now().timestamp_millis(),
+            ));
         }
         result.extend(kept_trimmable);
         result.extend(protected.to_vec());
@@ -1459,19 +1460,22 @@ mod tests {
             min_recent_messages: 2,
             enable_summary: false,
         });
+        let now = chrono::Utc::now().timestamp_millis();
         let messages = vec![
-            Message {
-                role: Role::System,
-                content: vec![ContentBlock::Text {
+            Message::new(
+                Role::System,
+                vec![ContentBlock::Text {
                     text: "system".to_string(),
                 }],
-            },
-            Message {
-                role: Role::User,
-                content: vec![ContentBlock::Text {
+                now,
+            ),
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
                     text: "short".to_string(),
                 }],
-            },
+                now,
+            ),
         ];
 
         let result = trimmer.trim(&messages, "system");
@@ -1487,25 +1491,18 @@ mod tests {
             min_recent_messages: 1,
             enable_summary: false,
         });
+        let now = chrono::Utc::now().timestamp_millis();
         let messages = vec![
-            Message {
-                role: Role::System,
-                content: vec![ContentBlock::Text {
+            Message::new(
+                Role::System,
+                vec![ContentBlock::Text {
                     text: "system prompt".to_string(),
                 }],
-            },
-            Message {
-                role: Role::User,
-                content: vec![ContentBlock::Text { text: "1".repeat(40) }],
-            },
-            Message {
-                role: Role::Assistant,
-                content: vec![ContentBlock::Text { text: "2".repeat(5) }],
-            },
-            Message {
-                role: Role::User,
-                content: vec![ContentBlock::Text { text: "3".repeat(5) }],
-            },
+                now,
+            ),
+            Message::new(Role::User, vec![ContentBlock::Text { text: "1".repeat(40) }], now),
+            Message::new(Role::Assistant, vec![ContentBlock::Text { text: "2".repeat(5) }], now),
+            Message::new(Role::User, vec![ContentBlock::Text { text: "3".repeat(5) }], now),
         ];
 
         let result = trimmer.trim(&messages, "system prompt");
@@ -1524,23 +1521,23 @@ mod tests {
             min_recent_messages: 2,
             enable_summary: false,
         });
+        let now = chrono::Utc::now().timestamp_millis();
         let messages = vec![
-            Message {
-                role: Role::System,
-                content: vec![ContentBlock::Text { text: "s".repeat(120) }],
-            },
-            Message {
-                role: Role::User,
-                content: vec![ContentBlock::Text {
+            Message::new(Role::System, vec![ContentBlock::Text { text: "s".repeat(120) }], now),
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
                     text: "small".to_string(),
                 }],
-            },
-            Message {
-                role: Role::Assistant,
-                content: vec![ContentBlock::Text {
+                now,
+            ),
+            Message::new(
+                Role::Assistant,
+                vec![ContentBlock::Text {
                     text: "small".to_string(),
                 }],
-            },
+                now,
+            ),
         ];
 
         let result = trimmer.trim(&messages, &"s".repeat(120));

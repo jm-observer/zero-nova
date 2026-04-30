@@ -148,6 +148,8 @@ impl LlmClient for AnthropicClient {
             current_tool_name: None,
             pending_stop_reason: None,
             current_block_type: None,
+            request_body: serde_json::to_value(&body).unwrap_or(serde_json::Value::Null),
+            response_events: Vec::new(),
         }))
     }
 }
@@ -166,6 +168,8 @@ pub struct AnthropicStreamReceiver {
     current_tool_name: Option<String>,
     pending_stop_reason: Option<StopReason>,
     current_block_type: Option<BlockType>,
+    request_body: serde_json::Value,
+    response_events: Vec<serde_json::Value>,
 }
 
 #[async_trait]
@@ -175,6 +179,8 @@ impl StreamReceiver for AnthropicStreamReceiver {
         loop {
             // First, try to get an event from the already buffered data
             if let Some(event) = self.parser.next_event()? {
+                self.response_events
+                    .push(serde_json::to_value(&event).unwrap_or(serde_json::Value::Null));
                 // Convert StreamEvent to ProviderStreamEvent
                 let provider_event = match event {
                     StreamEvent::ContentBlockStart { content_block, .. } => {
@@ -287,5 +293,13 @@ impl StreamReceiver for AnthropicStreamReceiver {
                 } // End of stream
             }
         }
+    }
+
+    fn response_body(&self) -> Option<serde_json::Value> {
+        Some(serde_json::Value::Array(self.response_events.clone()))
+    }
+
+    fn request_body(&self) -> Option<serde_json::Value> {
+        Some(self.request_body.clone())
     }
 }

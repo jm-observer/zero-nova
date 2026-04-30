@@ -591,6 +591,10 @@
           },
           "type": "array"
         },
+        "id": {
+          "type": "string"
+        },
+        "metadata": true,
         "role": {
           "type": "string"
         },
@@ -601,6 +605,7 @@
       },
       "required": [
         "content",
+        "id",
         "role",
         "timestamp"
       ],

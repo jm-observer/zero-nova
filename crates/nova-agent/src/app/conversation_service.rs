@@ -220,6 +220,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 vec![ContentBlock::Text {
                     text: input.to_string(),
                 }],
+                None,
             )
             .await?;
 
@@ -304,12 +305,13 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .update_runtime_state(session_id, Some(snapshot_internal.clone()), None, Some(initial_skills))
                 .await?;
 
-            let user_message = Message {
-                role: Role::User,
-                content: vec![ContentBlock::Text {
+            let user_message = Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
                     text: input.to_string(),
                 }],
-            };
+                Utc::now().timestamp_millis(),
+            );
             let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
             let turn_result = match self
                 .agent
@@ -327,8 +329,28 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             };
 
             for msg in &turn_result.messages {
+                let metadata = if msg.role == Role::Assistant {
+                    turn_result
+                        .provider_request_body
+                        .as_ref()
+                        .zip(turn_result.provider_response_body.as_ref())
+                        .map(|(request_body, response_body)| {
+                            serde_json::json!({
+                                "providerHttpTrace": {
+                                    "requestBody": request_body,
+                                    "responseBody": response_body,
+                                    "format": "json",
+                                    "boundMessageId": "",
+                                    "capturedAt": Utc::now().timestamp_millis(),
+                                    "truncated": false
+                                }
+                            })
+                        })
+                } else {
+                    None
+                };
                 self.sessions
-                    .append_message(session_id, msg.role.clone(), msg.content.clone())
+                    .append_message(session_id, msg.role.clone(), msg.content.clone(), metadata)
                     .await?;
             }
 
@@ -394,8 +416,28 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             };
 
             for msg in &turn_result.messages {
+                let metadata = if msg.role == Role::Assistant {
+                    turn_result
+                        .provider_request_body
+                        .as_ref()
+                        .zip(turn_result.provider_response_body.as_ref())
+                        .map(|(request_body, response_body)| {
+                            serde_json::json!({
+                                "providerHttpTrace": {
+                                    "requestBody": request_body,
+                                    "responseBody": response_body,
+                                    "format": "json",
+                                    "boundMessageId": "",
+                                    "capturedAt": Utc::now().timestamp_millis(),
+                                    "truncated": false
+                                }
+                            })
+                        })
+                } else {
+                    None
+                };
                 self.sessions
-                    .append_message(session_id, msg.role.clone(), msg.content.clone())
+                    .append_message(session_id, msg.role.clone(), msg.content.clone(), metadata)
                     .await?;
             }
 

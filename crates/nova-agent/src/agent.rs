@@ -13,7 +13,7 @@ use crate::tool::{Tool, ToolContext};
 use anyhow::Result;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde::Serialize;
-use serde_json;
+use serde_json::{self, Value};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,6 +27,8 @@ use tokio_util::sync::CancellationToken;
 pub struct TurnResult {
     pub messages: Vec<Message>,
     pub usage: Usage,
+    pub provider_request_body: Option<Value>,
+    pub provider_response_body: Option<Value>,
 }
 
 /// Runtime for the zero-nova agent.
@@ -196,16 +198,19 @@ impl<C: LlmClient> AgentRuntime<C> {
         let mut all_messages = history.to_vec();
 
         // Append initial user message
-        all_messages.push(Message {
-            role: Role::User,
-            content: vec![ContentBlock::Text {
+        all_messages.push(Message::new(
+            Role::User,
+            vec![ContentBlock::Text {
                 text: user_input.to_string(),
             }],
-        });
+            chrono::Utc::now().timestamp_millis(),
+        ));
 
         let mut turn_messages = Vec::new();
         let mut cumulative_usage = Usage::default();
         let mut completed_naturally = false;
+        let mut final_provider_request_body: Option<Value> = None;
+        let mut final_provider_response_body: Option<Value> = None;
 
         for iteration in 0..self.config.max_iterations {
             if let Some(token) = &cancellation_token {
@@ -213,6 +218,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                     return Ok(TurnResult {
                         messages: turn_messages,
                         usage: cumulative_usage,
+                        provider_request_body: final_provider_request_body,
+                        provider_response_body: final_provider_response_body,
                     });
                 }
             }
@@ -258,6 +265,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                         return Ok(TurnResult {
                             messages: turn_messages,
                             usage: cumulative_usage,
+                            provider_request_body: final_provider_request_body,
+                            provider_response_body: final_provider_response_body,
                         });
                     }
                 }
@@ -286,6 +295,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                     _ => {}
                 }
             }
+            final_provider_request_body = receiver.request_body();
+            final_provider_response_body = receiver.response_body();
 
             // Accumulate usage
             cumulative_usage.input_tokens += iter_usage.input_tokens;
@@ -326,10 +337,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 });
             }
 
-            let assistant_msg = Message {
-                role: Role::Assistant,
-                content: current_blocks,
-            };
+            let assistant_msg = Message::new(Role::Assistant, current_blocks, chrono::Utc::now().timestamp_millis());
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
@@ -344,12 +352,13 @@ impl<C: LlmClient> AgentRuntime<C> {
                 };
 
                 if is_truncated {
-                    all_messages.push(Message {
-                        role: Role::User,
-                        content: vec![ContentBlock::Text {
+                    all_messages.push(Message::new(
+                        Role::User,
+                        vec![ContentBlock::Text {
                             text: "Please continue your last tool call or response.".to_string(),
                         }],
-                    });
+                        chrono::Utc::now().timestamp_millis(),
+                    ));
                     continue;
                 }
             }
@@ -367,10 +376,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .execute_tool_calls(parsed_tool_calls, &event_tx, &cancellation_token)
                 .await?;
 
-            let tool_res_msg = Message {
-                role: Role::User,
-                content: tool_result_blocks,
-            };
+            let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
             all_messages.push(tool_res_msg.clone());
             turn_messages.push(tool_res_msg);
         }
@@ -392,6 +398,8 @@ impl<C: LlmClient> AgentRuntime<C> {
         Ok(TurnResult {
             messages: turn_messages,
             usage: cumulative_usage,
+            provider_request_body: final_provider_request_body,
+            provider_response_body: final_provider_response_body,
         })
     }
 
@@ -477,21 +485,23 @@ impl<C: LlmClient> AgentRuntime<C> {
             } else {
                 all_messages.insert(
                     0,
-                    Message {
-                        role: Role::System,
-                        content: vec![ContentBlock::Text {
+                    Message::new(
+                        Role::System,
+                        vec![ContentBlock::Text {
                             text: ctx.system_prompt.clone(),
                         }],
-                    },
+                        chrono::Utc::now().timestamp_millis(),
+                    ),
                 );
             }
         } else {
-            all_messages.push(Message {
-                role: Role::System,
-                content: vec![ContentBlock::Text {
+            all_messages.push(Message::new(
+                Role::System,
+                vec![ContentBlock::Text {
                     text: ctx.system_prompt.clone(),
                 }],
-            });
+                chrono::Utc::now().timestamp_millis(),
+            ));
         }
 
         all_messages.push(message);
@@ -500,6 +510,8 @@ impl<C: LlmClient> AgentRuntime<C> {
         let mut turn_messages = Vec::new();
         let mut cumulative_usage = Usage::default();
         let mut completed_naturally = false;
+        let mut final_provider_request_body: Option<Value> = None;
+        let mut final_provider_response_body: Option<Value> = None;
 
         for iteration in 0..ctx.iteration_budget {
             // 检查取消
@@ -508,6 +520,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                     return Ok(TurnResult {
                         messages: turn_messages,
                         usage: cumulative_usage,
+                        provider_request_body: final_provider_request_body,
+                        provider_response_body: final_provider_response_body,
                     });
                 }
             }
@@ -541,6 +555,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                         return Ok(TurnResult {
                             messages: turn_messages,
                             usage: cumulative_usage,
+                            provider_request_body: final_provider_request_body,
+                            provider_response_body: final_provider_response_body,
                         });
                     }
                 }
@@ -569,6 +585,8 @@ impl<C: LlmClient> AgentRuntime<C> {
                     _ => {}
                 }
             }
+            final_provider_request_body = receiver.request_body();
+            final_provider_response_body = receiver.response_body();
 
             // 累计 usage（run_turn_with_context 的关键修复）
             cumulative_usage.input_tokens += iter_usage.input_tokens;
@@ -610,10 +628,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 });
             }
 
-            let assistant_msg = Message {
-                role: Role::Assistant,
-                content: current_blocks,
-            };
+            let assistant_msg = Message::new(Role::Assistant, current_blocks, chrono::Utc::now().timestamp_millis());
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
@@ -627,12 +642,13 @@ impl<C: LlmClient> AgentRuntime<C> {
                 };
 
                 if is_truncated {
-                    all_messages.push(Message {
-                        role: Role::User,
-                        content: vec![ContentBlock::Text {
+                    all_messages.push(Message::new(
+                        Role::User,
+                        vec![ContentBlock::Text {
                             text: "Please continue your last tool call or response.".to_string(),
                         }],
-                    });
+                        chrono::Utc::now().timestamp_millis(),
+                    ));
                     continue;
                 }
             }
@@ -647,10 +663,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .execute_tool_calls(parsed_tool_calls, &event_tx, &cancellation_token)
                 .await?;
 
-            let tool_res_msg = Message {
-                role: Role::User,
-                content: tool_result_blocks,
-            };
+            let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
             all_messages.push(tool_res_msg.clone());
             turn_messages.push(tool_res_msg);
         }
@@ -666,6 +679,8 @@ impl<C: LlmClient> AgentRuntime<C> {
         Ok(TurnResult {
             messages: turn_messages,
             usage: cumulative_usage,
+            provider_request_body: final_provider_request_body,
+            provider_response_body: final_provider_response_body,
         })
     }
 

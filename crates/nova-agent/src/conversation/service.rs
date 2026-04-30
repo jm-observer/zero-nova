@@ -5,6 +5,7 @@ use super::session::{Session, SessionSummary};
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use chrono::Utc;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -76,8 +77,11 @@ impl SessionService {
         let mut initial_history = Vec::new();
         if !system_prompt.is_empty() {
             initial_history.push(Message {
+                id: uuid::Uuid::new_v4().to_string(),
                 role: Role::System,
                 content: vec![ContentBlock::Text { text: system_prompt }],
+                created_at: now,
+                metadata: None,
             });
         }
 
@@ -104,7 +108,14 @@ impl SessionService {
         // 持久化初始消息
         for msg in session.get_history() {
             self.repository
-                .save_message(&session.id, msg.role.clone(), msg.content.clone(), now)
+                .save_message(
+                    &session.id,
+                    &msg.id,
+                    msg.role.clone(),
+                    msg.content.clone(),
+                    msg.metadata.as_ref().map(serde_json::to_value).transpose()?,
+                    msg.created_at,
+                )
                 .await?;
         }
 
@@ -178,22 +189,43 @@ impl SessionService {
         }
     }
 
-    pub async fn append_message(&self, session_id: &str, role: Role, content: Vec<ContentBlock>) -> Result<()> {
+    pub async fn append_message(
+        &self,
+        session_id: &str,
+        role: Role,
+        content: Vec<ContentBlock>,
+        metadata: Option<Value>,
+    ) -> Result<()> {
         let session = self.get(session_id).await?.context("Session not found")?;
         let now = Utc::now().timestamp_millis();
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let mut parsed_metadata = metadata
+            .clone()
+            .map(serde_json::from_value::<crate::message::MessageMetadata>)
+            .transpose()?;
+        if let Some(metadata) = parsed_metadata.as_mut() {
+            if let Some(trace) = metadata.provider_http_trace.as_mut() {
+                trace.bound_message_id = message_id.clone();
+            }
+        }
 
         // 1. 更新内存
         {
             let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             history.push(Message {
+                id: message_id.clone(),
                 role: role.clone(),
                 content: content.clone(),
+                created_at: now,
+                metadata: parsed_metadata,
             });
             session.touch_updated_at();
         }
 
         // 2. 持久化消息
-        self.repository.save_message(session_id, role, content, now).await?;
+        self.repository
+            .save_message(session_id, &message_id, role, content, metadata, now)
+            .await?;
 
         // 3. 更新会话元数据
         let rc = {
@@ -319,7 +351,14 @@ impl SessionService {
 
         for msg in session.get_history() {
             self.repository
-                .save_message(&session.id, msg.role.clone(), msg.content.clone(), now)
+                .save_message(
+                    &session.id,
+                    &msg.id,
+                    msg.role.clone(),
+                    msg.content.clone(),
+                    msg.metadata.as_ref().map(serde_json::to_value).transpose()?,
+                    msg.created_at,
+                )
                 .await?;
         }
 

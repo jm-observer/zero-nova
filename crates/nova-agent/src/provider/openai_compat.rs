@@ -185,6 +185,8 @@ impl LlmClient for OpenAiCompatClient {
             pending_tool_calls: Vec::new(),
             pending_stop_reason: None,
             event_queue: VecDeque::new(),
+            request_body: body,
+            response_chunks: Vec::new(),
         }))
     }
 }
@@ -206,6 +208,8 @@ pub struct OpenAiCompatStreamReceiver {
     pending_stop_reason: Option<StopReason>,
     /// 缓存待发射的事件（单个 chunk 可能产生多个 ProviderStreamEvent）
     event_queue: VecDeque<ProviderStreamEvent>,
+    request_body: serde_json::Value,
+    response_chunks: Vec<serde_json::Value>,
 }
 
 #[async_trait]
@@ -240,6 +244,9 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
 
                     let chunk: ChatCompletionChunk = serde_json::from_str(&json_str)
                         .map_err(|e| anyhow!("Failed to parse OpenAI chunk: {}, content: {}", e, json_str))?;
+                    if let Ok(chunk_json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        self.response_chunks.push(chunk_json);
+                    }
                     self.process_chunk(chunk);
                     // 回到循环顶部消费 event_queue
                     continue;
@@ -255,6 +262,14 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
                 None => return Ok(None),
             }
         }
+    }
+
+    fn response_body(&self) -> Option<serde_json::Value> {
+        Some(serde_json::Value::Array(self.response_chunks.clone()))
+    }
+
+    fn request_body(&self) -> Option<serde_json::Value> {
+        Some(self.request_body.clone())
     }
 }
 

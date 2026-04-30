@@ -165,6 +165,13 @@ const en: Record<string, string> = {
     'chat.clone_session': 'Clone Session (Branch)',
     'chat.subagent_logs': 'Subagent Logs',
     'chat.files_created': '{0} files created',
+    'chat.copy_request_body': 'Copy request body',
+    'chat.copy_response_body': 'Copy response body',
+    'chat.copy_request_body_success': 'Copied request body',
+    'chat.copy_response_body_success': 'Copied response body',
+    'chat.copy_body_failed': 'Copy failed',
+    'chat.copy_body_unavailable': 'Body unavailable',
+    'chat.copy_body_data_invalid': 'Invalid data, cannot copy',
 
     // ========================
     // Settings - Tabs

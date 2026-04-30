@@ -174,6 +174,11 @@ export class ChatView {
         // 工具卡片折叠监听
         this.messagesContainer.addEventListener('click', (e) => {
             const target = e.target as HTMLElement;
+            const traceCopyBtn = target.closest('.message-trace-copy-btn') as HTMLButtonElement | null;
+            if (traceCopyBtn) {
+                void this.handleTraceCopyClick(traceCopyBtn);
+                return;
+            }
             // 允许点击整个 Header 或 Header 内部的任何元素
             const header = target.closest('.tool-name, .tool-result-header');
             if (header) {
@@ -192,6 +197,45 @@ export class ChatView {
                 }
             }
         });
+    }
+
+    private async handleTraceCopyClick(button: HTMLButtonElement) {
+        if (button.disabled) {
+            return;
+        }
+        const bodyType = button.dataset.bodyType;
+        const messageId = button.dataset.messageId;
+        if (!bodyType || !messageId) {
+            this.bus.emit('toast', { message: t('chat.copy_body_data_invalid') });
+            return;
+        }
+        const message = this.state.messages.find((item) => item.id === messageId);
+        const trace = message?.metadata?.providerHttpTrace;
+        if (!trace || trace.boundMessageId !== messageId) {
+            this.bus.emit('toast', { message: t('chat.copy_body_data_invalid') });
+            return;
+        }
+        const value = bodyType === 'request' ? trace.requestBody : trace.responseBody;
+        if (value === undefined || value === null) {
+            this.bus.emit('toast', { message: t('chat.copy_body_unavailable') });
+            return;
+        }
+
+        // 短暂禁用，避免快速重复复制
+        button.disabled = true;
+        setTimeout(() => {
+            button.disabled = false;
+        }, 300);
+
+        try {
+            await navigator.clipboard.writeText(JSON.stringify(value, null, 2));
+            this.bus.emit('toast', {
+                message: bodyType === 'request' ? t('chat.copy_request_body_success') : t('chat.copy_response_body_success'),
+            });
+        } catch (error) {
+            console.error('[ChatView] Failed to copy provider body:', error);
+            this.bus.emit('toast', { message: t('chat.copy_body_failed') });
+        }
     }
 
     private async syncProjectPicker() {
@@ -647,6 +691,26 @@ export class ChatView {
         const voiceBadgeHtml = voiceTranscriptState
             ? `<div class="message-intent">${voiceTranscriptState === 'pending' ? t('voice.recognizing') : t('voice.title')}</div>`
             : '';
+        const trace = message.metadata?.providerHttpTrace;
+        const traceBound = trace?.boundMessageId === message.id;
+        const hasRequestBody = !!trace && traceBound && trace.requestBody !== undefined && trace.requestBody !== null;
+        const hasResponseBody = !!trace && traceBound && trace.responseBody !== undefined && trace.responseBody !== null;
+        const traceActionsHtml = isAssistant
+            ? `<div class="message-trace-actions">
+                <button
+                    class="message-trace-copy-btn"
+                    data-body-type="request"
+                    data-message-id="${escapeHtml(message.id || '')}"
+                    ${hasRequestBody ? '' : 'disabled'}
+                >${t('chat.copy_request_body')}</button>
+                <button
+                    class="message-trace-copy-btn"
+                    data-body-type="response"
+                    data-message-id="${escapeHtml(message.id || '')}"
+                    ${hasResponseBody ? '' : 'disabled'}
+                >${t('chat.copy_response_body')}</button>
+            </div>`
+            : '';
 
         return `
             <div class="message ${roleClass} ${voiceTranscriptState ? `voice-transcript ${voiceTranscriptState}` : ''}" data-index="${index}">
@@ -654,6 +718,7 @@ export class ChatView {
                     ${voiceBadgeHtml}
                     ${intentHtml}
                     <div class="markdown-body">${contentHtml}</div>
+                    ${traceActionsHtml}
                 </div>
                 <div class="message-time">${formatTime(message.timestamp || message.createdAt)}</div>
             </div>

@@ -167,6 +167,13 @@ const zh: Record<string, string> = {
     'chat.clone_session': '克隆此会话 (分支)',
     'chat.subagent_logs': '子任务日志',
     'chat.files_created': '{0} 个生成文件',
+    'chat.copy_request_body': '复制请求 body',
+    'chat.copy_response_body': '复制响应 body',
+    'chat.copy_request_body_success': '已复制请求 body',
+    'chat.copy_response_body_success': '已复制响应 body',
+    'chat.copy_body_failed': '复制失败',
+    'chat.copy_body_unavailable': 'body 不可用',
+    'chat.copy_body_data_invalid': '数据异常，无法复制',
 
     // ========================
     // Settings - Tabs

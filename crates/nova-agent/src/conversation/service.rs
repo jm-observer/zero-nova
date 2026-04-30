@@ -208,6 +208,7 @@ impl SessionService {
                 trace.bound_message_id = message_id.clone();
             }
         }
+        let persisted_metadata = parsed_metadata.as_ref().map(serde_json::to_value).transpose()?;
 
         // 1. 更新内存
         {
@@ -224,7 +225,7 @@ impl SessionService {
 
         // 2. 持久化消息
         self.repository
-            .save_message(session_id, &message_id, role, content, metadata, now)
+            .save_message(session_id, &message_id, role, content, persisted_metadata, now)
             .await?;
 
         // 3. 更新会话元数据
@@ -657,6 +658,54 @@ mod tests {
             .collect::<Vec<_>>();
         ids.sort_unstable();
         assert_eq!(ids, vec!["skill-a", "skill-b"]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn provider_http_trace_bound_message_id_is_persisted() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+
+        let session = service
+            .create(Some("s".to_string()), "agent-1".to_string(), String::new())
+            .await?;
+
+        let metadata = serde_json::json!({
+            "providerHttpTrace": {
+                "requestBody": {"foo":"bar"},
+                "responseBody": {"id":"resp-1"},
+                "format": "json",
+                "boundMessageId": "",
+                "capturedAt": 1,
+                "truncated": false
+            }
+        });
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::Assistant,
+                vec![crate::message::ContentBlock::Text {
+                    text: "assistant".to_string(),
+                }],
+                Some(metadata),
+            )
+            .await?;
+
+        let rebuilt = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let loaded = rebuilt.get(&session.id).await?.expect("session should exist");
+        let history = loaded.get_history();
+        let assistant = history
+            .iter()
+            .find(|message| message.role == crate::message::Role::Assistant)
+            .expect("assistant message should exist");
+        let trace = assistant
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.provider_http_trace.as_ref())
+            .expect("provider trace should exist");
+        assert_eq!(trace.bound_message_id, assistant.id);
         Ok(())
     }
 }

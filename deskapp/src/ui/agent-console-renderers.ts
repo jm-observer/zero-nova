@@ -338,15 +338,17 @@ export function renderDiagnosticList(
 
 export function renderPromptSegments(promptView: PromptPreviewView): string {
     const sections: string[] = [];
+    const skillFragments = promptView.skillFragments ?? [];
+    const memoryFragments = promptView.memoryFragments ?? [];
 
     sections.push(renderPromptSection(t('console.prompt_preview'), promptView.systemPrompt));
 
-    if (promptView.skillFragments.length > 0) {
+    if (skillFragments.length > 0) {
         sections.push(
             `
                     <div class="prompt-segment">
-                        <div class="segment-label">Skills (${promptView.skillFragments.length})</div>
-                        ${promptView.skillFragments
+                        <div class="segment-label">Skills (${skillFragments.length})</div>
+                        ${skillFragments
                             .map(
                                 fragment => `
                                     <div class="skill-fragment">
@@ -361,12 +363,12 @@ export function renderPromptSegments(promptView: PromptPreviewView): string {
         );
     }
 
-    if (promptView.memoryFragments.length > 0) {
+    if (memoryFragments.length > 0) {
         sections.push(
             `
                     <div class="prompt-segment">
                         <div class="segment-label">Memory</div>
-                        ${promptView.memoryFragments
+                        ${memoryFragments
                             .map(fragment => `<div class="memory-fragment">${renderMultilineText(fragment.content)}</div>`)
                             .join('')}
                     </div>

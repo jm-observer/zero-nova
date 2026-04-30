@@ -597,6 +597,7 @@ export class AgentConsoleView {
                 return this.state.toResourceError<MemoryHitView[]>(error, t('common.load_failed'));
             });
         this.state.updateSessionResourceState(sessionId, 'memory', memoryResult);
+        this.renderPromptMemory();
     }
 
     private async loadRunsData(sessionId: string, force = false) {

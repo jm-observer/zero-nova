@@ -62,9 +62,13 @@ pub struct SessionTokenCounters {
 
 impl ControlState {
     pub fn new(default_agent: &str) -> Self {
+        Self::new_with_project_dir(default_agent, default_project_dir())
+    }
+
+    pub fn new_with_project_dir(default_agent: &str, project_dir: PathBuf) -> Self {
         Self {
             active_agent: default_agent.to_string(),
-            project_dir: default_project_dir(),
+            project_dir,
             model_override: SessionModelOverride::default(),
             last_turn_snapshot: None,
             skill_bindings: Vec::new(),

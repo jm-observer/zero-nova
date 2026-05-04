@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod bash;
 pub mod edit;
+pub mod project_manager;
 pub mod read;
 pub mod skill;
 pub mod task;
@@ -11,7 +12,7 @@ pub mod write;
 
 use crate::config::AppConfig;
 use crate::skill::SkillRegistry;
-use crate::tool::ToolRegistry;
+use crate::tool::{ProjectDirService, ToolRegistry};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -22,6 +23,7 @@ pub fn register_builtin_tools(
     task_store: Arc<Mutex<task::TaskStore>>,
     skill_registry: Arc<SkillRegistry>,
     tool_whitelist: Option<&[String]>,
+    project_dir_service: Arc<dyn ProjectDirService>,
 ) {
     if is_tool_enabled(tool_whitelist, "Bash") {
         registry.register(Box::new(bash::BashTool::new(&config.tool.bash)));
@@ -43,6 +45,9 @@ pub fn register_builtin_tools(
     }
     if is_tool_enabled(tool_whitelist, "WebFetch") {
         registry.register(Box::new(web_fetch::WebFetchTool::new()));
+    }
+    if is_tool_enabled(tool_whitelist, "ProjectManager") {
+        registry.register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)));
     }
 
     let skill_registry_for_skill = skill_registry.clone();

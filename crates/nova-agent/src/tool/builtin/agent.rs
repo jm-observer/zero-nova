@@ -6,11 +6,12 @@ use crate::prompt::TrimmerConfig;
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::provider::ModelConfig;
 use crate::tool::builtin::register_builtin_tools;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
+use crate::tool::{ProjectDirService, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -21,6 +22,23 @@ use tokio::time::Instant;
 pub struct AgentTool {
     config: AppConfig,
     agent_types: HashMap<String, AgentSpec>,
+}
+
+struct NoopProjectDirService;
+
+#[async_trait]
+impl ProjectDirService for NoopProjectDirService {
+    async fn get_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
+        anyhow::bail!("Project directory management is unavailable in subagent runtime")
+    }
+
+    async fn set_project_dir(&self, _session_id: &str, _project_dir: PathBuf) -> Result<PathBuf> {
+        anyhow::bail!("Project directory management is unavailable in subagent runtime")
+    }
+
+    async fn reset_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
+        anyhow::bail!("Project directory management is unavailable in subagent runtime")
+    }
 }
 
 impl AgentTool {
@@ -104,6 +122,7 @@ impl Tool for AgentTool {
                     task_store.clone(),
                     skill_registry.clone(),
                     spec.and_then(|agent| agent.tool_whitelist.as_deref()),
+                    Arc::new(NoopProjectDirService),
                 );
             }
         }
@@ -238,7 +257,16 @@ impl Tool for AgentTool {
             None
         };
 
-        let result = runtime.run_turn(&history, prompt, tx, None).await?;
+        let result = runtime
+            .run_turn(
+                &history,
+                prompt,
+                "subagent",
+                runtime.config.initial_env_snapshot.clone(),
+                tx,
+                None,
+            )
+            .await?;
 
         if let Some(handle) = forwarding_handle {
             handle.await?;

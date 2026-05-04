@@ -265,7 +265,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .initial_env_snapshot
                 .as_ref()
                 .and_then(|e| e.model_id.clone());
-            prompt_config = prompt_config.with_environment(env);
+            prompt_config = prompt_config.with_environment(env.clone());
 
             if let Some(content) = project_context {
                 prompt_config = prompt_config.with_project_context_content(content);
@@ -315,7 +315,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
             let turn_result = match self
                 .agent
-                .run_turn_with_context(turn_ctx, user_message, event_tx, Some(token))
+                .run_turn_with_context(turn_ctx, user_message, session_id, Some(env), event_tx, Some(token))
                 .await
             {
                 Ok(res) => res,
@@ -402,7 +402,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             let history_for_turn: &[Message] = &history[..history.len() - 1];
             let turn_result = match self
                 .agent
-                .run_turn(history_for_turn, input, event_tx, Some(token))
+                .run_turn(
+                    history_for_turn,
+                    input,
+                    session_id,
+                    self.agent.config.initial_env_snapshot.clone(),
+                    event_tx,
+                    Some(token),
+                )
                 .await
             {
                 Ok(res) => res,

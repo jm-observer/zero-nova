@@ -124,7 +124,7 @@ impl Tool for EditTool {
                 return Ok(ToolOutput {
                     content: format!("Failed to read file: {}", e),
                     is_error: true,
-                })
+                });
             }
         };
 
@@ -139,7 +139,10 @@ impl Tool for EditTool {
 
         if !replace_all && occurrences > 1 {
             return Ok(ToolOutput {
-                content: format!("Error: 'old_string' is not unique (found {} occurrences). Use 'replace_all: true' if intended, or provide a more specific string.", occurrences),
+                content: format!(
+                    "Error: 'old_string' is not unique (found {} occurrences). Use 'replace_all: true' if intended, or provide a more specific string.",
+                    occurrences
+                ),
                 is_error: true,
             });
         }

@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod builtin;
 
@@ -22,6 +22,8 @@ pub struct ToolContext {
     pub event_tx: mpsc::Sender<AgentEvent>,
     /// The tool_use_id to associate LogDelta events with.
     pub tool_use_id: String,
+    /// The session_id associated with this tool execution.
+    pub session_id: String,
     /// Reference to the task store for TaskCreate/TaskList/TaskUpdate.
     pub task_store: Option<Arc<Mutex<builtin::task::TaskStore>>>,
     /// Reference to the skill registry.
@@ -46,6 +48,38 @@ pub struct ToolDefinition {
 pub struct ToolOutput {
     pub content: String,
     pub is_error: bool,
+}
+
+#[async_trait::async_trait]
+pub trait ProjectDirService: Send + Sync {
+    async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf>;
+    async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf>;
+    async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf>;
+}
+
+pub struct UnavailableProjectDirService {
+    reason: &'static str,
+}
+
+impl UnavailableProjectDirService {
+    pub fn new(reason: &'static str) -> Self {
+        Self { reason }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProjectDirService for UnavailableProjectDirService {
+    async fn get_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
+        anyhow::bail!("{}", self.reason)
+    }
+
+    async fn set_project_dir(&self, _session_id: &str, _project_dir: PathBuf) -> Result<PathBuf> {
+        anyhow::bail!("{}", self.reason)
+    }
+
+    async fn reset_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
+        anyhow::bail!("{}", self.reason)
+    }
 }
 
 #[async_trait::async_trait]

@@ -178,10 +178,11 @@ pub struct ToolConfig {
     /// 项目上下文文件路径。为空时按默认候选文件自动查找。
     #[serde(default)]
     pub project_context_file: Option<String>,
-    /// 默认能力策略 ("minimal" | "full" | "workflow")。
-    /// Plan 1：基础扩展字段，不引入复杂嵌套。
     #[serde(default)]
     pub default_policy: Option<String>,
+    /// 默认项目目录。
+    #[serde(default)]
+    pub default_project_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -375,6 +376,19 @@ impl AppConfig {
         })
     }
 
+    /// Return the default project directory.
+    /// If configured, relative paths are resolved relative to `config_dir`.
+    pub fn default_project_dir(&self) -> Option<PathBuf> {
+        self.tool.default_project_dir.as_deref().map(|path| {
+            let path = PathBuf::from(path);
+            if path.is_absolute() {
+                path
+            } else {
+                self.config_dir.join(path)
+            }
+        })
+    }
+
     /// Return the path to the configuration file.
     /// Defaults to `{config_dir}/config.toml`.
     pub fn config_path(&self) -> PathBuf {
@@ -464,19 +478,38 @@ impl OriginAppConfig {
 #[derive(Debug, Deserialize, Default)]
 struct RawAppConfig {
     #[serde(default)]
-    provider: Option<ProviderConfig>,
+    pub provider: Option<ProviderConfig>,
     #[serde(default)]
-    llm: Option<RawLlmConfig>,
+    pub llm: Option<RawLlmConfig>,
     #[serde(default)]
-    search: SearchConfig,
+    pub search: SearchConfig,
     #[serde(default)]
-    tool: ToolConfig,
+    pub tool: RawToolConfig,
     #[serde(default)]
-    gateway: RawGatewayConfig,
+    pub gateway: RawGatewayConfig,
     #[serde(default)]
-    voice: VoiceConfig,
+    pub voice: VoiceConfig,
     #[serde(default)]
-    config_path: Option<String>,
+    pub config_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+struct RawToolConfig {
+    #[serde(default)]
+    pub bash: BashConfig,
+    pub skills_dir: Option<String>,
+    /// Prompts directory for agent template files. When None, defaults to `{config_dir}/prompts`.
+    #[serde(default)]
+    pub prompts_dir: Option<String>,
+    /// 项目上下文文件路径。为空时按默认候选文件自动查找。
+    #[serde(default)]
+    pub project_context_file: Option<String>,
+    /// 默认能力策略 ("minimal" | "full" | "workflow")。
+    #[serde(default)]
+    pub default_policy: Option<String>,
+    /// 默认项目目录。
+    #[serde(default)]
+    pub default_project_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -667,7 +700,8 @@ impl RawAppConfig {
         if let Some(preserve_recent) = self.gateway.trimmer.preserve_recent {
             trimmer.min_recent_messages = preserve_recent;
             warnings.push(
-                "Detected deprecated gateway.trimmer.preserve_recent; migrated to min_recent_messages.".to_string(),
+                "Detected deprecated gateway.trimmer.preserve_recent; migrated to gateway.trimmer.min_recent_messages."
+                    .to_string(),
             );
         }
         if self.gateway.trimmer.preserve_tool_pairs.is_some() {
@@ -676,13 +710,19 @@ impl RawAppConfig {
                     .to_string(),
             );
         }
-
         (
             OriginAppConfig {
                 provider,
                 llm,
                 search: self.search,
-                tool: self.tool,
+                tool: ToolConfig {
+                    bash: self.tool.bash,
+                    skills_dir: self.tool.skills_dir,
+                    prompts_dir: self.tool.prompts_dir,
+                    project_context_file: self.tool.project_context_file,
+                    default_policy: self.tool.default_policy,
+                    default_project_dir: self.tool.default_project_dir,
+                },
                 gateway: GatewayConfig {
                     host: self.gateway.host,
                     port: self.gateway.port,
@@ -830,14 +870,29 @@ preserve_recent = 5
     }
 
     #[test]
-    fn project_context_file_uses_relative_override_from_workspace() {
+    fn default_project_dir_resolves_relative_to_workspace() {
         let mut origin = OriginAppConfig::default();
-        origin.tool.project_context_file = Some("docs/PROJECT.md".to_string());
+        origin.tool.default_project_dir = Some("projects/app".to_string());
         let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
         assert_eq!(
-            config.project_context_file(),
-            Some(PathBuf::from("D:/workspace/docs/PROJECT.md"))
+            config.default_project_dir(),
+            Some(PathBuf::from("D:/workspace/projects/app"))
         );
+    }
+
+    #[test]
+    fn default_project_dir_uses_absolute_path_directly() {
+        let mut origin = OriginAppConfig::default();
+        origin.tool.default_project_dir = Some("D:/etc/project".to_string());
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.default_project_dir(), Some(PathBuf::from("D:/etc/project")));
+    }
+
+    #[test]
+    fn default_project_dir_is_none_when_not_set() {
+        let origin = OriginAppConfig::default();
+        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        assert_eq!(config.default_project_dir(), None);
     }
 
     #[test]

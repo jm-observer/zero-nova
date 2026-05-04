@@ -16,7 +16,7 @@ use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::provider::LlmClient;
 use nova_agent::skill::SkillRegistry;
 use nova_agent::tool::builtin::task::TaskStore;
-use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry};
+use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry, UnavailableProjectDirService};
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
@@ -181,7 +181,16 @@ async fn main() -> Result<()> {
     let task_store = Arc::new(Mutex::new(TaskStore::new()));
 
     let tools = ToolRegistry::new();
-    register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
+    register_builtin_tools(
+        &tools,
+        &config,
+        task_store.clone(),
+        skill_registry.clone(),
+        None,
+        Arc::new(UnavailableProjectDirService::new(
+            "ProjectManager is unavailable in CLI mode",
+        )),
+    );
 
     let prompt_builder = SystemPromptBuilder::new();
     let system_prompt_str = prompt_builder.with_tools(&tools).build();
@@ -336,7 +345,14 @@ async fn run_repl(
                 });
 
                 tokio::select! {
-                    result = agent.run_turn(&history, input, tx.clone(), None) => {
+                    result = agent.run_turn(
+                        &history,
+                        input,
+                        "cli-repl",
+                        agent.config.initial_env_snapshot.clone(),
+                        tx.clone(),
+                        None,
+                    ) => {
                         drop(tx);
                         printer_task.await.ok();
                         match result {
@@ -393,7 +409,16 @@ async fn run_oneshot(
         ));
     }
 
-    let result = agent.run_turn(&history, user_input, tx, None).await;
+    let result = agent
+        .run_turn(
+            &history,
+            user_input,
+            "cli-oneshot",
+            agent.config.initial_env_snapshot.clone(),
+            tx,
+            None,
+        )
+        .await;
     printer_task.await.ok();
 
     if let Err(e) = result {

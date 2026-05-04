@@ -2,8 +2,8 @@
 # api_key 建议通过环境变量 NOVA_API_KEY 设置，避免明文提交到仓库
 [provider]
 # api_key = ""
-#base_url = "http://192.168.0.68:8082/v1"
-base_url = "http://192.168.0.68:12340/v1"
+base_url = "http://192.168.0.68:8082/v1"
+#base_url = "http://192.168.0.68:12340/v1"
 
 # ── 模型调用参数 ────────────────────────────────────────────────
 [llm]
@@ -19,10 +19,12 @@ backend = "tavily"
 tavily_api_key = "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"
 
 # ── 工具与能力 ──────────────────────────────────────────────────
+# ── 工具与能力 ──────────────────────────────────────────────────
 [tool]
 skills_dir = "skills"
 prompts_dir = "prompts"
 project_context_file = "PROJECT.md"
+default_project_dir = ""
 default_policy = "workflow"
 
 [tool.bash]

@@ -104,6 +104,8 @@ impl<C: LlmClient> AgentRuntime<C> {
     async fn execute_tool_calls(
         &self,
         parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
+        session_id: &str,
+        environment: Option<EnvironmentSnapshot>,
         event_tx: &mpsc::Sender<AgentEvent>,
         cancellation_token: &Option<CancellationToken>,
     ) -> Result<Vec<ContentBlock>> {
@@ -113,6 +115,11 @@ impl<C: LlmClient> AgentRuntime<C> {
             let tool_registry = &self.tools;
             let tx = event_tx.clone();
             let tool_timeout_duration = self.config.tool_timeout;
+            let session_id = session_id.to_string();
+            let environment = environment.clone();
+            let task_store = self.task_store.clone();
+            let skill_registry = self.skill_registry.clone();
+            let read_files = self.read_files.clone();
 
             tool_results_fut.push(async move {
                 let _ = tx
@@ -131,10 +138,11 @@ impl<C: LlmClient> AgentRuntime<C> {
                         Some(ToolContext {
                             event_tx: tx.clone(),
                             tool_use_id: id.clone(),
-                            task_store: self.task_store.clone(),
-                            skill_registry: self.skill_registry.clone(),
-                            read_files: self.read_files.clone(),
-                            environment: self.config.initial_env_snapshot.clone(),
+                            session_id,
+                            task_store,
+                            skill_registry,
+                            read_files,
+                            environment,
                         }),
                     ),
                 )
@@ -192,6 +200,8 @@ impl<C: LlmClient> AgentRuntime<C> {
         &self,
         history: &[Message],
         user_input: &str,
+        session_id: &str,
+        environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
@@ -373,7 +383,13 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             // 工具执行 — 使用共享方法
             let tool_result_blocks = self
-                .execute_tool_calls(parsed_tool_calls, &event_tx, &cancellation_token)
+                .execute_tool_calls(
+                    parsed_tool_calls,
+                    session_id,
+                    environment.clone(),
+                    &event_tx,
+                    &cancellation_token,
+                )
                 .await?;
 
             let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
@@ -468,6 +484,8 @@ impl<C: LlmClient> AgentRuntime<C> {
         &self,
         ctx: TurnContext,
         message: Message,
+        session_id: &str,
+        environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
@@ -660,7 +678,13 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             // 工具执行 — 使用共享方法
             let tool_result_blocks = self
-                .execute_tool_calls(parsed_tool_calls, &event_tx, &cancellation_token)
+                .execute_tool_calls(
+                    parsed_tool_calls,
+                    session_id,
+                    environment.clone(),
+                    &event_tx,
+                    &cancellation_token,
+                )
                 .await?;
 
             let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());

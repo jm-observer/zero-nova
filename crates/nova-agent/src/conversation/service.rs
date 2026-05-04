@@ -3,6 +3,7 @@ use super::control::ControlState;
 use super::repository::SqliteSessionRepository;
 use super::session::{Session, SessionSummary};
 use crate::message::{ContentBlock, Message, Role};
+use crate::tool::ProjectDirService;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde_json::Value;
@@ -26,6 +27,7 @@ pub enum LoadingGuard {
 pub struct SessionService {
     cache: Arc<SessionCache>,
     repository: SqliteSessionRepository,
+    default_project_dir: PathBuf,
     /// Tracks in-flight session loads. Used to de-duplicate concurrent cold loads
     /// for the same session ID in read-through mode.
     loading: Arc<RwLock<HashMap<String, oneshot::Sender<Arc<Session>>>>>,
@@ -33,9 +35,19 @@ pub struct SessionService {
 
 impl SessionService {
     pub fn new(cache: Arc<SessionCache>, repository: SqliteSessionRepository) -> Self {
+        let default_project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::new_with_default_project_dir(cache, repository, default_project_dir)
+    }
+
+    pub fn new_with_default_project_dir(
+        cache: Arc<SessionCache>,
+        repository: SqliteSessionRepository,
+        default_project_dir: PathBuf,
+    ) -> Self {
         Self {
             cache,
             repository,
+            default_project_dir,
             loading: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -86,7 +98,10 @@ impl SessionService {
         }
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(ControlState::new(&agent_id)),
+            control: std::sync::RwLock::new(ControlState::new_with_project_dir(
+                &agent_id,
+                self.default_project_dir.clone(),
+            )),
             id: id.clone(),
             name: session_name.clone(),
             history: RwLock::new(initial_history),
@@ -464,8 +479,7 @@ impl SessionService {
     }
 
     pub async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
-        let cwd = std::env::current_dir().context("Failed to get process current directory")?;
-        self.set_project_dir(session_id, &cwd).await
+        self.set_project_dir(session_id, &self.default_project_dir).await
     }
 }
 
@@ -721,5 +735,20 @@ async fn normalize_project_dir(path: &Path) -> PathBuf {
             );
             path.to_path_buf()
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProjectDirService for SessionService {
+    async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        SessionService::get_project_dir(self, session_id).await
+    }
+
+    async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf> {
+        SessionService::set_project_dir(self, session_id, &project_dir).await
+    }
+
+    async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+        SessionService::reset_project_dir(self, session_id).await
     }
 }

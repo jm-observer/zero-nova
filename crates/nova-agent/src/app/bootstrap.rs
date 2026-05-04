@@ -42,7 +42,7 @@ pub async fn build_application<C: LlmClient + 'static>(
     }
     let skill_registry = Arc::new(skill_registry);
 
-    let default_project_dir = std::env::current_dir().context("Failed to get current_dir for default project_dir")?;
+    let default_project_dir = resolve_default_project_dir(&config).await?;
 
     // 在 agent 循环之前采集一次环境快照
     let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &default_project_dir).await;
@@ -58,9 +58,24 @@ pub async fn build_application<C: LlmClient + 'static>(
     let project_context =
         load_project_context_with_config_async(&default_project_dir, config.project_context_file().as_deref()).await;
 
+    let data_dir_path = config.data_dir_path();
+    let sqlite_manager = SqliteManager::new(&data_dir_path).await?;
+    let repository = SqliteSessionRepository::new(sqlite_manager.pool);
+    let session_cache = Arc::new(SessionCache::new());
+    let session_service =
+        SessionService::new_with_default_project_dir(session_cache, repository, default_project_dir.clone());
+    session_service.load_all().await?;
+
     let tools = ToolRegistry::new();
     // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
-    register_builtin_tools(&tools, &config, task_store.clone(), skill_registry.clone(), None);
+    register_builtin_tools(
+        &tools,
+        &config,
+        task_store.clone(),
+        skill_registry.clone(),
+        None,
+        Arc::new(session_service.clone()),
+    );
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -141,13 +156,6 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
     let config_path = config.config_path();
-
-    let data_dir_path = config.data_dir_path();
-    let sqlite_manager = SqliteManager::new(&data_dir_path).await?;
-    let repository = SqliteSessionRepository::new(sqlite_manager.pool);
-    let session_cache = Arc::new(SessionCache::new());
-    let session_service = SessionService::new(session_cache, repository);
-    session_service.load_all().await?;
 
     let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());
     let workspace_service = super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service);
@@ -248,4 +256,54 @@ fn warn_unused_gateway_sections(config: &AppConfig) -> Result<()> {
         }
     }
     Ok(())
+}
+
+async fn resolve_default_project_dir(config: &AppConfig) -> Result<std::path::PathBuf> {
+    let cwd = std::env::current_dir().context("Failed to get process current directory")?;
+    let fallback = tokio::fs::canonicalize(&cwd).await.unwrap_or(cwd);
+
+    let Some(configured) = config.default_project_dir() else {
+        log::info!(
+            "Using process current directory as default project_dir: {}",
+            fallback.display()
+        );
+        return Ok(fallback);
+    };
+
+    let metadata = match tokio::fs::metadata(&configured).await {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            log::warn!(
+                "Configured default_project_dir '{}' is inaccessible: {}. Falling back to {}",
+                configured.display(),
+                err,
+                fallback.display()
+            );
+            return Ok(fallback);
+        }
+    };
+
+    if !metadata.is_dir() {
+        log::warn!(
+            "Configured default_project_dir '{}' is not a directory. Falling back to {}",
+            configured.display(),
+            fallback.display()
+        );
+        return Ok(fallback);
+    }
+
+    let resolved = tokio::fs::canonicalize(&configured).await.unwrap_or_else(|err| {
+        log::warn!(
+            "Failed to canonicalize configured default_project_dir '{}': {}. Using raw path.",
+            configured.display(),
+            err
+        );
+        configured.clone()
+    });
+
+    log::info!(
+        "Using configured default_project_dir as session default: {}",
+        resolved.display()
+    );
+    Ok(resolved)
 }

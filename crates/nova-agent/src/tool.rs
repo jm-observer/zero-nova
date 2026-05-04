@@ -52,9 +52,8 @@ pub struct ToolOutput {
 
 #[async_trait::async_trait]
 pub trait ProjectDirService: Send + Sync {
-    async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf>;
+    async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>>;
     async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf>;
-    async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf>;
 }
 
 pub struct UnavailableProjectDirService {
@@ -69,15 +68,11 @@ impl UnavailableProjectDirService {
 
 #[async_trait::async_trait]
 impl ProjectDirService for UnavailableProjectDirService {
-    async fn get_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
+    async fn get_project_dir(&self, _session_id: &str) -> Result<Option<PathBuf>> {
         anyhow::bail!("{}", self.reason)
     }
 
     async fn set_project_dir(&self, _session_id: &str, _project_dir: PathBuf) -> Result<PathBuf> {
-        anyhow::bail!("{}", self.reason)
-    }
-
-    async fn reset_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
         anyhow::bail!("{}", self.reason)
     }
 }

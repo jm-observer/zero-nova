@@ -20,13 +20,14 @@ impl Tool for ProjectManagerTool {
     fn definition(&self) -> crate::tool::ToolDefinition {
         crate::tool::ToolDefinition {
             name: "ProjectManager".to_string(),
-            description: "Manages the current session's project directory. Supports getting, setting, and resetting the directory.".to_string(),
+            description: "Manages the current session's project directory. Supports getting and setting the directory."
+                .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["get", "set", "reset"],
+                        "enum": ["get", "set"],
                         "description": "The action to perform on the project directory."
                     },
                     "path": {
@@ -50,8 +51,12 @@ impl Tool for ProjectManagerTool {
 
         match action {
             "get" => match self.project_dir_service.get_project_dir(session_id).await {
-                Ok(path) => Ok(ToolOutput {
+                Ok(Some(path)) => Ok(ToolOutput {
                     content: format!("Current project directory: {}", path.display()),
+                    is_error: false,
+                }),
+                Ok(None) => Ok(ToolOutput {
+                    content: "Current project directory is not set.".to_string(),
                     is_error: false,
                 }),
                 Err(e) => Ok(ToolOutput {
@@ -75,16 +80,6 @@ impl Tool for ProjectManagerTool {
                     }),
                 }
             }
-            "reset" => match self.project_dir_service.reset_project_dir(session_id).await {
-                Ok(path) => Ok(ToolOutput {
-                    content: format!("Project directory reset to: {}", path.display()),
-                    is_error: false,
-                }),
-                Err(e) => Ok(ToolOutput {
-                    content: format!("Failed to reset project directory: {}", e),
-                    is_error: true,
-                }),
-            },
             _ => Ok(ToolOutput {
                 content: format!("Unknown action: {}", action),
                 is_error: true,

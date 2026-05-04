@@ -15,39 +15,22 @@ use std::sync::RwLock;
 use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
-/// Guard for an in-flight session load, used to prevent race conditions.
-pub enum LoadingGuard {
-    /// A session is currently being loaded; join this to get the result.
-    InFlight(oneshot::Receiver<Arc<Session>>),
-    /// Session already exists in cache (fast path after insert).
-    Ready(Arc<Session>),
-}
+type SessionLoadResult = Option<Arc<Session>>;
+type LoadingWaiters = HashMap<String, Vec<oneshot::Sender<SessionLoadResult>>>;
 
 #[derive(Clone)]
 pub struct SessionService {
     cache: Arc<SessionCache>,
     repository: SqliteSessionRepository,
-    default_project_dir: PathBuf,
-    /// Tracks in-flight session loads. Used to de-duplicate concurrent cold loads
-    /// for the same session ID in read-through mode.
-    loading: Arc<RwLock<HashMap<String, oneshot::Sender<Arc<Session>>>>>,
+    /// De-duplicates concurrent cold loads for the same session id.
+    loading: Arc<RwLock<LoadingWaiters>>,
 }
 
 impl SessionService {
     pub fn new(cache: Arc<SessionCache>, repository: SqliteSessionRepository) -> Self {
-        let default_project_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self::new_with_default_project_dir(cache, repository, default_project_dir)
-    }
-
-    pub fn new_with_default_project_dir(
-        cache: Arc<SessionCache>,
-        repository: SqliteSessionRepository,
-        default_project_dir: PathBuf,
-    ) -> Self {
         Self {
             cache,
             repository,
-            default_project_dir,
             loading: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -60,19 +43,7 @@ impl SessionService {
     pub async fn load_all(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
         for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control) in rows {
-            if let Ok(Some((id, title, _agent_id, created_at, updated_at, runtime_control, history))) =
-                self.repository.load_session(&id).await
-            {
-                let session = Arc::new(Session {
-                    control: std::sync::RwLock::new(runtime_control),
-                    id: id.clone(),
-                    name: title,
-                    history: RwLock::new(history),
-                    created_at,
-                    updated_at: AtomicI64::new(updated_at),
-                    chat_lock: Mutex::new(()),
-                    cancellation_token: RwLock::new(None),
-                });
+            if let Some(session) = self.load_session_from_db(&id).await? {
                 self.cache.insert(id, session);
             }
         }
@@ -82,14 +53,14 @@ impl SessionService {
     /// 创建一个新会话并持久化
     pub async fn create(&self, name: Option<String>, agent_id: String, system_prompt: String) -> Result<Arc<Session>> {
         let id = Uuid::new_v4().to_string();
-        let length = if id.len() > 8 { 8 } else { id.len() };
+        let length = id.len().min(8);
         let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..length]));
         let now = Utc::now().timestamp_millis();
 
         let mut initial_history = Vec::new();
         if !system_prompt.is_empty() {
             initial_history.push(Message {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: Uuid::new_v4().to_string(),
                 role: Role::System,
                 content: vec![ContentBlock::Text { text: system_prompt }],
                 created_at: now,
@@ -98,12 +69,9 @@ impl SessionService {
         }
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(ControlState::new_with_project_dir(
-                &agent_id,
-                self.default_project_dir.clone(),
-            )),
+            control: std::sync::RwLock::new(ControlState::new(&agent_id)),
             id: id.clone(),
-            name: session_name.clone(),
+            name: session_name,
             history: RwLock::new(initial_history),
             created_at: now,
             updated_at: AtomicI64::new(now),
@@ -111,97 +79,77 @@ impl SessionService {
             cancellation_token: RwLock::new(None),
         });
 
-        // 持久化到 DB
-        let rc = {
-            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            control.clone()
-        };
-        self.repository
-            .save_session(&session.id, &session.name, &agent_id, session.created_at, now, &rc)
-            .await?;
-
-        // 持久化初始消息
-        for msg in session.get_history() {
-            self.repository
-                .save_message(
-                    &session.id,
-                    &msg.id,
-                    msg.role.clone(),
-                    msg.content.clone(),
-                    msg.metadata.as_ref().map(serde_json::to_value).transpose()?,
-                    msg.created_at,
-                )
-                .await?;
-        }
-
+        self.persist_full_session(&session).await?;
         self.cache.insert(id, session.clone());
         Ok(session)
     }
 
     /// 获取会话 (Read-Through with concurrency protection).
-    ///
-    /// Prevents a race condition where multiple concurrent callers load the same
-    /// session from the database simultaneously, creating duplicate `Arc<Session>` entries.
     pub async fn get(&self, id: &str) -> Result<Option<Arc<Session>>> {
-        // Fast path: check cache
-        if let Some(s) = self.cache.get(id) {
-            return Ok(Some(s));
+        if let Some(session) = self.cache.get(id) {
+            return Ok(Some(session));
         }
 
-        let id_owned: String = id.to_string();
-
-        // Try to register as the loader. If `tx` was already in the map, we lost the race.
-        let (wrapper_tx, wrapper_rx) = oneshot::channel();
-        let was_loaded = {
+        let mut receiver = None;
+        let is_loader = {
             let mut loading = self.loading.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            // Wrap the real tx we'll use later
-            loading.insert(id_owned.clone(), wrapper_tx)
+            if let Some(waiters) = loading.get_mut(id) {
+                let (tx, rx) = oneshot::channel();
+                waiters.push(tx);
+                receiver = Some(rx);
+                false
+            } else {
+                loading.insert(id.to_string(), Vec::new());
+                true
+            }
         };
 
-        match was_loaded {
-            Some(_prev_tx) => {
-                // We lost the race: await the receiver from the first-ordered caller.
-                // The first-ordered caller will send via its `tx`, and our `rx` receives it.
-                if let Ok(s) = wrapper_rx.await {
-                    self.cache.insert(id_owned, s.clone());
-                    return Ok(Some(s));
+        if !is_loader {
+            if let Some(rx) = receiver {
+                match rx.await {
+                    Ok(session) => return Ok(session),
+                    Err(_) => {
+                        if let Some(session) = self.cache.get(id) {
+                            return Ok(Some(session));
+                        }
+                    }
                 }
-                // Cache check for second-ordered fallback
-                if let Some(s) = self.cache.get(id) {
-                    return Ok(Some(s));
-                }
-                Ok(None)
             }
-            None => {
-                // We are the loader: load from DB
-                let session = self.load_session_from_db(id).await?;
-                if let Some(ref s) = session {
-                    self.cache.insert(id_owned, s.clone());
-                }
-                Ok(session)
-            }
+            return Ok(None);
         }
+
+        let load_result = self.load_session_from_db(id).await?;
+        if let Some(session) = load_result.as_ref() {
+            self.cache.insert(id.to_string(), session.clone());
+        }
+
+        let waiters = {
+            let mut loading = self.loading.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            loading.remove(id).unwrap_or_default()
+        };
+        for waiter in waiters {
+            let _ = waiter.send(load_result.clone());
+        }
+
+        Ok(load_result)
     }
 
-    /// Load a single session from the database.
     async fn load_session_from_db(&self, id: &str) -> Result<Option<Arc<Session>>> {
-        if let Ok(Some((id, title, _agent_id, created_at, updated_at, runtime_control, history))) =
-            self.repository.load_session(id).await
-        {
-            let session = Arc::new(Session {
-                control: std::sync::RwLock::new(runtime_control),
-                id: id.clone(),
-                name: title,
-                history: RwLock::new(history),
-                created_at,
-                updated_at: AtomicI64::new(updated_at),
-                chat_lock: Mutex::new(()),
-                cancellation_token: RwLock::new(None),
-            });
-            Ok(Some(session))
-        } else {
-            Ok(None)
-        }
+        let loaded = self.repository.load_session(id).await?;
+        Ok(loaded.map(
+            |(id, title, _agent_id, created_at, updated_at, runtime_control, history)| {
+                Arc::new(Session {
+                    control: std::sync::RwLock::new(runtime_control),
+                    id,
+                    name: title,
+                    history: RwLock::new(history),
+                    created_at,
+                    updated_at: AtomicI64::new(updated_at),
+                    chat_lock: Mutex::new(()),
+                    cancellation_token: RwLock::new(None),
+                })
+            },
+        ))
     }
 
     pub async fn append_message(
@@ -213,7 +161,7 @@ impl SessionService {
     ) -> Result<()> {
         let session = self.get(session_id).await?.context("Session not found")?;
         let now = Utc::now().timestamp_millis();
-        let message_id = uuid::Uuid::new_v4().to_string();
+        let message_id = Uuid::new_v4().to_string();
         let mut parsed_metadata = metadata
             .clone()
             .map(serde_json::from_value::<crate::message::MessageMetadata>)
@@ -225,7 +173,6 @@ impl SessionService {
         }
         let persisted_metadata = parsed_metadata.as_ref().map(serde_json::to_value).transpose()?;
 
-        // 1. 更新内存
         {
             let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             history.push(Message {
@@ -238,32 +185,16 @@ impl SessionService {
             session.touch_updated_at();
         }
 
-        // 2. 持久化消息
         self.repository
             .save_message(session_id, &message_id, role, content, persisted_metadata, now)
             .await?;
-
-        // 3. 更新会话元数据
-        let rc = {
-            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            runtime_control.clone()
-        };
-        self.repository
-            .save_session(
-                &session.id,
-                &session.name,
-                &rc.active_agent,
-                session.created_at,
-                session.updated_at.load(Ordering::SeqCst),
-                &rc,
-            )
-            .await?;
+        self.persist_session_control(&session).await?;
 
         Ok(())
     }
 
     pub async fn list_sorted(&self) -> Vec<SessionSummary> {
-        let mut list: Vec<_> = self.cache.list();
+        let mut list = self.cache.list();
 
         list.sort_by(|a, b| {
             b.updated_at
@@ -272,18 +203,22 @@ impl SessionService {
         });
 
         list.into_iter()
-            .map(|s| SessionSummary {
-                id: s.id.clone(),
-                name: s.name.clone(),
-                agent_id: s
+            .map(|session| SessionSummary {
+                id: session.id.clone(),
+                name: session.name.clone(),
+                agent_id: session
                     .control
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .active_agent
                     .clone(),
-                created_at: s.created_at,
-                updated_at: s.updated_at.load(Ordering::SeqCst),
-                message_count: s.history.read().unwrap_or_else(|poisoned| poisoned.into_inner()).len(),
+                created_at: session.created_at,
+                updated_at: session.updated_at.load(Ordering::SeqCst),
+                message_count: session
+                    .history
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len(),
             })
             .collect()
     }
@@ -296,21 +231,7 @@ impl SessionService {
             control.active_agent = agent_id.to_string();
         }
 
-        let rc = {
-            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            runtime_control.clone()
-        };
-        self.repository
-            .save_session(
-                &session.id,
-                &session.name,
-                agent_id,
-                session.created_at,
-                session.updated_at.load(Ordering::SeqCst),
-                &rc,
-            )
-            .await?;
-
+        self.persist_session_control(&session).await?;
         Ok(session)
     }
 
@@ -335,18 +256,18 @@ impl SessionService {
 
         let new_id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
-        let agent_id = source.control.read().unwrap().active_agent.clone();
-        let mut new_control = ControlState::new(&agent_id);
-        {
-            let source_control = source.control.read().unwrap();
+        let new_control = {
+            let source_control = source.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let agent_id = source_control.active_agent.clone();
+            let mut new_control = ControlState::new_with_project_dir(&agent_id, source_control.project_dir.clone());
             new_control.model_override = source_control.model_override.clone();
-        }
-        let new_name = format!("{} (Copy)", source.name);
+            new_control
+        };
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(new_control.clone()),
+            control: std::sync::RwLock::new(new_control),
             id: new_id.clone(),
-            name: new_name.clone(),
+            name: format!("{} (Copy)", source.name),
             history: RwLock::new(new_history),
             created_at: now,
             updated_at: AtomicI64::new(now),
@@ -354,30 +275,7 @@ impl SessionService {
             cancellation_token: RwLock::new(None),
         });
 
-        self.repository
-            .save_session(
-                &session.id,
-                &session.name,
-                &agent_id,
-                session.created_at,
-                now,
-                &new_control,
-            )
-            .await?;
-
-        for msg in session.get_history() {
-            self.repository
-                .save_message(
-                    &session.id,
-                    &msg.id,
-                    msg.role.clone(),
-                    msg.content.clone(),
-                    msg.metadata.as_ref().map(serde_json::to_value).transpose()?,
-                    msg.created_at,
-                )
-                .await?;
-        }
-
+        self.persist_full_session(&session).await?;
         self.cache.insert(new_id, session.clone());
         Ok(Some(session))
     }
@@ -397,12 +295,7 @@ impl SessionService {
             control.model_override.updated_at = Utc::now().timestamp_millis();
         }
 
-        let rc = {
-            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            runtime_control.clone()
-        };
-        self.repository.update_session_runtime_control(session_id, &rc).await?;
-
+        self.persist_runtime_control(session_id, &session).await?;
         Ok(session)
     }
 
@@ -417,8 +310,8 @@ impl SessionService {
 
         {
             let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(s) = snapshot {
-                control.last_turn_snapshot = Some(s);
+            if let Some(snapshot) = snapshot {
+                control.last_turn_snapshot = Some(snapshot);
             }
             if let Some((input, output, cache_creation, cache_read)) = token_delta {
                 control.token_counters.input_tokens += input;
@@ -440,16 +333,11 @@ impl SessionService {
             }
         }
 
-        let rc = {
-            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            runtime_control.clone()
-        };
-        self.repository.update_session_runtime_control(session_id, &rc).await?;
-
+        self.persist_runtime_control(session_id, &session).await?;
         Ok(())
     }
 
-    pub async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+    pub async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>> {
         let session = self.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
         Ok(control.project_dir.clone())
@@ -461,14 +349,10 @@ impl SessionService {
 
         {
             let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            control.project_dir = normalized.clone();
+            control.project_dir = Some(normalized.clone());
         }
 
-        let rc = {
-            let runtime_control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-            runtime_control.clone()
-        };
-        self.repository.update_session_runtime_control(session_id, &rc).await?;
+        self.persist_runtime_control(session_id, &session).await?;
         log::info!(
             "Session project_dir updated: session_id={}, project_dir={}",
             session_id,
@@ -478,8 +362,66 @@ impl SessionService {
         Ok(normalized)
     }
 
-    pub async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
-        self.set_project_dir(session_id, &self.default_project_dir).await
+    async fn persist_full_session(&self, session: &Arc<Session>) -> Result<()> {
+        let runtime_control = {
+            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.clone()
+        };
+
+        self.repository
+            .save_session(
+                &session.id,
+                &session.name,
+                &runtime_control.active_agent,
+                session.created_at,
+                session.updated_at.load(Ordering::SeqCst),
+                &runtime_control,
+            )
+            .await?;
+
+        for msg in session.get_history() {
+            self.repository
+                .save_message(
+                    &session.id,
+                    &msg.id,
+                    msg.role.clone(),
+                    msg.content.clone(),
+                    msg.metadata.as_ref().map(serde_json::to_value).transpose()?,
+                    msg.created_at,
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn persist_session_control(&self, session: &Arc<Session>) -> Result<()> {
+        let runtime_control = {
+            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.clone()
+        };
+
+        self.repository
+            .save_session(
+                &session.id,
+                &session.name,
+                &runtime_control.active_agent,
+                session.created_at,
+                session.updated_at.load(Ordering::SeqCst),
+                &runtime_control,
+            )
+            .await
+    }
+
+    async fn persist_runtime_control(&self, session_id: &str, session: &Arc<Session>) -> Result<()> {
+        let runtime_control = {
+            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            control.clone()
+        };
+
+        self.repository
+            .update_session_runtime_control(session_id, &runtime_control)
+            .await
     }
 }
 
@@ -578,6 +520,22 @@ mod tests {
         merge_skill_bindings(&mut existing, incoming);
         assert_eq!(existing.len(), 1);
         assert_eq!(existing[0]["skill_id"], "skill-a");
+    }
+
+    #[tokio::test]
+    async fn create_starts_without_project_dir() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+        let session = service
+            .create(Some("s".to_string()), "agent-1".to_string(), String::new())
+            .await?;
+
+        let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(control.project_dir, None);
+        Ok(())
     }
 
     #[tokio::test]
@@ -740,15 +698,11 @@ async fn normalize_project_dir(path: &Path) -> PathBuf {
 
 #[async_trait::async_trait]
 impl ProjectDirService for SessionService {
-    async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+    async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>> {
         SessionService::get_project_dir(self, session_id).await
     }
 
     async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf> {
         SessionService::set_project_dir(self, session_id, &project_dir).await
-    }
-
-    async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
-        SessionService::reset_project_dir(self, session_id).await
     }
 }

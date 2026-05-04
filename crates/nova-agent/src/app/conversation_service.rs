@@ -92,11 +92,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         self.sessions.set_project_dir(session_id, path).await
     }
 
-    pub async fn reset_project_dir(&self, session_id: &str) -> Result<PathBuf> {
-        self.sessions.reset_project_dir(session_id).await
-    }
-
-    pub async fn get_project_dir(&self, session_id: &str) -> Result<PathBuf> {
+    pub async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>> {
         self.sessions.get_project_dir(session_id).await
     }
 
@@ -241,8 +237,11 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         // 渐进切换策略（Phase 3 G11）
         let use_turn_context = self.agent.config.use_turn_context;
         if use_turn_context {
-            let project_dir = self.sessions.get_project_dir(session_id).await?;
-            // 预加载项目上下文（R2 修复）
+            let project_dir = self
+                .sessions
+                .get_project_dir(session_id)
+                .await?
+                .unwrap_or_else(|| self.agent.config.config_dir.clone());
             let project_context =
                 load_project_context_with_config_async(&project_dir, self.agent.config.project_context_file.as_deref())
                     .await;

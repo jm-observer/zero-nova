@@ -26,10 +26,15 @@ Rust 异步应用程序。<!-- 补充具体业务功能描述 -->
 ## 代码质量
 
 **格式**：遵循 `rustfmt.toml`（120 列，4 空格缩进）和 `clippy.toml` 阈值。
+- **文档编码规范**：所有文档文件统一使用 UTF-8 编码，并将换行符统一为 LF 格式
 
 **错误处理**：
-- `lib.rs` 及子模块：禁止 `.unwrap()` / `.expect()`，一律用 `?` + `anyhow::Result`
+- `lib.rs` 及子模块：禁止 `.unwrap()` / `.expect()`，使用 `?` 传播错误，返回 `anyhow::Result` 或 `thiserror` 自定义错误类型
 - `main.rs` 和测试代码：允许 `.unwrap()`
+
+**异步与并发**：
+- 倾向使用 `tokio` 异步运行时
+- 锁倾向使用 `tokio::sync::RwLock`，避免在异步上下文中使用 `std::sync` 的阻塞锁
 - 禁止用 `#[allow(...)]` 压制警告；确有必要时须在注释中说明理由
 
 **安全与性能**：
@@ -39,7 +44,8 @@ Rust 异步应用程序。<!-- 补充具体业务功能描述 -->
 - **可见性最小化**：模块、结构体、函数默认私有，仅在需要外部访问时标记 `pub(crate)` 或 `pub`，避免过度暴露内部实现
 
 **可维护性**：
-- **前后端结构体对齐**：前后端使用的结构体定义必须以项目根目录 `schema/` 文件夹中的 schema 数据为准；新增或修改字段时，需先更新对应 schema，再同步前后端结构体，禁止前后端各自独立演进导致字段、类型或可选性不一致
+- **前后端结构体对齐**：前后端共享的结构体以 Rust 侧定义为 source of truth，通过 `ts-rs`（`#[derive(TS)]`）自动导出 TypeScript 类型定义到 `schema/` 目录；前端直接引用生成的 `.ts` 文件，禁止手动复制或独立维护类型。新增或修改字段时，先更新 Rust 结构体，再执行 `cargo test` 重新生成 schema，最后同步前端引用
+- **文件长度控制**：单个 `.rs` 文件建议不超过 **500 行**；超过时应按类型、职责拆分为子模块（如 `models.rs`、`handlers.rs`、`utils.rs`），每个模块围绕一类核心类型或职责组织
 - **函数长度控制**：Rust 函数 / 方法应尽量保持简短，优先控制在 **60 行以内**；若超过 **100 行**，应优先考虑拆分为私有辅助函数，或在注释中说明保持整体性的必要理由
 - **单一职责**：一个函数应尽量只负责一类核心逻辑；解析、校验、IO、状态更新等职责混在一起时，应优先拆分
 - **参数数量控制**：函数参数建议不超过 **4 个**；超过时优先考虑引入结构体参数，避免调用方难以理解参数含义
@@ -53,7 +59,7 @@ Rust 异步应用程序。<!-- 补充具体业务功能描述 -->
 - **避免过宽类型暴露**：公共接口返回类型应稳定且语义明确，避免不必要地暴露内部实现细节
 
 **依赖管理**：
-- 未经用户明确同意，不得添加新依赖
+
 - 引入前评估必要性，优先选维护良好、传递依赖少的 crate
 - 不确定选型时，向用户列出候选方案及取舍，不自行决定
 - **Workspace 依赖统一**：若项目为 workspace，所有成员 crate 的 `[dependencies]` 必须使用 `{ workspace = true }` 形式引用依赖，版本统一在根 `Cargo.toml` 的 `[workspace.dependencies]` 中声明
@@ -119,15 +125,31 @@ docs/
 ## 修复流程
 每次代码修改后，必须按以下循环执行，**全部通过才视为完成**：
 
-1. `cargo clippy --workspace -- -D warnings`
-2. `cargo fmt --check --all`（仅格式化本项目 crate；若存在 git submodule 等外部项目，在对应目录的 `rustfmt.toml` 中添加 `ignore` 或从 `workspace.members` 中排除，确保 `cargo fmt` 不触及非本项目代码）
-3. `cargo test --workspace`
+1. `cargo clippy -- -D warnings`（workspace 项目加 `--workspace`）
+2. `cargo fmt --check`（workspace 项目加 `--all`；若存在 git submodule 等外部代码，通过 `rustfmt.toml` 的 `ignore` 或调整 `workspace.members` 排除，确保不触及非本项目代码）
+3. `cargo test`（workspace 项目加 `--workspace`）
 
-若任一步骤失败，继续修复并重新执行完整循环，直到三项全部通过。  
+若任一步骤失败，继续修复并重新执行完整循环，直到三项全部通过。
 **禁止在循环未完成时停下来，不得以"请你测试一下"结束任务。**
 
-> 所有命令均在 workspace 根目录执行，覆盖全部 crate。
+> 在项目根目录执行；workspace 项目需确保覆盖全部 crate。
 
 ## CI / 发布
 - 构建目标：`x86_64-pc-windows-msvc`、`aarch64-unknown-linux-gnu`
 - 推送 `v*` 标签触发 Release；推送前本地确认修复流程全部通过
+
+## 其他
+- Continue executing your next steps by calling the appropriate tools now.
+- Do not describe what you will do - just call the tools directly.
+- IMPORTANT: After a tool call returns success, proceed to the next step immediately.
+  Never call the same tool with identical arguments more than once.
+  If "Edit applied successfully" is returned, the edit is done - move on.
+- **文件变更请求必须落地执行**：当用户明确要求“修改 / 补充 / 更新 / 新增 / 删除”文件内容时，必须实际调用可用工具完成操作，不能只用自然语言描述方案或拟议改动
+- **先读取再修改**：如果请求中引用了文档、目录或文件，先读取相关内容，再继续修改
+- **不得过早结束**：只要还有明显必要的后续工具调用，就不能提前输出最终文本答复
+- **单次写入不代表完成**：一次 edit / write 完成后，如请求语义或项目规则要求继续检查、补充修改、验证或读取相关文件，必须继续执行
+- **仅在以下情况下停止**：请求已经实际完成；或缺少无法推断的关键信息；或工具报错导致无法继续
+- **简洁回答仅约束汇报**：“简洁回答”只约束最终说明长度，不代表可以跳过工具调用或跳过后续必要步骤
+- **优先产出实际变更**：对于配置修改、代码修改、文档落地类任务，优先完成实际变更，再用极简文本汇报结果
+- **未调用工具则任务未完成**：如果已经判断应该改文件，却没有调用任何工具，说明任务仍未完成，必须继续执行
+- **输出顺序要求**：先做事，后汇报；禁止把“我已修改 / 我会修改 / 建议修改为”视为完成，文件变更请求只有在实际产生工具调用并完成变更后才算完成

@@ -8,8 +8,7 @@ use crate::conversation::repository::SqliteSessionRepository;
 use crate::conversation::sqlite_manager::SqliteManager;
 use crate::conversation::{SessionCache, SessionService};
 use crate::prompt::{
-    load_project_context_with_config_async, EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector,
-    SystemPromptBuilder, TrimmerConfig,
+    EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector, SystemPromptBuilder, TrimmerConfig,
 };
 use crate::provider::LlmClient;
 use crate::skill::SkillRegistry;
@@ -37,37 +36,23 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
-    if let Err(e) = skill_registry.load_from_dir(&skill_dir) {
-        log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+    if let Err(err) = skill_registry.load_from_dir(&skill_dir) {
+        log::warn!("Failed to load skills from {:?}: {}", skill_dir, err);
     }
     let skill_registry = Arc::new(skill_registry);
 
-    let default_project_dir = resolve_default_project_dir(&config).await?;
-
-    // 在 agent 循环之前采集一次环境快照
-    let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &default_project_dir).await;
-    let env_snapshot = {
-        let mut e = env_snapshot;
-        e.model_id = Some(config.llm.model_config.model.clone());
-        e
-    };
+    let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &config.config_dir).await;
+    env_snapshot.model_id = Some(config.llm.model_config.model.clone());
 
     let task_store = Arc::new(Mutex::new(TaskStore::new()));
-
-    // 预加载项目上下文（R2 修复）
-    let project_context =
-        load_project_context_with_config_async(&default_project_dir, config.project_context_file().as_deref()).await;
-
     let data_dir_path = config.data_dir_path();
     let sqlite_manager = SqliteManager::new(&data_dir_path).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
     let session_cache = Arc::new(SessionCache::new());
-    let session_service =
-        SessionService::new_with_default_project_dir(session_cache, repository, default_project_dir.clone());
+    let session_service = SessionService::new(session_cache, repository);
     session_service.load_all().await?;
 
     let tools = ToolRegistry::new();
-    // register_builtin_tools now accepts &ToolRegistry (no longer needs &mut).
     register_builtin_tools(
         &tools,
         &config,
@@ -99,21 +84,16 @@ pub async fn build_application<C: LlmClient + 'static>(
     for agent in &config.gateway.agents {
         let agent_prompt = load_agent_prompt(agent, &config).await?;
 
-        // 统一通过 SystemPromptBuilder 构建
         let mut template_vars = HashMap::new();
         template_vars.insert("workflow_stage".to_string(), "idle".to_string());
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), default_project_dir.clone())
+        let prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), config.config_dir.clone())
             .with_environment(env_snapshot.clone())
             .with_project_context_path_opt(config.project_context_file())
             .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))
             .with_template_vars(template_vars.clone());
-
-        if let Some(content) = &project_context {
-            prompt_config = prompt_config.with_project_context_content(content.clone());
-        }
 
         let full_system_prompt = SystemPromptBuilder::from_config(&prompt_config, &skill_registry).build();
 
@@ -143,15 +123,14 @@ pub async fn build_application<C: LlmClient + 'static>(
     agent.task_store = Some(task_store);
     agent.skill_registry = Some(skill_registry);
 
-    // 侧信道注入器（Phase 3 G10）
     if config.gateway.side_channel.enabled {
-        let si = SideChannelConfig {
+        let side_channel = SideChannelConfig {
             enabled: config.gateway.side_channel.enabled,
             skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
             inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
             custom_reminders: vec![],
         };
-        agent.set_side_channel_injector(SideChannelInjector::new(si));
+        agent.set_side_channel_injector(SideChannelInjector::new(side_channel));
     }
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
@@ -224,8 +203,8 @@ async fn load_agent_prompt(agent: &crate::config::AgentSpec, config: &AppConfig)
     let prompt_path = config.prompts_dir().join(&prompt_file);
     match tokio::fs::read_to_string(&prompt_path).await {
         Ok(content) => Ok(content),
-        Err(e) => {
-            log::warn!("Failed to read prompt file {:?}: {}", prompt_path, e);
+        Err(err) => {
+            log::warn!("Failed to read prompt file {:?}: {}", prompt_path, err);
             Ok(String::new())
         }
     }
@@ -256,54 +235,4 @@ fn warn_unused_gateway_sections(config: &AppConfig) -> Result<()> {
         }
     }
     Ok(())
-}
-
-async fn resolve_default_project_dir(config: &AppConfig) -> Result<std::path::PathBuf> {
-    let cwd = std::env::current_dir().context("Failed to get process current directory")?;
-    let fallback = tokio::fs::canonicalize(&cwd).await.unwrap_or(cwd);
-
-    let Some(configured) = config.default_project_dir() else {
-        log::info!(
-            "Using process current directory as default project_dir: {}",
-            fallback.display()
-        );
-        return Ok(fallback);
-    };
-
-    let metadata = match tokio::fs::metadata(&configured).await {
-        Ok(metadata) => metadata,
-        Err(err) => {
-            log::warn!(
-                "Configured default_project_dir '{}' is inaccessible: {}. Falling back to {}",
-                configured.display(),
-                err,
-                fallback.display()
-            );
-            return Ok(fallback);
-        }
-    };
-
-    if !metadata.is_dir() {
-        log::warn!(
-            "Configured default_project_dir '{}' is not a directory. Falling back to {}",
-            configured.display(),
-            fallback.display()
-        );
-        return Ok(fallback);
-    }
-
-    let resolved = tokio::fs::canonicalize(&configured).await.unwrap_or_else(|err| {
-        log::warn!(
-            "Failed to canonicalize configured default_project_dir '{}': {}. Using raw path.",
-            configured.display(),
-            err
-        );
-        configured.clone()
-    });
-
-    log::info!(
-        "Using configured default_project_dir as session default: {}",
-        resolved.display()
-    );
-    Ok(resolved)
 }

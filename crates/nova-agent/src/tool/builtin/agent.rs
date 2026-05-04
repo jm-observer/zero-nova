@@ -28,15 +28,11 @@ struct NoopProjectDirService;
 
 #[async_trait]
 impl ProjectDirService for NoopProjectDirService {
-    async fn get_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
+    async fn get_project_dir(&self, _session_id: &str) -> Result<Option<PathBuf>> {
         anyhow::bail!("Project directory management is unavailable in subagent runtime")
     }
 
     async fn set_project_dir(&self, _session_id: &str, _project_dir: PathBuf) -> Result<PathBuf> {
-        anyhow::bail!("Project directory management is unavailable in subagent runtime")
-    }
-
-    async fn reset_project_dir(&self, _session_id: &str) -> Result<PathBuf> {
         anyhow::bail!("Project directory management is unavailable in subagent runtime")
     }
 }

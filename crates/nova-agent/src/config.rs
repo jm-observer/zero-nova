@@ -180,9 +180,6 @@ pub struct ToolConfig {
     pub project_context_file: Option<String>,
     #[serde(default)]
     pub default_policy: Option<String>,
-    /// 默认项目目录。
-    #[serde(default)]
-    pub default_project_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -376,19 +373,6 @@ impl AppConfig {
         })
     }
 
-    /// Return the default project directory.
-    /// If configured, relative paths are resolved relative to `config_dir`.
-    pub fn default_project_dir(&self) -> Option<PathBuf> {
-        self.tool.default_project_dir.as_deref().map(|path| {
-            let path = PathBuf::from(path);
-            if path.is_absolute() {
-                path
-            } else {
-                self.config_dir.join(path)
-            }
-        })
-    }
-
     /// Return the path to the configuration file.
     /// Defaults to `{config_dir}/config.toml`.
     pub fn config_path(&self) -> PathBuf {
@@ -507,9 +491,6 @@ struct RawToolConfig {
     /// 默认能力策略 ("minimal" | "full" | "workflow")。
     #[serde(default)]
     pub default_policy: Option<String>,
-    /// 默认项目目录。
-    #[serde(default)]
-    pub default_project_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -721,7 +702,6 @@ impl RawAppConfig {
                     prompts_dir: self.tool.prompts_dir,
                     project_context_file: self.tool.project_context_file,
                     default_policy: self.tool.default_policy,
-                    default_project_dir: self.tool.default_project_dir,
                 },
                 gateway: GatewayConfig {
                     host: self.gateway.host,
@@ -867,32 +847,6 @@ preserve_recent = 5
         origin.tool.prompts_dir = Some("D:/etc/prompts".to_string());
         let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
         assert_eq!(config.prompts_dir(), PathBuf::from("D:/etc/prompts"));
-    }
-
-    #[test]
-    fn default_project_dir_resolves_relative_to_workspace() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.default_project_dir = Some("projects/app".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
-        assert_eq!(
-            config.default_project_dir(),
-            Some(PathBuf::from("D:/workspace/projects/app"))
-        );
-    }
-
-    #[test]
-    fn default_project_dir_uses_absolute_path_directly() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.default_project_dir = Some("D:/etc/project".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
-        assert_eq!(config.default_project_dir(), Some(PathBuf::from("D:/etc/project")));
-    }
-
-    #[test]
-    fn default_project_dir_is_none_when_not_set() {
-        let origin = OriginAppConfig::default();
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
-        assert_eq!(config.default_project_dir(), None);
     }
 
     #[test]

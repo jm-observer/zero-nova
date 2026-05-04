@@ -177,8 +177,8 @@ impl AgentWorkspaceService {
                 started_at: r.created_at,
                 finished_at: Some(r.updated_at),
                 duration_ms: Some((r.updated_at - r.created_at) as u64),
-                orchestration_model: r.orchestration_model.as_ref().map(Into::into),
-                execution_model: r.execution_model.as_ref().map(Into::into),
+                orchestration_model: r.orchestration_model.as_ref().map(proto_model_ref),
+                execution_model: r.execution_model.as_ref().map(proto_model_ref),
                 tool_call_count: r.tool_call_count,
                 usage: None,
                 error_summary: None,
@@ -202,8 +202,8 @@ impl AgentWorkspaceService {
             started_at: r.created_at,
             finished_at: Some(r.updated_at),
             duration_ms: Some((r.updated_at - r.created_at) as u64),
-            orchestration_model: r.orchestration_model.as_ref().map(Into::into),
-            execution_model: r.execution_model.as_ref().map(Into::into),
+            orchestration_model: r.orchestration_model.as_ref().map(proto_model_ref),
+            execution_model: r.execution_model.as_ref().map(proto_model_ref),
             tool_call_count: r.tool_call_count,
             usage: None,
             error_summary: None,
@@ -411,6 +411,13 @@ impl AgentWorkspaceService {
                 })
             }
         }
+    }
+}
+
+fn proto_model_ref(model: &ModelRef) -> nova_protocol::ModelRef {
+    nova_protocol::ModelRef {
+        provider: model.provider.clone(),
+        model: model.model.clone(),
     }
 }
 

@@ -22,6 +22,12 @@ pub struct AppAgent {
 }
 
 #[derive(Debug, Clone)]
+pub struct AppAgentSwitch {
+    pub agent: AppAgent,
+    pub session: AppSession,
+}
+
+#[derive(Debug, Clone)]
 pub struct AppMessage {
     pub id: String,
     pub role: String,

@@ -56,7 +56,7 @@ impl Tool for ProjectManagerTool {
                     is_error: false,
                 }),
                 Ok(None) => Ok(ToolOutput {
-                    content: "Current project directory is not set.".to_string(),
+                    content: "Current project directory: (not set)".to_string(),
                     is_error: false,
                 }),
                 Err(e) => Ok(ToolOutput {

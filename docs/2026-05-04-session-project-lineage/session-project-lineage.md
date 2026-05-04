@@ -12,8 +12,8 @@
 | 状态 | Plan | 说明 | 依赖 | 执行顺序 |
 |------|------|------|------|----------|
 | 待开始 | Plan 1: Session Project 数据模型收敛 | 将 `project` 从必填路径改为 session 级可空状态，并移除默认 project / reset 相关接口。 | 无 | 1 |
-| 待开始 | Plan 2: 同 Agent 最近 Session 继承与恢复 | 以最近活跃时间为准实现 Agent 内 session 恢复与新建继承规则。 | Plan 1 | 2 |
-| 待开始 | Plan 3: 无 Project 运行时行为与测试补齐 | 统一 prompt、工具、项目上下文在 `project = None` 下的行为，并补齐端到端测试。 | Plan 1, Plan 2 | 3 |
+| 已完成 | Plan 2: 同 Agent 最近 Session 继承与恢复 | 以最近活跃时间为准实现 Agent 内 session 恢复与新建继承规则。 | Plan 1 | 2 |
+| 已完成 | Plan 3: 无 Project 运行时行为与测试补齐 | 统一 prompt、工具、项目上下文在 `project = None` 下的行为，并补齐端到端测试。 | Plan 1, Plan 2 | 3 |
 
 ## 核心业务语义
 

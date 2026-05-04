@@ -1,11 +1,10 @@
-use crate::bridge::app_agent_to_protocol;
+use crate::bridge::{app_agent_switch_to_protocol, app_agent_to_protocol};
 use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use log::info;
 use nova_agent::app::AgentApplication;
 use nova_protocol::{
-    observability::AgentInspectRequest, AgentsListResponse, AgentsSwitchResponse, GatewayMessage, MessageEnvelope,
-    SessionAgentSwitchPayload,
+    observability::AgentInspectRequest, AgentsListResponse, GatewayMessage, MessageEnvelope, SessionAgentSwitchPayload,
 };
 
 pub async fn handle_agents_list(
@@ -32,15 +31,12 @@ pub async fn handle_agents_switch(
     info!("Switching session {} to agent {}", payload.session_id, payload.agent_id);
 
     match app.switch_agent(&payload.session_id, &payload.agent_id).await {
-        Ok(agent) => {
-            let agent = app_agent_to_protocol(agent);
+        Ok(result) => {
+            let response = app_agent_switch_to_protocol(result);
             let _ = outbound_tx
                 .send_async(GatewayMessage::new(
                     request_id,
-                    MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {
-                        agent,
-                        messages: vec![],
-                    }),
+                    MessageEnvelope::AgentsSwitchResponse(response),
                 ))
                 .await;
         }

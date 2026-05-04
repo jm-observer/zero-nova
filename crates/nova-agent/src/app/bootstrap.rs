@@ -41,7 +41,7 @@ pub async fn build_application<C: LlmClient + 'static>(
     }
     let skill_registry = Arc::new(skill_registry);
 
-    let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, &config.config_dir).await;
+    let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
     env_snapshot.model_id = Some(config.llm.model_config.model.clone());
 
     let task_store = Arc::new(Mutex::new(TaskStore::new()));
@@ -89,7 +89,7 @@ pub async fn build_application<C: LlmClient + 'static>(
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), config.config_dir.clone())
+        let prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), None)
             .with_environment(env_snapshot.clone())
             .with_project_context_path_opt(config.project_context_file())
             .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))

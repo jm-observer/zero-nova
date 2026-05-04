@@ -1,4 +1,4 @@
-use nova_agent::app::types::{AppAgent, AppEvent, AppMessage, AppSession};
+use nova_agent::app::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use nova_agent::message::ContentBlock;
 use nova_protocol::{
     Agent, AgentsSwitchResponse, ContentBlockDTO, ErrorPayload, GatewayMessage, MessageDTO, MessageEnvelope,
@@ -96,6 +96,14 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
         }),
         AppEvent::AgentSwitched { agent } => MessageEnvelope::AgentsSwitchResponse(AgentsSwitchResponse {
             agent: app_agent_to_protocol(agent),
+            session: app_session_to_protocol(AppSession {
+                id: session_id.to_string(),
+                title: None,
+                agent_id: String::new(),
+                created_at: 0,
+                updated_at: 0,
+                message_count: 0,
+            }),
             messages: vec![],
         }),
         AppEvent::Welcome {
@@ -240,6 +248,14 @@ pub fn app_agent_to_protocol(agent: AppAgent) -> Agent {
         description: agent.description,
         icon: None,
         system_prompt: None,
+    }
+}
+
+pub fn app_agent_switch_to_protocol(result: AppAgentSwitch) -> AgentsSwitchResponse {
+    AgentsSwitchResponse {
+        agent: app_agent_to_protocol(result.agent),
+        session: app_session_to_protocol(result.session),
+        messages: vec![],
     }
 }
 

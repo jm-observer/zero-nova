@@ -76,16 +76,28 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         Ok(())
     }
 
-    pub async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AgentDescriptor> {
+    pub async fn switch_agent(
+        &self,
+        _session_id: &str,
+        agent_id: &str,
+    ) -> Result<(AgentDescriptor, Arc<crate::conversation::session::Session>)> {
         let agent = self
             .agent_registry
             .get(agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
 
-        self.sessions.set_active_agent(session_id, agent_id).await?;
+        if let Some(session) = self.sessions.find_latest_session_by_agent(agent_id).await? {
+            let session = self.sessions.touch_session(&session.id).await?;
+            return Ok((agent, session));
+        }
 
-        Ok(agent)
+        let session = self
+            .sessions
+            .create_for_agent(None, agent_id.to_string(), agent.system_prompt_template.clone(), None)
+            .await?;
+
+        Ok((agent, session))
     }
 
     pub async fn set_project_dir(&self, session_id: &str, path: &Path) -> Result<PathBuf> {
@@ -237,14 +249,12 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         // 渐进切换策略（Phase 3 G11）
         let use_turn_context = self.agent.config.use_turn_context;
         if use_turn_context {
-            let project_dir = self
-                .sessions
-                .get_project_dir(session_id)
-                .await?
-                .unwrap_or_else(|| self.agent.config.config_dir.clone());
-            let project_context =
-                load_project_context_with_config_async(&project_dir, self.agent.config.project_context_file.as_deref())
-                    .await;
+            let project_dir = self.sessions.get_project_dir(session_id).await?;
+            let project_context = load_project_context_with_config_async(
+                project_dir.as_deref(),
+                self.agent.config.project_context_file.as_deref(),
+            )
+            .await;
 
             // 新路径：prepare_turn + run_turn_with_context
             let mut prompt_config = PromptConfig::new(
@@ -257,7 +267,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .with_template_vars(agent_descriptor.initial_template_vars.clone());
 
             let mut env =
-                crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, &project_dir).await;
+                crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref())
+                    .await;
             env.model_id = self
                 .agent
                 .config

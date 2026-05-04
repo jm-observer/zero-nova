@@ -13,6 +13,9 @@ use tokio::sync::Mutex;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+const NO_PROJECT_RELATIVE_PATH_ERROR: &str =
+    "Current session has no project directory. Set a project before using relative paths.";
+
 pub mod builtin;
 
 /// Context for tool execution, providing access to event channels and other runtime info.
@@ -486,15 +489,44 @@ fn preprocess_file_tool_input(
         return Ok(());
     };
 
-    let project_dir = Path::new(&env.project_dir);
-    let allowed_root = project_dir;
-
-    let require_exists = !matches!(tool_name, "Write");
-    let resolved =
-        resolve_path_ref(raw_path, project_dir, Some(allowed_root), require_exists).map_err(|err| ToolOutput {
+    let raw_path = Path::new(raw_path);
+    if raw_path.is_absolute() {
+        let require_exists = !matches!(tool_name, "Write");
+        let resolved = resolve_path_ref(
+            raw_path.to_string_lossy().as_ref(),
+            Path::new("."),
+            None,
+            require_exists,
+        )
+        .map_err(|err| ToolOutput {
             content: format_path_resolve_error(tool_name, &err),
             is_error: true,
         })?;
+        input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
+        return Ok(());
+    }
+
+    let Some(project_dir) = env.project_dir.as_deref() else {
+        return Err(ToolOutput {
+            content: NO_PROJECT_RELATIVE_PATH_ERROR.to_string(),
+            is_error: true,
+        });
+    };
+
+    let project_dir = Path::new(project_dir);
+    let allowed_root = project_dir;
+
+    let require_exists = !matches!(tool_name, "Write");
+    let resolved = resolve_path_ref(
+        raw_path.to_string_lossy().as_ref(),
+        project_dir,
+        Some(allowed_root),
+        require_exists,
+    )
+    .map_err(|err| ToolOutput {
+        content: format_path_resolve_error(tool_name, &err),
+        is_error: true,
+    })?;
 
     input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
     Ok(())
@@ -524,9 +556,12 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
+    use crate::prompt::EnvironmentSnapshot;
     use anyhow::Result;
     use serde_json::json;
+    use std::collections::HashSet;
     use std::sync::Arc;
+    use tokio::sync::{mpsc, Mutex};
 
     struct StaticTool {
         name: &'static str,
@@ -576,5 +611,41 @@ mod tests {
             .unwrap();
         assert!(search_output.content.contains("Loaded tool: DeferredTool"));
         assert!(registry.has_loaded_tool("DeferredTool"));
+    }
+
+    #[tokio::test]
+    async fn relative_file_tool_path_requires_project_dir_when_session_has_none() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(StaticTool { name: "Read" }));
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        let output = registry
+            .execute(
+                "Read",
+                json!({"file_path":"src/lib.rs"}),
+                Some(ToolContext {
+                    event_tx,
+                    tool_use_id: "tool-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    task_store: None,
+                    skill_registry: None,
+                    read_files: Arc::new(Mutex::new(HashSet::new())),
+                    environment: Some(EnvironmentSnapshot {
+                        config_dir: "D:/config".to_string(),
+                        project_dir: None,
+                        platform: "windows".to_string(),
+                        shell: "powershell".to_string(),
+                        git_branch: None,
+                        git_status_summary: None,
+                        recent_commits: None,
+                        model_id: None,
+                        current_date: "2026-05-04".to_string(),
+                    }),
+                }),
+            )
+            .await
+            .unwrap();
+
+        assert!(output.is_error);
+        assert_eq!(output.content, super::NO_PROJECT_RELATIVE_PATH_ERROR);
     }
 }

@@ -8,6 +8,8 @@ pub struct SqliteSessionRepository {
     pool: sqlx::SqlitePool,
 }
 
+type SessionRow = (String, String, String, i64, i64, super::control::ControlState);
+
 impl SqliteSessionRepository {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
         Self { pool }
@@ -47,11 +49,12 @@ impl SqliteSessionRepository {
         &self,
         id: &str,
         runtime_control: &super::control::ControlState,
+        updated_at: i64,
     ) -> Result<()> {
         let runtime_control_json = serde_json::to_string(runtime_control)?;
         sqlx::query("UPDATE sessions SET runtime_control = ?, updated_at = ? WHERE id = ?")
             .bind(runtime_control_json)
-            .bind(chrono::Utc::now().timestamp_millis())
+            .bind(updated_at)
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -172,7 +175,7 @@ impl SqliteSessionRepository {
         Ok(None)
     }
 
-    pub async fn list_sessions(&self) -> Result<Vec<(String, String, String, i64, i64, super::control::ControlState)>> {
+    pub async fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let rows = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control FROM sessions ORDER BY updated_at DESC",
         )
@@ -199,6 +202,30 @@ impl SqliteSessionRepository {
             ));
         }
         Ok(sessions)
+    }
+
+    pub async fn find_latest_session_by_agent(&self, agent_id: &str) -> Result<Option<SessionRow>> {
+        let row = sqlx::query(
+            "SELECT id, title, agent_id, created_at, updated_at, runtime_control
+             FROM sessions
+             WHERE agent_id = ?
+             ORDER BY updated_at DESC
+             LIMIT 1",
+        )
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_session_row).transpose()
+    }
+
+    pub async fn touch_session(&self, id: &str, updated_at: i64) -> Result<()> {
+        sqlx::query("UPDATE sessions SET updated_at = ? WHERE id = ?")
+            .bind(updated_at)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<()> {
@@ -620,6 +647,25 @@ fn parse_model_ref(raw: Option<String>) -> Result<Option<super::control::ModelRe
         .transpose()
 }
 
+fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
+    let agent_id: String = row.get("agent_id");
+    let runtime_control_json: Option<String> = row.get("runtime_control");
+    let runtime_control = if let Some(json) = runtime_control_json {
+        serde_json::from_str(&json).unwrap_or_else(|_| super::control::ControlState::new(&agent_id))
+    } else {
+        super::control::ControlState::new(&agent_id)
+    };
+
+    Ok((
+        row.get("id"),
+        row.get("title"),
+        agent_id,
+        row.get("created_at"),
+        row.get("updated_at"),
+        runtime_control,
+    ))
+}
+
 fn is_terminal_run_status(status: &str) -> bool {
     matches!(status, "success" | "failed" | "cancelled" | "stopped")
 }
@@ -790,6 +836,29 @@ mod tests {
         assert_eq!(logs[0].action, "test_action");
         assert_eq!(logs[0].details, serde_json::json!({"info": "test"}));
         assert!(logs[0].id > 0);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn find_latest_session_by_agent_uses_updated_at_desc() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+        repo.save_session("session-1", "older", "agent-1", 10, 10, &ControlState::new("agent-1"))
+            .await?;
+        repo.save_session("session-2", "newer", "agent-1", 20, 30, &ControlState::new("agent-1"))
+            .await?;
+        repo.save_session("session-3", "other", "agent-2", 20, 40, &ControlState::new("agent-2"))
+            .await?;
+
+        let latest = repo
+            .find_latest_session_by_agent("agent-1")
+            .await?
+            .expect("latest session should exist");
+        assert_eq!(latest.0, "session-2");
+        assert_eq!(latest.1, "newer");
 
         Ok(())
     }

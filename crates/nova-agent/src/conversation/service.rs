@@ -52,6 +52,16 @@ impl SessionService {
 
     /// 创建一个新会话并持久化
     pub async fn create(&self, name: Option<String>, agent_id: String, system_prompt: String) -> Result<Arc<Session>> {
+        self.create_for_agent(name, agent_id, system_prompt, None).await
+    }
+
+    pub async fn create_for_agent(
+        &self,
+        name: Option<String>,
+        agent_id: String,
+        system_prompt: String,
+        inherited_project_dir: Option<PathBuf>,
+    ) -> Result<Arc<Session>> {
         let id = Uuid::new_v4().to_string();
         let length = id.len().min(8);
         let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..length]));
@@ -69,7 +79,7 @@ impl SessionService {
         }
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(ControlState::new(&agent_id)),
+            control: std::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
             id: id.clone(),
             name: session_name,
             history: RwLock::new(initial_history),
@@ -82,6 +92,16 @@ impl SessionService {
         self.persist_full_session(&session).await?;
         self.cache.insert(id, session.clone());
         Ok(session)
+    }
+
+    pub async fn find_latest_session_by_agent(&self, agent_id: &str) -> Result<Option<Arc<Session>>> {
+        let Some((session_id, _title, _agent_id, _created_at, _updated_at, _runtime_control)) =
+            self.repository.find_latest_session_by_agent(agent_id).await?
+        else {
+            return Ok(None);
+        };
+
+        self.get(&session_id).await
     }
 
     /// 获取会话 (Read-Through with concurrency protection).
@@ -223,15 +243,11 @@ impl SessionService {
             .collect()
     }
 
-    pub async fn set_active_agent(&self, session_id: &str, agent_id: &str) -> Result<Arc<Session>> {
+    pub async fn touch_session(&self, session_id: &str) -> Result<Arc<Session>> {
         let session = self.get(session_id).await?.context("Session not found")?;
-
-        {
-            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
-            control.active_agent = agent_id.to_string();
-        }
-
-        self.persist_session_control(&session).await?;
+        let updated_at = Utc::now().timestamp_millis();
+        session.updated_at.store(updated_at, Ordering::SeqCst);
+        self.repository.touch_session(session_id, updated_at).await?;
         Ok(session)
     }
 
@@ -418,9 +434,11 @@ impl SessionService {
             let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
             control.clone()
         };
+        let updated_at = Utc::now().timestamp_millis();
+        session.updated_at.store(updated_at, Ordering::SeqCst);
 
         self.repository
-            .update_session_runtime_control(session_id, &runtime_control)
+            .update_session_runtime_control(session_id, &runtime_control, updated_at)
             .await
     }
 }
@@ -535,6 +553,62 @@ mod tests {
 
         let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(control.project_dir, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_for_agent_inherits_project_dir_only() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let inherited = dir.path().join("project-a");
+
+        let session = service
+            .create_for_agent(
+                Some("s".to_string()),
+                "agent-1".to_string(),
+                String::new(),
+                Some(inherited.clone()),
+            )
+            .await?;
+
+        let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(control.project_dir, Some(inherited));
+        assert_eq!(control.active_agent, "agent-1");
+        assert_eq!(control.skill_bindings.len(), 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn touch_session_refreshes_latest_agent_ordering() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+
+        let first = service
+            .create(Some("first".to_string()), "agent-1".to_string(), String::new())
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let second = service
+            .create(Some("second".to_string()), "agent-1".to_string(), String::new())
+            .await?;
+
+        service.touch_session(&first.id).await?;
+
+        let latest = service
+            .find_latest_session_by_agent("agent-1")
+            .await?
+            .expect("latest session should exist");
+        assert_eq!(latest.id, first.id);
+        assert_ne!(latest.id, second.id);
+
+        let stored = repository
+            .find_latest_session_by_agent("agent-1")
+            .await?
+            .expect("stored latest session should exist");
+        assert_eq!(stored.0, first.id);
         Ok(())
     }
 

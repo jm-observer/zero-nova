@@ -1,5 +1,5 @@
 use super::conversation_service::ConversationService;
-use super::types::{AppAgent, AppEvent, AppMessage, AppSession};
+use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use super::voice_service::VoiceService;
 use crate::agent::TurnResult;
 use crate::config::AppConfig;
@@ -26,7 +26,7 @@ pub trait AgentApplication: Send + Sync {
     async fn delete_session(&self, session_id: &str) -> Result<bool>;
     async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession>;
 
-    async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgent>;
+    async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgentSwitch>;
     async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf>;
     async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>>;
     fn list_agents(&self) -> Vec<AppAgent>;
@@ -225,10 +225,20 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .map(|agent| agent.system_prompt_template.clone())
             .unwrap_or_default();
 
+        let inherited_project_dir = self
+            .conversation_service
+            .sessions
+            .find_latest_session_by_agent(&agent_id)
+            .await?
+            .and_then(|session| {
+                let control = session.control.read().ok()?;
+                control.project_dir.clone()
+            });
+
         let session = self
             .conversation_service
             .sessions
-            .create(title, agent_id, system_prompt)
+            .create_for_agent(title, agent_id, system_prompt, inherited_project_dir)
             .await?;
 
         let id = session.id.clone();
@@ -295,13 +305,32 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         })
     }
 
-    async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgent> {
-        let agent = self.conversation_service.switch_agent(session_id, agent_id).await?;
-        Ok(AppAgent {
+    async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgentSwitch> {
+        let (agent, session) = self.conversation_service.switch_agent(session_id, agent_id).await?;
+        let agent = AppAgent {
             id: agent.id.clone(),
             name: agent.display_name.clone(),
             description: Some(agent.description.clone()),
-        })
+        };
+        let session = AppSession {
+            id: session.id.clone(),
+            title: Some(session.name.clone()),
+            agent_id: session
+                .control
+                .read()
+                .map_err(|_| anyhow!("Session control lock poisoned"))?
+                .active_agent
+                .clone(),
+            created_at: session.created_at,
+            updated_at: session.updated_at.load(Ordering::SeqCst),
+            message_count: session
+                .history
+                .read()
+                .map_err(|_| anyhow!("Session history lock poisoned"))?
+                .len(),
+        };
+
+        Ok(AppAgentSwitch { agent, session })
     }
 
     async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf> {

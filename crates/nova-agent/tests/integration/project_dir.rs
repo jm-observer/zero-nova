@@ -1,10 +1,9 @@
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;
 
 #[tokio::test]
-async fn session_project_dir_can_set_and_reset() {
+async fn session_project_dir_can_set_and_get() {
     let data_dir = tempdir().expect("create data tempdir");
     let manager = SqliteManager::new(data_dir.path()).await.expect("create sqlite manager");
     let repository = SqliteSessionRepository::new(manager.pool.clone());
@@ -30,17 +29,7 @@ async fn session_project_dir_can_set_and_reset() {
         .get_project_dir(&session.id)
         .await
         .expect("get project dir after set");
-    assert_eq!(current, expected_target);
-
-    let reset = service
-        .reset_project_dir(&session.id)
-        .await
-        .expect("reset project dir");
-    let cwd = std::env::current_dir().expect("get cwd");
-    let expected_cwd = tokio::fs::canonicalize(&cwd)
-        .await
-        .unwrap_or(cwd);
-    assert_eq!(reset, expected_cwd);
+    assert_eq!(current, Some(expected_target));
 }
 
 #[tokio::test]
@@ -61,45 +50,4 @@ async fn set_project_dir_keeps_raw_path_when_canonicalize_fails() {
         .await
         .expect("set missing project dir should keep raw path");
     assert_eq!(updated, missing_dir);
-}
-
-#[tokio::test]
-async fn session_uses_configured_default_project_dir_for_create_and_reset() {
-    let data_dir = tempdir().expect("create data tempdir");
-    let manager = SqliteManager::new(data_dir.path()).await.expect("create sqlite manager");
-    let repository = SqliteSessionRepository::new(manager.pool.clone());
-
-    let configured_default = tempdir().expect("create configured default tempdir");
-    let expected_default = tokio::fs::canonicalize(configured_default.path())
-        .await
-        .unwrap_or_else(|_| PathBuf::from(configured_default.path()));
-
-    let service = SessionService::new_with_default_project_dir(
-        Arc::new(SessionCache::new()),
-        repository,
-        expected_default.clone(),
-    );
-
-    let session = service
-        .create(Some("project-dir-default".to_string()), "default".to_string(), String::new())
-        .await
-        .expect("create session");
-
-    let initial = service
-        .get_project_dir(&session.id)
-        .await
-        .expect("get initial project dir");
-    assert_eq!(initial, expected_default);
-
-    let switched_dir = tempdir().expect("create switched tempdir");
-    service
-        .set_project_dir(&session.id, switched_dir.path())
-        .await
-        .expect("set project dir");
-
-    let reset = service
-        .reset_project_dir(&session.id)
-        .await
-        .expect("reset project dir");
-    assert_eq!(reset, expected_default);
 }

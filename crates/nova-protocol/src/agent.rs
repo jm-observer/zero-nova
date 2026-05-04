@@ -1,3 +1,4 @@
+use crate::session::Session;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +20,7 @@ pub struct AgentsListResponse {
 #[serde(rename_all = "camelCase")]
 pub struct AgentsSwitchResponse {
     pub agent: Agent,
+    pub session: Session,
     pub messages: Vec<Value>,
 }
 

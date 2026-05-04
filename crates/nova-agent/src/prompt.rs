@@ -42,7 +42,7 @@ pub struct PromptConfig {
     /// 从文件加载的 agent prompt 内容（已读取为字符串）
     pub agent_prompt: String,
     /// 项目目录（用于加载项目上下文文件等）
-    pub project_dir: PathBuf,
+    pub project_dir: Option<PathBuf>,
     /// 当前活跃的 skill id（如果有）
     pub active_skill: Option<String>,
     /// 模板变量键值对（用于替换 {{key}} 占位符）
@@ -58,7 +58,7 @@ pub struct PromptConfig {
 }
 
 impl PromptConfig {
-    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, project_dir: PathBuf) -> Self {
+    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, project_dir: Option<PathBuf>) -> Self {
         Self {
             agent_id: agent_id.into(),
             agent_prompt: agent_prompt.into(),
@@ -181,7 +181,7 @@ pub struct EnvironmentSnapshot {
     /// 配置目录
     pub config_dir: String,
     /// 项目目录
-    pub project_dir: String,
+    pub project_dir: Option<String>,
     /// 操作系统平台
     pub platform: String,
     /// Shell 类型
@@ -203,11 +203,11 @@ impl EnvironmentSnapshot {
     ///
     /// git 命令失败时（非 git 目录或无 git 可执行文件）静默跳过，
     /// 确保在任何环境下都能正常工作。
-    pub async fn collect(config_dir: &Path, project_dir: &Path) -> Self {
+    pub async fn collect(config_dir: &Path, project_dir: Option<&Path>) -> Self {
         let config_dir_path = config_dir;
         let config_dir = config_dir_path.to_string_lossy().to_string();
         let project_dir_path = project_dir;
-        let project_dir = project_dir_path.to_string_lossy().to_string();
+        let project_dir = project_dir_path.map(|path| path.to_string_lossy().to_string());
 
         let platform = std::env::consts::OS.to_string();
 
@@ -215,18 +215,30 @@ impl EnvironmentSnapshot {
             .or_else(|_| std::env::var("COMSPEC"))
             .unwrap_or_else(|_| "unknown".to_string());
 
-        let git_branch = Self::run_git(project_dir_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
+        let git_branch = if let Some(project_dir_path) = project_dir_path {
+            Self::run_git(project_dir_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await
+        } else {
+            None
+        };
 
-        let git_status_summary = Self::run_git(project_dir_path, &["status", "--short"]).await.map(|s| {
-            let count = s.lines().filter(|l| !l.is_empty()).count();
-            if count == 0 {
-                "clean".to_string()
-            } else {
-                format!("{} changed files", count)
-            }
-        });
+        let git_status_summary = if let Some(project_dir_path) = project_dir_path {
+            Self::run_git(project_dir_path, &["status", "--short"]).await.map(|s| {
+                let count = s.lines().filter(|l| !l.is_empty()).count();
+                if count == 0 {
+                    "clean".to_string()
+                } else {
+                    format!("{} changed files", count)
+                }
+            })
+        } else {
+            None
+        };
 
-        let recent_commits = Self::run_git(project_dir_path, &["log", "--oneline", "-5"]).await;
+        let recent_commits = if let Some(project_dir_path) = project_dir_path {
+            Self::run_git(project_dir_path, &["log", "--oneline", "-5"]).await
+        } else {
+            None
+        };
 
         let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
@@ -271,7 +283,10 @@ impl EnvironmentSnapshot {
     pub fn to_prompt_text(&self) -> String {
         let mut lines = vec![
             format!("Config directory: {}", self.config_dir),
-            format!("Project directory: {}", self.project_dir),
+            format!(
+                "Project directory: {}",
+                self.project_dir.as_deref().unwrap_or("(not set)")
+            ),
             format!("Platform: {}", self.platform),
             format!("Shell: {}", self.shell),
             format!("Date: {}", self.current_date),
@@ -301,18 +316,20 @@ impl EnvironmentSnapshot {
 /// 按优先级查找 PROJECT.md → NOVA.md，找到第一个非空文件即返回。
 /// 所有文件都不存在或为空时返回 None。
 /// 异步从工作区加载项目上下文文件（Plan 2 规范建议修复）。
-pub async fn load_project_context_async(project_dir: &Path) -> Option<String> {
+pub async fn load_project_context_async(project_dir: Option<&Path>) -> Option<String> {
     load_project_context_with_config_async(project_dir, None).await
 }
 
 /// 异步从工作区加载项目上下文文件，支持显式路径。
 pub async fn load_project_context_with_config_async(
-    project_dir: &Path,
+    project_dir: Option<&Path>,
     configured_path: Option<&Path>,
 ) -> Option<String> {
     if let Some(path) = configured_path {
         return load_single_project_context_async(path).await;
     }
+
+    let project_dir = project_dir?;
 
     for filename in PROJECT_CONTEXT_FILES {
         let path = project_dir.join(filename);
@@ -344,15 +361,17 @@ async fn load_single_project_context_async(path: &Path) -> Option<String> {
     }
 }
 
-pub fn load_project_context(project_dir: &Path) -> Option<String> {
+pub fn load_project_context(project_dir: Option<&Path>) -> Option<String> {
     load_project_context_with_config(project_dir, None)
 }
 
 /// 从工作区加载项目上下文文件，支持显式配置文件路径。
-pub fn load_project_context_with_config(project_dir: &Path, configured_path: Option<&Path>) -> Option<String> {
+pub fn load_project_context_with_config(project_dir: Option<&Path>, configured_path: Option<&Path>) -> Option<String> {
     if let Some(path) = configured_path {
         return load_single_project_context(path);
     }
+
+    let project_dir = project_dir?;
 
     for filename in PROJECT_CONTEXT_FILES {
         let path = project_dir.join(filename);
@@ -681,7 +700,7 @@ impl SystemPromptBuilder {
         if let Some(content) = &config.project_context_content {
             builder = builder.project_context_section(content);
         } else if let Some(content) =
-            load_project_context_with_config(&config.project_dir, config.project_context_path.as_deref())
+            load_project_context_with_config(config.project_dir.as_deref(), config.project_context_path.as_deref())
         {
             builder = builder.project_context_section(&content);
         }
@@ -1341,7 +1360,7 @@ mod tests {
     fn env_snapshot_to_prompt_includes_cwd() {
         let snapshot = EnvironmentSnapshot {
             config_dir: "D:/workspace".to_string(),
-            project_dir: "D:/project".to_string(),
+            project_dir: Some("D:/project".to_string()),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: None,
@@ -1361,7 +1380,7 @@ mod tests {
     fn env_snapshot_to_prompt_optional_git() {
         let snapshot = EnvironmentSnapshot {
             config_dir: "D:/workspace".to_string(),
-            project_dir: "D:/project".to_string(),
+            project_dir: Some("D:/project".to_string()),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: Some("main".to_string()),
@@ -1380,7 +1399,7 @@ mod tests {
     fn env_snapshot_to_prompt_with_commits() {
         let snapshot = EnvironmentSnapshot {
             config_dir: "D:/workspace".to_string(),
-            project_dir: "D:/project".to_string(),
+            project_dir: Some("D:/project".to_string()),
             platform: "windows".to_string(),
             shell: "powershell".to_string(),
             git_branch: None,
@@ -1401,7 +1420,7 @@ mod tests {
         let dir = create_temp_dir("project-context-find");
         fs::write(dir.join("PROJECT.md"), "hello project").unwrap();
 
-        let content = load_project_context(&dir);
+        let content = load_project_context(Some(&dir));
         assert_eq!(content.as_deref(), Some("hello project"));
 
         fs::remove_dir_all(dir).unwrap();
@@ -1410,7 +1429,7 @@ mod tests {
     #[test]
     fn load_project_context_none_when_missing() {
         let dir = create_temp_dir("project-context-missing");
-        assert!(load_project_context(&dir).is_none());
+        assert!(load_project_context(Some(&dir)).is_none());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1420,7 +1439,7 @@ mod tests {
         fs::write(dir.join("PROJECT.md"), "   \n").unwrap();
         fs::write(dir.join("NOVA.md"), "fallback").unwrap();
 
-        let content = load_project_context(&dir);
+        let content = load_project_context(Some(&dir));
         assert_eq!(content.as_deref(), Some("fallback"));
 
         fs::remove_dir_all(dir).unwrap();
@@ -1432,7 +1451,7 @@ mod tests {
         let large = format!("{}\nend", "a".repeat(MAX_PROJECT_CONTEXT_CHARS + 128));
         fs::write(dir.join("PROJECT.md"), large).unwrap();
 
-        let content = load_project_context(&dir).unwrap();
+        let content = load_project_context(Some(&dir)).unwrap();
         assert!(content.contains("[... truncated due to size limit ...]"));
         assert!(content.len() <= MAX_PROJECT_CONTEXT_CHARS + 64);
 
@@ -1446,7 +1465,7 @@ mod tests {
         fs::create_dir_all(custom.parent().unwrap()).unwrap();
         fs::write(&custom, "configured context").unwrap();
 
-        let content = load_project_context_with_config(&dir, Some(&custom));
+        let content = load_project_context_with_config(Some(&dir), Some(&custom));
         assert_eq!(content.as_deref(), Some("configured context"));
 
         fs::remove_dir_all(dir).unwrap();
@@ -1634,7 +1653,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "draft".to_string());
         vars.insert(template_vars::TOPIC.to_string(), "plan".to_string());
-        let config = PromptConfig::new("agent", "base", dir.clone())
+        let config = PromptConfig::new("agent", "base", Some(dir.clone()))
             .with_template_vars(vars)
             .with_workflow_prompt_path(workflow_file);
         let skills = SkillRegistry::new();
@@ -1644,5 +1663,29 @@ mod tests {
         assert!(prompt.contains("Draft plan"));
 
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn env_snapshot_to_prompt_shows_project_not_set() {
+        let snapshot = EnvironmentSnapshot {
+            config_dir: "D:/workspace".to_string(),
+            project_dir: None,
+            platform: "windows".to_string(),
+            shell: "powershell".to_string(),
+            git_branch: None,
+            git_status_summary: None,
+            recent_commits: None,
+            model_id: None,
+            current_date: "2026-05-04".to_string(),
+        };
+
+        let prompt = snapshot.to_prompt_text();
+        assert!(prompt.contains("Project directory: (not set)"));
+    }
+
+    #[test]
+    fn load_project_context_with_no_project_returns_none() {
+        assert!(load_project_context(None).is_none());
+        assert!(load_project_context_with_config(None, None).is_none());
     }
 }

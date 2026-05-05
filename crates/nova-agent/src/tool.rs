@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,8 @@ pub struct ToolContext {
     pub read_files: Arc<Mutex<HashSet<String>>>,
     /// 运行时环境快照
     pub environment: Option<EnvironmentSnapshot>,
+    /// 同一 turn 内共享的可变环境快照（用于实时同步 project_dir 等变更）。
+    pub shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
 }
 
 /// Definition of a tool, including name, description, and input schema.
@@ -640,6 +642,7 @@ mod tests {
                         model_id: None,
                         current_date: "2026-05-04".to_string(),
                     }),
+                    shared_environment: None,
                 }),
             )
             .await

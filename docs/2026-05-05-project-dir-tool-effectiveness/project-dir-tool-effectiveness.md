@@ -38,11 +38,11 @@ Turn N:
 
 ## Plan 拆分
 
-| Plan | 标题 | 简要描述 | 前置依赖 |
-|------|------|---------|---------|
-| Plan 1 | BashTool 读取 project_dir 作为 CWD | 修改 BashTool 执行时从 ToolContext.environment.project_dir 设置 current_dir | 无 |
-| Plan 2 | 同 turn 内 EnvironmentSnapshot 实时刷新 | ProjectManager 修改 project_dir 后触发 snapshot 局部刷新，使后续工具获取最新值 | Plan 1 |
-| Plan 3 | ProjectManager 返回信息增强 | 返回更精确的状态描述，说明变更范围和生效时机 | Plan 2 |
+| Plan | 标题 | 简要描述 | 前置依赖 | 状态 |
+|------|------|---------|---------|------|
+| Plan 1 | BashTool 读取 project_dir 作为 CWD | 修改 BashTool 执行时从 ToolContext.environment.project_dir 设置 current_dir | 无 | 已完成 |
+| Plan 2 | 同 turn 内 EnvironmentSnapshot 实时刷新 | ProjectManager 修改 project_dir 后触发 snapshot 局部刷新，使后续工具获取最新值 | Plan 1 | 已完成 |
+| Plan 3 | ProjectManager 返回信息增强 | 返回更精确的状态描述，说明变更范围和生效时机 | Plan 2 | 已完成 |
 
 ### 执行顺序
 

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
@@ -106,6 +106,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
         session_id: &str,
         environment: Option<EnvironmentSnapshot>,
+        shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
         event_tx: &mpsc::Sender<AgentEvent>,
         cancellation_token: &Option<CancellationToken>,
     ) -> Result<Vec<ContentBlock>> {
@@ -120,6 +121,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             let task_store = self.task_store.clone();
             let skill_registry = self.skill_registry.clone();
             let read_files = self.read_files.clone();
+            let shared_environment = shared_environment.clone();
 
             tool_results_fut.push(async move {
                 let _ = tx
@@ -143,6 +145,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                             skill_registry,
                             read_files,
                             environment,
+                            shared_environment,
                         }),
                     ),
                 )
@@ -221,6 +224,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         let mut completed_naturally = false;
         let mut final_provider_request_body: Option<Value> = None;
         let mut final_provider_response_body: Option<Value> = None;
+        let shared_environment = environment.clone().map(|env| Arc::new(RwLock::new(env)));
 
         for iteration in 0..self.config.max_iterations {
             if let Some(token) = &cancellation_token {
@@ -398,11 +402,17 @@ impl<C: LlmClient> AgentRuntime<C> {
             }
 
             // 工具执行 — 使用共享方法
+            let current_environment = if let Some(env) = &shared_environment {
+                Some(env.read().await.clone())
+            } else {
+                environment.clone()
+            };
             let tool_result_blocks = self
                 .execute_tool_calls(
                     parsed_tool_calls,
                     session_id,
-                    environment.clone(),
+                    current_environment,
+                    shared_environment.clone(),
                     &event_tx,
                     &cancellation_token,
                 )
@@ -546,6 +556,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         let mut completed_naturally = false;
         let mut final_provider_request_body: Option<Value> = None;
         let mut final_provider_response_body: Option<Value> = None;
+        let shared_environment = environment.clone().map(|env| Arc::new(RwLock::new(env)));
 
         for iteration in 0..ctx.iteration_budget {
             // 检查取消
@@ -709,11 +720,17 @@ impl<C: LlmClient> AgentRuntime<C> {
             }
 
             // 工具执行 — 使用共享方法
+            let current_environment = if let Some(env) = &shared_environment {
+                Some(env.read().await.clone())
+            } else {
+                environment.clone()
+            };
             let tool_result_blocks = self
                 .execute_tool_calls(
                     parsed_tool_calls,
                     session_id,
-                    environment.clone(),
+                    current_environment,
+                    shared_environment.clone(),
                     &event_tx,
                     &cancellation_token,
                 )

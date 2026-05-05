@@ -53,11 +53,15 @@ impl Tool for ProjectManagerTool {
         match action {
             "get" => match self.project_dir_service.get_project_dir(session_id).await {
                 Ok(Some(path)) => Ok(ToolOutput {
-                    content: format!("Current project directory: {}", path.display()),
+                    content: format!(
+                        "Current project directory: {}\nDirectory exists: {}",
+                        path.display(),
+                        if path.exists() { "yes" } else { "no" }
+                    ),
                     is_error: false,
                 }),
                 Ok(None) => Ok(ToolOutput {
-                    content: "Current project directory: (not set)".to_string(),
+                    content: "Project directory: not set (using process working directory as fallback)".to_string(),
                     is_error: false,
                 }),
                 Err(e) => Ok(ToolOutput {
@@ -70,15 +74,48 @@ impl Tool for ProjectManagerTool {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("Missing 'path' for set action"))?;
                 let path = PathBuf::from(path_str);
-                match self.project_dir_service.set_project_dir(session_id, path).await {
-                    Ok(new_path) => Ok(ToolOutput {
+
+                if !path.exists() {
+                    return Ok(ToolOutput {
                         content: format!(
-                            "Project directory updated for session {}: {}\nChange scope: session-level project_dir state updated.\nTool effect: tools that read session environment/project_dir use this value in subsequent tool executions.",
-                            session_id,
-                            new_path.display()
+                            "Failed to set project directory: path '{}' does not exist",
+                            path.display()
                         ),
-                        is_error: false,
-                    }),
+                        is_error: true,
+                    });
+                }
+                if !path.is_dir() {
+                    return Ok(ToolOutput {
+                        content: format!(
+                            "Failed to set project directory: path '{}' is not a directory",
+                            path.display()
+                        ),
+                        is_error: true,
+                    });
+                }
+
+                match self.project_dir_service.set_project_dir(session_id, path).await {
+                    Ok(new_path) => {
+                        if let Some(shared_env) = ctx.shared_environment.as_ref() {
+                            let mut env = shared_env.write().await;
+                            env.project_dir = Some(new_path.to_string_lossy().to_string());
+                        }
+
+                        let exists = new_path.exists();
+                        let mut content = format!(
+                            "Project directory changed to: {}\nDirectory exists: {}\nAffected tools: Bash (CWD), Read/Write/Edit (relative path base)",
+                            new_path.display(),
+                            if exists { "yes" } else { "NO - commands may fail" }
+                        );
+                        if !exists {
+                            content.push_str("\nWarning: The specified directory does not exist on disk.");
+                        }
+
+                        Ok(ToolOutput {
+                            content,
+                            is_error: false,
+                        })
+                    }
                     Err(e) => Ok(ToolOutput {
                         content: format!("Failed to set project directory: {}", e),
                         is_error: true,

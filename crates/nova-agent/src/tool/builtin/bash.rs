@@ -153,14 +153,14 @@ impl BashTool {
     }
 
     fn resolve_working_dir(&self, context: Option<&ToolContext>) -> Option<PathBuf> {
-        if let Some(env_project_dir) = context
+        if let Some(workspace) = &self.workspace {
+            return Some(workspace.clone());
+        }
+        context
             .and_then(|ctx| ctx.environment.as_ref())
             .and_then(|env| env.project_dir.as_deref())
             .filter(|project_dir| !project_dir.trim().is_empty())
-        {
-            return Some(PathBuf::from(env_project_dir));
-        }
-        self.workspace.clone()
+            .map(PathBuf::from)
     }
 }
 
@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_working_dir_prefers_context_project_dir() {
+    fn resolve_working_dir_prefers_workspace_when_present() {
         let config = BashConfig::default();
         let tool = BashTool::with_workspace(&config, PathBuf::from("D:/fallback"));
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
@@ -457,6 +457,35 @@ mod tests {
                 model_id: None,
                 current_date: "2026-05-05".to_string(),
             }),
+            shared_environment: None,
+        };
+        assert_eq!(tool.resolve_working_dir(Some(&ctx)), Some(PathBuf::from("D:/fallback")));
+    }
+
+    #[test]
+    fn resolve_working_dir_falls_back_to_context_project_dir() {
+        let config = BashConfig::default();
+        let tool = BashTool::new(&config);
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let ctx = ToolContext {
+            event_tx: tx,
+            tool_use_id: "tool-1".to_string(),
+            session_id: "session-1".to_string(),
+            task_store: None,
+            skill_registry: None,
+            read_files: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            environment: Some(crate::prompt::EnvironmentSnapshot {
+                config_dir: "D:/config".to_string(),
+                project_dir: Some("D:/project".to_string()),
+                platform: "windows".to_string(),
+                shell: "pwsh".to_string(),
+                git_branch: None,
+                git_status_summary: None,
+                recent_commits: None,
+                model_id: None,
+                current_date: "2026-05-05".to_string(),
+            }),
+            shared_environment: None,
         };
         assert_eq!(tool.resolve_working_dir(Some(&ctx)), Some(PathBuf::from("D:/project")));
     }

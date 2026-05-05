@@ -499,6 +499,7 @@ export interface SessionRuntimeSnapshot {
     sessionId: string;
     projectDir?: string | null;
     modelOverride?: { orchestration?: { provider: string; model: string }; execution?: { provider: string; model: string } };
+    systemPromptState?: SessionSystemPromptStateView;
     /** 模型绑定详细视图（Plan 2 扩展） */
     orchestrationDetail?: ModelBindingDetailView;
     executionDetail?: ModelBindingDetailView;
@@ -506,6 +507,12 @@ export interface SessionRuntimeSnapshot {
     turnCount?: number;
     lastRunId?: string;
     lastStatus?: string;
+}
+
+export interface SessionSystemPromptStateView {
+    version: string;
+    updatedAt: number;
+    sourceRevision: string;
 }
 
 /**

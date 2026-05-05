@@ -29,6 +29,11 @@ impl RuntimeSnapshotAssembler {
                     }),
                 updated_at: control.model_override.updated_at,
             },
+            system_prompt_state: SessionSystemPromptState {
+                version: control.system_prompt_state.version.clone(),
+                updated_at: control.system_prompt_state.updated_at,
+                source_revision: control.system_prompt_state.source_revision.clone(),
+            },
             last_turn: control.last_turn_snapshot.as_ref().map(|s| LastTurnSnapshot {
                 turn_id: s.turn_id.clone(),
                 prepared_at: s.prepared_at,

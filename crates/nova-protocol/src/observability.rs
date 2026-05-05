@@ -52,11 +52,21 @@ pub struct SessionRuntimeSnapshot {
     pub session_id: String,
     pub active_agent: String,
     pub model_override: SessionModelOverride,
+    #[serde(default)]
+    pub system_prompt_state: SessionSystemPromptState,
     pub last_turn: Option<LastTurnSnapshot>,
     pub token_counters: SessionTokenCounters,
     pub project_dir: Option<String>,
     pub project_dir_source: Option<String>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSystemPromptState {
+    pub version: String,
+    pub updated_at: i64,
+    pub source_revision: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -101,6 +111,22 @@ pub struct SessionTokenCounters {
 pub struct PromptPreviewRequest {
     pub session_id: String,
     pub message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSystemPromptReloadRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSystemPromptReloadResponse {
+    pub session_id: String,
+    pub version_before: String,
+    pub version_after: String,
+    pub updated_at: i64,
+    pub changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]

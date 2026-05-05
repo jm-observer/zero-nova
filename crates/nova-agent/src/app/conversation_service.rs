@@ -259,14 +259,18 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .await;
 
             // 新路径：prepare_turn + run_turn_with_context
-            let mut prompt_config = PromptConfig::new(
-                agent_descriptor.id.clone(),
-                agent_descriptor.system_prompt_base.clone(),
-                project_dir.clone(),
-            )
-            .with_project_context_path_opt(self.agent.config.project_context_file.clone())
-            .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
-            .with_template_vars(agent_descriptor.initial_template_vars.clone());
+            let system_prompt_base = {
+                let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+                control
+                    .system_prompt_base_override
+                    .clone()
+                    .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
+            };
+            let mut prompt_config =
+                PromptConfig::new(agent_descriptor.id.clone(), system_prompt_base, project_dir.clone())
+                    .with_project_context_path_opt(self.agent.config.project_context_file.clone())
+                    .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
+                    .with_template_vars(agent_descriptor.initial_template_vars.clone());
 
             let mut env =
                 crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref())

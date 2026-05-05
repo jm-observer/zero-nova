@@ -205,6 +205,27 @@ pub async fn handle_session_prompt_preview(
     }
 }
 
+pub async fn handle_session_system_prompt_reload(
+    payload: observability::SessionSystemPromptReloadRequest,
+    app: &dyn AgentApplication,
+    outbound_tx: ResponseSink<GatewayMessage>,
+    request_id: String,
+) {
+    match app.reload_session_system_prompt(&payload.session_id).await {
+        Ok(response) => {
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionSystemPromptReloadResponse(response),
+                ))
+                .await;
+        }
+        Err(e) => {
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+        }
+    }
+}
+
 pub async fn handle_session_tools(
     session_id: String,
     app: &dyn AgentApplication,

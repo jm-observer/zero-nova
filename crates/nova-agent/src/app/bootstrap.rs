@@ -137,7 +137,8 @@ pub async fn build_application<C: LlmClient + 'static>(
     let config_path = config.config_path();
 
     let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());
-    let workspace_service = super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service);
+    let workspace_service =
+        super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service, config_arc.clone());
     let voice_service = build_voice_service(&config);
 
     Ok(Arc::new(AgentApplicationImpl::new(

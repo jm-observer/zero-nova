@@ -162,6 +162,10 @@ pub enum MessageEnvelope {
     SessionPromptPreview(obs::PromptPreviewRequest),
     #[serde(rename = "session.prompt.preview.response")]
     SessionPromptPreviewResponse(obs::PromptPreviewSnapshot),
+    #[serde(rename = "session.system_prompt.reload")]
+    SessionSystemPromptReload(obs::SessionSystemPromptReloadRequest),
+    #[serde(rename = "session.system_prompt.reload.response")]
+    SessionSystemPromptReloadResponse(obs::SessionSystemPromptReloadResponse),
     #[serde(rename = "session.tools.list")]
     SessionToolsList(obs::SessionToolsRequest),
     #[serde(rename = "session.tools.list.response")]

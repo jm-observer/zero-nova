@@ -75,6 +75,9 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
         MessageEnvelope::SessionPromptPreview(payload) => {
             sessions::handle_session_prompt_preview(payload, app, outbound_tx, msg_id).await;
         }
+        MessageEnvelope::SessionSystemPromptReload(payload) => {
+            sessions::handle_session_system_prompt_reload(payload, app, outbound_tx, msg_id).await;
+        }
         MessageEnvelope::SessionToolsList(payload) => {
             sessions::handle_session_tools(payload.session_id, app, outbound_tx, msg_id).await;
         }

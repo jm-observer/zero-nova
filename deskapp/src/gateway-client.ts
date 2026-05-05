@@ -137,6 +137,28 @@ interface RawSessionRuntimeSnapshot {
     token_counters?: RawTurnUsage & { updatedAt?: number; updated_at?: number };
     updatedAt?: number;
     updated_at?: number;
+    systemPromptState?: {
+        version?: string;
+        updatedAt?: number;
+        updated_at?: number;
+        sourceRevision?: string;
+        source_revision?: string;
+    };
+    system_prompt_state?: {
+        version?: string;
+        updatedAt?: number;
+        updated_at?: number;
+        sourceRevision?: string;
+        source_revision?: string;
+    };
+}
+
+interface SessionSystemPromptReloadResult {
+    sessionId: string;
+    versionBefore: string;
+    versionAfter: string;
+    updatedAt: number;
+    changed: boolean;
 }
 
 interface RawRunRecord {
@@ -403,6 +425,7 @@ export class GatewayClient {
     private normalizeSessionRuntimeSnapshot(payload: RawSessionRuntimeSnapshot): SessionRuntimeSnapshot {
         const tokenCounters = payload.tokenCounters ?? payload.token_counters;
         const modelOverride = payload.modelOverride ?? payload.model_override;
+        const systemPromptState = payload.systemPromptState ?? payload.system_prompt_state;
         const totalUsage = this.normalizeRunUsage(tokenCounters) ?? { inputTokens: 0, outputTokens: 0 };
 
         return {
@@ -424,6 +447,13 @@ export class GatewayClient {
                             model: String(modelOverride.execution.model ?? ''),
                         }
                         : undefined,
+                }
+                : undefined,
+            systemPromptState: systemPromptState
+                ? {
+                    version: String(systemPromptState.version ?? ''),
+                    updatedAt: Number(systemPromptState.updatedAt ?? systemPromptState.updated_at ?? 0),
+                    sourceRevision: String(systemPromptState.sourceRevision ?? systemPromptState.source_revision ?? ''),
                 }
                 : undefined,
             totalUsage,
@@ -1621,6 +1651,10 @@ export class GatewayClient {
      */
     async getSessionPromptPreview(sessionId: string): Promise<PromptPreviewView> {
         return this.request<PromptPreviewView>('session.prompt.preview', { sessionId });
+    }
+
+    async reloadSessionSystemPrompt(sessionId: string): Promise<SessionSystemPromptReloadResult> {
+        return this.request<SessionSystemPromptReloadResult>('session.system_prompt.reload', { sessionId });
     }
 
     /**

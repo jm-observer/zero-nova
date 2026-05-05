@@ -315,6 +315,41 @@ impl SessionService {
         Ok(session)
     }
 
+    pub async fn reload_system_prompt(
+        &self,
+        session_id: &str,
+        prompt_base_override: String,
+        prompt_version: String,
+        source_revision: String,
+    ) -> Result<(String, String, bool, i64)> {
+        let session = self.get(session_id).await?.context("Session not found")?;
+        let updated_at = Utc::now().timestamp_millis();
+        let (version_before, changed) = {
+            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let before = control.system_prompt_state.version.clone();
+            let changed = before != prompt_version;
+            control.system_prompt_base_override = Some(prompt_base_override.clone());
+            control.system_prompt_state.version = prompt_version.clone();
+            control.system_prompt_state.updated_at = updated_at;
+            control.system_prompt_state.source_revision = source_revision;
+            (before, changed)
+        };
+
+        {
+            let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(first) = history.first_mut() {
+                if first.role == Role::System {
+                    first.content = vec![ContentBlock::Text {
+                        text: prompt_base_override,
+                    }];
+                }
+            }
+        }
+
+        self.persist_runtime_control(session_id, &session).await?;
+        Ok((version_before, prompt_version, changed, updated_at))
+    }
+
     pub async fn update_runtime_state(
         &self,
         session_id: &str,

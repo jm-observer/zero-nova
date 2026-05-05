@@ -781,6 +781,13 @@ const zh: Record<string, string> = {
     'console.live_data': '实时运行态数据',
     'console.data_stale': '连接断开，显示缓存数据',
     'console.prompt_preview': '当前 Prompt 预览',
+    'console.prompt_reload': '重新加载',
+    'console.prompt_reload_success_changed': '已重新加载，后续请求将使用新系统提示词',
+    'console.prompt_reload_success_unchanged': '配置已重新加载，内容未变化',
+    'console.prompt_reload_failed': '重载失败，当前会话仍使用旧系统提示词',
+    'console.prompt_reload_loading': '重载中...',
+    'console.prompt_version': '版本',
+    'console.prompt_updated_at': '更新时间',
     'console.no_data': '暂无数据',
     'chat.inspect': '查看运行态',
     // Plan 2: 模型绑定与 Token 统计

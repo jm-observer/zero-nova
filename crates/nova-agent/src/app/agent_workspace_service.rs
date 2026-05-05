@@ -1,24 +1,31 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
+use crate::config::{AppConfig, OriginAppConfig};
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
+use crate::prompt::{PromptConfig, SystemPromptBuilder};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use tokio::fs;
 
 pub struct AgentWorkspaceService {
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
+    pub config: Arc<RwLock<AppConfig>>,
 }
 
 impl AgentWorkspaceService {
-    pub fn new(agent_registry: AgentRegistry, sessions: SessionService) -> Self {
+    pub fn new(agent_registry: AgentRegistry, sessions: SessionService, config: Arc<RwLock<AppConfig>>) -> Self {
         Self {
             agent_registry,
             sessions,
+            config,
         }
     }
 
@@ -94,6 +101,66 @@ impl AgentWorkspaceService {
             .last_turn
             .and_then(|t| t.prompt_preview)
             .context("No turn snapshot available for prompt preview")
+    }
+
+    pub async fn reload_session_system_prompt(&self, session_id: &str) -> Result<SessionSystemPromptReloadResponse> {
+        let session = self.sessions.get(session_id).await?.context("Session not found")?;
+        let agent_id = {
+            let control = session.control.read().unwrap();
+            control.active_agent.clone()
+        };
+        let agent_descriptor = self
+            .agent_registry
+            .get(&agent_id)
+            .cloned()
+            .with_context(|| format!("Agent '{}' not found", agent_id))?;
+
+        let app_config_snapshot = self
+            .config
+            .read()
+            .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
+            .clone();
+        let reloaded_origin = OriginAppConfig::load_from_file(app_config_snapshot.config_path())?;
+        let reloaded_config = AppConfig::from_origin(reloaded_origin, app_config_snapshot.config_dir.clone());
+
+        let agent_spec = reloaded_config
+            .gateway
+            .agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .cloned()
+            .with_context(|| format!("Agent '{}' missing in config", agent_id))?;
+        let prompt_base = load_agent_prompt_for_reload(&agent_spec, &reloaded_config).await?;
+
+        let mut prompt_config = PromptConfig::new(agent_id.clone(), prompt_base.clone(), None)
+            .with_project_context_path_opt(reloaded_config.project_context_file())
+            .with_workflow_prompt_path(reloaded_config.prompts_dir().join("workflow-stages.md"))
+            .with_template_vars(agent_descriptor.initial_template_vars.clone());
+        let env = crate::prompt::EnvironmentSnapshot::collect(&reloaded_config.config_dir, None).await;
+        prompt_config = prompt_config.with_environment(env);
+        let compiled_prompt = SystemPromptBuilder::from_config(&prompt_config, &default_skill_registry()).build();
+        let prompt_version = fingerprint_text(&compiled_prompt);
+        let source_revision = source_revision(&reloaded_config).await;
+
+        let (version_before, version_after, changed, updated_at) = self
+            .sessions
+            .reload_system_prompt(session_id, prompt_base, prompt_version, source_revision)
+            .await?;
+        log::info!(
+            "Session system prompt reloaded: session_id={}, version_before={}, version_after={}, changed={}",
+            session_id,
+            version_before,
+            version_after,
+            changed
+        );
+
+        Ok(SessionSystemPromptReloadResponse {
+            session_id: session_id.to_string(),
+            version_before,
+            version_after,
+            updated_at,
+            changed,
+        })
     }
 
     pub async fn list_session_tools(&self, session_id: &str) -> Result<SessionToolsResponse> {
@@ -493,6 +560,56 @@ impl AgentWorkspaceService {
                 })
             }
         }
+    }
+}
+
+fn default_skill_registry() -> crate::skill::SkillRegistry {
+    crate::skill::SkillRegistry::new()
+}
+
+async fn load_agent_prompt_for_reload(agent: &crate::config::AgentSpec, config: &AppConfig) -> Result<String> {
+    if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
+        anyhow::bail!(
+            "Agent '{}' has both prompt_file and prompt_inline configured; only one is allowed",
+            agent.id
+        );
+    }
+    if let Some(file) = &agent.prompt_file {
+        let prompt_path = config.prompts_dir().join(file);
+        return fs::read_to_string(&prompt_path)
+            .await
+            .with_context(|| format!("Failed to read prompt_file for agent '{}': {:?}", agent.id, prompt_path));
+    }
+    if let Some(inline) = &agent.prompt_inline {
+        return Ok(inline.clone());
+    }
+    let prompt_file = format!("agent-{}.md", agent.id);
+    let prompt_path = config.prompts_dir().join(&prompt_file);
+    match fs::read_to_string(&prompt_path).await {
+        Ok(content) => Ok(content),
+        Err(_) => Ok(String::new()),
+    }
+}
+
+fn fingerprint_text(value: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+async fn source_revision(config: &AppConfig) -> String {
+    let path = config.config_path();
+    match fs::metadata(&path).await {
+        Ok(meta) => {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis())
+                .unwrap_or_default();
+            format!("mtime:{}:len:{}", modified, meta.len())
+        }
+        Err(_) => "unknown".to_string(),
     }
 }
 

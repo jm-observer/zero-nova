@@ -14,6 +14,10 @@ pub struct ControlState {
     #[serde(default)]
     pub skill_bindings: Vec<serde_json::Value>,
     #[serde(default)]
+    pub system_prompt_base_override: Option<String>,
+    #[serde(default)]
+    pub system_prompt_state: SystemPromptState,
+    #[serde(default)]
     pub token_counters: SessionTokenCounters,
 }
 
@@ -45,6 +49,19 @@ pub struct LastTurnSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SystemPromptState {
+    /// Session 当前生效的系统提示词版本（建议由编译后的 prompt 内容哈希得到）。
+    pub version: String,
+    /// 最后一次替换为当前版本的时间。
+    pub updated_at: i64,
+    /// 最近一次用于生成当前版本的配置源修订标识（如配置哈希或 mtime 摘要）。
+    pub source_revision: String,
+}
+
+/// Session 级 token 累计缓存。
+/// 这是一个派生值，真实基线来自各 run 的 usage 明细。
+/// 正常路径下由 turn 完成时增量更新；异常场景下可从 run usage 重建。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionTokenCounters {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -65,6 +82,8 @@ impl ControlState {
             model_override: SessionModelOverride::default(),
             last_turn_snapshot: None,
             skill_bindings: Vec::new(),
+            system_prompt_base_override: None,
+            system_prompt_state: SystemPromptState::default(),
             token_counters: SessionTokenCounters::default(),
         }
     }

@@ -89,6 +89,7 @@ export class AgentConsoleView {
     private connectionStatus: ConnectionStatus = 'connecting';
     private artifactsPanelWasOpen = false;
     private activeRunFilter: RunFilter = 'all';
+    private promptReloading = false;
     private unsubs: Array<() => void> = [];
     private keydownHandler = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
@@ -1088,6 +1089,35 @@ export class AgentConsoleView {
             : undefined;
 
         const promptPreview = document.getElementById('console-prompt-preview');
+        const promptVersion = document.getElementById('console-prompt-version');
+        const promptReloadBtn = document.getElementById('console-prompt-reload-btn') as HTMLButtonElement | null;
+        if (promptReloadBtn) {
+            promptReloadBtn.disabled = this.promptReloading || !sessionId;
+            promptReloadBtn.textContent = this.promptReloading ? t('console.prompt_reload_loading') : t('console.prompt_reload');
+            promptReloadBtn.onclick = () => {
+                if (!sessionId) {
+                    return;
+                }
+                void this.handlePromptReload(sessionId);
+            };
+        }
+
+        const runtimeState = sessionId
+            ? (this.state.getSessionResourceState(sessionId, 'runtime') as ResourceState<SessionRuntimeSnapshot> | undefined)
+            : undefined;
+        const systemPromptState = runtimeState?.data?.systemPromptState;
+        if (promptVersion) {
+            if (systemPromptState?.version) {
+                const shortVersion = systemPromptState.version.slice(0, 8);
+                const updatedAt = systemPromptState.updatedAt > 0 ? formatTime(systemPromptState.updatedAt) : '—';
+                promptVersion.textContent = `${t('console.prompt_version')}: ${shortVersion}  ${t('console.prompt_updated_at')}: ${updatedAt}`;
+                promptVersion.setAttribute('title', systemPromptState.version);
+            } else {
+                promptVersion.textContent = '';
+                promptVersion.removeAttribute('title');
+            }
+        }
+
         if (promptPreview) {
             if (promptState?.loading && !promptState.data) {
                 promptPreview.innerHTML = `<div class="empty-hint">${escapeHtml(t('common.loading'))}</div>`;
@@ -1120,6 +1150,36 @@ export class AgentConsoleView {
         }
 
         memoryHits.innerHTML = renderMemoryHitsHtml(hits, Boolean(memoryState?.unsupported));
+    }
+
+    private async handlePromptReload(sessionId: string) {
+        if (!this.state.gatewayClient || this.promptReloading) {
+            return;
+        }
+
+        this.promptReloading = true;
+        this.renderPromptMemory();
+        try {
+            const result = await this.state.gatewayClient.reloadSessionSystemPrompt(sessionId);
+            const runtime = await this.state.gatewayClient.getSessionRuntime(sessionId);
+            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtime));
+            await this.loadPromptMemoryData(sessionId, true);
+            this.bus.emit(Events.NOTIFICATION, {
+                type: 'success',
+                message: result.changed
+                    ? t('console.prompt_reload_success_changed')
+                    : t('console.prompt_reload_success_unchanged'),
+            });
+        } catch (error) {
+            const detail = error instanceof Error ? `: ${error.message}` : '';
+            this.bus.emit(Events.NOTIFICATION, {
+                type: 'error',
+                message: `${t('console.prompt_reload_failed')}${detail}`,
+            });
+        } finally {
+            this.promptReloading = false;
+            this.renderPromptMemory();
+        }
     }
 
     private renderRuns() {

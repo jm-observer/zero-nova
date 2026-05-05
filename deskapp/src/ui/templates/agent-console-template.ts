@@ -120,7 +120,11 @@ export const AGENT_CONSOLE_TEMPLATE = `
     <!-- Prompt/Memory 页 -->
     <div class="console-tab-content" data-tab="prompt-memory" id="console-tab-prompt-memory">
         <div class="console-section">
-            <div class="console-section-title" data-i18n="console.prompt_preview">Prompt 预览</div>
+            <div class="console-section-title-row">
+                <div class="console-section-title" data-i18n="console.prompt_preview">Prompt 预览</div>
+                <button id="console-prompt-reload-btn" class="console-inline-btn" data-i18n="console.prompt_reload">重新加载</button>
+            </div>
+            <div id="console-prompt-version" class="console-inline-meta"></div>
             <div id="console-prompt-preview" class="prompt-preview-container">
                 <div class="empty-hint" data-i18n="common.loading">加载中...</div>
             </div>

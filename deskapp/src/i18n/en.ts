@@ -777,6 +777,13 @@ const en: Record<string, string> = {
     'console.live_data': 'Live Runtime Data',
     'console.data_stale': 'Disconnected, showing cached data',
     'console.prompt_preview': 'Current Prompt Preview',
+    'console.prompt_reload': 'Reload',
+    'console.prompt_reload_success_changed': 'Reloaded. Subsequent requests will use the new system prompt.',
+    'console.prompt_reload_success_unchanged': 'Configuration reloaded. Prompt content is unchanged.',
+    'console.prompt_reload_failed': 'Reload failed. The current session is still using the previous system prompt.',
+    'console.prompt_reload_loading': 'Reloading...',
+    'console.prompt_version': 'Version',
+    'console.prompt_updated_at': 'Updated',
     'console.no_data': 'No Data',
     'chat.inspect': 'Inspect Runtime',
     // Plan 2: Model Binding & Token Stats

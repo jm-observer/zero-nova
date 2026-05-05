@@ -53,6 +53,10 @@ pub trait AgentApplication: Send + Sync {
         session_id: &str,
         message_id: Option<String>,
     ) -> Result<nova_protocol::observability::PromptPreviewSnapshot>;
+    async fn reload_session_system_prompt(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionSystemPromptReloadResponse>;
     async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse>;
     async fn list_session_file_tree(
         &self,
@@ -440,6 +444,13 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         self.workspace_service
             .preview_session_prompt(session_id, message_id)
             .await
+    }
+
+    async fn reload_session_system_prompt(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionSystemPromptReloadResponse> {
+        self.workspace_service.reload_session_system_prompt(session_id).await
     }
 
     async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse> {

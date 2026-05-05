@@ -1,0 +1,25 @@
+{
+  "id": "req-provider-health-1",
+  "type": "provider.health.response",
+  "payload": {
+    "providers": [
+      {
+        "provider": "openai_compat",
+        "scope": "orchestration",
+        "status": "healthy",
+        "checkedAt": 1760000000000,
+        "latencyMs": 120,
+        "message": "Provider returned HTTP 200"
+      },
+      {
+        "provider": "openai_compat",
+        "scope": "execution",
+        "status": "healthy",
+        "checkedAt": 1760000000000,
+        "latencyMs": 120,
+        "message": "Provider returned HTTP 200"
+      }
+    ],
+    "updatedAt": 1760000000000
+  }
+}

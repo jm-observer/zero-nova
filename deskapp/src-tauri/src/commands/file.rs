@@ -48,8 +48,11 @@ pub struct ProjectDirEntry {
 pub async fn project_dir_list(
     app: tauri::AppHandle,
     relative_path: Option<String>,
+    base_dir: Option<String>,
 ) -> Result<Vec<ProjectDirEntry>, String> {
-    let base_dir = resolve_project_dir(&app)?;
+    // 仅用于桌面端本地目录交互，不作为会话级文件树的数据源。
+    // `@` 选择器应始终走后端 session.file_tree.list，避免本地/远端双权威。
+    let base_dir = resolve_project_dir(&app, base_dir.as_deref())?;
     let safe_relative = sanitize_relative_path(relative_path.as_deref().unwrap_or(""))?;
     tokio::task::spawn_blocking(move || list_project_dir_entries(base_dir, safe_relative))
         .await
@@ -96,7 +99,11 @@ fn list_project_dir_entries(base_dir: PathBuf, safe_relative: PathBuf) -> Result
     Ok(entries)
 }
 
-fn resolve_project_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn resolve_project_dir(app: &tauri::AppHandle, override_base_dir: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(base_dir) = override_base_dir {
+        return canonicalize_project_dir(base_dir);
+    }
+
     let config = app.state::<crate::config::AppConfig>();
     let workspace = config
         .sidecar
@@ -109,7 +116,11 @@ fn resolve_project_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     } else {
         workspace
     };
-    std::fs::canonicalize(candidate).map_err(|e| format!("项目目录不可访问: {}", e))
+    canonicalize_project_dir(candidate)
+}
+
+fn canonicalize_project_dir(path: impl AsRef<Path>) -> Result<PathBuf, String> {
+    std::fs::canonicalize(path.as_ref()).map_err(|e| format!("项目目录不可访问: {}", e))
 }
 
 fn sanitize_relative_path(input: &str) -> Result<PathBuf, String> {
@@ -463,7 +474,7 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_project_dir_entries, sanitize_relative_path};
+    use super::{canonicalize_project_dir, list_project_dir_entries, sanitize_relative_path};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -510,6 +521,18 @@ mod tests {
         assert_eq!(entries[0].name, "Alpha");
         assert_eq!(entries[1].name, "beta.txt");
         assert_eq!(entries[2].name, "Gamma.txt");
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn canonicalize_project_dir_uses_override_when_provided() {
+        let base = make_temp_dir();
+        let expected = fs::canonicalize(&base).unwrap();
+
+        let actual = canonicalize_project_dir(&base).unwrap();
+
+        assert_eq!(actual, expected);
 
         let _ = fs::remove_dir_all(base);
     }

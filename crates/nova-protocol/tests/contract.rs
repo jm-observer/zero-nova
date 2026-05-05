@@ -24,6 +24,8 @@ fn valid_contract_fixtures_deserialize() {
         "skill_activated.json",
         "task_status_changed.json",
         "progress_event.json",
+        "provider_health.json",
+        "provider_health_response.json",
         "workspace_restore.json",
         "voice_transcribe_request.json",
         "voice_transcribe_response.json",

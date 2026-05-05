@@ -161,6 +161,26 @@ pub async fn handle_session_runtime(
     }
 }
 
+pub async fn handle_provider_health(
+    app: &dyn AgentApplication,
+    outbound_tx: ResponseSink<GatewayMessage>,
+    request_id: String,
+) {
+    match app.get_provider_health().await {
+        Ok(snapshot) => {
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::ProviderHealthResponse(snapshot),
+                ))
+                .await;
+        }
+        Err(e) => {
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+        }
+    }
+}
+
 pub async fn handle_session_prompt_preview(
     payload: observability::PromptPreviewRequest,
     app: &dyn AgentApplication,
@@ -197,6 +217,30 @@ pub async fn handle_session_tools(
                 .send_async(GatewayMessage::new(
                     request_id,
                     MessageEnvelope::SessionToolsListResponse(tools),
+                ))
+                .await;
+        }
+        Err(e) => {
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+        }
+    }
+}
+
+pub async fn handle_session_file_tree_list(
+    payload: observability::SessionFileTreeRequest,
+    app: &dyn AgentApplication,
+    outbound_tx: ResponseSink<GatewayMessage>,
+    request_id: String,
+) {
+    match app
+        .list_session_file_tree(&payload.session_id, payload.relative_path)
+        .await
+    {
+        Ok(tree) => {
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionFileTreeListResponse(tree),
                 ))
                 .await;
         }
@@ -282,6 +326,30 @@ pub async fn handle_session_token_usage(
                 .send_async(GatewayMessage::new(
                     request_id,
                     MessageEnvelope::SessionTokenUsageResponse(usage),
+                ))
+                .await;
+        }
+        Err(e) => {
+            send_general_error(&outbound_tx, &request_id, e.to_string(), None::<String>).await;
+        }
+    }
+}
+
+pub async fn handle_session_token_usage_detail(
+    payload: observability::SessionTokenUsageDetailRequest,
+    app: &dyn AgentApplication,
+    outbound_tx: ResponseSink<GatewayMessage>,
+    request_id: String,
+) {
+    match app
+        .get_session_token_usage_detail(&payload.session_id, payload.limit, payload.before_turn_id.as_deref())
+        .await
+    {
+        Ok(detail) => {
+            let _ = outbound_tx
+                .send_async(GatewayMessage::new(
+                    request_id,
+                    MessageEnvelope::SessionTokenUsageDetailResponse(detail),
                 ))
                 .await;
         }

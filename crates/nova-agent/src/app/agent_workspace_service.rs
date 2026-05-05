@@ -2,9 +2,12 @@ use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
+use crate::path_resolver::resolve_path_ref;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
+use std::path::{Path, PathBuf};
+use tokio::fs;
 
 pub struct AgentWorkspaceService {
     pub agent_registry: AgentRegistry,
@@ -101,6 +104,33 @@ impl AgentWorkspaceService {
         })
     }
 
+    pub async fn list_session_file_tree(
+        &self,
+        session_id: &str,
+        relative_path: Option<String>,
+    ) -> Result<SessionFileTreeResponse> {
+        let session = self.sessions.get(session_id).await?.context("Session not found")?;
+        let project_dir = {
+            let control = session.control.read().unwrap();
+            control
+                .project_dir
+                .clone()
+                .context("Session project directory is not set")?
+        };
+
+        let base_relative_path = normalize_relative_path(relative_path.as_deref());
+        let target_path = resolve_directory_target(&project_dir, &base_relative_path)?;
+        let mut entries = read_dir_entries(&project_dir, &target_path, &base_relative_path).await?;
+        sort_file_tree_entries(&mut entries);
+
+        Ok(SessionFileTreeResponse {
+            entries,
+            base_relative_path,
+            project_dir_present: true,
+            updated_at: Utc::now().timestamp_millis(),
+        })
+    }
+
     pub async fn list_session_skill_bindings(&self, session_id: &str) -> Result<SessionSkillBindingsResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().unwrap();
@@ -154,9 +184,61 @@ impl AgentWorkspaceService {
 
     pub async fn get_session_token_usage(&self, session_id: &str) -> Result<SessionTokenUsageResponse> {
         let runtime = self.get_session_runtime(session_id).await?;
+        let repo = self.sessions.get_repository();
+        let quality = repo.count_usage_quality(session_id).await?;
+        let runs = repo.list_runs(session_id).await?;
+        let last_turn_usage = runs
+            .into_iter()
+            .find_map(|run| run.usage.as_ref().and_then(map_turn_usage));
         Ok(SessionTokenUsageResponse {
-            usage: runtime.token_counters,
-            updated_at: runtime.updated_at,
+            summary: SessionTokenUsageSummary {
+                input_tokens: runtime.token_counters.input_tokens,
+                output_tokens: runtime.token_counters.output_tokens,
+                cache_creation_input_tokens: runtime.token_counters.cache_creation_input_tokens,
+                cache_read_input_tokens: runtime.token_counters.cache_read_input_tokens,
+                total_turn_count: quality.total_turns,
+                turns_with_unknown_cache_usage: quality.turns_with_unknown_cache,
+                turns_with_missing_usage: quality.turns_with_missing_usage,
+                last_turn_usage,
+                updated_at: runtime.updated_at,
+            },
+        })
+    }
+
+    pub async fn get_session_token_usage_detail(
+        &self,
+        session_id: &str,
+        limit: u32,
+        before_turn_id: Option<&str>,
+    ) -> Result<SessionTokenUsageDetailResponse> {
+        let repo = self.sessions.get_repository();
+        let runs = repo.list_runs(session_id).await?;
+        let mut details = runs
+            .into_iter()
+            .map(|run| TurnUsageDetail {
+                turn_id: run.id.clone(),
+                run_id: run.id,
+                status: run.status,
+                model: run.execution_model.as_ref().map(|model| model.model.clone()),
+                provider: run.execution_model.as_ref().map(|model| model.provider.clone()),
+                usage: run.usage.as_ref().and_then(map_turn_usage),
+                started_at: run.created_at,
+                finished_at: Some(run.updated_at),
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(before) = before_turn_id {
+            if let Some(position) = details.iter().position(|item| item.turn_id == before) {
+                details = details.into_iter().skip(position + 1).collect();
+            }
+        }
+
+        let has_more = details.len() > limit as usize;
+        let turns = details.into_iter().take(limit as usize).collect();
+        Ok(SessionTokenUsageDetailResponse {
+            session_id: session_id.to_string(),
+            turns,
+            has_more,
         })
     }
 
@@ -180,7 +262,7 @@ impl AgentWorkspaceService {
                 orchestration_model: r.orchestration_model.as_ref().map(proto_model_ref),
                 execution_model: r.execution_model.as_ref().map(proto_model_ref),
                 tool_call_count: r.tool_call_count,
-                usage: None,
+                usage: r.usage.as_ref().and_then(map_turn_usage),
                 error_summary: None,
                 waiting_reason: None,
             });
@@ -205,7 +287,7 @@ impl AgentWorkspaceService {
             orchestration_model: r.orchestration_model.as_ref().map(proto_model_ref),
             execution_model: r.execution_model.as_ref().map(proto_model_ref),
             tool_call_count: r.tool_call_count,
-            usage: None,
+            usage: r.usage.as_ref().and_then(map_turn_usage),
             error_summary: None,
             waiting_reason: None,
         })
@@ -421,6 +503,10 @@ fn proto_model_ref(model: &ModelRef) -> nova_protocol::ModelRef {
     }
 }
 
+fn map_turn_usage(value: &serde_json::Value) -> Option<TurnUsage> {
+    serde_json::from_value::<TurnUsage>(value.clone()).ok()
+}
+
 fn deserialize_skill_bindings(
     bindings: &[serde_json::Value],
 ) -> Vec<nova_protocol::observability::SkillBindingSnapshot> {
@@ -447,9 +533,74 @@ fn deserialize_skill_bindings(
         .collect()
 }
 
+fn normalize_relative_path(raw: Option<&str>) -> String {
+    let trimmed = raw.unwrap_or("").trim().trim_start_matches('@').trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        trimmed.replace('\\', "/")
+    }
+}
+
+fn resolve_directory_target(project_dir: &Path, base_relative_path: &str) -> Result<PathBuf> {
+    let lookup = if base_relative_path.is_empty() {
+        ".".to_string()
+    } else {
+        base_relative_path.to_string()
+    };
+    let resolved = resolve_path_ref(&lookup, project_dir, Some(project_dir), true)
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    if !resolved.is_dir {
+        anyhow::bail!("Target path is not a directory: {}", resolved.target_path.display());
+    }
+    Ok(resolved.target_path)
+}
+
+async fn read_dir_entries(
+    project_dir: &Path,
+    target_path: &Path,
+    base_relative_path: &str,
+) -> Result<Vec<SessionFileTreeEntry>> {
+    let mut reader = fs::read_dir(target_path)
+        .await
+        .with_context(|| format!("Failed to read directory: {}", target_path.display()))?;
+    let mut entries = Vec::new();
+
+    while let Some(item) = reader.next_entry().await? {
+        let name = item.file_name().to_string_lossy().to_string();
+        let file_type = item.file_type().await?;
+        let abs = item.path();
+        let rel = abs
+            .strip_prefix(project_dir)
+            .with_context(|| format!("Path is out of project root: {}", abs.display()))?;
+        entries.push(SessionFileTreeEntry {
+            name,
+            relative_path: rel.to_string_lossy().replace('\\', "/"),
+            is_dir: file_type.is_dir(),
+        });
+    }
+
+    if !base_relative_path.is_empty() && entries.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(entries)
+}
+
+fn sort_file_tree_entries(entries: &mut [SessionFileTreeEntry]) {
+    entries.sort_by(|left, right| {
+        right
+            .is_dir
+            .cmp(&left.is_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+}
+
 #[cfg(test)]
 mod tests {
-    use super::deserialize_skill_bindings;
+    use super::{deserialize_skill_bindings, sort_file_tree_entries};
+    use nova_protocol::observability::SessionFileTreeEntry;
 
     #[test]
     fn session_skill_bindings_reading_does_not_depend_on_last_turn() {
@@ -463,5 +614,35 @@ mod tests {
         let snapshots = deserialize_skill_bindings(&bindings);
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].skill_id, "skill-a");
+    }
+
+    #[test]
+    fn file_tree_entries_are_sorted_by_dir_then_name_case_insensitive() {
+        let mut entries = vec![
+            SessionFileTreeEntry {
+                name: "zeta.rs".to_string(),
+                relative_path: "zeta.rs".to_string(),
+                is_dir: false,
+            },
+            SessionFileTreeEntry {
+                name: "Beta".to_string(),
+                relative_path: "Beta".to_string(),
+                is_dir: true,
+            },
+            SessionFileTreeEntry {
+                name: "alpha".to_string(),
+                relative_path: "alpha".to_string(),
+                is_dir: true,
+            },
+            SessionFileTreeEntry {
+                name: "Alpha.txt".to_string(),
+                relative_path: "Alpha.txt".to_string(),
+                is_dir: false,
+            },
+        ];
+
+        sort_file_tree_entries(&mut entries);
+        let names = entries.into_iter().map(|item| item.name).collect::<Vec<_>>();
+        assert_eq!(names, vec!["alpha", "Beta", "Alpha.txt", "zeta.rs"]);
     }
 }

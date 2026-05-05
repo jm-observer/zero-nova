@@ -174,6 +174,13 @@ const zh: Record<string, string> = {
     'chat.copy_body_failed': '复制失败',
     'chat.copy_body_unavailable': 'body 不可用',
     'chat.copy_body_data_invalid': '数据异常，无法复制',
+    'chat.project_label': 'Project',
+    'chat.project_not_set': '未设置',
+    'chat.project_not_set_long': '未设置 Project 目录',
+    'chat.project_hint': '@ 选择器将基于当前 Project 目录',
+    'chat.project_copy_path': '复制路径',
+    'chat.project_open_dir': '在文件管理器中打开',
+    'chat.project_refresh': '刷新',
 
     // ========================
     // Settings - Tabs
@@ -425,6 +432,10 @@ const zh: Record<string, string> = {
     // ========================
     'status.connecting': '连接中...',
     'status.connected': '已连接',
+    'status.gateway_connected_provider_unknown': '网关已连接 / Provider 待检查',
+    'status.gateway_connected_provider_healthy': '网关已连接 / Provider 正常',
+    'status.gateway_connected_provider_degraded': '网关已连接 / Provider 降级',
+    'status.gateway_connected_provider_error': '网关已连接 / Provider 异常',
     'status.disconnected': '连接断开',
     'status.reconnecting': '重连中...',
     'status.error': '连接错误',

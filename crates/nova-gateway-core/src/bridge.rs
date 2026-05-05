@@ -212,7 +212,7 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             };
             MessageEnvelope::SkillInvocation(payload)
         }
-        AppEvent::SessionRuntimeUpdated(payload) => MessageEnvelope::SessionRuntimeUpdated(payload),
+        AppEvent::SessionRuntimeUpdated(payload) => MessageEnvelope::SessionRuntimeUpdated(*payload),
         AppEvent::SessionTokenUsageUpdated(payload) => MessageEnvelope::SessionTokenUsageUpdated(payload),
         AppEvent::SessionToolsUpdated(payload) => MessageEnvelope::SessionToolsUpdated(payload),
         AppEvent::SessionSkillBindingsUpdated(payload) => MessageEnvelope::SessionSkillBindingsUpdated(payload),

@@ -20,8 +20,9 @@ impl Tool for ProjectManagerTool {
     fn definition(&self) -> crate::tool::ToolDefinition {
         crate::tool::ToolDefinition {
             name: "ProjectManager".to_string(),
-            description: "Manages the current session's project directory. Supports getting and setting the directory."
-                .to_string(),
+            description:
+                "Gets or changes the current session project directory. Use this when the user asks to switch the project or working directory."
+                    .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -71,7 +72,11 @@ impl Tool for ProjectManagerTool {
                 let path = PathBuf::from(path_str);
                 match self.project_dir_service.set_project_dir(session_id, path).await {
                     Ok(new_path) => Ok(ToolOutput {
-                        content: format!("Project directory updated to: {}", new_path.display()),
+                        content: format!(
+                            "Project directory updated for session {}: {}\nChange scope: session-level project_dir state updated.\nTool effect: tools that read session environment/project_dir use this value in subsequent tool executions.",
+                            session_id,
+                            new_path.display()
+                        ),
                         is_error: false,
                     }),
                     Err(e) => Ok(ToolOutput {

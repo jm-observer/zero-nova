@@ -10,7 +10,9 @@ use serde_json::{Map, Value};
 use crate::chat::{ChatCompletePayload, ChatPayload, ProgressEvent, SkillActivatedPayload, TaskStatusChangedPayload};
 use crate::envelope::{GatewayMessage, MessageEnvelope};
 use crate::observability::{
-    AgentInspectRequest, AgentInspectResponse, WorkspaceRestoreRequest, WorkspaceRestoreResponse,
+    AgentInspectRequest, AgentInspectResponse, ProviderHealthRequest, ProviderHealthSnapshot,
+    ProviderHealthSnapshotResponse, SessionFileTreeRequest, SessionFileTreeResponse, WorkspaceRestoreRequest,
+    WorkspaceRestoreResponse,
 };
 use crate::session::{SessionCreateRequest, SessionCreateResponse, SessionIdPayload};
 use crate::system::{ErrorPayload, WelcomePayload};
@@ -96,6 +98,18 @@ const FIXTURES: &[FixtureSpec] = &[
         message_type: "chat.progress",
         valid: true,
         content: include_str!("../../../schemas/fixtures/progress_event.json"),
+    },
+    FixtureSpec {
+        file_name: "provider_health.json",
+        message_type: "provider.health",
+        valid: true,
+        content: include_str!("../../../schemas/fixtures/provider_health.json"),
+    },
+    FixtureSpec {
+        file_name: "provider_health_response.json",
+        message_type: "provider.health.response",
+        valid: true,
+        content: include_str!("../../../schemas/fixtures/provider_health_response.json"),
     },
     FixtureSpec {
         file_name: "skill_activated.json",
@@ -216,6 +230,31 @@ schema_builder!(
     workspace_restore_response_schema,
     WorkspaceRestoreResponse,
     "WorkspaceRestoreResponse"
+);
+schema_builder!(
+    provider_health_request_schema,
+    ProviderHealthRequest,
+    "ProviderHealthRequest"
+);
+schema_builder!(
+    provider_health_snapshot_schema,
+    ProviderHealthSnapshot,
+    "ProviderHealthSnapshot"
+);
+schema_builder!(
+    provider_health_snapshot_response_schema,
+    ProviderHealthSnapshotResponse,
+    "ProviderHealthSnapshotResponse"
+);
+schema_builder!(
+    session_file_tree_request_schema,
+    SessionFileTreeRequest,
+    "SessionFileTreeRequest"
+);
+schema_builder!(
+    session_file_tree_response_schema,
+    SessionFileTreeResponse,
+    "SessionFileTreeResponse"
 );
 schema_builder!(welcome_payload_schema, WelcomePayload, "WelcomePayload");
 schema_builder!(error_payload_schema, ErrorPayload, "ErrorPayload");
@@ -365,6 +404,39 @@ const ROOT_SCHEMA_ARTIFACTS: &[SchemaArtifactSpec] = &[
         build: workspace_restore_request_schema,
     },
     SchemaArtifactSpec {
+        type_name: "ProviderHealthRequest",
+        domain: "observability",
+        kind: KIND_REQUEST,
+        frontend: true,
+        message_type: Some("provider.health"),
+        file_name: "provider-health-request.schema.json",
+        title: "ProviderHealthRequest",
+        description: None,
+        build: provider_health_request_schema,
+    },
+    SchemaArtifactSpec {
+        type_name: "ProviderHealthSnapshot",
+        domain: "observability",
+        kind: KIND_PAYLOAD,
+        frontend: true,
+        message_type: Some("provider.health.updated"),
+        file_name: "provider-health-snapshot.schema.json",
+        title: "ProviderHealthSnapshot",
+        description: None,
+        build: provider_health_snapshot_schema,
+    },
+    SchemaArtifactSpec {
+        type_name: "ProviderHealthSnapshotResponse",
+        domain: "observability",
+        kind: KIND_RESPONSE,
+        frontend: true,
+        message_type: Some("provider.health.response"),
+        file_name: "provider-health-response.schema.json",
+        title: "ProviderHealthSnapshotResponse",
+        description: None,
+        build: provider_health_snapshot_response_schema,
+    },
+    SchemaArtifactSpec {
         type_name: "WorkspaceRestoreResponse",
         domain: "observability",
         kind: KIND_RESPONSE,
@@ -374,6 +446,28 @@ const ROOT_SCHEMA_ARTIFACTS: &[SchemaArtifactSpec] = &[
         title: "WorkspaceRestoreResponse",
         description: None,
         build: workspace_restore_response_schema,
+    },
+    SchemaArtifactSpec {
+        type_name: "SessionFileTreeRequest",
+        domain: "observability",
+        kind: KIND_REQUEST,
+        frontend: true,
+        message_type: Some("session.file_tree.list"),
+        file_name: "session-file-tree-request.schema.json",
+        title: "SessionFileTreeRequest",
+        description: None,
+        build: session_file_tree_request_schema,
+    },
+    SchemaArtifactSpec {
+        type_name: "SessionFileTreeResponse",
+        domain: "observability",
+        kind: KIND_RESPONSE,
+        frontend: true,
+        message_type: Some("session.file_tree.list.response"),
+        file_name: "session-file-tree-response.schema.json",
+        title: "SessionFileTreeResponse",
+        description: None,
+        build: session_file_tree_response_schema,
     },
     SchemaArtifactSpec {
         type_name: "WelcomePayload",

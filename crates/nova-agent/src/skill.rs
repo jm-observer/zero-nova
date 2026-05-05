@@ -186,6 +186,7 @@ impl Default for CapabilityPolicy {
                 "Read".to_string(),
                 "Write".to_string(),
                 "Edit".to_string(),
+                "ProjectManager".to_string(),
             ],
             deferred_tools: vec![
                 "TaskCreate".to_string(),
@@ -712,6 +713,7 @@ mod tests {
         assert!(policy.tool_search_enabled);
         assert!(policy.skill_tool_enabled);
         assert!(policy.agent_tools_enabled);
+        assert!(policy.always_enabled_tools.contains(&"ProjectManager".to_string()));
     }
 
     #[test]

@@ -51,4 +51,12 @@ pub struct ChunkFunction {
 pub struct OpenAiUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<OpenAiPromptTokensDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAiPromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: Option<u64>,
 }

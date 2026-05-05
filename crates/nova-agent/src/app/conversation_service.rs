@@ -10,6 +10,7 @@ use crate::prompt::{load_project_context_with_config_async, PromptConfig};
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
+use nova_protocol::observability::{TurnUsage, UsageCompleteness, UsageSource};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -139,6 +140,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 orchestration_model,
                 execution_model,
                 tool_call_count: Some(0),
+                usage: None,
             })
             .await?;
 
@@ -366,6 +368,20 @@ impl<C: LlmClient + 'static> ConversationService<C> {
 
             // Phase C: Update usage and skills
             let usage = &turn_result.usage;
+            let turn_usage = TurnUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                source: UsageSource::Provider,
+                completeness: infer_usage_completeness(usage),
+                raw_provider_usage: usage.raw_provider_usage.clone(),
+            };
+            let turn_usage_value = serde_json::to_value(&turn_usage)?;
+            self.sessions
+                .get_repository()
+                .update_run_usage(&run_id, &turn_usage_value)
+                .await?;
             let mut final_skills = self.collect_current_skills(active_skill_id.as_deref());
             {
                 // 合并运行过程中观察到的技能（动态激活/切换/退出事件）
@@ -387,12 +403,15 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             self.sessions
                 .update_runtime_state(
                     session_id,
-                    None,
+                    Some(LastTurnSnapshot {
+                        usage: Some(turn_usage_value),
+                        ..snapshot_internal
+                    }),
                     Some((
                         usage.input_tokens,
                         usage.output_tokens,
-                        usage.cache_creation_input_tokens,
-                        usage.cache_read_input_tokens,
+                        usage.cache_creation_input_tokens.unwrap_or(0),
+                        usage.cache_read_input_tokens.unwrap_or(0),
                     )),
                     Some(final_skills),
                 )
@@ -460,6 +479,20 @@ impl<C: LlmClient + 'static> ConversationService<C> {
 
             // Phase C: Update usage and skills
             let usage = &turn_result.usage;
+            let turn_usage = TurnUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                source: UsageSource::Provider,
+                completeness: infer_usage_completeness(usage),
+                raw_provider_usage: usage.raw_provider_usage.clone(),
+            };
+            let turn_usage_value = serde_json::to_value(&turn_usage)?;
+            self.sessions
+                .get_repository()
+                .update_run_usage(&run_id, &turn_usage_value)
+                .await?;
             let mut final_skills = self.collect_current_skills(None);
             {
                 let observed = observed_skills.lock().await;
@@ -473,8 +506,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     Some((
                         usage.input_tokens,
                         usage.output_tokens,
-                        usage.cache_creation_input_tokens,
-                        usage.cache_read_input_tokens,
+                        usage.cache_creation_input_tokens.unwrap_or(0),
+                        usage.cache_read_input_tokens.unwrap_or(0),
                     )),
                     Some(final_skills),
                 )
@@ -512,5 +545,16 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             }
         }
         skills
+    }
+}
+
+fn infer_usage_completeness(usage: &crate::provider::types::Usage) -> UsageCompleteness {
+    if usage.input_tokens == 0 && usage.output_tokens == 0 {
+        return UsageCompleteness::Missing;
+    }
+    if usage.cache_creation_input_tokens.is_some() || usage.cache_read_input_tokens.is_some() {
+        UsageCompleteness::Full
+    } else {
+        UsageCompleteness::Partial
     }
 }

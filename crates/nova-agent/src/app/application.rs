@@ -54,6 +54,11 @@ pub trait AgentApplication: Send + Sync {
         message_id: Option<String>,
     ) -> Result<nova_protocol::observability::PromptPreviewSnapshot>;
     async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse>;
+    async fn list_session_file_tree(
+        &self,
+        session_id: &str,
+        relative_path: Option<String>,
+    ) -> Result<nova_protocol::observability::SessionFileTreeResponse>;
     async fn list_session_skill_bindings(
         &self,
         session_id: &str,
@@ -72,6 +77,12 @@ pub trait AgentApplication: Send + Sync {
         &self,
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionTokenUsageResponse>;
+    async fn get_session_token_usage_detail(
+        &self,
+        session_id: &str,
+        limit: u32,
+        before_turn_id: Option<&str>,
+    ) -> Result<nova_protocol::observability::SessionTokenUsageDetailResponse>;
 
     // --- Plan 2: Execution Records & Control ---
     async fn list_session_runs(&self, session_id: &str) -> Result<nova_protocol::observability::SessionRunsResponse>;
@@ -89,6 +100,7 @@ pub trait AgentApplication: Send + Sync {
     async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse>;
     async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse>;
     async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse>;
+    async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse>;
     async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse>;
     async fn voice_transcribe(
         &self,
@@ -162,6 +174,9 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
                 usage: turn_result.usage.clone(),
             })
             .await;
+        if let Ok(summary) = self.workspace_service.get_session_token_usage(session_id).await {
+            let _ = sender.send(AppEvent::SessionTokenUsageUpdated(summary)).await;
+        }
         if let Ok(after) = self.workspace_service.list_session_skill_bindings(session_id).await {
             if should_emit_skill_bindings_updated(&before_skill_bindings, &after.skills) {
                 if let Err(err) = sender.send(AppEvent::SessionSkillBindingsUpdated(after)).await {
@@ -431,6 +446,16 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         self.workspace_service.list_session_tools(session_id).await
     }
 
+    async fn list_session_file_tree(
+        &self,
+        session_id: &str,
+        relative_path: Option<String>,
+    ) -> Result<nova_protocol::observability::SessionFileTreeResponse> {
+        self.workspace_service
+            .list_session_file_tree(session_id, relative_path)
+            .await
+    }
+
     async fn list_session_skill_bindings(
         &self,
         session_id: &str,
@@ -461,6 +486,17 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionTokenUsageResponse> {
         self.workspace_service.get_session_token_usage(session_id).await
+    }
+
+    async fn get_session_token_usage_detail(
+        &self,
+        session_id: &str,
+        limit: u32,
+        before_turn_id: Option<&str>,
+    ) -> Result<nova_protocol::observability::SessionTokenUsageDetailResponse> {
+        self.workspace_service
+            .get_session_token_usage_detail(session_id, limit, before_turn_id)
+            .await
     }
 
     // --- Plan 2: Execution Records & Control Implementation ---
@@ -505,6 +541,15 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 
     async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse> {
         self.workspace_service.restore_workspace().await
+    }
+
+    async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse> {
+        let config = self
+            .config
+            .read()
+            .map_err(|_| anyhow!("Application config lock poisoned"))?
+            .clone();
+        crate::provider::health::collect_provider_health(&config).await
     }
 
     async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {

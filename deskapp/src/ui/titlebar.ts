@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { t } from '../i18n/index';
 import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
+import type { ProviderHealthSnapshotView } from '../core/types';
 
 export class TitleBarView {
     private statusIndicator: HTMLDivElement;
@@ -10,6 +11,8 @@ export class TitleBarView {
     private btnMaximize: HTMLButtonElement;
     private btnClose: HTMLButtonElement;
     private themeToggle: HTMLButtonElement;
+    private gatewayConnectionStatus: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' = 'connecting';
+    private providerHealthByScope = new Map<string, ProviderHealthSnapshotView>();
 
     constructor(_state: AppState, private bus: EventBus) {
         this.statusIndicator = document.getElementById('status-indicator') as HTMLDivElement;
@@ -32,11 +35,23 @@ export class TitleBarView {
         this.bus.on(Events.GATEWAY_STATUS, (payload: { status: string }) => {
             this.handleGatewayStatusChange(payload.status);
         });
+
+        this.bus.on(Events.PROVIDER_HEALTH_UPDATED, (payload: { providers?: ProviderHealthSnapshotView[] }) => {
+            this.handleProviderHealthChange(payload?.providers ?? []);
+        });
     }
 
     private handleGatewayStatusChange(payload: any) {
-        const { status, text } = typeof payload === 'string' ? { status: payload, text: null } : payload;
-        
+        const { status, text, connectionStatus } = typeof payload === 'string'
+            ? { status: payload, text: null, connectionStatus: undefined }
+            : payload;
+
+        if (typeof connectionStatus === 'string') {
+            this.gatewayConnectionStatus = connectionStatus;
+            this.updateAggregateStatus();
+            return;
+        }
+
         switch (status) {
             case 'connected':
                 this.setStatus(text || t('status.connected'), 'ready');
@@ -57,6 +72,39 @@ export class TitleBarView {
                 this.setStatus(text || t('status.error'), 'error');
                 break;
         }
+    }
+
+    private handleProviderHealthChange(providers: ProviderHealthSnapshotView[]) {
+        this.providerHealthByScope.clear();
+        providers.forEach((provider) => {
+            this.providerHealthByScope.set(provider.scope, provider);
+        });
+        this.updateAggregateStatus();
+    }
+
+    private updateAggregateStatus() {
+        if (this.gatewayConnectionStatus !== 'connected') {
+            this.handleGatewayStatusChange({ status: this.gatewayConnectionStatus });
+            return;
+        }
+
+        const providers = [...this.providerHealthByScope.values()];
+        if (providers.length === 0) {
+            this.setStatus(t('status.gateway_connected_provider_unknown'), 'running');
+            return;
+        }
+
+        if (providers.some((item) => ['auth_failed', 'unreachable', 'misconfigured'].includes(item.status))) {
+            this.setStatus(t('status.gateway_connected_provider_error'), 'error');
+            return;
+        }
+
+        if (providers.some((item) => item.status === 'degraded' || item.status === 'checking' || item.status === 'unknown')) {
+            this.setStatus(t('status.gateway_connected_provider_degraded'), 'running');
+            return;
+        }
+
+        this.setStatus(t('status.gateway_connected_provider_healthy'), 'ready');
     }
 
     private bindEvents() {

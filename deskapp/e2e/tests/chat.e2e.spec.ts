@@ -43,12 +43,15 @@ test.describe('Chat functionality', () => {
     await expect(tokens.first()).toBeVisible();
   });
 
-  test.skip('@ 触发目录弹层并支持过滤/插入', async ({ page }) => {
-    // 依赖 Tauri runtime 的 invoke("project_dir_list")，当前纯浏览器 E2E 环境不稳定。
-    await page.fill('#message-input', '@src/ch');
+  test('@ 触发会话文件树选择器（不依赖本地 project_dir_list）', async ({ page }) => {
+    await page.fill('#message-input', '@');
     await expect(page.locator('.project-picker')).toBeVisible();
-    await expect(page.locator('.project-picker-item')).toHaveCount(1);
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#message-input')).toHaveValue(/@src\/chat-view\.ts\s$/);
+    await expect(page.locator('.project-picker')).toContainText('当前会话未设置项目目录');
+  });
+
+  test('remote 边界回归：@ 选择器可用但本地目录能力不作为兜底', async ({ page }) => {
+    await page.fill('#message-input', '@src');
+    await expect(page.locator('.project-picker')).toBeVisible();
+    await expect(page.locator('.project-picker')).toContainText('当前会话未设置项目目录');
   });
 });

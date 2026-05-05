@@ -172,6 +172,13 @@ const en: Record<string, string> = {
     'chat.copy_body_failed': 'Copy failed',
     'chat.copy_body_unavailable': 'Body unavailable',
     'chat.copy_body_data_invalid': 'Invalid data, cannot copy',
+    'chat.project_label': 'Project',
+    'chat.project_not_set': 'Not Set',
+    'chat.project_not_set_long': 'Project directory is not set',
+    'chat.project_hint': '@ picker is scoped to current project directory',
+    'chat.project_copy_path': 'Copy Path',
+    'chat.project_open_dir': 'Open in File Manager',
+    'chat.project_refresh': 'Refresh',
 
     // ========================
     // Settings - Tabs
@@ -422,6 +429,10 @@ const en: Record<string, string> = {
     // ========================
     'status.connecting': 'Connecting...',
     'status.connected': 'Connected',
+    'status.gateway_connected_provider_unknown': 'Gateway Connected / Provider Checking',
+    'status.gateway_connected_provider_healthy': 'Gateway Connected / Provider Healthy',
+    'status.gateway_connected_provider_degraded': 'Gateway Connected / Provider Degraded',
+    'status.gateway_connected_provider_error': 'Gateway Connected / Provider Error',
     'status.disconnected': 'Disconnected',
     'status.reconnecting': 'Reconnecting...',
     'status.error': 'Connection Error',

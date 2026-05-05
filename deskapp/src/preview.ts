@@ -15,6 +15,7 @@ const TEXT_EXTS = new Set([
     'toml', 'env', 'gitignore', 'dockerfile', 'makefile',
 ]);
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico']);
+const REMOTE_LOCAL_FILE_HINT = '当前会话可能运行在远端环境，本地预览/打开远端文件不可用。';
 
 function escapeHtml(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -180,7 +181,7 @@ async function main() {
             body.innerHTML = `<div class="file-preview-unsupported"><div class="file-preview-unsupported-icon">${getFileIcon(filename)}</div><div class="file-preview-unsupported-text">Unsupported file type</div></div>`;
         }
     } catch (err: any) {
-        body.innerHTML = `<div class="file-preview-unsupported"><div class="file-preview-unsupported-icon">⚠️</div><div class="file-preview-unsupported-text">Preview failed: ${escapeHtml(String(err))}</div></div>`;
+        body.innerHTML = `<div class="file-preview-unsupported"><div class="file-preview-unsupported-icon">⚠️</div><div class="file-preview-unsupported-text">Preview failed: ${escapeHtml(String(err))}<br>${escapeHtml(REMOTE_LOCAL_FILE_HINT)}</div></div>`;
     }
 }
 

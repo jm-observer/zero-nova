@@ -12,6 +12,7 @@ pub struct RunRecord {
     pub orchestration_model: Option<ModelRef>,
     pub execution_model: Option<ModelRef>,
     pub tool_call_count: Option<u32>,
+    pub usage: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

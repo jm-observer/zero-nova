@@ -77,6 +77,7 @@
    VOICE_CONTROL_RETRY: 'voice:retry',
    PROGRESS_UPDATE: 'progress:update',     // { event: any }
    GATEWAY_STATUS: 'gateway:status',       // { status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
+   PROVIDER_HEALTH_UPDATED: 'provider:health',
    CHAT_INTENT: 'chat:intent',             // { sessionId: string, intent: string, agentId?: string }
    CONSOLE_TOGGLED: 'console:toggled',     // { visible: boolean }
    CONSOLE_TAB_CHANGED: 'console:tab',     // { tab: string }

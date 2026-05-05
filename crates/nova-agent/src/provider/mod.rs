@@ -3,6 +3,7 @@ use crate::provider::types::{ToolDefinition, Usage};
 use serde_json::Value;
 
 pub mod anthropic;
+pub mod health;
 pub mod openai_compat;
 pub mod sse;
 pub mod types;

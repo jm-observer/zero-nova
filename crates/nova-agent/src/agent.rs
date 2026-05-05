@@ -311,8 +311,24 @@ impl<C: LlmClient> AgentRuntime<C> {
             // Accumulate usage
             cumulative_usage.input_tokens += iter_usage.input_tokens;
             cumulative_usage.output_tokens += iter_usage.output_tokens;
-            cumulative_usage.cache_creation_input_tokens += iter_usage.cache_creation_input_tokens;
-            cumulative_usage.cache_read_input_tokens += iter_usage.cache_read_input_tokens;
+            cumulative_usage.cache_creation_input_tokens = match (
+                cumulative_usage.cache_creation_input_tokens,
+                iter_usage.cache_creation_input_tokens,
+            ) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+            cumulative_usage.cache_read_input_tokens = match (
+                cumulative_usage.cache_read_input_tokens,
+                iter_usage.cache_read_input_tokens,
+            ) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
 
             let mut current_blocks = Vec::new();
             if !current_thinking.is_empty() {
@@ -609,8 +625,24 @@ impl<C: LlmClient> AgentRuntime<C> {
             // 累计 usage（run_turn_with_context 的关键修复）
             cumulative_usage.input_tokens += iter_usage.input_tokens;
             cumulative_usage.output_tokens += iter_usage.output_tokens;
-            cumulative_usage.cache_creation_input_tokens += iter_usage.cache_creation_input_tokens;
-            cumulative_usage.cache_read_input_tokens += iter_usage.cache_read_input_tokens;
+            cumulative_usage.cache_creation_input_tokens = match (
+                cumulative_usage.cache_creation_input_tokens,
+                iter_usage.cache_creation_input_tokens,
+            ) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+            cumulative_usage.cache_read_input_tokens = match (
+                cumulative_usage.cache_read_input_tokens,
+                iter_usage.cache_read_input_tokens,
+            ) {
+                (Some(a), Some(b)) => Some(a + b),
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
 
             // 构建 assistant message blocks
             let mut current_blocks = Vec::new();

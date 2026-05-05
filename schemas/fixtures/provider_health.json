@@ -1,0 +1,5 @@
+{
+  "id": "req-provider-health-1",
+  "type": "provider.health",
+  "payload": {}
+}

@@ -10,6 +10,21 @@ pub struct SqliteSessionRepository {
 
 type SessionRow = (String, String, String, i64, i64, super::control::ControlState);
 
+#[derive(Debug, Clone)]
+pub struct SessionUsageAggregate {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+    pub cache_read_input_tokens: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UsageQualityCounts {
+    pub total_turns: u32,
+    pub turns_with_unknown_cache: u32,
+    pub turns_with_missing_usage: u32,
+}
+
 impl SqliteSessionRepository {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
         Self { pool }
@@ -258,6 +273,7 @@ impl SqliteSessionRepository {
             .transpose()?;
         let execution_model = run.execution_model.as_ref().map(serde_json::to_string).transpose()?;
 
+        let usage_json = run.usage.as_ref().map(serde_json::to_string).transpose()?;
         sqlx::query(
             "INSERT INTO runs (run_id, session_id, turn_id, agent_id, status, started_at, finished_at, duration_ms, orchestration_model, execution_model, usage, error_summary, waiting_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
@@ -271,11 +287,21 @@ impl SqliteSessionRepository {
         .bind(if is_terminal_run_status(&run.status) { Some(run.updated_at - run.created_at) } else { None })
         .bind(orchestration_model)
         .bind(execution_model)
-        .bind(Option::<String>::None)
+        .bind(usage_json)
         .bind(Option::<String>::None)
         .bind(Option::<String>::None)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    pub async fn update_run_usage(&self, run_id: &str, usage: &serde_json::Value) -> Result<()> {
+        let usage_json = serde_json::to_string(usage)?;
+        sqlx::query("UPDATE runs SET usage = ? WHERE run_id = ?")
+            .bind(usage_json)
+            .bind(run_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -591,7 +617,7 @@ impl SqliteSessionRepository {
 
     pub async fn list_runs(&self, session_id: &str) -> Result<Vec<super::model::RunRecord>> {
         let rows = sqlx::query(
-            "SELECT run_id, session_id, status, started_at, COALESCE(finished_at, started_at) AS updated_at, orchestration_model, execution_model, (SELECT COUNT(*) FROM run_steps WHERE run_steps.run_id = runs.run_id AND run_steps.step_type = 'tool_use') AS tool_call_count FROM runs WHERE session_id = ? ORDER BY started_at DESC",
+            "SELECT run_id, session_id, status, started_at, COALESCE(finished_at, started_at) AS updated_at, orchestration_model, execution_model, usage, (SELECT COUNT(*) FROM run_steps WHERE run_steps.run_id = runs.run_id AND run_steps.step_type = 'tool_use') AS tool_call_count FROM runs WHERE session_id = ? ORDER BY started_at DESC",
         )
         .bind(session_id)
         .fetch_all(&self.pool)
@@ -601,6 +627,7 @@ impl SqliteSessionRepository {
         for row in rows {
             let orchestration_model = parse_model_ref(row.get("orchestration_model"))?;
             let execution_model = parse_model_ref(row.get("execution_model"))?;
+            let usage = parse_usage(row.get("usage"))?;
             runs.push(super::model::RunRecord {
                 id: row.get("run_id"),
                 session_id: row.get("session_id"),
@@ -610,6 +637,7 @@ impl SqliteSessionRepository {
                 orchestration_model,
                 execution_model,
                 tool_call_count: Some(row.get::<i64, _>("tool_call_count") as u32),
+                usage,
             });
         }
         Ok(runs)
@@ -617,7 +645,7 @@ impl SqliteSessionRepository {
 
     pub async fn get_run(&self, run_id: &str) -> Result<Option<super::model::RunRecord>> {
         let row = sqlx::query(
-            "SELECT run_id, session_id, status, started_at, COALESCE(finished_at, started_at) AS updated_at, orchestration_model, execution_model, (SELECT COUNT(*) FROM run_steps WHERE run_steps.run_id = runs.run_id AND run_steps.step_type = 'tool_use') AS tool_call_count FROM runs WHERE run_id = ?",
+            "SELECT run_id, session_id, status, started_at, COALESCE(finished_at, started_at) AS updated_at, orchestration_model, execution_model, usage, (SELECT COUNT(*) FROM run_steps WHERE run_steps.run_id = runs.run_id AND run_steps.step_type = 'tool_use') AS tool_call_count FROM runs WHERE run_id = ?",
         )
         .bind(run_id)
         .fetch_optional(&self.pool)
@@ -626,6 +654,7 @@ impl SqliteSessionRepository {
         if let Some(row) = row {
             let orchestration_model = parse_model_ref(row.get("orchestration_model"))?;
             let execution_model = parse_model_ref(row.get("execution_model"))?;
+            let usage = parse_usage(row.get("usage"))?;
             Ok(Some(super::model::RunRecord {
                 id: row.get("run_id"),
                 session_id: row.get("session_id"),
@@ -635,15 +664,64 @@ impl SqliteSessionRepository {
                 orchestration_model,
                 execution_model,
                 tool_call_count: Some(row.get::<i64, _>("tool_call_count") as u32),
+                usage,
             }))
         } else {
             Ok(None)
         }
     }
+
+    pub async fn sum_session_usage(&self, session_id: &str) -> Result<SessionUsageAggregate> {
+        let row = sqlx::query(
+            "SELECT
+                COALESCE(SUM(json_extract(usage, '$.inputTokens')), 0) AS input_tokens,
+                COALESCE(SUM(json_extract(usage, '$.outputTokens')), 0) AS output_tokens,
+                COALESCE(SUM(json_extract(usage, '$.cacheCreationInputTokens')), 0) AS cache_creation_input_tokens,
+                COALESCE(SUM(json_extract(usage, '$.cacheReadInputTokens')), 0) AS cache_read_input_tokens
+             FROM runs WHERE session_id = ? AND usage IS NOT NULL",
+        )
+        .bind(session_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(SessionUsageAggregate {
+            input_tokens: row.get::<i64, _>("input_tokens") as u64,
+            output_tokens: row.get::<i64, _>("output_tokens") as u64,
+            cache_creation_input_tokens: row.get::<i64, _>("cache_creation_input_tokens") as u64,
+            cache_read_input_tokens: row.get::<i64, _>("cache_read_input_tokens") as u64,
+        })
+    }
+
+    pub async fn count_usage_quality(&self, session_id: &str) -> Result<UsageQualityCounts> {
+        let row = sqlx::query(
+            "SELECT
+                COUNT(*) AS total_turns,
+                COUNT(CASE WHEN usage IS NOT NULL
+                    AND json_extract(usage, '$.cacheCreationInputTokens') IS NULL
+                    AND json_extract(usage, '$.cacheReadInputTokens') IS NULL
+                    THEN 1 END) AS turns_with_unknown_cache,
+                COUNT(CASE WHEN usage IS NULL THEN 1 END) AS turns_with_missing_usage
+             FROM runs WHERE session_id = ?",
+        )
+        .bind(session_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(UsageQualityCounts {
+            total_turns: row.get::<i64, _>("total_turns") as u32,
+            turns_with_unknown_cache: row.get::<i64, _>("turns_with_unknown_cache") as u32,
+            turns_with_missing_usage: row.get::<i64, _>("turns_with_missing_usage") as u32,
+        })
+    }
 }
 
 fn parse_model_ref(raw: Option<String>) -> Result<Option<super::control::ModelRef>> {
     raw.map(|value| serde_json::from_str(&value).context("Failed to parse run model metadata"))
+        .transpose()
+}
+
+fn parse_usage(raw: Option<String>) -> Result<Option<serde_json::Value>> {
+    raw.map(|value| serde_json::from_str(&value).context("Failed to parse run usage metadata"))
         .transpose()
 }
 
@@ -709,6 +787,7 @@ mod tests {
                 model: "gpt-4.1-mini".to_string(),
             }),
             tool_call_count: Some(0),
+            usage: None,
         })
         .await?;
 
@@ -769,6 +848,7 @@ mod tests {
                 model: "gpt-4.1-mini".to_string(),
             }),
             tool_call_count: Some(0),
+            usage: None,
         })
         .await?;
 

@@ -67,6 +67,11 @@ impl RuntimeSnapshotAssembler {
                 cache_read_input_tokens: control.token_counters.cache_read_input_tokens,
                 updated_at: control.token_counters.updated_at,
             },
+            project_dir: control
+                .project_dir
+                .as_ref()
+                .map(|project_dir| project_dir.to_string_lossy().to_string()),
+            project_dir_source: None,
             updated_at: Utc::now().timestamp_millis(),
         }
     }

@@ -2,7 +2,27 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-// --- Plan 1: Runtime Snapshots ---
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealthRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealthSnapshot {
+    pub provider: String,
+    pub scope: String,
+    pub status: String,
+    pub checked_at: i64,
+    pub latency_ms: Option<u64>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderHealthSnapshotResponse {
+    pub providers: Vec<ProviderHealthSnapshot>,
+    pub updated_at: i64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +54,8 @@ pub struct SessionRuntimeSnapshot {
     pub model_override: SessionModelOverride,
     pub last_turn: Option<LastTurnSnapshot>,
     pub token_counters: SessionTokenCounters,
+    pub project_dir: Option<String>,
+    pub project_dir_source: Option<String>,
     pub updated_at: i64,
 }
 
@@ -104,6 +126,30 @@ pub struct SessionToolsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionFileTreeRequest {
+    pub session_id: String,
+    pub relative_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFileTreeEntry {
+    pub name: String,
+    pub relative_path: String,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFileTreeResponse {
+    pub entries: Vec<SessionFileTreeEntry>,
+    pub base_relative_path: String,
+    pub project_dir_present: bool,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionToolsResponse {
     pub tools: Vec<ToolAvailabilitySnapshot>,
     pub updated_at: i64,
@@ -113,7 +159,7 @@ pub struct SessionToolsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ToolAvailabilitySnapshot {
     pub name: String,
-    pub source: String, // builtin, mcp_server, mcp_client, custom, skill_unlocked
+    pub source: String,
     pub description: Option<String>,
     pub schema_summary: Value,
     pub enabled: bool,
@@ -139,7 +185,7 @@ pub struct SkillBindingSnapshot {
     #[serde(rename = "skillId", alias = "skill_id")]
     pub skill_id: String,
     pub name: String,
-    pub status: String, // active, bound, available
+    pub status: String,
     pub description: Option<String>,
 }
 
@@ -187,8 +233,25 @@ pub struct SessionTokenUsageRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTokenUsageResponse {
-    pub usage: SessionTokenCounters,
-    pub updated_at: i64,
+    pub summary: SessionTokenUsageSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageSource {
+    #[default]
+    Provider,
+    Estimated,
+    Mixed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageCompleteness {
+    Full,
+    #[default]
+    Partial,
+    Missing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -196,7 +259,7 @@ pub struct SessionTokenUsageResponse {
 pub struct ModelBindingDetailView {
     pub orchestration: ModelRef,
     pub execution: ModelRef,
-    pub source: String, // global_default, agent_default, session_override
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -206,9 +269,62 @@ pub struct TurnUsage {
     pub output_tokens: u64,
     pub cache_creation_input_tokens: Option<u64>,
     pub cache_read_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub source: UsageSource,
+    #[serde(default)]
+    pub completeness: UsageCompleteness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_provider_usage: Option<Value>,
 }
 
-// --- Plan 2: Execution Records & Control ---
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTokenUsageSummary {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+    pub cache_read_input_tokens: u64,
+    pub total_turn_count: u32,
+    pub turns_with_unknown_cache_usage: u32,
+    pub turns_with_missing_usage: u32,
+    pub last_turn_usage: Option<TurnUsage>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTokenUsageDetailRequest {
+    pub session_id: String,
+    #[serde(default = "default_usage_detail_limit")]
+    pub limit: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTokenUsageDetailResponse {
+    pub session_id: String,
+    pub turns: Vec<TurnUsageDetail>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsageDetail {
+    pub turn_id: String,
+    pub run_id: String,
+    pub status: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub usage: Option<TurnUsage>,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
+}
+
+fn default_usage_detail_limit() -> u32 {
+    20
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
@@ -235,7 +351,7 @@ pub struct RunRecord {
     pub session_id: String,
     pub turn_id: String,
     pub agent_id: String,
-    pub status: String, // queued, running, waiting_user, paused, stopped, failed, completed
+    pub status: String,
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub duration_ms: Option<u64>,
@@ -252,7 +368,7 @@ pub struct RunRecord {
 pub struct RunStepRecord {
     pub step_id: String,
     pub run_id: String,
-    pub step_type: String, // thinking, tool, approval, message, artifact, system
+    pub step_type: String,
     pub title: String,
     pub status: String,
     pub tool_name: Option<String>,
@@ -265,7 +381,7 @@ pub struct RunStepRecord {
 #[serde(rename_all = "camelCase")]
 pub struct RunControlRequest {
     pub run_id: String,
-    pub action: String, // stop, resume_waiting, pause, resume, retry
+    pub action: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -314,8 +430,8 @@ pub struct PermissionPendingResponse {
 #[serde(rename_all = "camelCase")]
 pub struct PermissionRespondRequest {
     pub request_id: String,
-    pub action: String,                 // approve, deny
-    pub remember_scope: Option<String>, // session, permanent
+    pub action: String,
+    pub remember_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -331,7 +447,7 @@ pub struct PermissionRequestRecord {
     pub reason: Option<String>,
     pub target: String,
     pub risk_level: String,
-    pub status: String, // pending, approved, denied, expired
+    pub status: String,
     pub created_at: i64,
     pub resolved_at: Option<i64>,
 }
@@ -376,10 +492,10 @@ pub struct DiagnosticsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticIssueRecord {
     pub issue_id: String,
-    pub category: String, // llm, mcp, memory, permission, protocol, artifact, runtime, unknown
+    pub category: String,
     pub title: String,
     pub message: String,
-    pub severity: String, // error, warning, info
+    pub severity: String,
     pub action_hint: Option<String>,
     pub count: u32,
     pub created_at: i64,
@@ -403,6 +519,6 @@ pub struct WorkspaceRestoreResponse {
     pub selected_artifact_id: Option<String>,
     pub selected_permission_request_id: Option<String>,
     pub selected_diagnostic_id: Option<String>,
-    pub restorable_run_state: String, // none, view_only, reattachable
+    pub restorable_run_state: String,
     pub updated_at: i64,
 }

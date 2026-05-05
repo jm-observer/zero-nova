@@ -474,11 +474,30 @@ export interface AgentRuntimeSnapshot {
     capabilityPolicy: Record<string, unknown>;
 }
 
+export type ProviderHealthStatus =
+    | 'unknown'
+    | 'checking'
+    | 'healthy'
+    | 'degraded'
+    | 'auth_failed'
+    | 'unreachable'
+    | 'misconfigured';
+
+export interface ProviderHealthSnapshotView {
+    provider: string;
+    scope: 'orchestration' | 'execution' | string;
+    status: ProviderHealthStatus;
+    checkedAt: number;
+    latencyMs?: number;
+    message?: string | null;
+}
+
 /**
  * 会话运行态快照 (session.runtime)
  */
 export interface SessionRuntimeSnapshot {
     sessionId: string;
+    projectDir?: string | null;
     modelOverride?: { orchestration?: { provider: string; model: string }; execution?: { provider: string; model: string } };
     /** 模型绑定详细视图（Plan 2 扩展） */
     orchestrationDetail?: ModelBindingDetailView;
@@ -527,6 +546,12 @@ export interface ToolDescriptorView {
     unlockedBy?: string;
     /** Plan 3 扩展：工具解锁原因 */
     unlockedReason?: string;
+}
+
+export interface SessionFileTreeEntryView {
+    name: string;
+    relativePath: string;
+    isDir: boolean;
 }
 
 /**
@@ -615,8 +640,8 @@ export interface SkillExitedEvent {
 export interface TokenUsageView {
     inputTokens: number;
     outputTokens: number;
-    cacheCreationInputTokens?: number;
-    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number | null;
+    cacheReadInputTokens?: number | null;
     totalCost?: number; // 估算成本
 }
 
@@ -627,8 +652,8 @@ export interface TokenUsageView {
 export interface UsageView {
     inputTokens: number;
     outputTokens: number;
-    cacheCreationInputTokens?: number;
-    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number | null;
+    cacheReadInputTokens?: number | null;
 }
 
 /**

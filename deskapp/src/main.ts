@@ -8,7 +8,7 @@ import { AppState } from './core/state';
 import { ChatService } from './services/chat-service';
 import { bargeInDetector, player, recorder, setVoiceSynthesizeCallback, streamingTtsManager, ttsManager } from './voice';
 
-import type { Session } from './core/types';
+import type { ProviderHealthSnapshotView, Session } from './core/types';
 
 // UI Components
 import { TitleBarView } from './ui/titlebar';
@@ -41,9 +41,44 @@ async function init() {
         // 初始化 Skill/Tool 事件追踪（Plan 3）
         state.initSkillToolTracking();
 
+        let providerHealthPollTimer: number | null = null;
+
+        const publishProviderHealth = (providers: ProviderHealthSnapshotView[]) => {
+            bus.emit(Events.PROVIDER_HEALTH_UPDATED, { providers });
+        };
+
+        const refreshProviderHealth = async () => {
+            try {
+                const providers = await gatewayClient.getProviderHealth();
+                publishProviderHealth(providers);
+            } catch (error) {
+                console.warn('[Main] Failed to fetch provider health:', error);
+            }
+        };
+
+        const ensureProviderHealthPolling = () => {
+            if (providerHealthPollTimer !== null) {
+                window.clearInterval(providerHealthPollTimer);
+            }
+            providerHealthPollTimer = window.setInterval(() => {
+                void refreshProviderHealth();
+            }, 30000);
+        };
+
         // Forward connection status to EventBus
         gatewayClient.onConnectionChange((status) => {
-            bus.emit(Events.GATEWAY_STATUS, { status });
+            bus.emit(Events.GATEWAY_STATUS, { connectionStatus: status });
+            if (status === 'connected') {
+                void refreshProviderHealth();
+                ensureProviderHealthPolling();
+            } else if (providerHealthPollTimer !== null) {
+                window.clearInterval(providerHealthPollTimer);
+                providerHealthPollTimer = null;
+            }
+        });
+
+        gatewayClient.onProviderHealthUpdated((providers) => {
+            publishProviderHealth(providers);
         });
 
         // 4. UI Components Registration
@@ -400,6 +435,8 @@ async function init() {
                     }
                 }
 
+                await refreshProviderHealth();
+
                 // Initial session selection (only if not already set)
                 if (!state.currentSessionId) {
                     if (state.currentAgentId) {
@@ -430,8 +467,8 @@ async function init() {
         };
 
         // Listen for connection success to trigger data load
-        bus.on(Events.GATEWAY_STATUS, (payload: { status: string }) => {
-            if (payload.status === 'connected') {
+        bus.on(Events.GATEWAY_STATUS, (payload: { status?: string; connectionStatus?: string }) => {
+            if (payload.connectionStatus === 'connected' || payload.status === 'connected') {
                 console.log('[Main] Gateway connected, triggering data load...');
                 loadInitialData();
             }

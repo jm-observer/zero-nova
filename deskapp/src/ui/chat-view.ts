@@ -1,15 +1,12 @@
+import { invoke } from '@tauri-apps/api/core';
 import { t } from '../i18n/index';
 import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
 import { renderMarkdown } from '../markdown';
 import { escapeHtml, formatTime } from '../utils/html';
-import { invoke } from '@tauri-apps/api/core';
+import type { SessionFileTreeEntryView, SessionRuntimeSnapshot } from '../core/types';
 
-type ProjectDirEntry = {
-    name: string;
-    relativePath: string;
-    isDir: boolean;
-};
+type ProjectDirEntry = SessionFileTreeEntryView;
 
 export class ChatView {
     private messagesContainer: HTMLElement;
@@ -17,6 +14,10 @@ export class ChatView {
     private sendBtn: HTMLButtonElement;
     private inspectBtn: HTMLButtonElement;
     private inputContainer: HTMLElement;
+    private inputRow: HTMLElement;
+    private projectMenuBtn: HTMLButtonElement | null = null;
+    private projectMenuEl: HTMLElement | null = null;
+    private projectMenuVisible = false;
     private projectPickerEl: HTMLElement | null = null;
     private pickerVisible = false;
     private pickerLoading = false;
@@ -28,6 +29,9 @@ export class ChatView {
     private pickerActiveIndex = 0;
     private pickerReqSeq = 0;
     private pickerComposing = false;
+    private pickerErrorMessage: string | null = null;
+    private sessionFileTreeCache = new Map<string, Map<string, ProjectDirEntry[]>>();
+    private sessionProjectDirState = new Map<string, string | null>();
     
     private streamingMessageEl: HTMLElement | null = null;
     private streamingContent = ''; // 仅作向后兼容和备份
@@ -40,10 +44,12 @@ export class ChatView {
         this.sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
         this.inspectBtn = document.getElementById('inspect-btn') as HTMLButtonElement;
         this.inputContainer = document.querySelector('.input-container') as HTMLElement;
+        this.inputRow = (this.inputContainer.querySelector('.input-row') as HTMLElement) ?? this.inputContainer;
     }
 
     init() {
         console.log('[ChatView] Initializing...');
+        this.ensureProjectMenu();
         this.bindEvents();
         
         // 监听消息容器大小变化，更新右侧的 Minimap 导航条
@@ -56,10 +62,20 @@ export class ChatView {
         
         this.bus.on(Events.SESSION_SELECTED, () => {
             this.updateHeaderTitle();
+            this.hideProjectPicker();
+            this.hideProjectMenu();
+            void this.refreshProjectMenuState();
+        });
+
+        this.state.gatewayClient?.onSessionRuntimeUpdated((payload) => {
+            this.handleSessionRuntimeUpdated(payload);
         });
         
         this.bus.on(Events.SESSION_CHANGED, (payload: any) => {
              console.log('[ChatView] Session changed:', payload.previousSessionId, '->', payload.sessionId);
+             if (payload.previousSessionId) {
+                 this.invalidateSessionFileTreeCache(payload.previousSessionId);
+             }
              // 如果是从初始状态 (null) 切换到第一个会话，说明正在通过首条消息建立会话，
              // 此时应保留当前显示的乐观消息（用户刚发出的那一条），不执行清空。
              if (payload.previousSessionId === null && payload.sessionId !== null) {
@@ -89,6 +105,7 @@ export class ChatView {
                  console.log('[ChatView] Chat complete, resetting streaming state');
                  this.streamingMessageEl = null;
                  this.streamingContent = '';
+                 this.invalidateSessionFileTreeCache(payload.sessionId);
              }
         });
 
@@ -169,7 +186,10 @@ export class ChatView {
         });
 
         this.messagesContainer.addEventListener('contextmenu', (e) => this.handleContextMenu(e));
-        document.addEventListener('click', () => this.hideContextMenu());
+        document.addEventListener('click', () => {
+            this.hideContextMenu();
+            this.hideProjectMenu();
+        });
 
         // 工具卡片折叠监听
         this.messagesContainer.addEventListener('click', (e) => {
@@ -197,6 +217,146 @@ export class ChatView {
                 }
             }
         });
+    }
+
+    private ensureProjectMenu() {
+        if (this.projectMenuBtn && this.projectMenuEl) {
+            this.renderProjectMenu();
+            return;
+        }
+
+        this.projectMenuBtn = document.createElement('button');
+        this.projectMenuBtn.type = 'button';
+        this.projectMenuBtn.className = 'project-menu-trigger';
+        this.projectMenuBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            this.projectMenuVisible = !this.projectMenuVisible;
+            this.renderProjectMenu();
+        });
+
+        this.projectMenuEl = document.createElement('div');
+        this.projectMenuEl.className = 'project-menu';
+        this.projectMenuEl.addEventListener('click', (event) => {
+            event.stopPropagation();
+        });
+
+        this.inputContainer.insertBefore(this.projectMenuBtn, this.inputRow);
+        this.inputContainer.appendChild(this.projectMenuEl);
+        this.renderProjectMenu();
+    }
+
+    private async refreshProjectMenuState() {
+        const sessionId = this.state.currentSessionId;
+        if (!sessionId) {
+            this.renderProjectMenu();
+            return;
+        }
+
+        const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime') as { data?: SessionRuntimeSnapshot } | undefined;
+        if (runtimeState?.data) {
+            this.sessionProjectDirState.set(sessionId, runtimeState.data.projectDir ?? null);
+            this.renderProjectMenu();
+            return;
+        }
+
+        if (!this.state.gatewayClient) {
+            this.renderProjectMenu();
+            return;
+        }
+
+        try {
+            const runtime = await this.state.gatewayClient.getSessionRuntime(sessionId);
+            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtime));
+            this.sessionProjectDirState.set(sessionId, runtime.projectDir ?? null);
+        } catch (error) {
+            console.warn('[ChatView] Failed to refresh session runtime for project menu:', error);
+        }
+
+        this.renderProjectMenu();
+    }
+
+    private renderProjectMenu() {
+        if (!this.projectMenuBtn || !this.projectMenuEl) {
+            return;
+        }
+
+        const sessionId = this.state.currentSessionId;
+        const projectDir = sessionId ? this.sessionProjectDirState.get(sessionId) : null;
+        const basename = projectDir ? projectDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || projectDir : t('chat.project_not_set');
+        this.projectMenuBtn.textContent = `${t('chat.project_label')}: ${basename}`;
+        this.projectMenuBtn.disabled = !sessionId;
+
+        if (!this.projectMenuVisible) {
+            this.projectMenuEl.classList.remove('visible');
+            this.projectMenuEl.innerHTML = '';
+            return;
+        }
+
+        this.projectMenuEl.classList.add('visible');
+        const disabledAttr = projectDir ? '' : 'disabled';
+        const pathHtml = projectDir ? escapeHtml(projectDir) : escapeHtml(t('chat.project_not_set_long'));
+        this.projectMenuEl.innerHTML = `
+            <div class="project-menu-path">${pathHtml}</div>
+            <div class="project-menu-hint">${escapeHtml(t('chat.project_hint'))}</div>
+            <div class="project-menu-actions">
+                <button type="button" class="project-menu-action" data-action="copy" ${disabledAttr}>${escapeHtml(t('chat.project_copy_path'))}</button>
+                <button type="button" class="project-menu-action" data-action="open" ${disabledAttr}>${escapeHtml(t('chat.project_open_dir'))}</button>
+                <button type="button" class="project-menu-action" data-action="refresh">${escapeHtml(t('chat.project_refresh'))}</button>
+            </div>
+        `;
+
+        this.projectMenuEl.querySelectorAll('.project-menu-action').forEach((element) => {
+            element.addEventListener('click', () => {
+                const action = (element as HTMLElement).dataset.action;
+                if (action === 'copy') {
+                    void this.copyProjectPath();
+                } else if (action === 'open') {
+                    void this.openProjectDir();
+                } else if (action === 'refresh') {
+                    void this.refreshProjectMenuState();
+                }
+            });
+        });
+    }
+
+    private hideProjectMenu() {
+        this.projectMenuVisible = false;
+        if (this.projectMenuEl) {
+            this.projectMenuEl.classList.remove('visible');
+            this.projectMenuEl.innerHTML = '';
+        }
+    }
+
+    private getCurrentProjectDir(): string | null {
+        const sessionId = this.state.currentSessionId;
+        if (!sessionId) {
+            return null;
+        }
+
+        const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime') as { data?: SessionRuntimeSnapshot } | undefined;
+        if (runtimeState?.data?.projectDir !== undefined) {
+            return runtimeState.data.projectDir ?? null;
+        }
+
+        return this.sessionProjectDirState.get(sessionId) ?? null;
+    }
+
+    private async copyProjectPath() {
+        const projectDir = this.getCurrentProjectDir();
+        if (!projectDir) {
+            return;
+        }
+        await navigator.clipboard.writeText(projectDir);
+        this.hideProjectMenu();
+    }
+
+    private async openProjectDir() {
+        const projectDir = this.getCurrentProjectDir();
+        if (!projectDir) {
+            return;
+        }
+        await invoke('file_open', { filePath: projectDir });
+        this.hideProjectMenu();
     }
 
     private async handleTraceCopyClick(button: HTMLButtonElement) {
@@ -281,14 +441,35 @@ export class ChatView {
     private async loadProjectEntries(relativePath: string) {
         this.showProjectPicker();
         this.pickerLoading = true;
+        this.pickerErrorMessage = null;
         this.pickerCurrentPath = relativePath;
         this.renderProjectPicker();
 
         const reqId = ++this.pickerReqSeq;
         try {
-            const entries = await invoke<ProjectDirEntry[]>('project_dir_list', {
-                relativePath: relativePath || null,
-            });
+            const sessionId = this.state.currentSessionId;
+            if (!sessionId) {
+                throw new Error('NO_SESSION');
+            }
+
+            const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime');
+            if (!runtimeState?.data) {
+                this.pickerErrorMessage = '当前会话未设置项目目录';
+                this.pickerEntries = [];
+                this.pickerFilteredEntries = [];
+                return;
+            }
+
+            const cache = this.getSessionFileTreeCache(sessionId);
+            const cacheKey = relativePath || '';
+            let entries = cache.get(cacheKey);
+            if (!entries) {
+                entries = await this.state.gatewayClient?.listSessionFileTree(sessionId, relativePath || undefined);
+                if (!entries) {
+                    throw new Error('LOAD_FAILED');
+                }
+                cache.set(cacheKey, entries);
+            }
             if (reqId !== this.pickerReqSeq) {
                 return;
             }
@@ -301,7 +482,8 @@ export class ChatView {
             }
             this.pickerEntries = [];
             this.pickerFilteredEntries = [];
-            console.error('[ChatView] project_dir_list failed:', error);
+            this.pickerErrorMessage = this.getPickerErrorMessage(error);
+            console.error('[ChatView] session.file_tree.list failed:', error);
         } finally {
             if (reqId === this.pickerReqSeq) {
                 this.pickerLoading = false;
@@ -350,6 +532,7 @@ export class ChatView {
         this.pickerEntries = [];
         this.pickerFilteredEntries = [];
         this.pickerFilterKeyword = '';
+        this.pickerErrorMessage = null;
         this.pickerActiveIndex = 0;
         if (this.projectPickerEl) {
             this.projectPickerEl.classList.remove('visible');
@@ -375,7 +558,9 @@ export class ChatView {
                 `<button class="project-picker-item ${typeClass} ${activeClass}" data-index="${i}">${escapeHtml(entry.name)}</button>`
             );
         }
-        const empty = !this.pickerLoading && items.length === 0 ? '<div class="project-picker-empty">无匹配项</div>' : '';
+        const empty = !this.pickerLoading && items.length === 0
+            ? `<div class="project-picker-empty">${escapeHtml(this.pickerErrorMessage || '无匹配项')}</div>`
+            : '';
         this.projectPickerEl.innerHTML = `
             <div class="project-picker-header">
                 <span class="project-picker-path">@${escapeHtml(breadcrumb)}</span>
@@ -410,6 +595,71 @@ export class ChatView {
         const parts = this.pickerCurrentPath.split('/').filter(Boolean);
         parts.pop();
         await this.loadProjectEntries(parts.join('/'));
+    }
+
+    private getSessionFileTreeCache(sessionId: string): Map<string, ProjectDirEntry[]> {
+        const existing = this.sessionFileTreeCache.get(sessionId);
+        if (existing) {
+            return existing;
+        }
+        const created = new Map<string, ProjectDirEntry[]>();
+        this.sessionFileTreeCache.set(sessionId, created);
+        return created;
+    }
+
+    private invalidateSessionFileTreeCache(sessionId?: string) {
+        if (!sessionId) {
+            return;
+        }
+        this.sessionFileTreeCache.delete(sessionId);
+    }
+
+    private handleSessionRuntimeUpdated(payload: Record<string, unknown>) {
+        const sessionId = typeof payload.sessionId === 'string'
+            ? payload.sessionId
+            : (typeof payload.session_id === 'string' ? payload.session_id : null);
+        if (!sessionId) {
+            return;
+        }
+        const projectDir = this.readProjectDirFromRuntimePayload(payload);
+        const previousProjectDir = this.sessionProjectDirState.get(sessionId);
+        if (projectDir !== previousProjectDir) {
+            this.invalidateSessionFileTreeCache(sessionId);
+            if (projectDir !== undefined) {
+                this.sessionProjectDirState.set(sessionId, projectDir);
+            }
+        }
+        if (sessionId === this.state.currentSessionId) {
+            this.renderProjectMenu();
+        }
+    }
+
+    private readProjectDirFromRuntimePayload(payload: Record<string, unknown>): string | null | undefined {
+        if (typeof payload.projectDir === 'string') {
+            return payload.projectDir;
+        }
+        if (payload.projectDir === null) {
+            return null;
+        }
+        if (typeof payload.project_dir === 'string') {
+            return payload.project_dir;
+        }
+        if (payload.project_dir === null) {
+            return null;
+        }
+        return undefined;
+    }
+
+    private getPickerErrorMessage(error: unknown): string {
+        if (error instanceof Error) {
+            if (error.message.includes('project directory') || error.message.includes('项目目录')) {
+                return '当前会话未设置项目目录';
+            }
+            if (error.message.includes('not found') || error.message.includes('不存在')) {
+                return '目录不存在或无权限访问';
+            }
+        }
+        return '无法加载会话文件树';
     }
 
     private async selectProjectPickerEntry(entry: ProjectDirEntry) {

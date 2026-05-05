@@ -6,6 +6,7 @@ use nova_agent::message::ContentBlock;
 use nova_agent::prompt::TrimmerConfig;
 use nova_agent::provider::types::{StopReason, ToolDefinition, Usage};
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
+use nova_agent::prompt::PromptConfig;
 use nova_agent::tool::builtin::edit::EditTool;
 use nova_agent::tool::builtin::project_manager::ProjectManagerTool;
 use nova_agent::tool::builtin::read::ReadTool;
@@ -225,6 +226,63 @@ async fn project_manager_get_and_set_support_empty_project() {
         .await
         .expect("get after set");
     assert!(get_after.content.contains(expected.to_string_lossy().as_ref()));
+}
+
+#[tokio::test]
+async fn prepare_turn_exposes_project_manager_by_default() {
+    let data_dir = tempdir().expect("create data tempdir");
+    let prompts_dir = tempdir().expect("create prompts tempdir");
+    let manager = SqliteManager::new(data_dir.path()).await.expect("create sqlite manager");
+    let repository = SqliteSessionRepository::new(manager.pool.clone());
+    let sessions = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let tools = ToolRegistry::new();
+    tools.register(Box::new(ProjectManagerTool::new(Arc::new(sessions))));
+
+    let runtime = AgentRuntime::new(
+        NoopClient,
+        tools,
+        AgentConfig {
+            max_iterations: 2,
+            model_config: ModelConfig::default(),
+            tool_timeout: Duration::from_secs(1),
+            max_tokens: 256,
+            use_turn_context: true,
+            trimmer: TrimmerConfig::default(),
+            config_dir: data_dir.path().to_path_buf(),
+            prompts_dir: prompts_dir.path().to_path_buf(),
+            project_context_file: None,
+            initial_env_snapshot: Some(EnvironmentSnapshot {
+                config_dir: data_dir.path().to_string_lossy().to_string(),
+                project_dir: None,
+                platform: "windows".to_string(),
+                shell: "powershell".to_string(),
+                git_branch: None,
+                git_status_summary: None,
+                recent_commits: None,
+                model_id: Some("test-model".to_string()),
+                current_date: "2026-05-04".to_string(),
+            }),
+        },
+    );
+
+    let prompt_config = PromptConfig::new("agent-a", "system prompt", None).with_environment(EnvironmentSnapshot {
+        config_dir: data_dir.path().to_string_lossy().to_string(),
+        project_dir: None,
+        platform: "windows".to_string(),
+        shell: "powershell".to_string(),
+        git_branch: None,
+        git_status_summary: None,
+        recent_commits: None,
+        model_id: Some("test-model".to_string()),
+        current_date: "2026-05-04".to_string(),
+    });
+
+    let turn_ctx = runtime
+        .prepare_turn("切换到 D:/git/zero", Arc::new(Vec::new()), &prompt_config)
+        .expect("prepare turn");
+
+    assert!(turn_ctx.tool_definitions.iter().any(|tool| tool.name == "ProjectManager"));
 }
 
 #[tokio::test]

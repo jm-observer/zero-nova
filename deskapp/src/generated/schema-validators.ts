@@ -609,6 +609,10 @@ const GatewayMessageGeneratedSchema = {
           },
           "type": "array"
         },
+        "id": {
+          "type": "string"
+        },
+        "metadata": true,
         "role": {
           "type": "string"
         },
@@ -619,6 +623,7 @@ const GatewayMessageGeneratedSchema = {
       },
       "required": [
         "content",
+        "id",
         "role",
         "timestamp"
       ],

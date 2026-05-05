@@ -121,7 +121,7 @@ pub enum AppEvent {
         level: SkillInvocationLevel,
     },
     // --- Observability & Control (Plan 1 & 2) ---
-    SessionRuntimeUpdated(nova_protocol::observability::SessionRuntimeSnapshot),
+    SessionRuntimeUpdated(Box<nova_protocol::observability::SessionRuntimeSnapshot>),
     SessionTokenUsageUpdated(nova_protocol::observability::SessionTokenUsageResponse),
     SessionToolsUpdated(nova_protocol::observability::SessionToolsResponse),
     SessionSkillBindingsUpdated(nova_protocol::observability::SessionSkillBindingsResponse),

@@ -3,6 +3,7 @@ import { EventBus } from '../core/event-bus';
 import { invoke } from '@tauri-apps/api/core';
 
 export class ModalsView {
+    private static readonly REMOTE_LOCAL_FILE_HINT = '当前会话可能运行在远端环境，本地预览/打开远端文件不可用。';
     // Confirm Modal
     private confirmModal: HTMLDivElement;
     private confirmMessage!: HTMLParagraphElement;
@@ -198,7 +199,13 @@ export class ModalsView {
                 });
             };
         } catch (err) {
-            this.filePreviewBody.innerHTML = `<div class="error-preview">${t('preview.load_failed')}: ${err}</div>`;
+            const detail = this.escapeHtml(String(err));
+            this.filePreviewBody.innerHTML = `
+                <div class="error-preview">
+                    ${t('preview.load_failed')}: ${detail}<br />
+                    ${ModalsView.REMOTE_LOCAL_FILE_HINT}
+                </div>
+            `;
         }
     }
 

@@ -26,6 +26,8 @@
     AuditLogView,
     DiagnosticIssueView,
     WorkspaceRestoreView,
+    SessionFileTreeEntryView,
+    ProviderHealthSnapshotView,
 } from './core/types';
 import type { AgentInspectRequest, WorkspaceRestoreRequest } from './generated/generated-types';
 import { validateOutboundMessage } from './gateway-messages';
@@ -99,6 +101,42 @@ interface RawTurnUsage {
     output_tokens?: number;
     cache_creation_input_tokens?: number;
     cache_read_input_tokens?: number;
+}
+
+interface RawProviderHealthSnapshot {
+    provider?: string;
+    scope?: string;
+    status?: string;
+    checkedAt?: number;
+    checked_at?: number;
+    latencyMs?: number | null;
+    latency_ms?: number | null;
+    message?: string | null;
+}
+
+interface RawSessionRuntimeSnapshot {
+    sessionId?: string;
+    session_id?: string;
+    activeAgent?: string;
+    active_agent?: string;
+    projectDir?: string | null;
+    project_dir?: string | null;
+    modelOverride?: {
+        orchestration?: RawRunModelRef | null;
+        execution?: RawRunModelRef | null;
+        updatedAt?: number;
+        updated_at?: number;
+    };
+    model_override?: {
+        orchestration?: RawRunModelRef | null;
+        execution?: RawRunModelRef | null;
+        updatedAt?: number;
+        updated_at?: number;
+    };
+    tokenCounters?: RawTurnUsage & { updatedAt?: number; updated_at?: number };
+    token_counters?: RawTurnUsage & { updatedAt?: number; updated_at?: number };
+    updatedAt?: number;
+    updated_at?: number;
 }
 
 interface RawRunRecord {
@@ -345,6 +383,50 @@ export class GatewayClient {
             outputTokens: raw.outputTokens ?? raw.output_tokens ?? 0,
             cacheCreationInputTokens: raw.cacheCreationInputTokens ?? raw.cache_creation_input_tokens,
             cacheReadInputTokens: raw.cacheReadInputTokens ?? raw.cache_read_input_tokens,
+        };
+    }
+
+    private normalizeProviderHealthSnapshot(payload: RawProviderHealthSnapshot): ProviderHealthSnapshotView {
+        const status = String(payload.status ?? 'unknown') as ProviderHealthSnapshotView['status'];
+        return {
+            provider: String(payload.provider ?? 'unknown'),
+            scope: String(payload.scope ?? 'orchestration'),
+            status,
+            checkedAt: Number(payload.checkedAt ?? payload.checked_at ?? Date.now()),
+            latencyMs: typeof (payload.latencyMs ?? payload.latency_ms) === 'number'
+                ? Number(payload.latencyMs ?? payload.latency_ms)
+                : undefined,
+            message: typeof payload.message === 'string' ? payload.message : null,
+        };
+    }
+
+    private normalizeSessionRuntimeSnapshot(payload: RawSessionRuntimeSnapshot): SessionRuntimeSnapshot {
+        const tokenCounters = payload.tokenCounters ?? payload.token_counters;
+        const modelOverride = payload.modelOverride ?? payload.model_override;
+        const totalUsage = this.normalizeRunUsage(tokenCounters) ?? { inputTokens: 0, outputTokens: 0 };
+
+        return {
+            sessionId: String(payload.sessionId ?? payload.session_id ?? ''),
+            projectDir: typeof payload.projectDir === 'string'
+                ? payload.projectDir
+                : (typeof payload.project_dir === 'string' ? payload.project_dir : null),
+            modelOverride: modelOverride
+                ? {
+                    orchestration: modelOverride.orchestration
+                        ? {
+                            provider: String(modelOverride.orchestration.provider ?? ''),
+                            model: String(modelOverride.orchestration.model ?? ''),
+                        }
+                        : undefined,
+                    execution: modelOverride.execution
+                        ? {
+                            provider: String(modelOverride.execution.provider ?? ''),
+                            model: String(modelOverride.execution.model ?? ''),
+                        }
+                        : undefined,
+                }
+                : undefined,
+            totalUsage,
         };
     }
 
@@ -1433,6 +1515,27 @@ export class GatewayClient {
         return result.totalUsage || result.tokenUsage || { inputTokens: 0, outputTokens: 0 };
     }
 
+    async getProviderHealth(): Promise<ProviderHealthSnapshotView[]> {
+        const result = await this.request<{ providers?: RawProviderHealthSnapshot[] }>('provider.health', {});
+        return (result.providers ?? []).map((entry) => this.normalizeProviderHealthSnapshot(entry));
+    }
+
+    onProviderHealthUpdated(callback: (providers: ProviderHealthSnapshotView[]) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'provider.health.updated' && msg.payload) {
+                callback([this.normalizeProviderHealthSnapshot(msg.payload as RawProviderHealthSnapshot)]);
+                return;
+            }
+
+            if (msg.type === 'provider.health.response' && msg.payload) {
+                const payload = msg.payload as { providers?: RawProviderHealthSnapshot[] };
+                callback((payload.providers ?? []).map((entry) => this.normalizeProviderHealthSnapshot(entry)));
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
     onSessionRuntimeUpdated(callback: (payload: Record<string, unknown>) => void): () => void {
         const handler = (msg: GatewayMessage) => {
             if (msg.type === 'session.runtime.updated' && msg.payload) {
@@ -1490,14 +1593,23 @@ export class GatewayClient {
     /**
      * 鑾峰彇浼氳瘽鐨勮繍琛屾椂蹇収锛堝惈妯″瀷缁戝畾鍜?token 绱锛?     */
     async getSessionRuntime(sessionId: string): Promise<SessionRuntimeSnapshot> {
-        return this.request<SessionRuntimeSnapshot>('session.runtime', { sessionId });
+        const payload = await this.request<RawSessionRuntimeSnapshot>('session.runtime', { sessionId });
+        return this.normalizeSessionRuntimeSnapshot(payload);
     }
 
     /**
      * 鑾峰彇浼氳瘽杩愯鎬佸揩鐓у垪琛紙鐢ㄤ簬浼氳瘽閫夋嫨鍣ㄤ腑鏄剧ず妯″瀷淇℃伅锛?     */
     async getAllSessionRuntimes(): Promise<SessionRuntimeSnapshot[]> {
-        const result = await this.request<{ sessions: SessionRuntimeSnapshot[] }>('session.runtimes');
-        return result.sessions || [];
+        const result = await this.request<{ sessions: RawSessionRuntimeSnapshot[] }>('session.runtimes');
+        return (result.sessions || []).map((entry) => this.normalizeSessionRuntimeSnapshot(entry));
+    }
+
+    async listSessionFileTree(sessionId: string, relativePath?: string): Promise<SessionFileTreeEntryView[]> {
+        const result = await this.request<{ entries?: SessionFileTreeEntryView[] }>('session.file_tree.list', {
+            sessionId,
+            relativePath: relativePath || undefined,
+        });
+        return result.entries || [];
     }
 
     // ========================
@@ -1533,13 +1645,15 @@ export class GatewayClient {
         orchestration?: { provider: string; model: string };
         execution?: { provider: string; model: string };
     }): Promise<SessionRuntimeSnapshot> {
-        return this.request('session.model.override', { sessionId, ...overrides });
+        const payload = await this.request<RawSessionRuntimeSnapshot>('session.model.override', { sessionId, ...overrides });
+        return this.normalizeSessionRuntimeSnapshot(payload);
     }
 
     /**
      * 閲嶇疆浼氳瘽绾фā鍨嬭鐩?     */
     async resetSessionModelOverride(sessionId: string): Promise<SessionRuntimeSnapshot> {
-        return this.request('session.model.override', { sessionId, reset: true });
+        const payload = await this.request<RawSessionRuntimeSnapshot>('session.model.override', { sessionId, reset: true });
+        return this.normalizeSessionRuntimeSnapshot(payload);
     }
 
     /**

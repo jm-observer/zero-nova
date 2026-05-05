@@ -66,6 +66,9 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
         MessageEnvelope::AgentInspect(payload) => {
             agents::handle_agent_inspect(payload, app, outbound_tx, msg_id).await;
         }
+        MessageEnvelope::ProviderHealth(_) => {
+            sessions::handle_provider_health(app, outbound_tx, msg_id).await;
+        }
         MessageEnvelope::SessionRuntime(payload) => {
             sessions::handle_session_runtime(payload.session_id, app, outbound_tx, msg_id).await;
         }
@@ -74,6 +77,9 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
         }
         MessageEnvelope::SessionToolsList(payload) => {
             sessions::handle_session_tools(payload.session_id, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionFileTreeList(payload) => {
+            sessions::handle_session_file_tree_list(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionSkillBindings(payload) => {
             sessions::handle_session_skill_bindings(payload.session_id, app, outbound_tx, msg_id).await;
@@ -86,6 +92,9 @@ pub async fn dispatch(msg: GatewayMessage, app: &dyn AgentApplication, outbound_
         }
         MessageEnvelope::SessionTokenUsage(payload) => {
             sessions::handle_session_token_usage(payload.session_id, app, outbound_tx, msg_id).await;
+        }
+        MessageEnvelope::SessionTokenUsageDetail(payload) => {
+            sessions::handle_session_token_usage_detail(payload, app, outbound_tx, msg_id).await;
         }
         MessageEnvelope::SessionRuns(payload) => {
             sessions::handle_session_runs(payload, app, outbound_tx, msg_id).await;

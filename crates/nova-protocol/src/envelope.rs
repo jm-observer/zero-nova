@@ -146,10 +146,18 @@ pub enum MessageEnvelope {
     AgentInspect(obs::AgentInspectRequest),
     #[serde(rename = "agent.inspect.response")]
     AgentInspectResponse(obs::AgentInspectResponse),
+    #[serde(rename = "provider.health")]
+    ProviderHealth(obs::ProviderHealthRequest),
+    #[serde(rename = "provider.health.response")]
+    ProviderHealthResponse(obs::ProviderHealthSnapshotResponse),
+    #[serde(rename = "provider.health.updated")]
+    ProviderHealthUpdated(obs::ProviderHealthSnapshot),
     #[serde(rename = "session.runtime")]
     SessionRuntime(obs::SessionRuntimeRequest),
     #[serde(rename = "session.runtime.response")]
     SessionRuntimeResponse(obs::SessionRuntimeSnapshot),
+    #[serde(rename = "session.runtime.updated")]
+    SessionRuntimeUpdated(obs::SessionRuntimeSnapshot),
     #[serde(rename = "session.prompt.preview")]
     SessionPromptPreview(obs::PromptPreviewRequest),
     #[serde(rename = "session.prompt.preview.response")]
@@ -158,23 +166,38 @@ pub enum MessageEnvelope {
     SessionToolsList(obs::SessionToolsRequest),
     #[serde(rename = "session.tools.list.response")]
     SessionToolsListResponse(obs::SessionToolsResponse),
+    #[serde(rename = "session.tools.updated")]
+    SessionToolsUpdated(obs::SessionToolsResponse),
+    #[serde(rename = "session.file_tree.list")]
+    SessionFileTreeList(obs::SessionFileTreeRequest),
+    #[serde(rename = "session.file_tree.list.response")]
+    SessionFileTreeListResponse(obs::SessionFileTreeResponse),
     #[serde(rename = "session.skill.bindings")]
     SessionSkillBindings(obs::SessionSkillBindingsRequest),
     #[serde(rename = "session.skill.bindings.response")]
     SessionSkillBindingsResponse(obs::SessionSkillBindingsResponse),
+    #[serde(rename = "session.skill.bindings.updated")]
+    SessionSkillBindingsUpdated(obs::SessionSkillBindingsResponse),
     #[serde(rename = "session.memory.hits")]
     SessionMemoryHits(obs::SessionMemoryHitsRequest),
+    #[serde(rename = "session.memory.hit")]
+    SessionMemoryHit(obs::MemoryHitSnapshot),
     #[serde(rename = "session.memory.hits.response")]
     SessionMemoryHitsResponse(obs::SessionMemoryHitsResponse),
     #[serde(rename = "session.model.override")]
     SessionModelOverride(obs::SessionModelOverrideRequest),
     #[serde(rename = "session.model.override.response")]
     SessionModelOverrideResponse(obs::SessionRuntimeSnapshot),
-    #[serde(rename = "sessions.token_usage")]
+    #[serde(rename = "session.token.usage")]
     SessionTokenUsage(obs::SessionTokenUsageRequest),
-    #[serde(rename = "sessions.token_usage.response")]
+    #[serde(rename = "session.token.usage.response")]
     SessionTokenUsageResponse(obs::SessionTokenUsageResponse),
-
+    #[serde(rename = "session.token.usage.updated")]
+    SessionTokenUsageUpdated(obs::SessionTokenUsageResponse),
+    #[serde(rename = "session.token.usage.detail")]
+    SessionTokenUsageDetail(obs::SessionTokenUsageDetailRequest),
+    #[serde(rename = "session.token.usage.detail.response")]
+    SessionTokenUsageDetailResponse(obs::SessionTokenUsageDetailResponse),
     #[serde(rename = "session.runs")]
     SessionRuns(obs::SessionRunsRequest),
     #[serde(rename = "session.runs.response")]
@@ -211,18 +234,6 @@ pub enum MessageEnvelope {
     WorkspaceRestore(obs::WorkspaceRestoreRequest),
     #[serde(rename = "workspace.restore.response")]
     WorkspaceRestoreResponse(obs::WorkspaceRestoreResponse),
-
-    // --- Events ---
-    #[serde(rename = "session.runtime.updated")]
-    SessionRuntimeUpdated(obs::SessionRuntimeSnapshot),
-    #[serde(rename = "session.token.usage")]
-    SessionTokenUsageUpdated(obs::SessionTokenUsageResponse),
-    #[serde(rename = "session.tools.updated")]
-    SessionToolsUpdated(obs::SessionToolsResponse),
-    #[serde(rename = "session.skill.bindings.updated")]
-    SessionSkillBindingsUpdated(obs::SessionSkillBindingsResponse),
-    #[serde(rename = "session.memory.hit")]
-    SessionMemoryHit(obs::MemoryHitSnapshot),
     #[serde(rename = "run.status.updated")]
     RunStatusUpdated(obs::RunRecord),
     #[serde(rename = "run.step.updated")]

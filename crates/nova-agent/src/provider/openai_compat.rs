@@ -5,7 +5,7 @@ use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use log::debug;
+use log::{debug, trace};
 use reqwest::{header, Client};
 use serde_json::json;
 use std::collections::VecDeque;
@@ -218,7 +218,7 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
         loop {
             // 1. 先消费缓冲队列
             if let Some(event) = self.event_queue.pop_front() {
-                debug!(
+                trace!(
                     "[INBOUND] SSE stream: event from buffer, event_type={}",
                     std::any::type_name_of_val(&event)
                 );
@@ -277,12 +277,14 @@ impl OpenAiCompatStreamReceiver {
     fn process_chunk(&mut self, chunk: ChatCompletionChunk) {
         // --- Usage 处理 ---
         if let Some(usage) = chunk.usage {
+            let cache_read_tokens = usage.prompt_tokens_details.and_then(|details| details.cached_tokens);
             self.event_queue.push_back(ProviderStreamEvent::MessageComplete {
                 usage: Usage {
                     input_tokens: usage.prompt_tokens,
                     output_tokens: usage.completion_tokens,
-                    cache_creation_input_tokens: 0,
-                    cache_read_input_tokens: 0,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: cache_read_tokens,
+                    raw_provider_usage: self.response_chunks.last().cloned(),
                 },
                 stop_reason: self.pending_stop_reason.take(),
             });

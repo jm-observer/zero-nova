@@ -5,6 +5,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use log::{info, warn};
 use serde_json::{json, Value};
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -33,6 +34,20 @@ impl ShellBackend for UnixSh {
     fn build_command(&self, command_str: &str) -> Command {
         let mut cmd = Command::new("sh");
         cmd.args(["-c", command_str]);
+        cmd
+    }
+}
+
+struct UnixBash;
+
+impl ShellBackend for UnixBash {
+    fn name(&self) -> &str {
+        "bash"
+    }
+
+    fn build_command(&self, command_str: &str) -> Command {
+        let mut cmd = Command::new("bash");
+        cmd.args(["-lc", command_str]);
         cmd
     }
 }
@@ -105,7 +120,13 @@ fn select_shell(config: &BashConfig) -> Box<dyn ShellBackend> {
     // 1. 配置覆盖
     if let Some(shell) = &config.shell {
         match shell.to_lowercase().as_str() {
-            "sh" | "bash" => return Box::new(UnixSh),
+            "sh" => return Box::new(UnixSh),
+            "bash" => {
+                if which("bash").is_ok() {
+                    return Box::new(UnixBash);
+                }
+                return Box::new(UnixSh);
+            }
             "pwsh" | "powershell" => {
                 if let Some(ps) = PowerShellBackend::detect() {
                     return Box::new(ps);
@@ -124,8 +145,24 @@ fn select_shell(config: &BashConfig) -> Box<dyn ShellBackend> {
         }
         Box::new(CmdBackend)
     } else {
-        // Unix: sh
-        Box::new(UnixSh)
+        // Linux/macOS: bash 优先，回退 sh
+        if which("bash").is_ok() {
+            Box::new(UnixBash)
+        } else {
+            Box::new(UnixSh)
+        }
+    }
+}
+
+fn is_cross_shell_nested_command(command_str: &str, shell_name: &str) -> bool {
+    let normalized = command_str.trim().to_lowercase();
+    let is_prefixed = |prefixes: &[&str]| prefixes.iter().any(|p| normalized.starts_with(p));
+
+    match shell_name {
+        "pwsh" | "powershell" => is_prefixed(&["bash ", "sh ", "cmd ", "cmd.exe "]),
+        "bash" | "sh" => is_prefixed(&["pwsh ", "powershell ", "cmd ", "cmd.exe "]),
+        "cmd" => is_prefixed(&["pwsh ", "powershell ", "bash ", "sh "]),
+        _ => false,
     }
 }
 
@@ -195,6 +232,15 @@ impl Tool for BashTool {
         let command_str = input["command"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'command' field"))?;
+        if is_cross_shell_nested_command(command_str, self.shell.name()) {
+            return Ok(ToolOutput {
+                content: format!(
+                    "Cross-shell nesting is not allowed. Current shell: '{}', command starts with another shell launcher.",
+                    self.shell.name()
+                ),
+                is_error: true,
+            });
+        }
         let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(3600000);
         let run_in_background = input["run_in_background"].as_bool().unwrap_or(false);
 
@@ -249,12 +295,14 @@ impl Tool for BashTool {
 
         let mut stdout_buf = String::new();
         let mut stderr_buf = String::new();
+        let mut stdout_had_lossy = false;
+        let mut stderr_had_lossy = false;
 
         const LOG_FLUSH_INTERVAL_MS: u128 = 200;
 
         let read_fut = async {
-            let mut stdout_reader = BufReader::new(stdout).lines();
-            let mut stderr_reader = BufReader::new(stderr).lines();
+            let mut stdout_reader = BufReader::new(stdout);
+            let mut stderr_reader = BufReader::new(stderr);
 
             let mut stdout_done = false;
             let mut stderr_done = false;
@@ -265,13 +313,17 @@ impl Tool for BashTool {
 
             while !stdout_done || !stderr_done {
                 tokio::select! {
-                    line = stdout_reader.next_line(), if !stdout_done => {
-                        match line {
-                            Ok(Some(line)) => {
-                                pending_stdout.push_str(&line);
-                                pending_stdout.push('\n');
-                                stdout_buf.push_str(&line);
-                                stdout_buf.push('\n');
+                    read_res = async {
+                        let mut buf = Vec::new();
+                        stdout_reader.read_until(b'\n', &mut buf).await.map(|n| (n, buf))
+                    }, if !stdout_done => {
+                        match read_res {
+                            Ok((0, _)) => stdout_done = true,
+                            Ok((_, chunk)) => {
+                                let (decoded, had_lossy) = decode_lossy_with_flag(&chunk);
+                                stdout_had_lossy |= had_lossy;
+                                pending_stdout.push_str(&decoded);
+                                stdout_buf.push_str(&decoded);
 
                                 if last_flush.elapsed().as_millis() >= LOG_FLUSH_INTERVAL_MS {
                                     if let Some(ctx) = &context {
@@ -285,20 +337,23 @@ impl Tool for BashTool {
                                     last_flush = Instant::now();
                                 }
                             }
-                            Ok(None) => stdout_done = true,
                             Err(e) => {
                                 stderr_buf.push_str(&format!("Error reading stdout: {}\n", e));
                                 stdout_done = true;
                             }
                         }
                     }
-                    line = stderr_reader.next_line(), if !stderr_done => {
-                        match line {
-                            Ok(Some(line)) => {
-                                pending_stderr.push_str(&line);
-                                pending_stderr.push('\n');
-                                stderr_buf.push_str(&line);
-                                stderr_buf.push('\n');
+                    read_res = async {
+                        let mut buf = Vec::new();
+                        stderr_reader.read_until(b'\n', &mut buf).await.map(|n| (n, buf))
+                    }, if !stderr_done => {
+                        match read_res {
+                            Ok((0, _)) => stderr_done = true,
+                            Ok((_, chunk)) => {
+                                let (decoded, had_lossy) = decode_lossy_with_flag(&chunk);
+                                stderr_had_lossy |= had_lossy;
+                                pending_stderr.push_str(&decoded);
+                                stderr_buf.push_str(&decoded);
 
                                 if last_flush.elapsed().as_millis() >= LOG_FLUSH_INTERVAL_MS {
                                     if let Some(ctx) = &context {
@@ -312,7 +367,6 @@ impl Tool for BashTool {
                                     last_flush = Instant::now();
                                 }
                             }
-                            Ok(None) => stderr_done = true,
                             Err(e) => {
                                 stderr_buf.push_str(&format!("Error reading stderr: {}\n", e));
                                 stderr_done = true;
@@ -356,9 +410,13 @@ impl Tool for BashTool {
         match timeout(Duration::from_millis(timeout_ms), read_fut).await {
             Ok(Ok(status)) => {
                 let exit_code = status.code().unwrap_or(-1);
+                let stdout_encoding = if stdout_had_lossy { "lossy" } else { "utf8" };
+                let stderr_encoding = if stderr_had_lossy { "lossy" } else { "utf8" };
                 let content = format!(
-                    "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
+                    "exit_code: {}\nstdout_encoding: {}\nstderr_encoding: {}\nstdout:\n{}\nstderr:\n{}",
                     exit_code,
+                    stdout_encoding,
+                    stderr_encoding,
                     truncate(&stdout_buf, 100_000),
                     truncate(&stderr_buf, 10_000)
                 );
@@ -402,6 +460,12 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
+fn decode_lossy_with_flag(bytes: &[u8]) -> (String, bool) {
+    let decoded = String::from_utf8_lossy(bytes);
+    let had_lossy = matches!(decoded, Cow::Owned(_));
+    (decoded.into_owned(), had_lossy)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,6 +496,26 @@ mod tests {
         assert_eq!(truncate(s, 6), "你好... [truncated]");
         assert_eq!(truncate(s, 3), "你... [truncated]");
         assert_eq!(truncate(s, 0), "... [truncated]");
+    }
+
+    #[test]
+    fn decode_lossy_detects_invalid_utf8() {
+        let (decoded_utf8, utf8_lossy) = decode_lossy_with_flag(b"hello\n");
+        assert_eq!(decoded_utf8, "hello\n");
+        assert!(!utf8_lossy);
+
+        let invalid = [0x66, 0x6F, 0x80, 0x6F];
+        let (decoded_invalid, invalid_lossy) = decode_lossy_with_flag(&invalid);
+        assert!(decoded_invalid.contains('\u{FFFD}'));
+        assert!(invalid_lossy);
+    }
+
+    #[test]
+    fn cross_shell_nesting_is_detected() {
+        assert!(is_cross_shell_nested_command("powershell -Command \"echo hi\"", "bash"));
+        assert!(is_cross_shell_nested_command("bash -lc \"echo hi\"", "pwsh"));
+        assert!(is_cross_shell_nested_command("cmd /c dir", "sh"));
+        assert!(!is_cross_shell_nested_command("echo hello", "bash"));
     }
 
     #[test]

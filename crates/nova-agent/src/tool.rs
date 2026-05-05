@@ -460,6 +460,10 @@ impl ToolRegistry {
             .cloned();
 
         if let Some(tool) = tool {
+            let definition = tool.definition();
+            if let Err(error_output) = validate_input_against_schema(canonical_name, &input, &definition.input_schema) {
+                return Ok(error_output);
+            }
             return tool.execute(input, context).await;
         }
 
@@ -548,6 +552,72 @@ fn format_path_resolve_error(tool_name: &str, err: &PathResolveError) -> String 
     }
 }
 
+fn validate_input_against_schema(tool_name: &str, input: &Value, schema: &Value) -> Result<(), ToolOutput> {
+    let Some(input_obj) = input.as_object() else {
+        return Err(ToolOutput {
+            content: format!("Invalid arguments for '{}': input must be a JSON object", tool_name),
+            is_error: true,
+        });
+    };
+
+    let schema_props = schema.get("properties").and_then(Value::as_object);
+    let schema_required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|required| required.iter().filter_map(Value::as_str).collect::<HashSet<_>>())
+        .unwrap_or_default();
+
+    if let Some(props) = schema_props {
+        for key in input_obj.keys() {
+            if !props.contains_key(key) {
+                return Err(ToolOutput {
+                    content: format!("Invalid arguments for '{}': unknown field '{}'", tool_name, key),
+                    is_error: true,
+                });
+            }
+        }
+
+        for required in &schema_required {
+            if !input_obj.contains_key(*required) {
+                return Err(ToolOutput {
+                    content: format!(
+                        "Invalid arguments for '{}': missing required field '{}'",
+                        tool_name, required
+                    ),
+                    is_error: true,
+                });
+            }
+        }
+
+        for (key, value) in input_obj {
+            if let Some(prop_schema) = props.get(key) {
+                if let Some(expected_type) = prop_schema.get("type").and_then(Value::as_str) {
+                    let type_ok = match expected_type {
+                        "string" => value.is_string(),
+                        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+                        "number" => value.is_number(),
+                        "boolean" => value.is_boolean(),
+                        "object" => value.is_object(),
+                        "array" => value.is_array(),
+                        _ => true,
+                    };
+                    if !type_ok {
+                        return Err(ToolOutput {
+                            content: format!(
+                                "Invalid arguments for '{}': field '{}' must be type '{}'",
+                                tool_name, key, expected_type
+                            ),
+                            is_error: true,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Provides a default empty `ToolRegistry`.
 impl Default for ToolRegistry {
     fn default() -> Self {
@@ -560,13 +630,18 @@ mod tests {
     use super::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
     use crate::prompt::EnvironmentSnapshot;
     use anyhow::Result;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::{mpsc, Mutex};
 
     struct StaticTool {
         name: &'static str,
+    }
+
+    struct SchemaTool {
+        name: &'static str,
+        schema: Value,
     }
 
     #[async_trait::async_trait]
@@ -576,6 +651,25 @@ mod tests {
                 name: self.name.to_string(),
                 description: format!("{} description", self.name),
                 input_schema: json!({"type": "object"}),
+                defer_loading: false,
+            }
+        }
+
+        async fn execute(&self, _input: serde_json::Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
+            Ok(ToolOutput {
+                content: self.name.to_string(),
+                is_error: false,
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for SchemaTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: self.name.to_string(),
+                description: format!("{} description", self.name),
+                input_schema: self.schema.clone(),
                 defer_loading: false,
             }
         }
@@ -613,6 +707,87 @@ mod tests {
             .unwrap();
         assert!(search_output.content.contains("Loaded tool: DeferredTool"));
         assert!(registry.has_loaded_tool("DeferredTool"));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_unknown_fields_by_schema() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(SchemaTool {
+            name: "SchemaRead",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string" }
+                },
+                "required": ["file_path"]
+            }),
+        }));
+
+        let output = registry
+            .execute(
+                "SchemaRead",
+                json!({
+                    "file_path": "src/lib.rs",
+                    "unknown": true
+                }),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(output.is_error);
+        assert!(output.content.contains("unknown field 'unknown'"));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_missing_required_fields_by_schema() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(SchemaTool {
+            name: "SchemaWrite",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string" }
+                },
+                "required": ["file_path"]
+            }),
+        }));
+
+        let output = registry.execute("SchemaWrite", json!({}), None).await.unwrap();
+
+        assert!(output.is_error);
+        assert!(output.content.contains("missing required field"));
+    }
+
+    #[tokio::test]
+    async fn execute_rejects_type_mismatch_by_schema() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(SchemaTool {
+            name: "SchemaBash",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string" },
+                    "timeout_ms": { "type": "integer" }
+                },
+                "required": ["command"]
+            }),
+        }));
+
+        let output = registry
+            .execute(
+                "SchemaBash",
+                json!({
+                    "command": "echo ok",
+                    "timeout_ms": "1000"
+                }),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(output.is_error);
+        assert!(output.content.contains("field 'timeout_ms' must be type 'integer'"));
     }
 
     #[tokio::test]

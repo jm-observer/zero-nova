@@ -29,7 +29,18 @@ pub struct ChatPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ProgressEvent {
     #[serde(rename = "type")]
-    pub kind: String, // 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'tool_log'
+    pub kind: String,
+    // 基础 kind 值：
+    //   'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'tool_log'
+    //
+    // 编排相关 kind 值（args 字段携带对应结构体）：
+    //   'orchestration_plan'      → args = OrchestrationPlanEvent
+    //   'sub_agent_spawn'         → args = { agent_id, stage_id, description, subagent_type }
+    //   'sub_agent_log'           → args = { agent_id, stage_id }; log = <流式文本>
+    //   'sub_agent_complete'      → args = SubAgentCompleteArgs
+    //   'stage_complete'          → args = StageCompleteArgs
+    //   'orchestration_review_start' → args = { plan_id }
+    //   'orchestration_complete'  → args = OrchestrationCompleteArgs
     pub session_id: Option<String>,
     pub iteration: Option<i32>,
     pub tool_name: Option<String>,

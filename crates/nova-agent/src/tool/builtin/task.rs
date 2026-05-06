@@ -58,6 +58,17 @@ pub struct TaskUpdateRequest {
 }
 
 /// In-memory store for tasks within a session.
+///
+/// # 编排模式 metadata 约定
+///
+/// 在多 Agent 编排场景中，`Task.metadata` 使用以下保留 key：
+///
+/// | Key | 类型 | 说明 |
+/// |-----|------|------|
+/// | `"orchestration_plan_id"` | `String` | 所属编排 Plan 的 ID |
+/// | `"orchestration_stage_id"` | `String` | 所属 Stage 的 ID |
+/// | `"orchestration_agent_id"` | `String` | 子 Agent 的标识符 |
+/// | `"orchestration_role"` | `String` | `"orchestrator"` \| `"sub_agent"` \| `"reviewer"` |
 pub struct TaskStore {
     tasks: HashMap<String, Task>,
     next_id: AtomicU64,

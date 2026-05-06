@@ -63,7 +63,25 @@ impl Tool for AgentTool {
                     "subagent_type": { "type": "string", "description": "The type of agent to spawn (e.g., 'Explore', 'Plan', 'Coder')" },
                     "run_in_background": { "type": "boolean", "default": false, "description": "Whether to run the agent in the background" },
                     "isolation": { "type": "string", "enum": ["none", "worktree"], "default": "none", "description": "Isolation mode for the agent" },
-                    "model": { "type": "string", "description": "Optional model override" }
+                    "model": { "type": "string", "description": "Optional model override" },
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Unique identifier for this agent within the current orchestration plan (e.g. 'agent-1'). Required in orchestration mode."
+                    },
+                    "parent_plan_id": {
+                        "type": "string",
+                        "description": "ID of the orchestration plan this agent belongs to. Required in orchestration mode."
+                    },
+                    "stage_id": {
+                        "type": "string",
+                        "description": "ID of the execution stage this agent belongs to. Required in orchestration mode."
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "enum": ["full", "summary"],
+                        "default": "full",
+                        "description": "In 'summary' mode the agent returns a structured summary only, reducing context usage for the Review Agent."
+                    }
                 },
                 "required": ["prompt", "description"]
             }),

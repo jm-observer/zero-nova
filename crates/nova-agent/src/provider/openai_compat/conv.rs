@@ -6,7 +6,7 @@ use async_openai::types::chat::{
     ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessage,
     ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
     ChatCompletionStreamOptions, ChatCompletionTool, ChatCompletionTools, CompletionUsage, CreateChatCompletionRequest,
-    FinishReason, FunctionCall, FunctionObject,
+    FinishReason, FunctionCall, FunctionObject, ReasoningEffort,
 };
 
 use crate::message::{ContentBlock, Message, Role};
@@ -186,21 +186,38 @@ pub fn build_request(
         Some(tools_to_openai(tools))
     };
 
-    CreateChatCompletionRequest {
+    let reasoning_effort = match config.reasoning_effort.as_deref() {
+        Some("minimal") => Some(ReasoningEffort::Minimal),
+        Some("low") => Some(ReasoningEffort::Low),
+        Some("medium") => Some(ReasoningEffort::Medium),
+        Some("high") => Some(ReasoningEffort::High),
+        _ => None,
+    };
+
+    let mut request = CreateChatCompletionRequest {
         model: config.model.clone(),
         messages: openai_messages,
         tools: openai_tools,
         max_completion_tokens: Some(config.max_tokens),
         temperature: config.temperature.map(|t| t as f32),
         top_p: config.top_p.map(|p| p as f32),
+        reasoning_effort,
         stream: Some(true),
         stream_options: Some(ChatCompletionStreamOptions {
             include_usage: Some(true),
             include_obfuscation: None,
         }),
-        // thinking_budget 和 reasoning_effort 暂时不映射（已确认去掉非标准字段）
+        // thinking_budget 暂不映射（已确认去掉非标准字段）
         ..Default::default()
+    };
+
+    // 一些 OpenAI-compatible 服务端仍要求 `max_tokens`，这里保留兼容写法。
+    #[allow(deprecated)]
+    {
+        request.max_tokens = Some(config.max_tokens);
     }
+
+    request
 }
 
 // ============================================================================

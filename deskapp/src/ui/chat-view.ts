@@ -69,9 +69,9 @@ export class ChatView {
             void this.refreshProjectMenuState();
         });
 
-        const onSessionRuntimeUpdated = this.state.gatewayClient?.onSessionRuntimeUpdated;
-        if (typeof onSessionRuntimeUpdated === 'function') {
-            onSessionRuntimeUpdated((payload) => {
+        const gatewayClient = this.state.gatewayClient;
+        if (gatewayClient && typeof gatewayClient.onSessionRuntimeUpdated === 'function') {
+            gatewayClient.onSessionRuntimeUpdated((payload) => {
                 this.handleSessionRuntimeUpdated(payload);
             });
         }
@@ -590,6 +590,15 @@ export class ChatView {
                 void this.selectProjectPickerEntry(this.pickerFilteredEntries[idx]);
             });
         });
+
+        // 滚动选中项到可视区域
+        if (this.pickerActiveIndex >= 0) {
+            const activeEl = this.projectPickerEl.querySelector(`.project-picker-item[data-index="${this.pickerActiveIndex}"]`);
+            if (activeEl) {
+                (activeEl as HTMLElement).scrollIntoView({ block: 'nearest' });
+            }
+        }
+
         const upButton = this.projectPickerEl.querySelector('.project-picker-item.up');
         if (upButton) {
             upButton.addEventListener('click', () => {

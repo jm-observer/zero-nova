@@ -19,3 +19,4 @@ crates/nova-server/.nova
 .worktrees
 tmp
 nul
+dist

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenFlux Feedback</title>
+  <link rel="stylesheet" href="./src/styles/main.css" />
+</head>
+<body>
+  <div class="feedback-container">
+    <div class="fb-header">
+      <div class="fb-title">反馈</div>
+      <div class="fb-actions">
+        <button id="fb-minimize" class="icon-btn" type="button">_</button>
+        <button id="fb-close" class="icon-btn" type="button">×</button>
+      </div>
+    </div>
+
+    <div class="fb-body">
+      <div class="fb-type-row">
+        <button class="fb-type-btn active" data-type="bug_report" type="button">问题反馈</button>
+        <button class="fb-type-btn" data-type="feature_request" type="button">功能建议</button>
+      </div>
+
+      <div class="fb-field">
+        <label for="fb-title">标题</label>
+        <input id="fb-title" type="text" />
+      </div>
+
+      <div class="fb-field">
+        <label for="fb-content">描述</label>
+        <textarea id="fb-content" rows="8"></textarea>
+      </div>
+
+      <div class="fb-field">
+        <label for="fb-contact">联系方式（可选）</label>
+        <input id="fb-contact" type="text" />
+      </div>
+
+      <div class="fb-field">
+        <input id="fb-file-input" type="file" multiple hidden />
+        <button id="fb-add-file" class="secondary-btn" type="button">添加附件</button>
+        <div id="fb-file-list" class="fb-file-list"></div>
+      </div>
+
+      <div id="fb-hint" class="fb-hint"></div>
+    </div>
+
+    <div class="fb-footer">
+      <button id="fb-cancel" class="secondary-btn" type="button">取消</button>
+      <button id="fb-submit" class="primary-btn" type="button">提交</button>
+    </div>
+  </div>
+  <script type="module" src="./src/feedback.ts"></script>
+</body>
+</html>

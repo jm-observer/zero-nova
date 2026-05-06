@@ -1,32 +1,32 @@
 pub mod conv;
-pub mod types;
 
-use crate::message::{ContentBlock, Message, Role};
-use crate::provider::openai_compat::types::ChatCompletionChunk;
-use crate::provider::sse::{RawSseEvent, SseParser};
+use crate::message::Message;
+use crate::provider::openai_compat::conv::{build_request, map_finish_reason, map_usage};
 use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::{anyhow, Result};
+use async_openai::config::OpenAIConfig;
+use async_openai::types::chat::CreateChatCompletionStreamResponse;
+use async_openai::Client as OpenAiSdkClient;
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use log::{debug, trace};
-use reqwest::{header, Client};
-use serde_json::json;
 use std::collections::VecDeque;
+use std::pin::Pin;
+use tokio_stream::Stream;
 
-/// Client for interacting with OpenAI-compatible APIs.
+/// Client for interacting with OpenAI-compatible APIs using async-openai SDK.
 pub struct OpenAiCompatClient {
-    http: Client,
-    api_key: String,
-    base_url: String,
+    client: OpenAiSdkClient<OpenAIConfig>,
 }
 
 impl OpenAiCompatClient {
     /// Constructs a new `OpenAiCompatClient` with the provided API key and base URL.
     pub fn new(api_key: String, base_url: String) -> Self {
+        let base = base_url.trim_end_matches('/').to_string();
+        let config = OpenAIConfig::new().with_api_key(api_key).with_api_base(base);
         Self {
-            http: Client::new(),
-            api_key,
-            base_url,
+            client: OpenAiSdkClient::with_config(config),
         }
     }
 }
@@ -39,156 +39,25 @@ impl LlmClient for OpenAiCompatClient {
         tools: &[ToolDefinition],
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
-        let mut input_messages = Vec::new();
+        let request = build_request(messages, tools, config);
 
-        for msg in messages {
-            let role = match msg.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant => "assistant",
-            };
-
-            let mut text_parts = Vec::new();
-            let mut tool_calls = Vec::new();
-            let mut tool_results = Vec::new();
-
-            for block in &msg.content {
-                match block {
-                    ContentBlock::Text { text } => {
-                        text_parts.push(text.clone());
-                    }
-                    ContentBlock::Thinking { .. } => {
-                        // 3.6.2 OpenAI compatibility: Skip thinking for requests
-                        continue;
-                    }
-                    ContentBlock::ToolUse { id, name, input } => {
-                        tool_calls.push(json!({
-                            "id": id,
-                            "type": "function",
-                            "function": {
-                                "name": name,
-                                "arguments": input.to_string()
-                            }
-                        }));
-                    }
-                    ContentBlock::ToolResult {
-                        tool_use_id, output, ..
-                    } => {
-                        tool_results.push(json!({
-                            "role": "tool",
-                            "tool_call_id": tool_use_id,
-                            "content": output
-                        }));
-                    }
-                }
-            }
-
-            // 3.6.3 OpenAI Tool Call Adaptation
-            if !tool_results.is_empty() {
-                // OpenAI requires each tool result to be a separate message with role "tool"
-                for tr in tool_results {
-                    input_messages.push(tr);
-                }
-                // If there's also text in this message (rare), add it as a user message
-                if !text_parts.is_empty() {
-                    input_messages.push(json!({
-                        "role": "user",
-                        "content": text_parts.join("\n")
-                    }));
-                }
-            } else if role == "assistant" && !tool_calls.is_empty() {
-                // Assistant message with tool calls
-                let mut assistant_msg = json!({
-                    "role": "assistant"
-                });
-                if !text_parts.is_empty() {
-                    assistant_msg["content"] = json!(text_parts.join("\n"));
-                } else {
-                    assistant_msg["content"] = json!(null);
-                }
-                assistant_msg["tool_calls"] = json!(tool_calls);
-                input_messages.push(assistant_msg);
-            } else {
-                // Regular user or assistant message
-                let content = text_parts.join("\n");
-                if !content.is_empty() || role == "user" {
-                    input_messages.push(json!({
-                        "role": role,
-                        "content": if content.is_empty() { json!(null) } else { json!(content) }
-                    }));
-                }
-            }
-        }
-
-        let mut body = json!({
-            "model": config.model,
-            "messages": input_messages,
-            "stream": true,
-        });
-
-        if !tools.is_empty() {
-            body["tools"] = json!(tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.input_schema
-                        }
-                    })
-                })
-                .collect::<Vec<_>>());
-        }
-
-        if let Some(temp) = config.temperature {
-            body["temperature"] = json!(temp);
-        }
-        if let Some(top_p) = config.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        body["max_tokens"] = json!(config.max_tokens);
-
-        // Phase 4a: stream_options to get usage
-        body["stream_options"] = json!({ "include_usage": true });
-
-        if let Some(effort) = &config.reasoning_effort {
-            body["reasoning_effort"] = json!(effort);
-        }
-
-        // Phase 4b: Support generic reasoning toggle for models like Gemma 4 or DeepSeek R1
-        if config.thinking_budget.is_some() {
-            body["enable_thinking"] = json!(true);
-            body["include_reasoning"] = json!(true);
-        }
-
-        let url = format!("{}/chat/completions", self.base_url);
         debug!(
-            "[OUTBOUND] LLM HTTP request: URL={}, model={}, msg_count={}",
-            url,
+            "[OUTBOUND] LLM HTTP request via async-openai: model={}, msg_count={}",
             config.model,
             messages.len()
         );
-        let resp = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header(header::CONTENT_TYPE, "application/json")
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?;
 
-        Ok(Box::new(OpenAiCompatStreamReceiver {
-            response: resp,
-            parser: SseParser::new(),
-            pending_tool_calls: Vec::new(),
-            pending_stop_reason: None,
-            event_queue: VecDeque::new(),
-            request_body: body,
-            response_chunks: Vec::new(),
-        }))
+        // 序列化请求体用于日志/诊断
+        let request_body = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
+
+        let stream = self
+            .client
+            .chat()
+            .create_stream(request)
+            .await
+            .map_err(|e| anyhow!("Failed to create chat stream: {}", e))?;
+
+        Ok(Box::new(OpenAiCompatStreamReceiver::new(stream, request_body)))
     }
 }
 
@@ -202,8 +71,10 @@ struct PendingToolCall {
 }
 
 pub struct OpenAiCompatStreamReceiver {
-    response: reqwest::Response,
-    parser: SseParser,
+    /// async-openai 返回的流式响应
+    stream: Pin<
+        Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, async_openai::error::OpenAIError>> + Send>,
+    >,
     /// 按 index 存储正在组装的 tool calls
     pending_tool_calls: Vec<Option<PendingToolCall>>,
     pending_stop_reason: Option<StopReason>,
@@ -213,6 +84,24 @@ pub struct OpenAiCompatStreamReceiver {
     response_chunks: Vec<serde_json::Value>,
 }
 
+impl OpenAiCompatStreamReceiver {
+    fn new(
+        stream: Pin<
+            Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, async_openai::error::OpenAIError>> + Send>,
+        >,
+        request_body: serde_json::Value,
+    ) -> Self {
+        Self {
+            stream,
+            pending_tool_calls: Vec::new(),
+            pending_stop_reason: None,
+            event_queue: VecDeque::new(),
+            request_body,
+            response_chunks: Vec::new(),
+        }
+    }
+}
+
 #[async_trait]
 impl StreamReceiver for OpenAiCompatStreamReceiver {
     async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>> {
@@ -220,47 +109,35 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
             // 1. 先消费缓冲队列
             if let Some(event) = self.event_queue.pop_front() {
                 trace!(
-                    "[INBOUND] SSE stream: event from buffer, event_type={}",
+                    "[INBOUND] Stream: event from buffer, event_type={}",
                     std::any::type_name_of_val(&event)
                 );
                 return Ok(Some(event));
             }
 
-            // 2. 从 SSE 帧中取原始 JSON
-            match self.parser.next_raw()? {
-                Some(RawSseEvent::Done) => {
-                    // [DONE] 信号：发射所有未关闭的 tool calls 的 End 事件，再发 MessageComplete
-                    debug!("[INBOUND] SSE stream: [DONE] received from LLM");
-                    self.flush_pending_tool_calls();
-                    return Ok(self.event_queue.pop_front());
-                }
-                Some(RawSseEvent::Data(json_str)) => {
-                    // Check for error in JSON
-                    if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        if let Some(error) = err_obj.get("error") {
-                            let msg = error.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
-                            return Err(anyhow!("OpenAI API Error: {}", msg));
-                        }
+            // 2. 从 async-openai stream 获取下一个 chunk
+            match self.stream.next().await {
+                Some(Ok(response)) => {
+                    // 记录原始响应用于诊断
+                    if let Ok(json) = serde_json::to_value(&response) {
+                        self.response_chunks.push(json);
                     }
-
-                    let chunk: ChatCompletionChunk = serde_json::from_str(&json_str)
-                        .map_err(|e| anyhow!("Failed to parse OpenAI chunk: {}, content: {}", e, json_str))?;
-                    if let Ok(chunk_json) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                        self.response_chunks.push(chunk_json);
-                    }
-                    self.process_chunk(chunk);
+                    self.process_response(response);
                     // 回到循环顶部消费 event_queue
                     continue;
                 }
-                None => {
-                    // 缓冲区中没有完整帧，读取更多数据
+                Some(Err(e)) => {
+                    return Err(anyhow!("OpenAI stream error: {}", e));
                 }
-            }
-
-            // 3. 从 HTTP response 读取更多数据
-            match self.response.chunk().await? {
-                Some(bytes) => self.parser.feed(&bytes),
-                None => return Ok(None),
+                None => {
+                    // 流结束：flush pending tool calls
+                    debug!("[INBOUND] Stream: [DONE] received from LLM");
+                    self.flush_pending_tool_calls();
+                    if let Some(event) = self.event_queue.pop_front() {
+                        return Ok(Some(event));
+                    }
+                    return Ok(None);
+                }
             }
         }
     }
@@ -275,45 +152,24 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
 }
 
 impl OpenAiCompatStreamReceiver {
-    fn process_chunk(&mut self, chunk: ChatCompletionChunk) {
+    fn process_response(&mut self, response: CreateChatCompletionStreamResponse) {
         // --- Usage 处理 ---
-        if let Some(usage) = chunk.usage {
-            let cache_read_tokens = usage.prompt_tokens_details.and_then(|details| details.cached_tokens);
+        if let Some(usage) = response.usage {
             self.event_queue.push_back(ProviderStreamEvent::MessageComplete {
-                usage: Usage {
-                    input_tokens: usage.prompt_tokens,
-                    output_tokens: usage.completion_tokens,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: cache_read_tokens,
-                    raw_provider_usage: self.response_chunks.last().cloned(),
-                },
+                usage: map_usage(&usage),
                 stop_reason: self.pending_stop_reason.take(),
             });
             return;
         }
 
-        let Some(choice) = chunk.choices.first() else { return };
+        let Some(choice) = response.choices.first() else { return };
 
         // --- finish_reason 处理 ---
         if let Some(reason) = &choice.finish_reason {
-            self.pending_stop_reason = Some(match reason.as_str() {
-                "stop" => StopReason::EndTurn,
-                "length" => StopReason::MaxTokens,
-                "tool_calls" => StopReason::ToolUse,
-                _ => StopReason::Unknown,
-            });
+            self.pending_stop_reason = Some(map_finish_reason(reason));
         }
 
         let delta = &choice.delta;
-
-        // --- Reasoning content（优先于普通 text）---
-        let reasoning = delta.reasoning_content.as_ref().or(delta.reasoning_alias.as_ref()); // fallback 到 alias
-        if let Some(reasoning) = reasoning {
-            if !reasoning.is_empty() {
-                self.event_queue
-                    .push_back(ProviderStreamEvent::ThinkingDelta(reasoning.clone()));
-            }
-        }
 
         // --- Text content ---
         if let Some(content) = &delta.content {
@@ -326,14 +182,12 @@ impl OpenAiCompatStreamReceiver {
         // --- Tool calls 增量组装 ---
         if let Some(tool_calls) = &delta.tool_calls {
             for tc in tool_calls {
-                let idx = tc.index;
-                // 确保 pending_tool_calls 容量足够
+                let idx = tc.index as usize;
                 while self.pending_tool_calls.len() <= idx {
                     self.pending_tool_calls.push(None);
                 }
 
                 if let Some(id) = &tc.id {
-                    // 新 tool call 的首个 chunk：发射 ToolUseStart
                     let name = tc
                         .function
                         .as_ref()

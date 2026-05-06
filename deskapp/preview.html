@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenFlux Preview</title>
+  <link rel="stylesheet" href="./src/styles/main.css" />
+</head>
+<body>
+  <div class="floating-preview-panel">
+    <div class="fp-header preview-header">
+      <div class="fp-title">
+        <span id="p-icon" class="fp-icon">📄</span>
+        <span id="p-name" class="fp-name">Preview</span>
+        <span id="p-size" class="fp-size"></span>
+      </div>
+      <div class="fp-actions">
+        <button id="p-open" class="icon-btn" title="打开">Open</button>
+        <button id="p-reveal" class="icon-btn" title="定位">Reveal</button>
+        <button id="p-copy" class="icon-btn" title="复制">Copy</button>
+        <button id="p-minimize" class="icon-btn" title="最小化">_</button>
+        <button id="p-close" class="icon-btn" title="关闭">×</button>
+      </div>
+    </div>
+    <div id="p-body" class="fp-body"></div>
+  </div>
+  <script type="module" src="./src/preview.ts"></script>
+</body>
+</html>

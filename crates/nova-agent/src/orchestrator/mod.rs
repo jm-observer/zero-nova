@@ -5,7 +5,7 @@ pub mod scheduler;
 use crate::event::AgentEvent;
 use crate::tool::builtin::agent::AgentTool;
 use crate::tool::{Tool, ToolContext};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use planner::{parse_and_validate, OrchestrationPlan};
 use reviewer::{build_review_prompt, parse_review_result, ReviewResult};
 use scheduler::{execute_stage, SubAgentResult, SubAgentStatus};
@@ -51,6 +51,7 @@ impl OrchestratorEngine {
     ) -> Result<ExecutionOutcome> {
         let plan = self.parse_plan(plan_json)?;
         let mut results = HashMap::<String, SubAgentResult>::new();
+        let mut stage_success = HashMap::<String, bool>::new();
 
         self.emit(
             "orchestration_plan",
@@ -64,20 +65,33 @@ impl OrchestratorEngine {
 
         for stage in &plan.stages {
             for dep in &stage.depends_on {
-                if results
-                    .values()
-                    .any(|r| &r.stage_id == dep && r.status != SubAgentStatus::Success)
-                {
-                    bail!("dependency stage '{}' contains failed agents", dep);
+                if !stage_success.get(dep).copied().unwrap_or(false) {
+                    self.emit(
+                        "orchestration_complete",
+                        json!({
+                            "planId": plan.plan_id,
+                            "overallSuccess": false,
+                            "summary": format!("Stage '{}' blocked by dependency '{}'.", stage.stage_id, dep),
+                        }),
+                    )
+                    .await;
+
+                    return Ok(ExecutionOutcome {
+                        plan,
+                        results,
+                        review: None,
+                    });
                 }
             }
 
-            let stage_results = execute_stage(stage, &cancellation_token, {
+            let stage_results = execute_stage(&plan.plan_id, stage, &cancellation_token, {
                 let tool = self.agent_tool.clone();
                 let ctx = self.tool_context.clone();
+                let plan_id = plan.plan_id.clone();
                 move |agent_req, stage_id| {
                     let tool = tool.clone();
                     let ctx = ctx.clone();
+                    let plan_id = plan_id.clone();
                     async move {
                         let output = tool
                             .execute(
@@ -87,6 +101,7 @@ impl OrchestratorEngine {
                                     "subagent_type": agent_req.subagent_type,
                                     "run_in_background": false,
                                     "agent_id": agent_req.agent_id,
+                                    "parent_plan_id": plan_id,
                                     "stage_id": stage_id,
                                     "output_format": agent_req.output_format.unwrap_or_else(|| "summary".to_string())
                                 }),
@@ -103,10 +118,12 @@ impl OrchestratorEngine {
                             .to_string();
 
                         Ok(SubAgentResult {
+                            plan_id,
                             agent_id: agent_req.agent_id,
                             stage_id,
                             status: SubAgentStatus::Success,
                             output: content,
+                            error: None,
                         })
                     }
                 }
@@ -114,29 +131,77 @@ impl OrchestratorEngine {
             .await?;
 
             let all_success = stage_results.iter().all(|r| r.status == SubAgentStatus::Success);
-            self.emit(
-                "stage_complete",
-                json!({ "stageId": stage.stage_id, "mode": stage.mode.as_str(), "allSuccess": all_success }),
-            )
-            .await;
+            stage_success.insert(stage.stage_id.clone(), all_success);
 
-            if !all_success {
-                bail!("stage '{}' execution failed", stage.stage_id);
-            }
-
-            for result in stage_results {
+            for result in &stage_results {
                 self.emit(
                     "sub_agent_complete",
                     json!({
+                        "planId": result.plan_id,
                         "agentId": result.agent_id,
                         "stageId": result.stage_id,
-                        "status": "success",
+                        "status": result.status.as_str(),
                         "outputSummary": result.output,
+                        "error": result.error,
                     }),
                 )
                 .await;
+            }
+
+            self.emit(
+                "stage_complete",
+                json!({
+                    "planId": plan.plan_id,
+                    "stageId": stage.stage_id,
+                    "mode": stage.mode.as_str(),
+                    "allSuccess": all_success
+                }),
+            )
+            .await;
+
+            for result in stage_results {
                 results.insert(result.agent_id.clone(), result);
             }
+
+            if cancellation_token.is_cancelled() || !all_success {
+                break;
+            }
+        }
+
+        if results.is_empty() {
+            self.emit(
+                "orchestration_complete",
+                json!({
+                    "planId": plan.plan_id,
+                    "overallSuccess": true,
+                    "summary": "No stages were scheduled.",
+                }),
+            )
+            .await;
+
+            return Ok(ExecutionOutcome {
+                plan,
+                results,
+                review: None,
+            });
+        }
+
+        if cancellation_token.is_cancelled() {
+            self.emit(
+                "orchestration_complete",
+                json!({
+                    "planId": plan.plan_id,
+                    "overallSuccess": false,
+                    "summary": "Orchestration cancelled before review.",
+                }),
+            )
+            .await;
+
+            return Ok(ExecutionOutcome {
+                plan,
+                results,
+                review: None,
+            });
         }
 
         self.emit("orchestration_review_start", json!({ "planId": plan.plan_id }))
@@ -188,14 +253,14 @@ impl OrchestratorEngine {
     }
 
     async fn emit(&self, kind: &str, args: serde_json::Value) {
-        let payload = format!(
-            "{{\"kind\":{},\"args\":{}}}",
-            serde_json::to_string(kind).unwrap_or_else(|_| "\"unknown\"".to_string()),
-            args
-        );
         let _ = self
             .event_tx
-            .send(AgentEvent::SystemLog(format!("[orchestration] {}", payload)))
+            .send(AgentEvent::OrchestrationProgress {
+                kind: kind.to_string(),
+                args,
+                log: None,
+                stream: None,
+            })
             .await;
     }
 }

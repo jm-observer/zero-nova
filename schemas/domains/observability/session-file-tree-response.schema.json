@@ -1,0 +1,51 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "SessionFileTreeEntry": {
+      "properties": {
+        "isDir": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "isDir",
+        "name",
+        "relativePath"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "baseRelativePath": {
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/definitions/SessionFileTreeEntry"
+      },
+      "type": "array"
+    },
+    "projectDirPresent": {
+      "type": "boolean"
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "baseRelativePath",
+    "entries",
+    "projectDirPresent",
+    "updatedAt"
+  ],
+  "title": "SessionFileTreeResponse",
+  "type": "object"
+}

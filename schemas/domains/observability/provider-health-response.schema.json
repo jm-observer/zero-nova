@@ -1,0 +1,62 @@
+{
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ProviderHealthSnapshot": {
+      "properties": {
+        "checkedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "latencyMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkedAt",
+        "provider",
+        "scope",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "providers": {
+      "items": {
+        "$ref": "#/definitions/ProviderHealthSnapshot"
+      },
+      "type": "array"
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "providers",
+    "updatedAt"
+  ],
+  "title": "ProviderHealthSnapshotResponse",
+  "type": "object"
+}

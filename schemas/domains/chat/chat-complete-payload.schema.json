@@ -6,16 +6,22 @@
       "description": "Usage statistics for a chat turn, re-exported from nova-core. This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
       "properties": {
         "cacheCreationInputTokens": {
-          "default": 0,
+          "default": null,
           "format": "uint64",
           "minimum": 0.0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "cacheReadInputTokens": {
-          "default": 0,
+          "default": null,
           "format": "uint64",
           "minimum": 0.0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "inputTokens": {
           "format": "uint64",

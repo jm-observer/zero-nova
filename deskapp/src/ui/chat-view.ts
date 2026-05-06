@@ -298,7 +298,12 @@ export class ChatView {
             event.stopPropagation();
         });
 
-        this.inputContainer.insertBefore(this.projectMenuBtn, this.inputRow);
+        const menuAnchor = this.inputRow !== this.inputContainer ? this.inputRow : this.inputContainer.firstChild;
+        if (menuAnchor) {
+            this.inputContainer.insertBefore(this.projectMenuBtn, menuAnchor);
+        } else {
+            this.inputContainer.appendChild(this.projectMenuBtn);
+        }
         this.inputContainer.appendChild(this.projectMenuEl);
         this.renderProjectMenu();
     }
@@ -646,7 +651,8 @@ export class ChatView {
         if (this.pickerActiveIndex >= 0) {
             const activeEl = this.projectPickerEl.querySelector(`.project-picker-item[data-index="${this.pickerActiveIndex}"]`);
             if (activeEl) {
-                (activeEl as HTMLElement).scrollIntoView({ block: 'nearest' });
+                const item = activeEl as HTMLElement & { scrollIntoView?: (options?: ScrollIntoViewOptions) => void };
+                item.scrollIntoView?.({ block: 'nearest' });
             }
         }
 
@@ -1339,7 +1345,10 @@ export class ChatView {
                 
                 // 用户点击跳转
                 marker.addEventListener('click', () => {
-                    htmlMsg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const scrollable = htmlMsg as HTMLElement & {
+                        scrollIntoView?: (options?: ScrollIntoViewOptions) => void;
+                    };
+                    scrollable.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
                     // 如果有高亮需求可以在这里补充
                     htmlMsg.style.transition = 'background-color 0.5s ease';
                     const origBg = htmlMsg.style.backgroundColor;

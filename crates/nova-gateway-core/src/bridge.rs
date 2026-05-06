@@ -212,6 +212,19 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             };
             MessageEnvelope::SkillInvocation(payload)
         }
+        AppEvent::OrchestrationProgress {
+            kind,
+            args,
+            log,
+            stream,
+        } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind,
+            session_id: Some(session_id.to_string()),
+            args: Some(args),
+            log,
+            stream,
+            ..Default::default()
+        }),
         AppEvent::SessionRuntimeUpdated(payload) => MessageEnvelope::SessionRuntimeUpdated(*payload),
         AppEvent::SessionTokenUsageUpdated(payload) => MessageEnvelope::SessionTokenUsageUpdated(payload),
         AppEvent::SessionToolsUpdated(payload) => MessageEnvelope::SessionToolsUpdated(payload),
@@ -283,5 +296,44 @@ pub fn app_message_to_protocol(message: AppMessage) -> MessageDTO {
             .collect(),
         timestamp: message.timestamp,
         metadata: message.metadata,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_event_to_gateway;
+    use nova_agent::app::types::AppEvent;
+    use nova_protocol::MessageEnvelope;
+    use serde_json::json;
+
+    #[test]
+    fn maps_orchestration_progress_to_chat_progress() {
+        let message = app_event_to_gateway(
+            AppEvent::OrchestrationProgress {
+                kind: "sub_agent_complete".to_string(),
+                args: json!({
+                    "planId": "plan-1",
+                    "stageId": "stage-1",
+                    "agentId": "agent-1",
+                    "status": "failed",
+                    "error": "boom"
+                }),
+                log: None,
+                stream: None,
+            },
+            "req-1",
+            "session-1",
+        );
+
+        match message.envelope {
+            MessageEnvelope::ChatProgress(progress) => {
+                assert_eq!(progress.kind, "sub_agent_complete");
+                assert_eq!(progress.session_id.as_deref(), Some("session-1"));
+                let args = progress.args.expect("args should exist");
+                assert_eq!(args["planId"], "plan-1");
+                assert_eq!(args["error"], "boom");
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
     }
 }

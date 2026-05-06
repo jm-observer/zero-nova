@@ -39,38 +39,38 @@ tools:
 
 ## 输出格式
 
-分析完成后，调用 `OrchestrateTask` 工具，`plan_json` 字段包含以下格式 JSON：
+分析完成后，调用 `OrchestrateTask` 工具，`planJson` 字段包含以下格式 JSON：
 
 ```json
 {
-  "plan_id": "plan-<8位随机字符串>",
+  "planId": "plan-<8位随机字符串>",
   "description": "<整体任务的一句话描述>",
   "stages": [
     {
-      "stage_id": "s1",
+      "stageId": "s1",
       "mode": "parallel",
-      "depends_on": [],
+      "dependsOn": [],
       "agents": [
         {
-          "agent_id": "a1",
-          "subagent_type": "Coder",
+          "agentId": "a1",
+          "subagentType": "Coder",
           "description": "<3-5字描述>",
           "prompt": "<完整、自包含的子任务提示词>",
-          "context_files": ["src/models/"]
+          "contextFiles": ["src/models/"]
         }
       ]
     },
     {
-      "stage_id": "s2",
+      "stageId": "s2",
       "mode": "serial",
-      "depends_on": ["s1"],
+      "dependsOn": ["s1"],
       "agents": [
         {
-          "agent_id": "a3",
-          "subagent_type": "Coder",
+          "agentId": "a3",
+          "subagentType": "Coder",
           "description": "<描述>",
           "prompt": "<提示词，可引用上一阶段预期输出>",
-          "context_files": ["tests/"]
+          "contextFiles": ["tests/"]
         }
       ]
     }
@@ -112,11 +112,9 @@ Review Agent 会收到每个子 Agent 的输出摘要，并判断：
 - 整体目标是否达成
 - 是否需要重试某个子 Agent
 
-## 降级策略
+## 失败处理
 
-若 `OrchestrateTask` 解析失败（如本地模型输出非法 JSON），系统会：
-1. 提示错误原因
-2. 降级为单 Agent 执行（直接执行整个任务，不拆分）
+若 `OrchestrateTask` 解析失败或执行失败，系统会返回明确错误；不要假设存在自动降级路径。
 
 ## 示例对话
 
@@ -126,4 +124,4 @@ Orchestrator 分析：
 - Stage 1（并行）：数据库模型（models/）、路由定义（routes/）可独立实现
 - Stage 2（串行，依赖 s1）：集成测试需要依赖 s1 的输出
 
--> 调用 OrchestrateTask { plan_json: "..." }
+-> 调用 OrchestrateTask { planJson: "..." }

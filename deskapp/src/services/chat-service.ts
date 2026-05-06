@@ -136,7 +136,7 @@ export class ChatService {
             const args = event.args || {};
             this.bus.emit('orchestration:agent_log', {
                 sessionId: event.sessionId,
-                agent_id: args.agent_id,
+                agentId: args.agentId,
                 log: event.log,
                 ...args,
             });

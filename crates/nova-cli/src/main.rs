@@ -669,6 +669,11 @@ impl EventPrinter {
                         format!("[skill invoked:{:?}] {skill_name}", level).bright_cyan()
                     );
                 }
+                AgentEvent::OrchestrationProgress { kind, args, .. } => {
+                    if self.verbose {
+                        println!("\n{} {}", format!("[orchestration:{kind}]").bright_black(), args);
+                    }
+                }
             },
         }
     }

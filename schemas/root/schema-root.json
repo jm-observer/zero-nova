@@ -42,6 +42,21 @@
         "AgentInspectResponse": {
           "$ref": "../schemas/domains/observability/agent-inspect-response.schema.json"
         },
+        "ProviderHealthRequest": {
+          "$ref": "../schemas/domains/observability/provider-health-request.schema.json"
+        },
+        "ProviderHealthSnapshot": {
+          "$ref": "../schemas/domains/observability/provider-health-snapshot.schema.json"
+        },
+        "ProviderHealthSnapshotResponse": {
+          "$ref": "../schemas/domains/observability/provider-health-response.schema.json"
+        },
+        "SessionFileTreeRequest": {
+          "$ref": "../schemas/domains/observability/session-file-tree-request.schema.json"
+        },
+        "SessionFileTreeResponse": {
+          "$ref": "../schemas/domains/observability/session-file-tree-response.schema.json"
+        },
         "WorkspaceRestoreRequest": {
           "$ref": "../schemas/domains/observability/workspace-restore-request.schema.json"
         },

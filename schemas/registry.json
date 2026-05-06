@@ -84,6 +84,33 @@
       "path": "schemas/domains/chat/progress-event.schema.json",
       "title": "ProgressEvent"
     },
+    "ProviderHealthRequest": {
+      "domain": "observability",
+      "frontend": true,
+      "kind": "request",
+      "messageType": "provider.health",
+      "name": "ProviderHealthRequest",
+      "path": "schemas/domains/observability/provider-health-request.schema.json",
+      "title": "ProviderHealthRequest"
+    },
+    "ProviderHealthSnapshot": {
+      "domain": "observability",
+      "frontend": true,
+      "kind": "payload",
+      "messageType": "provider.health.updated",
+      "name": "ProviderHealthSnapshot",
+      "path": "schemas/domains/observability/provider-health-snapshot.schema.json",
+      "title": "ProviderHealthSnapshot"
+    },
+    "ProviderHealthSnapshotResponse": {
+      "domain": "observability",
+      "frontend": true,
+      "kind": "response",
+      "messageType": "provider.health.response",
+      "name": "ProviderHealthSnapshotResponse",
+      "path": "schemas/domains/observability/provider-health-response.schema.json",
+      "title": "ProviderHealthSnapshotResponse"
+    },
     "SessionCreateRequest": {
       "domain": "session",
       "frontend": true,
@@ -101,6 +128,24 @@
       "name": "SessionCreateResponse",
       "path": "schemas/domains/session/session-create-response.schema.json",
       "title": "SessionCreateResponse"
+    },
+    "SessionFileTreeRequest": {
+      "domain": "observability",
+      "frontend": true,
+      "kind": "request",
+      "messageType": "session.file_tree.list",
+      "name": "SessionFileTreeRequest",
+      "path": "schemas/domains/observability/session-file-tree-request.schema.json",
+      "title": "SessionFileTreeRequest"
+    },
+    "SessionFileTreeResponse": {
+      "domain": "observability",
+      "frontend": true,
+      "kind": "response",
+      "messageType": "session.file_tree.list.response",
+      "name": "SessionFileTreeResponse",
+      "path": "schemas/domains/observability/session-file-tree-response.schema.json",
+      "title": "SessionFileTreeResponse"
     },
     "SessionIdPayload": {
       "domain": "session",

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EventBus } from '../core/event-bus';
 import { AppState } from '../core/state';
+import { t } from '../i18n';
 import { ChatView } from '../ui/chat-view';
 
 function flushAsync(): Promise<void> {
@@ -63,7 +64,7 @@ describe('ChatView http trace copy', () => {
         requestBtn?.click();
         await flushAsync();
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(JSON.stringify({ model: 'gpt', x: 1 }, null, 2));
-        expect(toastSpy).toHaveBeenCalledWith({ message: '已复制请求 body' });
+        expect(toastSpy).toHaveBeenCalledWith({ message: t('chat.copy_request_body_success') });
     });
 
     it('缺失 responseBody 时响应复制按钮置灰', () => {
@@ -127,7 +128,7 @@ describe('ChatView http trace copy', () => {
         await flushAsync();
 
         expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
-        expect(toastSpy).not.toHaveBeenCalledWith({ message: '已复制请求 body' });
+        expect(toastSpy).not.toHaveBeenCalledWith({ message: t('chat.copy_request_body_success') });
     });
 
     it('剪贴板失败时提示复制失败', async () => {
@@ -163,6 +164,6 @@ describe('ChatView http trace copy', () => {
         requestBtn?.click();
         await flushAsync();
 
-        expect(toastSpy).toHaveBeenCalledWith({ message: '复制失败' });
+        expect(toastSpy).toHaveBeenCalledWith({ message: t('chat.copy_body_failed') });
     });
 });

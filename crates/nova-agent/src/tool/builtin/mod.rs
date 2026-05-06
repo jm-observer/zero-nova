@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod bash;
 pub mod edit;
+pub mod orchestrate_task;
 pub mod project_manager;
 pub mod read;
 pub mod skill;
@@ -48,6 +49,9 @@ pub fn register_builtin_tools(
     }
     if is_tool_enabled(tool_whitelist, "ProjectManager") {
         registry.register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)));
+    }
+    if is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
+        registry.register(Box::new(orchestrate_task::OrchestrateTaskTool::new(config.clone())));
     }
 
     let skill_registry_for_skill = skill_registry.clone();
@@ -105,6 +109,17 @@ fn is_tool_enabled(tool_whitelist: Option<&[String]>, tool_name: &str) -> bool {
     }
 }
 
+fn is_tool_explicitly_enabled(tool_whitelist: Option<&[String]>, tool_name: &str) -> bool {
+    let Some(whitelist) = tool_whitelist else {
+        return false;
+    };
+
+    let legacy_aliases = legacy_tool_names(tool_name);
+    whitelist
+        .iter()
+        .any(|name| name == tool_name || legacy_aliases.iter().any(|alias| name == alias))
+}
+
 /// Return the set of legacy names that map to the given tool name.
 fn legacy_tool_names(tool_name: &str) -> &'static [&'static str] {
     match tool_name {
@@ -119,6 +134,48 @@ fn legacy_tool_names(tool_name: &str) -> &'static [&'static str] {
         "TaskCreate" => &["task_create", "create_task"],
         "TaskList" => &["task_list", "list_tasks"],
         "TaskUpdate" => &["task_update", "update_task", "task"],
+        "OrchestrateTask" => &["orchestrate_task"],
         _ => &[],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::register_builtin_tools;
+    use crate::config::{AppConfig, OriginAppConfig};
+    use crate::skill::SkillRegistry;
+    use crate::tool::{ToolRegistry, UnavailableProjectDirService};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[test]
+    fn orchestrate_task_is_hidden_without_explicit_whitelist() {
+        let registry = ToolRegistry::new();
+        register_builtin_tools(
+            &registry,
+            &AppConfig::from_origin(OriginAppConfig::default(), "D:/config".into()),
+            Arc::new(Mutex::new(super::task::TaskStore::default())),
+            Arc::new(SkillRegistry::new()),
+            None,
+            Arc::new(UnavailableProjectDirService::new("unavailable")),
+        );
+
+        assert!(!registry.has_loaded_tool("OrchestrateTask"));
+    }
+
+    #[test]
+    fn orchestrate_task_is_visible_when_whitelisted() {
+        let registry = ToolRegistry::new();
+        let whitelist = vec!["OrchestrateTask".to_string()];
+        register_builtin_tools(
+            &registry,
+            &AppConfig::from_origin(OriginAppConfig::default(), "D:/config".into()),
+            Arc::new(Mutex::new(super::task::TaskStore::default())),
+            Arc::new(SkillRegistry::new()),
+            Some(&whitelist),
+            Arc::new(UnavailableProjectDirService::new("unavailable")),
+        );
+
+        assert!(registry.has_loaded_tool("OrchestrateTask"));
     }
 }

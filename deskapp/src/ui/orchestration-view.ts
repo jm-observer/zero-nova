@@ -2,11 +2,12 @@ import { EventBus } from '../core/event-bus';
 import { renderMarkdown } from '../markdown';
 import { escapeHtml } from '../utils/html';
 
-type AgentStatus = 'pending' | 'running' | 'success' | 'failed';
+type AgentStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
 type StageMode = 'parallel' | 'serial';
 type PlanStatus = 'planning' | 'running' | 'reviewing' | 'completed' | 'failed';
 
 interface AgentState {
+    planId: string;
     agentId: string;
     stageId: string;
     description: string;
@@ -17,6 +18,7 @@ interface AgentState {
 }
 
 interface StageState {
+    planId: string;
     stageId: string;
     mode: StageMode;
     agents: Map<string, AgentState>;
@@ -31,6 +33,7 @@ interface PlanState {
     status: PlanStatus;
     completedCount: number;
     totalCount: number;
+    agentIndex: Map<string, AgentState>;
 }
 
 type GenericPayload = Record<string, unknown> & { sessionId?: string };
@@ -65,7 +68,7 @@ export class OrchestrationView {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const planId = this.readString(payload.plan_id);
+        const planId = this.readString(payload.planId);
         if (!planId) {
             return;
         }
@@ -79,6 +82,7 @@ export class OrchestrationView {
             status: 'planning',
             completedCount: 0,
             totalCount: 0,
+            agentIndex: new Map(),
         };
 
         const stages = Array.isArray(payload.stages) ? payload.stages : [];
@@ -87,12 +91,13 @@ export class OrchestrationView {
             if (!summary) {
                 continue;
             }
-            const stageId = this.readString(summary.stage_id);
+            const stageId = this.readString(summary.stageId);
             if (!stageId) {
                 continue;
             }
             const mode = this.readStageMode(summary.mode);
             const stage: StageState = {
+                planId,
                 stageId,
                 mode,
                 agents: new Map(),
@@ -105,18 +110,21 @@ export class OrchestrationView {
                 if (!summaryAgent) {
                     continue;
                 }
-                const agentId = this.readString(summaryAgent.agent_id);
+                const agentId = this.readString(summaryAgent.agentId);
                 if (!agentId) {
                     continue;
                 }
-                stage.agents.set(agentId, {
+                const agentState: AgentState = {
+                    planId,
                     agentId,
                     stageId,
                     description: this.readString(summaryAgent.description) ?? '',
-                    subagentType: this.readString(summaryAgent.subagent_type) ?? 'agent',
+                    subagentType: this.readString(summaryAgent.subagentType) ?? 'agent',
                     status: 'pending',
                     logs: [],
-                });
+                };
+                stage.agents.set(agentId, agentState);
+                plan.agentIndex.set(agentId, agentState);
                 plan.totalCount += 1;
             }
 
@@ -132,88 +140,93 @@ export class OrchestrationView {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const agentId = this.readString(payload.agent_id);
-        if (!agentId) {
+        const planId = this.readString(payload.planId);
+        const agentId = this.readString(payload.agentId);
+        if (!planId || !agentId) {
             return;
         }
-        const agent = this.findAgent(agentId);
+        const agent = this.findAgent(planId, agentId);
         if (!agent) {
             return;
         }
         agent.status = 'running';
-        const stage = this.findStage(agent.stageId);
+        const stage = this.findStage(planId, agent.stageId);
         if (stage) {
             stage.status = 'running';
+            this.updateStageCard(planId, stage.stageId, stage.status);
         }
-        const plan = this.findPlanByAgent(agentId);
+        const plan = this.plans.get(planId);
         if (plan && plan.status === 'planning') {
             plan.status = 'running';
             this.updatePlanStatus(plan.planId, 'running');
         }
-        this.updateAgentCard(agentId);
+        this.updateAgentCard(planId, agentId);
     }
 
     private onAgentLog(payload: GenericPayload) {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const agentId = this.readString(payload.agent_id);
+        const planId = this.readString(payload.planId);
+        const agentId = this.readString(payload.agentId);
         const log = this.readString(payload.log);
-        if (!agentId || !log) {
+        if (!planId || !agentId || !log) {
             return;
         }
-        const agent = this.findAgent(agentId);
+        const agent = this.findAgent(planId, agentId);
         if (!agent) {
             return;
         }
         agent.logs.push(log);
-        this.appendAgentLog(agentId, log);
+        this.appendAgentLog(planId, agentId, log);
     }
 
     private onAgentComplete(payload: GenericPayload) {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const agentId = this.readString(payload.agent_id);
-        if (!agentId) {
+        const planId = this.readString(payload.planId);
+        const agentId = this.readString(payload.agentId);
+        if (!planId || !agentId) {
             return;
         }
-        const agent = this.findAgent(agentId);
+        const agent = this.findAgent(planId, agentId);
         if (!agent) {
             return;
         }
-        agent.status = this.readString(payload.status) === 'success' ? 'success' : 'failed';
-        agent.outputSummary = this.readString(payload.output_summary);
+        agent.status = this.readAgentStatus(payload.status);
+        agent.outputSummary = this.readString(payload.outputSummary) ?? this.readString(payload.error);
 
-        const plan = this.findPlanByAgent(agentId);
+        const plan = this.plans.get(planId);
         if (plan) {
             plan.completedCount += 1;
             this.updatePlanProgress(plan.planId);
         }
-        this.updateAgentCard(agentId);
+        this.updateAgentCard(planId, agentId);
     }
 
     private onStageComplete(payload: GenericPayload) {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const stageId = this.readString(payload.stage_id);
-        if (!stageId) {
+        const planId = this.readString(payload.planId);
+        const stageId = this.readString(payload.stageId);
+        if (!planId || !stageId) {
             return;
         }
-        const stage = this.findStage(stageId);
+        const stage = this.findStage(planId, stageId);
         if (!stage) {
             return;
         }
-        stage.status = payload.all_success === true ? 'completed' : 'failed';
-        this.updateStageCard(stageId, stage.status);
+        stage.status = payload.allSuccess === true ? 'completed' : 'failed';
+        this.updateStageCard(planId, stageId, stage.status);
     }
 
     private onReviewStart(payload: GenericPayload) {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const planId = this.readString(payload.plan_id);
+        const planId = this.readString(payload.planId);
         if (!planId) {
             return;
         }
@@ -229,7 +242,7 @@ export class OrchestrationView {
         if (!this.isCurrentSession(payload)) {
             return;
         }
-        const planId = this.readString(payload.plan_id);
+        const planId = this.readString(payload.planId);
         if (!planId) {
             return;
         }
@@ -237,7 +250,7 @@ export class OrchestrationView {
         if (!plan) {
             return;
         }
-        plan.status = payload.overall_success === true ? 'completed' : 'failed';
+        plan.status = payload.overallSuccess === true ? 'completed' : 'failed';
         plan.completedCount = plan.totalCount;
         this.updatePlanProgress(planId);
         this.updatePlanStatus(planId, plan.status);
@@ -277,7 +290,7 @@ export class OrchestrationView {
         const modeText = stage.mode === 'parallel' ? '并行' : '串行';
         const agentsClass = stage.mode === 'parallel' ? 'agents-parallel' : 'agents-serial';
         return `
-            <div class="orchestration-stage stage-${stage.mode}" id="stage-${stage.stageId}">
+            <div class="orchestration-stage stage-${stage.mode}" id="${this.stageDomId(stage.planId, stage.stageId)}">
                 <div class="stage-header">
                     <span class="stage-mode-badge">${modeText}</span>
                 </div>
@@ -290,7 +303,7 @@ export class OrchestrationView {
 
     private renderAgentCard(agent: AgentState): string {
         return `
-            <div class="agent-card status-pending" id="agent-card-${agent.agentId}">
+            <div class="agent-card status-pending" id="${this.agentDomId(agent.planId, agent.agentId)}">
                 <div class="agent-card-header">
                     <span class="agent-type-badge">${escapeHtml(agent.subagentType)}</span>
                     <span class="agent-description">${escapeHtml(agent.description)}</span>
@@ -298,30 +311,36 @@ export class OrchestrationView {
                 </div>
                 <details class="agent-log-details">
                     <summary>执行日志</summary>
-                    <div class="agent-log-content" id="log-${agent.agentId}"></div>
+                    <div class="agent-log-content" id="${this.logDomId(agent.planId, agent.agentId)}"></div>
                 </details>
-                <div class="agent-summary hidden" id="summary-${agent.agentId}"></div>
+                <div class="agent-summary hidden" id="${this.summaryDomId(agent.planId, agent.agentId)}"></div>
             </div>
         `;
     }
 
-    private updateAgentCard(agentId: string) {
-        const agent = this.findAgent(agentId);
+    private updateAgentCard(planId: string, agentId: string) {
+        const agent = this.findAgent(planId, agentId);
         if (!agent) {
             return;
         }
-        const card = document.getElementById(`agent-card-${agentId}`);
+        const card = document.getElementById(this.agentDomId(planId, agentId));
         if (!card) {
             return;
         }
         card.className = `agent-card status-${agent.status}`;
         const icon = card.querySelector('.agent-status-icon');
         if (icon) {
-            const iconMap: Record<AgentStatus, string> = { pending: '○', running: '⟳', success: '✓', failed: '✗' };
+            const iconMap: Record<AgentStatus, string> = {
+                pending: '○',
+                running: '⟳',
+                success: '✓',
+                failed: '✗',
+                cancelled: '⊘',
+            };
             icon.textContent = iconMap[agent.status];
         }
-        if (agent.outputSummary && (agent.status === 'success' || agent.status === 'failed')) {
-            const summaryEl = document.getElementById(`summary-${agentId}`);
+        if (agent.outputSummary && agent.status !== 'running' && agent.status !== 'pending') {
+            const summaryEl = document.getElementById(this.summaryDomId(planId, agentId));
             if (summaryEl) {
                 summaryEl.innerHTML = renderMarkdown(agent.outputSummary);
                 summaryEl.classList.remove('hidden');
@@ -330,8 +349,8 @@ export class OrchestrationView {
         this.scrollToBottom();
     }
 
-    private appendAgentLog(agentId: string, log: string) {
-        const logEl = document.getElementById(`log-${agentId}`);
+    private appendAgentLog(planId: string, agentId: string, log: string) {
+        const logEl = document.getElementById(this.logDomId(planId, agentId));
         if (!logEl) {
             return;
         }
@@ -342,8 +361,8 @@ export class OrchestrationView {
         this.scrollToBottom();
     }
 
-    private updateStageCard(stageId: string, status: StageState['status']) {
-        const stageEl = document.getElementById(`stage-${stageId}`);
+    private updateStageCard(planId: string, stageId: string, status: StageState['status']) {
+        const stageEl = document.getElementById(this.stageDomId(planId, stageId));
         if (!stageEl) {
             return;
         }
@@ -394,39 +413,19 @@ export class OrchestrationView {
         }
     }
 
-    private findAgent(agentId: string): AgentState | undefined {
-        for (const plan of this.plans.values()) {
-            for (const stageId of plan.stageOrder) {
-                const stage = plan.stages.get(stageId);
-                const agent = stage?.agents.get(agentId);
-                if (agent) {
-                    return agent;
-                }
-            }
-        }
-        return undefined;
+    private findAgent(planId: string, agentId: string): AgentState | undefined {
+        return this.plans.get(planId)?.agentIndex.get(agentId);
     }
 
-    private findStage(stageId: string): StageState | undefined {
-        for (const plan of this.plans.values()) {
-            const stage = plan.stages.get(stageId);
-            if (stage) {
-                return stage;
-            }
-        }
-        return undefined;
+    private findStage(planId: string, stageId: string): StageState | undefined {
+        return this.plans.get(planId)?.stages.get(stageId);
     }
 
-    private findPlanByAgent(agentId: string): PlanState | undefined {
-        for (const plan of this.plans.values()) {
-            for (const stageId of plan.stageOrder) {
-                const stage = plan.stages.get(stageId);
-                if (stage?.agents.has(agentId)) {
-                    return plan;
-                }
-            }
+    private readAgentStatus(input: unknown): AgentStatus {
+        if (input === 'success' || input === 'failed' || input === 'cancelled' || input === 'running') {
+            return input;
         }
-        return undefined;
+        return 'failed';
     }
 
     private readString(input: unknown): string | undefined {
@@ -439,6 +438,22 @@ export class OrchestrationView {
 
     private readStageMode(input: unknown): StageMode {
         return input === 'parallel' ? 'parallel' : 'serial';
+    }
+
+    private agentDomId(planId: string, agentId: string): string {
+        return `agent-card-${planId}-${agentId}`;
+    }
+
+    private logDomId(planId: string, agentId: string): string {
+        return `log-${planId}-${agentId}`;
+    }
+
+    private summaryDomId(planId: string, agentId: string): string {
+        return `summary-${planId}-${agentId}`;
+    }
+
+    private stageDomId(planId: string, stageId: string): string {
+        return `stage-${planId}-${stageId}`;
     }
 
     private scrollToBottom() {

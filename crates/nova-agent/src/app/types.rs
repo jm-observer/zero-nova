@@ -120,6 +120,12 @@ pub enum AppEvent {
         skill_name: String,
         level: SkillInvocationLevel,
     },
+    OrchestrationProgress {
+        kind: String,
+        args: Value,
+        log: Option<String>,
+        stream: Option<String>,
+    },
     // --- Observability & Control (Plan 1 & 2) ---
     SessionRuntimeUpdated(Box<nova_protocol::observability::SessionRuntimeSnapshot>),
     SessionTokenUsageUpdated(nova_protocol::observability::SessionTokenUsageResponse),
@@ -211,6 +217,17 @@ impl From<AgentEvent> for AppEvent {
                 skill_id,
                 skill_name,
                 level,
+            },
+            AgentEvent::OrchestrationProgress {
+                kind,
+                args,
+                log,
+                stream,
+            } => AppEvent::OrchestrationProgress {
+                kind,
+                args,
+                log,
+                stream,
             },
         }
     }

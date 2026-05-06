@@ -7,6 +7,11 @@ schemas/domains/gateway/gateway-message.schema.json
 schemas/domains/gateway/message-envelope.schema.json
 schemas/domains/observability/agent-inspect-request.schema.json
 schemas/domains/observability/agent-inspect-response.schema.json
+schemas/domains/observability/provider-health-request.schema.json
+schemas/domains/observability/provider-health-response.schema.json
+schemas/domains/observability/provider-health-snapshot.schema.json
+schemas/domains/observability/session-file-tree-request.schema.json
+schemas/domains/observability/session-file-tree-response.schema.json
 schemas/domains/observability/workspace-restore-request.schema.json
 schemas/domains/observability/workspace-restore-response.schema.json
 schemas/domains/session/session-create-request.schema.json

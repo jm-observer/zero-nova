@@ -95,4 +95,11 @@ pub enum AgentEvent {
         skill_name: String,
         level: SkillInvocationLevel,
     },
+    /// Structured orchestration progress event routed to gateway chat progress.
+    OrchestrationProgress {
+        kind: String,
+        args: serde_json::Value,
+        log: Option<String>,
+        stream: Option<String>,
+    },
 }

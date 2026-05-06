@@ -289,6 +289,7 @@ impl Tool for AgentTool {
                 anyhow::bail!("run_in_background requires tool context");
             };
             let agent_id = input["agent_id"].as_str().unwrap_or("background-agent").to_string();
+            let plan_id = input["parent_plan_id"].as_str().unwrap_or("unknown-plan").to_string();
             let stage_id = input["stage_id"].as_str().unwrap_or("unknown-stage").to_string();
             let output_format = input["output_format"].as_str().unwrap_or("full").to_string();
             let this = self.clone();
@@ -299,22 +300,20 @@ impl Tool for AgentTool {
             let model_override_owned = model_override.map(ToString::to_string);
             let description_owned = description.to_string();
             let parent_tx = ctx.event_tx.clone();
-            let parent_tool_id = ctx.tool_use_id.clone();
 
             tokio::spawn(async move {
-                let spawn_log = format!(
-                    "{{\"kind\":\"sub_agent_spawn\",\"agent_id\":\"{}\",\"stage_id\":\"{}\",\"description\":\"{}\",\"subagent_type\":\"{}\"}}",
-                    agent_id,
-                    stage_id,
-                    description_owned,
-                    subagent_type_owned.as_deref().unwrap_or("default")
-                );
                 let _ = parent_tx
-                    .send(AgentEvent::LogDelta {
-                        id: parent_tool_id.clone(),
-                        name: "Agent".to_string(),
-                        log: spawn_log,
-                        stream: "orchestration".to_string(),
+                    .send(AgentEvent::OrchestrationProgress {
+                        kind: "sub_agent_spawn".to_string(),
+                        args: json!({
+                            "planId": plan_id.clone(),
+                            "agentId": agent_id.clone(),
+                            "stageId": stage_id.clone(),
+                            "description": description_owned.clone(),
+                            "subagentType": subagent_type_owned.as_deref().unwrap_or("default"),
+                        }),
+                        log: None,
+                        stream: None,
                     })
                     .await;
 
@@ -327,35 +326,42 @@ impl Tool for AgentTool {
                     )
                     .await;
 
-                let complete_log = match run {
+                let completion_event = match run {
                     Ok((output, _duration)) => {
                         let output_summary = if output_format == "summary" {
                             output.chars().take(500).collect::<String>()
                         } else {
                             output
                         };
-                        format!(
-                            "{{\"kind\":\"sub_agent_complete\",\"agent_id\":\"{}\",\"stage_id\":\"{}\",\"status\":\"success\",\"output_summary\":{}}}",
-                            agent_id,
-                            stage_id,
-                            serde_json::to_string(&output_summary).unwrap_or_else(|_| "\"\"".to_string())
-                        )
+                        AgentEvent::OrchestrationProgress {
+                            kind: "sub_agent_complete".to_string(),
+                            args: json!({
+                                "planId": plan_id.clone(),
+                                "agentId": agent_id.clone(),
+                                "stageId": stage_id.clone(),
+                                "status": "success",
+                                "outputSummary": output_summary,
+                                "error": serde_json::Value::Null,
+                            }),
+                            log: None,
+                            stream: None,
+                        }
                     }
-                    Err(err) => format!(
-                        "{{\"kind\":\"sub_agent_complete\",\"agent_id\":\"{}\",\"stage_id\":\"{}\",\"status\":\"failed\",\"error\":{}}}",
-                        agent_id,
-                        stage_id,
-                        serde_json::to_string(&err.to_string()).unwrap_or_else(|_| "\"unknown\"".to_string())
-                    ),
+                    Err(err) => AgentEvent::OrchestrationProgress {
+                        kind: "sub_agent_complete".to_string(),
+                        args: json!({
+                            "planId": plan_id,
+                            "agentId": agent_id,
+                            "stageId": stage_id,
+                            "status": "failed",
+                            "outputSummary": "",
+                            "error": err.to_string(),
+                        }),
+                        log: None,
+                        stream: None,
+                    },
                 };
-                let _ = parent_tx
-                    .send(AgentEvent::LogDelta {
-                        id: parent_tool_id,
-                        name: "Agent".to_string(),
-                        log: complete_log,
-                        stream: "orchestration".to_string(),
-                    })
-                    .await;
+                let _ = parent_tx.send(completion_event).await;
             });
 
             return Ok(ToolOutput {

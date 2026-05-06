@@ -116,6 +116,73 @@ export interface ProgressEvent {
     usage?: TokenUsageView;
 }
 
+export interface OrchestrationAgentSummary {
+    agentId: string;
+    description: string;
+    subagentType: string;
+}
+
+export interface OrchestrationStageSummary {
+    stageId: string;
+    mode: 'parallel' | 'serial';
+    dependsOn: string[];
+    agents: OrchestrationAgentSummary[];
+}
+
+export interface OrchestrationPlanEventArgs {
+    sessionId?: string;
+    planId: string;
+    description: string;
+    stages: OrchestrationStageSummary[];
+}
+
+export interface SubAgentSpawnArgs {
+    sessionId?: string;
+    planId: string;
+    agentId: string;
+    stageId: string;
+    description: string;
+    subagentType: string;
+}
+
+export interface SubAgentLogArgs {
+    sessionId?: string;
+    planId: string;
+    agentId: string;
+    stageId: string;
+    log?: string;
+}
+
+export interface SubAgentCompleteArgs {
+    sessionId?: string;
+    planId: string;
+    agentId: string;
+    stageId: string;
+    status: 'success' | 'failed' | 'cancelled';
+    outputSummary?: string;
+    error?: string;
+}
+
+export interface StageCompleteArgs {
+    sessionId?: string;
+    planId: string;
+    stageId: string;
+    mode: 'parallel' | 'serial';
+    allSuccess: boolean;
+}
+
+export interface OrchestrationReviewStartArgs {
+    sessionId?: string;
+    planId: string;
+}
+
+export interface OrchestrationCompleteArgs {
+    sessionId?: string;
+    planId: string;
+    overallSuccess: boolean;
+    summary: string;
+}
+
 export interface ChatIntentPayload {
     sessionId: string;
     intent: 'chat' | 'resolve' | 'address_agent' | 'continue_workflow';

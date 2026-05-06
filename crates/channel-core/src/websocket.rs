@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message as WsMessage};
+use uuid::Uuid;
 
 const DEFAULT_OUTBOUND_CAPACITY: usize = 128;
 
@@ -42,7 +43,7 @@ where
     Req: DeserializeOwned + Send + 'static,
     Resp: Serialize + Send + 'static,
 {
-    let peer_id = peer.to_string();
+    let peer_id = format!("{}#{}", peer, Uuid::new_v4());
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     info!("New WebSocket connection: {}", peer_id);
 

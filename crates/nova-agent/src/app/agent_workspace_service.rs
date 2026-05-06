@@ -131,6 +131,7 @@ impl AgentWorkspaceService {
             .cloned()
             .with_context(|| format!("Agent '{}' missing in config", agent_id))?;
         let prompt_base = load_agent_prompt_for_reload(&agent_spec, &reloaded_config).await?;
+        let prompt_base_fingerprint = fingerprint_text(&prompt_base);
 
         let mut prompt_config = PromptConfig::new(agent_id.clone(), prompt_base.clone(), None)
             .with_project_context_path_opt(reloaded_config.project_context_file())
@@ -141,6 +142,16 @@ impl AgentWorkspaceService {
         let compiled_prompt = SystemPromptBuilder::from_config(&prompt_config, &default_skill_registry()).build();
         let prompt_version = fingerprint_text(&compiled_prompt);
         let source_revision = source_revision(&reloaded_config).await;
+        log::info!(
+            "Session prompt reload prepared: session_id={}, agent_id={}, source_revision={}, prompt_base_len={}, prompt_base_hash={}, compiled_prompt_len={}, compiled_prompt_hash={}",
+            session_id,
+            agent_id,
+            source_revision,
+            prompt_base.len(),
+            prompt_base_fingerprint,
+            compiled_prompt.len(),
+            prompt_version
+        );
 
         let (version_before, version_after, changed, updated_at) = self
             .sessions

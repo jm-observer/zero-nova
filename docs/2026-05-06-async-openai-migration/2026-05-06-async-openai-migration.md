@@ -29,6 +29,7 @@
 3. 通过 `async-openai` 的 `CompletionUsage` 类型获取 token 统计
 4. 移除非标准字段支持（`reasoning_content`、`enable_thinking`、`include_reasoning`）
 5. 保持 `LlmClient` trait 抽象不变，对上层 `AgentRuntime` 透明
+6. 在前端每次回复内容下方展示本次请求的 token 使用情况（至少包含 `prompt_tokens`、`completion_tokens`、`total_tokens`）
 
 ### 不在范围内
 

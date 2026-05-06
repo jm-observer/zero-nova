@@ -13,6 +13,18 @@ export interface MessageAttachment {
     thumbnailUrl?: string;  // 图片缩略图（仅用于UI显示）
 }
 
+/**
+ * Token 使用量（单轮对话）
+ * 对应 OpenAI CompletionUsage 的简化版本
+ */
+export interface MessageTokenUsage {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    cacheCreationInputTokens?: number | null;
+    cacheReadInputTokens?: number | null;
+}
+
 export interface Message {
     id: string;
     role: 'user' | 'assistant';
@@ -21,6 +33,8 @@ export interface Message {
     toolCalls?: ToolCall[];
     attachments?: MessageAttachment[];
     metadata?: Record<string, unknown>;
+    /** 单轮 token 使用量（Plan 4） */
+    tokenUsage?: MessageTokenUsage;
 }
 
 export interface ToolCall {
@@ -82,6 +96,7 @@ export interface ProgressEvent {
     sessionId?: string;
     log?: string;
     stream?: string;
+    usage?: TokenUsageView;
 }
 
 export interface ChatIntentPayload {

@@ -942,7 +942,7 @@ export class ChatView {
                         displayContent = escapeHtml(String(originalContent));
                     }
 
-                    return `<div class="tool-result-card collapsible collapsed ${isErrorCode ? 'error' : ''}">
+                    return `<div class="tool-result-card collapsible ${isErrorCode ? 'error' : ''}">
                         <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
                         <div class="tool-result-content">${displayContent}</div>
                     </div>`;
@@ -974,6 +974,7 @@ export class ChatView {
         const traceBound = trace?.boundMessageId === message.id;
         const hasRequestBody = !!trace && traceBound && trace.requestBody !== undefined && trace.requestBody !== null;
         const hasResponseBody = !!trace && traceBound && trace.responseBody !== undefined && trace.responseBody !== null;
+        const tokenUsage = message.tokenUsage;
         const traceActionsHtml = isAssistant
             ? `<div class="message-trace-actions">
                 <button
@@ -990,6 +991,9 @@ export class ChatView {
                 >${t('chat.copy_response_body')}</button>
             </div>`
             : '';
+        const tokenUsageHtml = isAssistant && tokenUsage
+            ? `<div class="message-token-usage">Tokens: prompt ${this.formatTokenCountInK(tokenUsage.inputTokens)} · completion ${this.formatTokenCountInK(tokenUsage.outputTokens)} · total ${this.formatTokenCountInK(tokenUsage.totalTokens)}</div>`
+            : '';
 
         return `
             <div class="message ${roleClass} ${voiceTranscriptState ? `voice-transcript ${voiceTranscriptState}` : ''}" data-index="${index}">
@@ -998,6 +1002,7 @@ export class ChatView {
                     ${intentHtml}
                     <div class="markdown-body">${contentHtml}</div>
                     ${traceActionsHtml}
+                    ${tokenUsageHtml}
                 </div>
                 <div class="message-time">${formatTime(message.timestamp || message.createdAt)}</div>
             </div>
@@ -1087,7 +1092,10 @@ export class ChatView {
         const streamer = card.querySelector('.tool-log-streamer');
         if (!streamer) return;
 
+        // 日志出现时，确保卡片是展开的，并移除 hidden
         streamer.classList.remove('hidden');
+        card.classList.remove('collapsed');
+
         const line = document.createElement('div');
         line.className = `log-line ${stream || 'stdout'}`;
         line.textContent = log;
@@ -1173,13 +1181,14 @@ export class ChatView {
             this.scrollToBottom();
             this.updateMinimap();
 
-            // 5s 后自动折叠工具调用和结果
+            // 15s 后自动折叠工具调用和结果，给用户更多阅读时间
             setTimeout(() => {
                 const toolCard = markdownBody.querySelector(`.tool-use-card[data-tool-use-id="${toolUseId}"]`);
                 const resultCard = markdownBody.querySelector(`.tool-result-card[data-rel-id="${toolUseId}"]`);
                 if (toolCard) toolCard.classList.add('collapsed');
                 if (resultCard) resultCard.classList.add('collapsed');
-            }, 5000);
+                this.updateMinimap();
+            }, 15000);
         }
     }
 
@@ -1297,5 +1306,15 @@ export class ChatView {
             const agent = this.state.agentsList.find(a => a.id === this.state.currentAgentId);
             titleEl.textContent = session?.title || agent?.name || 'Chat';
         }
+    }
+
+    private formatTokenCountInK(value: unknown): string {
+        const count = typeof value === 'number' ? value : Number(value ?? 0);
+        if (!Number.isFinite(count) || count < 0) {
+            return '0k';
+        }
+        const inK = count / 1000;
+        const formatted = inK >= 10 ? inK.toFixed(1) : inK.toFixed(2);
+        return `${formatted.replace(/\.?0+$/, '')}k`;
     }
 }

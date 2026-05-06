@@ -1,7 +1,7 @@
 import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
 import { GatewayClient } from '../gateway-client';
-import type { Session } from '../core/types';
+import type { MessageTokenUsage, Session } from '../core/types';
 
 export class ChatService {
     constructor(private state: AppState, private bus: EventBus, private client: GatewayClient) {}
@@ -98,8 +98,10 @@ export class ChatService {
             // Refresh messages after completion to sync persistent state
             if (event.sessionId) {
                 const messages = await this.client.getMessages(event.sessionId);
+                const usage = this.normalizeMessageTokenUsage(event.usage);
+                const nextMessages = usage ? this.attachUsageToLastAssistantMessage(messages as any[], usage) : messages;
                 if (event.sessionId === this.state.currentSessionId) {
-                    this.state.setMessages(messages as any[]);
+                    this.state.setMessages(nextMessages as any[]);
                 }
             }
         } else if (event.type === 'tool_start') {
@@ -119,5 +121,38 @@ export class ChatService {
         } else if (event.type === 'system_log') {
             this.bus.emit('system:log', event);
         }
+    }
+
+    private normalizeMessageTokenUsage(usage: unknown): MessageTokenUsage | undefined {
+        if (!usage || typeof usage !== 'object') {
+            return undefined;
+        }
+        const record = usage as Record<string, unknown>;
+        const inputTokens = Number(record.inputTokens ?? 0);
+        const outputTokens = Number(record.outputTokens ?? 0);
+        return {
+            inputTokens,
+            outputTokens,
+            totalTokens: inputTokens + outputTokens,
+            cacheCreationInputTokens: typeof record.cacheCreationInputTokens === 'number' ? record.cacheCreationInputTokens : undefined,
+            cacheReadInputTokens: typeof record.cacheReadInputTokens === 'number' ? record.cacheReadInputTokens : undefined,
+        };
+    }
+
+    private attachUsageToLastAssistantMessage(messages: any[], usage: MessageTokenUsage): any[] {
+        if (!Array.isArray(messages) || messages.length === 0) {
+            return messages;
+        }
+
+        const nextMessages = [...messages];
+        for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+            const message = nextMessages[index];
+            if (message?.role !== 'assistant') {
+                continue;
+            }
+            nextMessages[index] = { ...message, tokenUsage: usage };
+            break;
+        }
+        return nextMessages;
     }
 }

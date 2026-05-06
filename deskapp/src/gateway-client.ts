@@ -87,6 +87,17 @@ interface VoiceTranscribeResult {
     segments?: Array<{ startMs: number; endMs: number; text: string }>;
 }
 
+interface ChatCompleteUsagePayload {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationInputTokens?: number;
+    cacheReadInputTokens?: number;
+}
+
 interface RawRunModelRef {
     provider?: string;
     model?: string;
@@ -269,6 +280,7 @@ export class GatewayClient {
     private maxReconnectAttempts = 10;
     private reconnectDelay = 1000;
     private shouldReconnect = true;
+    private debugLogSubscribed = false;
 
     private encodeAudioBase64(audio: ArrayBuffer): string {
         let binary = '';
@@ -593,11 +605,13 @@ export class GatewayClient {
 
                         if (payload.requireAuth && this.token) {
                             this.authenticate().then(() => {
+                                this.restoreSubscriptionsAfterReconnect();
                                 this.notifyConnectionChange('connected');
                                 resolve();
                             }).catch(reject);
                         } else {
                             this.authenticated = true;
+                            this.restoreSubscriptionsAfterReconnect();
                             this.notifyConnectionChange('connected');
                             resolve();
                         }
@@ -671,6 +685,12 @@ export class GatewayClient {
         this.connectionHandlers.forEach(handler => handler(status));
     }
 
+    private restoreSubscriptionsAfterReconnect(): void {
+        if (this.debugLogSubscribed) {
+            this.send({ type: 'debug.subscribe' });
+        }
+    }
+
     /**
      * 鐩戝惉杩炴帴鐘舵€佸彉鍖?     */
     onConnectionChange(handler: ConnectionHandler): () => void {
@@ -724,7 +744,8 @@ export class GatewayClient {
     }
 
     /**
-     * 澶勭悊鏀跺埌鐨勬秷鎭?     */
+     * 处理收到的消息
+     */
     private handleMessage(data: string): void {
         try {
             const message: GatewayMessage = JSON.parse(data);
@@ -735,13 +756,13 @@ export class GatewayClient {
                 this.warnGatewayError(message, pendingRequest?.requestType);
             }
 
-            // 閫氱煡鎵€鏈夋秷鎭鐞嗗櫒
+            // 通知所有消息处理器
             this.messageHandlers.forEach(handler => handler(message));
 
-            // 澶勭悊杩涘害浜嬩欢
+            // 处理进度事件
             if (message.type === 'chat.progress') {
                 const event = message.payload as ProgressEvent;
-                // ??????????? tool/toolName
+                // 兼容 tool / toolName 字段
                 if (event.toolName && !event.tool) event.tool = event.toolName;
                 if (!event.toolName && event.tool) event.toolName = event.tool;
 
@@ -753,46 +774,46 @@ export class GatewayClient {
                 this.progressHandlers.forEach(handler => handler(event));
             }
             
-            // 澶勭悊鑱婂ぉ鎰忓悜璇嗗埆浜嬩欢
+            // 处理聊天意图识别事件
             if (message.type === 'chat.intent') {
                 const payload = message.payload as ChatIntentPayload;
                 this.chatIntentHandlers.forEach(handler => handler(payload));
                 return;
             }
 
-            // 澶勭悊鑱婂ぉ瀹屾垚浜嬩欢
+            // 处理聊天完成事件
             if (message.type === 'chat.complete') {
-                const payload = message.payload as { output?: string; sessionId?: string; usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } };
+                const payload = message.payload as { output?: string; sessionId?: string; usage?: ChatCompleteUsagePayload };
                 const completeEvent: ProgressEvent = {
                     type: 'complete',
                     output: payload?.output,
                     sessionId: payload?.sessionId,
                 };
+                const usage = this.normalizeChatCompleteUsage(payload?.usage);
+                if (usage) {
+                    (completeEvent as ProgressEvent & { usage?: TokenUsageView }).usage = usage;
+                }
                 this.progressHandlers.forEach(handler => handler(completeEvent));
 
-                // 鍓嶇 token 绱姞锛氬彂閫?usage 鏇存柊浜嬩欢
-                if (payload?.usage && payload?.sessionId) {
+                // 前端 token 累加：发出 usage 更新事件
+                if (usage && payload?.sessionId) {
                     const usageUpdate = {
                         sessionId: payload.sessionId,
-                        usage: {
-                            inputTokens: payload.usage.input_tokens ?? 0,
-                            outputTokens: payload.usage.output_tokens ?? 0,
-                            cacheCreationInputTokens: payload.usage.cache_creation_input_tokens,
-                            cacheReadInputTokens: payload.usage.cache_read_input_tokens,
-                        },
+                        usage,
                     };
-                    // 閫氱煡鎵€鏈夋秷鎭鐞嗗櫒锛堝寘鎷?AppState锛?                    this.messageHandlers.forEach(handler => handler({ type: 'chat.token_usage', payload: usageUpdate }));
+                    // 通知所有消息处理器（包括 AppState）
+                    this.messageHandlers.forEach(handler => handler({ type: 'chat.token_usage', payload: usageUpdate }));
                 }
             }
 
-            // 澶勭悊瀹㈡埛绔?MCP 宸ュ叿璋冪敤璇锋眰
+            // 处理客户端 MCP 工具调用请求
             if (message.type === 'mcp.client.call' && message.id) {
                 this.handleClientMcpCall(message);
-                return; // 涓嶈蛋 pendingRequests 閫昏緫
+                return; // 不走 pendingRequests 逻辑
             }
 
-            // 澶勭悊鍝嶅簲 鈥斺€?鍙銆屾渶缁堛€嶆秷鎭?resolve/reject
-            // chat.start / chat.progress / config.progress 鏄腑闂寸姸鎬佹秷鎭紝涓嶅簲瑙﹀彂 resolve
+            // 处理响应：只对最终消息 resolve/reject
+            // chat.start / chat.progress / config.progress 是中间状态消息，不应触发 resolve
             const isIntermediateMessage =
                 message.type === 'chat.start' || message.type === 'chat.progress' || message.type === 'config.progress' || message.type === 'nexusai.auth-expired';
 
@@ -812,14 +833,28 @@ export class GatewayClient {
         }
     }
 
+    private normalizeChatCompleteUsage(usage?: ChatCompleteUsagePayload): TokenUsageView | undefined {
+        if (!usage) {
+            return undefined;
+        }
+        return {
+            inputTokens: usage.inputTokens ?? usage.input_tokens ?? 0,
+            outputTokens: usage.outputTokens ?? usage.output_tokens ?? 0,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens ?? usage.cache_read_input_tokens,
+        };
+    }
+
     /**
-     * 娣诲姞娑堟伅澶勭悊鍣?     */
+     * 添加消息处理器
+     */
     addMessageHandler(handler: MessageHandler): void {
         this.messageHandlers.push(handler);
     }
 
     /**
-     * 绉婚櫎娑堟伅澶勭悊鍣?     */
+     * 移除消息处理器
+     */
     removeMessageHandler(handler: MessageHandler): void {
         const index = this.messageHandlers.indexOf(handler);
         if (index !== -1) {
@@ -847,7 +882,7 @@ export class GatewayClient {
             this.send({
                 type: 'mcp.client.result',
                 id: message.id,
-                payload: { success: false, error: err.message || '?????????' },
+                payload: { success: false, error: err.message || 'MCP client tool call failed' },
             });
         }
     }
@@ -905,7 +940,8 @@ export class GatewayClient {
     }
 
     /**
-     * 鍙戣捣璇锋眰骞剁瓑寰呭搷搴?     * @param timeout 瓒呮椂姣鏁帮紝0 琛ㄧず涓嶈秴鏃讹紙榛樿 120 绉掞級
+     * 发起请求并等待响应
+     * @param timeout 超时毫秒数，0 表示不超时（默认 120 秒）
      */
     public request<T>(type: string, payload?: unknown, timeout: number = 120000): Promise<T> {
         return new Promise((resolve, reject) => {
@@ -917,12 +953,12 @@ export class GatewayClient {
             });
             this.send({ type, id, payload });
 
-            // timeout=0 ?????????? chat ??????
+            // timeout=0 表示不超时，主要用于 chat 请求
             if (timeout > 0) {
                 setTimeout(() => {
                     if (this.pendingRequests.has(id)) {
                         this.pendingRequests.delete(id);
-                        reject(new Error('璇锋眰瓒呮椂'));
+                        reject(new Error('请求超时'));
                     }
                 }, timeout);
             }
@@ -1100,7 +1136,7 @@ export class GatewayClient {
         const messageHandler = (msg: GatewayMessage) => {
             if (msg.type === 'nexusai.auth-expired') {
                 const payload = msg.payload as { message?: string };
-                handler(payload?.message || 'NexusAI access token ?????????');
+                handler(payload?.message || 'NexusAI access token expired');
             }
         };
         this.addMessageHandler(messageHandler);
@@ -1309,6 +1345,7 @@ export class GatewayClient {
      * 璁㈤槄 debug 鏃ュ織
      */
     subscribeDebugLog(): void {
+        this.debugLogSubscribed = true;
         this.send({ type: 'debug.subscribe' });
     }
 
@@ -1316,6 +1353,7 @@ export class GatewayClient {
      * 鍙栨秷璁㈤槄 debug 鏃ュ織
      */
     unsubscribeDebugLog(): void {
+        this.debugLogSubscribed = false;
         this.send({ type: 'debug.unsubscribe' });
     }
 
@@ -1850,7 +1888,7 @@ export class GatewayClient {
 
 }
 
-// ???????
+// 单例实例
 let gatewayClient: GatewayClient | null = null;
 
 /**

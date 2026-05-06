@@ -491,64 +491,166 @@
  font-size: 18px;
 }
 /* ========== Tool Message & Collapsible Cards ========== */
-.message.tool {
-    align-self: flex-start;
-    max-width: 90%;
+/* 仅针对含有工具卡片的消息，或系统工具消息设置统一宽度，既保证工具流堆叠时右侧整齐，又留有一定空白保留对话感 */
+.message.tool,
+.message.assistant:has(.tool-use-card),
+.message.assistant:has(.tool-result-card) {
+    align-self: flex-start !important;
+    width: 85%;
+    max-width: 100% !important;
+    margin-bottom: 4px;
 }
+
+.message.tool .message-bubble,
+.message.assistant:has(.tool-use-card) .message-bubble,
+.message.assistant:has(.tool-result-card) .message-bubble {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 赋予 tool 消息标准的气泡背景，使其与 assistant 消息左对齐并保持统一的外观边界 */
 .message.tool .message-bubble {
     background: var(--color-bg-secondary);
     border: 1px solid var(--color-border);
-    color: var(--color-text);
+    border-radius: var(--radius-lg);
+    border-top-left-radius: var(--radius-sm);
     padding: var(--spacing-sm) var(--spacing-md);
+    color: var(--color-text);
 }
+
 [data-theme='light'] .message.tool .message-bubble {
-    background: #f8f6f2;
-    border-color: #e0dbd1;
+    background: #ffffff;
+    border-color: #e2e8f0;
 }
-.tool-use-card.collapsible,
-.tool-result-card.collapsible {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    border-radius: var(--radius-md);
+
+/* 统一内部卡片样式（不带大阴影，融入气泡中） */
+.tool-use-card,
+.tool-result-card {
     margin: 8px 0;
+    background: rgba(128, 128, 128, 0.05);
+    border: 1px solid rgba(128, 128, 128, 0.15);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    transition: all 0.2s ease;
 }
-.tool-use-card.collapsible .tool-name,
-.tool-result-card.collapsible .tool-result-header {
+
+.tool-use-card {
+    border-left: 3px solid var(--color-primary);
+}
+
+.tool-result-card {
+    border-left: 3px solid var(--color-success);
+}
+
+.tool-result-card.error {
+    border-left-color: var(--color-error);
+}
+
+/* 卡片头部样式 */
+.tool-name,
+.tool-result-header {
     cursor: pointer;
     user-select: none;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    width: 100%;
-    margin-left: -4px;
-    padding: 4px;
-    border-radius: 4px;
-    transition: background-color 0.2s;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin: 0 !important;
+    color: var(--color-text);
+    transition: background-color 0.15s;
 }
-.tool-use-card.collapsible .tool-name:hover,
-.tool-result-card.collapsible .tool-result-header:hover {
-    background-color: rgba(128, 128, 128, 0.1);
+
+.tool-name:hover,
+.tool-result-header:hover {
+    background-color: rgba(128, 128, 128, 0.08);
 }
-.tool-use-card.collapsible .collapse-icon,
-.tool-result-card.collapsible .collapse-icon {
+
+/* 折叠图标 */
+.collapse-icon {
     font-size: 14px;
-    transition: transform 0.3s ease;
-    opacity: 0.6;
+    transition: transform 0.2s ease;
+    opacity: 0.5;
+    color: var(--color-text-secondary);
 }
+
+/* 内容区样式 */
+.tool-args,
+.tool-result-content {
+    padding: 0 12px 12px;
+}
+
+.tool-args,
+.json-result {
+    margin: 0;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.15);
+    border: none;
+    border-top: 1px solid rgba(128, 128, 128, 0.1);
+    border-radius: 0;
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    overflow-x: auto;
+}
+
+.tool-result-content {
+    font-size: 0.85rem;
+    color: var(--color-text);
+    line-height: 1.5;
+    border-top: 1px solid rgba(128, 128, 128, 0.1);
+}
+
+/* 日志流样式 */
+.tool-log-streamer {
+    margin: 0;
+    background: #09090b;
+    border: none;
+    border-top: 1px solid rgba(128, 128, 128, 0.1);
+    padding: 10px;
+    border-radius: 0;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: #a1a1aa;
+}
+
+/* 折叠状态 */
 .tool-use-card.collapsed .tool-args,
 .tool-use-card.collapsed .tool-log-streamer,
 .tool-result-card.collapsed .tool-result-content {
     display: none;
 }
+
 .tool-use-card.collapsed .collapse-icon,
 .tool-result-card.collapsed .collapse-icon {
     transform: rotate(-90deg);
 }
+
 .tool-use-card.collapsed,
 .tool-result-card.collapsed {
     padding-bottom: 0;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
 }
+
+/* 浅色主题适配 */
+[data-theme='light'] .tool-use-card,
+[data-theme='light'] .tool-result-card {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='light'] .tool-args,
+[data-theme='light'] .json-result {
+    background: rgba(0, 0, 0, 0.03);
+    color: #475569;
+}
+
+[data-theme='light'] .tool-name:hover,
+[data-theme='light'] .tool-result-header:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
 /* Thinking Block - Neutralized */
 .thinking-block {
     background: rgba(100, 116, 139, 0.05);

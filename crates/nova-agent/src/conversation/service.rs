@@ -324,7 +324,7 @@ impl SessionService {
     ) -> Result<(String, String, bool, i64)> {
         let session = self.get(session_id).await?.context("Session not found")?;
         let updated_at = Utc::now().timestamp_millis();
-        let (version_before, changed) = {
+        let (version_before, changed, prompt_preview_synced) = {
             let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
             let before = control.system_prompt_state.version.clone();
             let changed = before != prompt_version;
@@ -332,7 +332,9 @@ impl SessionService {
             control.system_prompt_state.version = prompt_version.clone();
             control.system_prompt_state.updated_at = updated_at;
             control.system_prompt_state.source_revision = source_revision;
-            (before, changed)
+            let prompt_preview_synced =
+                sync_last_turn_prompt_preview(control.last_turn_snapshot.as_mut(), &prompt_base_override);
+            (before, changed, prompt_preview_synced)
         };
 
         {
@@ -347,6 +349,12 @@ impl SessionService {
         }
 
         self.persist_runtime_control(session_id, &session).await?;
+        log::info!(
+            "Session prompt override persisted: session_id={}, changed={}, synced_last_turn_prompt_preview={}",
+            session_id,
+            changed,
+            prompt_preview_synced
+        );
         Ok((version_before, prompt_version, changed, updated_at))
     }
 
@@ -803,6 +811,31 @@ async fn normalize_project_dir(path: &Path) -> PathBuf {
             path.to_path_buf()
         }
     }
+}
+
+fn sync_last_turn_prompt_preview(
+    last_turn_snapshot: Option<&mut super::control::LastTurnSnapshot>,
+    prompt_base_override: &str,
+) -> bool {
+    let Some(snapshot) = last_turn_snapshot else {
+        return false;
+    };
+    let Some(preview) = snapshot.prompt_preview.as_mut() else {
+        return false;
+    };
+    let Some(preview_obj) = preview.as_object_mut() else {
+        return false;
+    };
+
+    preview_obj.insert(
+        "system_prompt".to_string(),
+        serde_json::Value::String(prompt_base_override.to_string()),
+    );
+    preview_obj.insert(
+        "rendered_prompt".to_string(),
+        serde_json::Value::String(prompt_base_override.to_string()),
+    );
+    true
 }
 
 #[async_trait::async_trait]

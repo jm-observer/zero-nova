@@ -490,15 +490,23 @@ async function init() {
              console.log('[Main] Loading messages for session:', payload.sessionId);
              try {
                 const messages = await gatewayClient.getMessages(payload.sessionId);
-                
-                // 智慧合并/冲突处理：
-                // 如果发现本地已经有临时 ID 的乐观消息，且服务器返回的消息数还不如本地多，
-                // 说明后端还没完成持久化或消息还在处理中。此时应保留本地状态，避免发送首条消息时 UI 闪烁。
+
                 if (state.currentSessionId === payload.sessionId) {
                     const localMsgs = state.messages;
-                    const hasTmp = localMsgs.some(m => String(m.id).startsWith('tmp-'));
-                    if (hasTmp && messages.length <= localMsgs.length) {
-                        console.log('[Main] Preserving optimistic messages, skipping overwrite.');
+                    const localTmpMsgs = localMsgs.filter(m => String(m.id).startsWith('tmp-'));
+                    if (localTmpMsgs.length > 0) {
+                        const serverMsgs = messages as any[];
+                        const merged = [...serverMsgs];
+                        for (const tmpMsg of localTmpMsgs) {
+                            const duplicated = serverMsgs.some(serverMsg =>
+                                serverMsg.role === tmpMsg.role &&
+                                String(serverMsg.content ?? '') === String(tmpMsg.content ?? ''),
+                            );
+                            if (!duplicated) {
+                                merged.push(tmpMsg);
+                            }
+                        }
+                        state.setMessages(merged as any[]);
                         return;
                     }
                 }

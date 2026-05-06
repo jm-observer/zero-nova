@@ -13,3 +13,4 @@ serde_json = { workspace = true }
 futures-util = { workspace = true }
 tokio-tungstenite = { workspace = true }
 log = { workspace = true }
+uuid = { workspace = true }

@@ -80,7 +80,24 @@ export type WorkingMode = 'standalone' | 'router' | 'managed';
 // 注意：为了避免循环依赖，这里只放纯 Interface/Type，不放 Class 实现
 
 export interface ProgressEvent {
-    type: 'iteration' | 'thinking' | 'tool_start' | 'tool_result' | 'token' | 'complete' | 'turn_complete' | 'iteration_limit' | 'tool_log' | 'system_log';
+    type:
+        | 'iteration'
+        | 'thinking'
+        | 'tool_start'
+        | 'tool_result'
+        | 'token'
+        | 'complete'
+        | 'turn_complete'
+        | 'iteration_limit'
+        | 'tool_log'
+        | 'system_log'
+        | 'orchestration_plan'
+        | 'sub_agent_spawn'
+        | 'sub_agent_log'
+        | 'sub_agent_complete'
+        | 'stage_complete'
+        | 'orchestration_review_start'
+        | 'orchestration_complete';
     iteration?: number;
     tool?: string;
     toolName?: string;

@@ -4,6 +4,7 @@ import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
 import { renderMarkdown } from '../markdown';
 import { escapeHtml, formatTime } from '../utils/html';
+import { OrchestrationView } from './orchestration-view';
 import type { SessionFileTreeEntryView, SessionRuntimeSnapshot } from '../core/types';
 
 type ProjectDirEntry = SessionFileTreeEntryView;
@@ -54,6 +55,7 @@ export class ChatView {
 
     init() {
         console.log('[ChatView] Initializing...');
+        new OrchestrationView(this.bus, this.messagesContainer, () => this.state.currentSessionId);
         this.ensureProjectMenu();
         this.bindEvents();
         

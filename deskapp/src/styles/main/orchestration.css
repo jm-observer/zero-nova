@@ -1,0 +1,210 @@
+.orchestration-plan {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  margin: 12px 0;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.plan-icon {
+  flex-shrink: 0;
+}
+
+.plan-description {
+  flex: 1;
+}
+
+.plan-status-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.plan-status-badge.status-running {
+  color: var(--accent-color);
+}
+
+.plan-status-badge.status-completed {
+  color: #16a34a;
+}
+
+.plan-status-badge.status-failed {
+  color: #dc2626;
+}
+
+.plan-status-badge.status-reviewing {
+  color: #d97706;
+}
+
+.plan-progress-wrap {
+  padding: 8px 14px 0;
+}
+
+.plan-progress {
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.plan-progress-bar {
+  height: 100%;
+  background: var(--accent-color);
+  transition: width 0.3s ease;
+}
+
+.plan-progress-text {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.plan-stages {
+  padding: 10px 14px 14px;
+}
+
+.orchestration-stage + .orchestration-stage {
+  margin-top: 10px;
+}
+
+.orchestration-stage {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.stage-header {
+  margin-bottom: 8px;
+}
+
+.stage-mode-badge {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.stage-agents.agents-parallel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.stage-agents.agents-serial {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+}
+
+.agent-card.status-running {
+  border-color: var(--accent-color);
+}
+
+.agent-card.status-success {
+  border-color: #22c55e;
+}
+
+.agent-card.status-failed {
+  border-color: #ef4444;
+}
+
+.agent-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-type-badge {
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.agent-description {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-status-icon {
+  width: 14px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.status-running .agent-status-icon {
+  animation: orchestration-spin 1s linear infinite;
+}
+
+.agent-log-details {
+  margin-top: 6px;
+}
+
+.agent-log-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-log-content {
+  margin-top: 4px;
+  border-radius: 4px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-summary {
+  margin-top: 6px;
+  padding: 6px;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  font-size: 13px;
+}
+
+.plan-review-section {
+  border-top: 1px solid var(--border-color);
+  padding: 10px 14px;
+}
+
+.review-header {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+@keyframes orchestration-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

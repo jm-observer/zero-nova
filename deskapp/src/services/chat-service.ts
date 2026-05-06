@@ -128,6 +128,26 @@ export class ChatService {
             this.bus.emit('chat:iteration', event);
         } else if (event.type === 'system_log') {
             this.bus.emit('system:log', event);
+        } else if (event.type === 'orchestration_plan') {
+            this.bus.emit('orchestration:plan', { sessionId: event.sessionId, ...(event.args || {}) });
+        } else if (event.type === 'sub_agent_spawn') {
+            this.bus.emit('orchestration:agent_spawn', { sessionId: event.sessionId, ...(event.args || {}) });
+        } else if (event.type === 'sub_agent_log') {
+            const args = event.args || {};
+            this.bus.emit('orchestration:agent_log', {
+                sessionId: event.sessionId,
+                agent_id: args.agent_id,
+                log: event.log,
+                ...args,
+            });
+        } else if (event.type === 'sub_agent_complete') {
+            this.bus.emit('orchestration:agent_complete', { sessionId: event.sessionId, ...(event.args || {}) });
+        } else if (event.type === 'stage_complete') {
+            this.bus.emit('orchestration:stage_complete', { sessionId: event.sessionId, ...(event.args || {}) });
+        } else if (event.type === 'orchestration_review_start') {
+            this.bus.emit('orchestration:review_start', { sessionId: event.sessionId, ...(event.args || {}) });
+        } else if (event.type === 'orchestration_complete') {
+            this.bus.emit('orchestration:complete', { sessionId: event.sessionId, ...(event.args || {}) });
         }
     }
 

@@ -39,11 +39,8 @@ pub async fn collect_provider_health(config: &AppConfig) -> Result<ProviderHealt
 }
 
 async fn probe_provider(config: &AppConfig, provider_kind: ProviderKind) -> HealthProbeResult {
-    if config.provider.api_key.trim().is_empty() {
-        return HealthProbeResult::misconfigured("Missing provider API key");
-    }
-    if config.provider.base_url.trim().is_empty() {
-        return HealthProbeResult::misconfigured("Missing provider base URL");
+    if config.provider.api_key.trim().is_empty() || config.provider.base_url.trim().is_empty() {
+        return HealthProbeResult::unknown("Provider not configured (missing API key or base URL)");
     }
 
     let client = match Client::builder()
@@ -173,6 +170,14 @@ impl HealthProbeResult {
     fn unreachable(message: impl Into<String>) -> Self {
         Self {
             status: "unreachable".to_string(),
+            latency_ms: None,
+            message: Some(message.into()),
+        }
+    }
+
+    fn unknown(message: impl Into<String>) -> Self {
+        Self {
+            status: "unknown".to_string(),
             latency_ms: None,
             message: Some(message.into()),
         }

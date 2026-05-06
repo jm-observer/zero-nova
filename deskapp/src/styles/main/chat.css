@@ -1805,6 +1805,27 @@
 .send-btn.is-stop:hover {
   background: #c03030;
 }
+/* 图标显隐切换 */
+.send-btn .icon-stop {
+  display: none;
+}
+.send-btn.is-stop .icon-send {
+  display: none;
+}
+.send-btn.is-stop .icon-stop {
+  display: block;
+}
+/* 图标淡入淡出过渡 */
+.send-btn .icon-send,
+.send-btn .icon-stop {
+  transition: opacity 0.15s;
+}
+/* 停止中：禁用态叠加停止背景 */
+.send-btn.is-stop:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #e04040;
+}
 /* 输入区附加按钮（如工具、附件等�?*/
 .input-actions {
   display: flex;

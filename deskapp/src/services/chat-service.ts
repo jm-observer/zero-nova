@@ -18,6 +18,14 @@ export class ChatService {
             this.bus.emit(Events.CHAT_INTENT, payload);
         });
 
+        // 转发停止响应事件到 EventBus，供 ChatView 退出 STOPPING 状态
+        this.client.addMessageHandler((msg) => {
+            if (msg.type === 'chat.stop.response' && msg.payload) {
+                const payload = msg.payload as { sessionId: string };
+                this.bus.emit('chat:stop-response', payload);
+            }
+        });
+
         // Listen for outgoing messages
         this.bus.on('message:send', async (payload: { text: string; skipOptimisticMessage?: boolean }) => {
             console.log('[ChatService] Outgoing message:', payload.text);

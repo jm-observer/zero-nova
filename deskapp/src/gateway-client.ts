@@ -1,4 +1,4 @@
-﻿import type {
+import type {
     ProgressEvent,
     ChatIntentPayload,
     Session,
@@ -421,7 +421,9 @@ export class GatewayClient {
     }
 
     private normalizeProviderHealthSnapshot(payload: RawProviderHealthSnapshot): ProviderHealthSnapshotView {
-        const status = String(payload.status ?? 'unknown') as ProviderHealthSnapshotView['status'];
+        let status = String(payload.status ?? 'unknown') as ProviderHealthSnapshotView['status'];
+        let message = typeof payload.message === 'string' ? payload.message : null;
+
         return {
             provider: String(payload.provider ?? 'unknown'),
             scope: String(payload.scope ?? 'orchestration'),
@@ -430,7 +432,7 @@ export class GatewayClient {
             latencyMs: typeof (payload.latencyMs ?? payload.latency_ms) === 'number'
                 ? Number(payload.latencyMs ?? payload.latency_ms)
                 : undefined,
-            message: typeof payload.message === 'string' ? payload.message : null,
+            message,
         };
     }
 
@@ -804,6 +806,12 @@ export class GatewayClient {
                     // 通知所有消息处理器（包括 AppState）
                     this.messageHandlers.forEach(handler => handler({ type: 'chat.token_usage', payload: usageUpdate }));
                 }
+            }
+
+            // 处理停止响应事件
+            if (message.type === 'chat.stop.response') {
+                const payload = message.payload as { sessionId: string };
+                this.messageHandlers.forEach(handler => handler({ type: 'chat.stop.response', payload }));
             }
 
             // 处理客户端 MCP 工具调用请求

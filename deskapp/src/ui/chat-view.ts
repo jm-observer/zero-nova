@@ -39,6 +39,10 @@ export class ChatView {
     private currentIntentText: string | null = null;
     private layoutObserver: ResizeObserver | null = null;
 
+    // 流式状态机：以会话为粒度的流式输出追踪
+    private streamingSessions = new Set<string>();
+    private stoppingSessions = new Set<string>();
+
     constructor(private state: AppState, private bus: EventBus) {
         this.messagesContainer = document.getElementById('messages') as HTMLElement;
         this.messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
@@ -67,6 +71,7 @@ export class ChatView {
             this.hideProjectPicker();
             this.hideProjectMenu();
             void this.refreshProjectMenuState();
+            this.updateSendButton();
         });
 
         const gatewayClient = this.state.gatewayClient;
@@ -101,15 +106,24 @@ export class ChatView {
 
         this.bus.on('token', (payload: { sessionId: string, token: string }) => {
              if (payload.sessionId === this.state.currentSessionId) {
+                 // 兜底：首条消息建会话时 sendMessage 里 sessionId 为 null，此处补充追踪
+                 if (!this.streamingSessions.has(payload.sessionId)) {
+                     this.streamingSessions.add(payload.sessionId);
+                     this.updateSendButton();
+                 }
                  this.appendToken(payload.token);
              }
         });
 
         this.bus.on('chat:complete', (payload: any) => {
+             // 无论当前显示哪个会话，都清理该会话的流式状态，避免切换回来后按钮卡住
+             this.streamingSessions.delete(payload.sessionId);
+             this.stoppingSessions.delete(payload.sessionId);
              if (payload.sessionId === this.state.currentSessionId) {
                  console.log('[ChatView] Chat complete, resetting streaming state');
                  this.streamingMessageEl = null;
                  this.streamingContent = '';
+                 this.updateSendButton();
                  this.invalidateSessionFileTreeCache(payload.sessionId);
                  this.clearRuntimeStatusText();
              }
@@ -136,11 +150,37 @@ export class ChatView {
         });
         
         this.bus.on('chat:error', (payload: any) => {
+            // 无论当前显示哪个会话，都清理该会话的流式状态
+            this.streamingSessions.delete(payload.sessionId);
+            this.stoppingSessions.delete(payload.sessionId);
             if (payload.sessionId === this.state.currentSessionId) {
+                this.updateSendButton();
                 this.clearRuntimeStatusText();
                 this.handleChatError(payload);
             }
         });
+
+        // 停止响应：退出 STOPPING 状态
+        this.bus.on('chat:stop-response', (payload: any) => {
+            // 无论当前显示哪个会话，都清理 stopping 标记
+            this.stoppingSessions.delete(payload.sessionId);
+            if (payload.sessionId === this.state.currentSessionId) {
+                console.log('[ChatView] Chat stop response received');
+                this.updateSendButton();
+            }
+        });
+
+        // 连接断开容错：清空所有 streaming/stopping 状态
+        if (gatewayClient && typeof gatewayClient.onConnectionChange === 'function') {
+            gatewayClient.onConnectionChange((status) => {
+                if (status === 'disconnected') {
+                    console.log('[ChatView] Gateway disconnected, clearing streaming state');
+                    this.streamingSessions.clear();
+                    this.stoppingSessions.clear();
+                    this.updateSendButton();
+                }
+            });
+        }
 
         this.bus.on('system:log', (event: any) => {
             if (event.sessionId === this.state.currentSessionId) {
@@ -156,7 +196,16 @@ export class ChatView {
     }
 
     private bindEvents() {
-        this.sendBtn.addEventListener('click', () => this.sendMessage());
+        // 统一按钮点击处理：发送消息或停止生成
+        this.sendBtn.addEventListener('click', () => {
+            const sid = this.state.currentSessionId;
+            const isStreaming = sid ? this.streamingSessions.has(sid) : false;
+            if (isStreaming) {
+                this.handleStopClick();
+            } else {
+                this.sendMessage();
+            }
+        });
         this.inspectBtn?.addEventListener('click', () => {
             if (!this.state.consoleVisible) {
                 this.state.setConsoleTab('overview');
@@ -781,10 +830,20 @@ export class ChatView {
     private sendMessage() {
         const text = this.messageInput.value.trim();
         if (!text) return;
-        
+
+        // 如果当前会话正在流式输出，不允许发送新消息（Enter 键路径也经过此处）
+        const sessionId = this.state.currentSessionId;
+        if (sessionId && this.streamingSessions.has(sessionId)) return;
+
         // 发送新消息前，确保重置流式状态，避免内容追加到旧的气泡中
         this.streamingMessageEl = null;
         this.streamingContent = '';
+
+        // 标记当前会话为 streaming 状态
+        if (sessionId) {
+            this.streamingSessions.add(sessionId);
+            this.updateSendButton();
+        }
         
         this.currentIntentText = null;
         this.bus.emit('message:send', { text });
@@ -1316,5 +1375,46 @@ export class ChatView {
         const inK = count / 1000;
         const formatted = inK >= 10 ? inK.toFixed(1) : inK.toFixed(2);
         return `${formatted.replace(/\.?0+$/, '')}k`;
+    }
+
+    // ========================
+    // 停止按钮逻辑
+    // ========================
+
+    /**
+     * 处理停止按钮点击
+     */
+    private handleStopClick() {
+        const sid = this.state.currentSessionId;
+        if (!sid) return;
+        if (this.stoppingSessions.has(sid)) return; // 防重复
+
+        this.stoppingSessions.add(sid);
+        this.updateSendButton(); // 立即禁用按钮
+
+        if (this.state.gatewayClient) {
+            this.state.gatewayClient.stopTask(sid);
+        }
+    }
+
+    /**
+     * 更新发送按钮状态
+     */
+    private updateSendButton() {
+        const sid = this.state.currentSessionId;
+        const isStopping = sid ? this.stoppingSessions.has(sid) : false;
+        const isStreaming = sid ? this.streamingSessions.has(sid) : false;
+
+        if (isStreaming) {
+            // 切换为停止图标
+            this.sendBtn.classList.add('is-stop');
+            this.sendBtn.disabled = isStopping;
+            this.sendBtn.setAttribute('aria-label', isStopping ? '停止中...' : '停止生成');
+        } else {
+            // 恢复发送图标
+            this.sendBtn.classList.remove('is-stop');
+            this.sendBtn.disabled = false;
+            this.sendBtn.setAttribute('aria-label', '发送');
+        }
     }
 }

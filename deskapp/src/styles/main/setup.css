@@ -491,10 +491,10 @@
  font-size: 18px;
 }
 /* ========== Tool Message & Collapsible Cards ========== */
-/* 仅针对含有工具卡片的消息，或系统工具消息设置统一宽度，既保证工具流堆叠时右侧整齐，又留有一定空白保留对话感 */
+/* ========== Tool Message & Collapsible Cards ========== */
+/* 将所有的助手消息和工具消息统一定宽为85%，以实现左侧对话区完美的矩形阵列对齐，同时留出右侧15%的对话区分空间 */
 .message.tool,
-.message.assistant:has(.tool-use-card),
-.message.assistant:has(.tool-result-card) {
+.message.assistant {
     align-self: flex-start !important;
     width: 85%;
     max-width: 100% !important;
@@ -502,8 +502,7 @@
 }
 
 .message.tool .message-bubble,
-.message.assistant:has(.tool-use-card) .message-bubble,
-.message.assistant:has(.tool-result-card) .message-bubble {
+.message.assistant .message-bubble {
     width: 100%;
     box-sizing: border-box;
 }

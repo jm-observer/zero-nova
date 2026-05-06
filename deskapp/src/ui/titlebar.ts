@@ -110,7 +110,29 @@ export class TitleBarView {
         }
 
         const providers = [...this.providerHealthByScope.values()];
-        if (providers.some((item) => ['auth_failed', 'unreachable', 'misconfigured'].includes(item.status))) {
+        
+        // 收集错误信息用于 Tooltip
+        const issueProviders = providers.filter(p => 
+            ['auth_failed', 'unreachable', 'misconfigured', 'degraded'].includes(p.status)
+        );
+        
+        if (issueProviders.length > 0) {
+            const diagnosticMsg = issueProviders
+                .map(p => `${p.scope}: ${p.status}${p.message ? ` (${p.message})` : ''}`)
+                .join('\n');
+            this.statusIndicator.title = diagnosticMsg;
+        } else {
+            this.statusIndicator.title = '';
+        }
+
+        // 严重错误：如果所有 Provider 都挂了，才显示 error
+        // 否则，网关连着就应该是 ready (Green) 或 running (Yellow)
+        // 注意：misconfigured (如缺少 API Key) 视为非致命错误，不触发红色指示灯
+        const hasFatalError = providers.length > 0 && providers.every(item => 
+            ['auth_failed', 'unreachable'].includes(item.status)
+        );
+
+        if (hasFatalError) {
             this.setStatus(t('status.gateway_connected_provider_error'), 'error');
             return;
         }
@@ -126,11 +148,13 @@ export class TitleBarView {
             return;
         }
 
+        // 降级状态或检查中，显示 Yellow (running) 但文案提示降级
         if (providers.some((item) => item.status === 'degraded' || item.status === 'checking' || item.status === 'unknown')) {
             this.setStatus(t('status.gateway_connected_provider_degraded'), 'running');
             return;
         }
 
+        // 只要网关连接且没有全量失效，默认就是 Ready (Green)
         this.setStatus(t('status.gateway_connected_provider_healthy'), 'ready');
     }
 

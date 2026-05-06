@@ -178,7 +178,17 @@
             <div class="input-row">
               <textarea id="message-input" placeholder="问问 OpenFlux..." rows="1"></textarea>
               <button id="mic-btn" class="mic-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /></svg></button>
-              <button id="send-btn" class="send-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg></button>
+              <button id="send-btn" class="send-btn" aria-label="发送">
+                <!-- 发送图标（纸飞机）：默认显示 -->
+                <svg class="icon-send" width="18" height="18" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                </svg>
+                <!-- 停止图标（实心圆角方块）：streaming 时显示 -->
+                <svg class="icon-stop" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="4" y="4" width="16" height="16" rx="3" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>

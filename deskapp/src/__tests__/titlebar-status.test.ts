@@ -36,13 +36,14 @@ describe('TitleBarView status priority', () => {
         `;
     });
 
-    it('provider error 优先级高于 runtime status text', () => {
+    it('单个 provider error 不再导致全局 error 态，除非所有 provider 都失效', () => {
         const bus = new EventBus();
         const view = new TitleBarView({} as any, bus);
         view.init();
 
         bus.emit(Events.GATEWAY_STATUS, { connectionStatus: 'connected' });
-        bus.emit(Events.RUNTIME_STATUS_TEXT, { text: 'Agent Running (2/30)' });
+        
+        // 一个 provider 报错，另一个正常
         bus.emit(Events.PROVIDER_HEALTH_UPDATED, {
             providers: [
                 {
@@ -50,12 +51,69 @@ describe('TitleBarView status priority', () => {
                     scope: 'orchestration',
                     status: 'auth_failed',
                     checkedAt: Date.now(),
+                    message: 'Invalid Key'
                 },
+                {
+                    provider: 'anthropic',
+                    scope: 'execution',
+                    status: 'healthy',
+                    checkedAt: Date.now(),
+                }
             ],
         });
 
+        const dot = document.querySelector('#status-indicator .dot') as HTMLElement;
         const text = document.querySelector('#status-indicator .text') as HTMLElement;
+        const indicator = document.querySelector('#status-indicator') as HTMLElement;
+
+        // 应该是 Ready (Green) 而不是 Error (Red)
+        expect(dot.className).toBe('dot ready');
+        expect(text.textContent).toBe('status.gateway_connected_provider_healthy');
+        // 应该包含诊断信息
+        expect(indicator.title).toContain('orchestration: auth_failed (Invalid Key)');
+    });
+
+    it('所有 provider 都失效时显示 error 态', () => {
+        const bus = new EventBus();
+        const view = new TitleBarView({} as any, bus);
+        view.init();
+
+        bus.emit(Events.GATEWAY_STATUS, { connectionStatus: 'connected' });
+        
+        bus.emit(Events.PROVIDER_HEALTH_UPDATED, {
+            providers: [
+                {
+                    provider: 'openai',
+                    scope: 'orchestration',
+                    status: 'auth_failed',
+                    checkedAt: Date.now(),
+                }
+            ],
+        });
+
+        const dot = document.querySelector('#status-indicator .dot') as HTMLElement;
+        const text = document.querySelector('#status-indicator .text') as HTMLElement;
+
+        expect(dot.className).toBe('dot error');
         expect(text.textContent).toBe('status.gateway_connected_provider_error');
+    });
+
+    it('runtime status text 优先级高于 provider 状态（当网关已连接时）', () => {
+        const bus = new EventBus();
+        const view = new TitleBarView({} as any, bus);
+        view.init();
+
+        bus.emit(Events.GATEWAY_STATUS, { connectionStatus: 'connected' });
+        bus.emit(Events.PROVIDER_HEALTH_UPDATED, {
+            providers: [{ provider: 'openai', scope: 'orchestration', status: 'healthy', checkedAt: Date.now() }],
+        });
+        bus.emit(Events.RUNTIME_STATUS_TEXT, { text: 'Agent Running (2/30)' });
+
+        const text = document.querySelector('#status-indicator .text') as HTMLElement;
+        const dot = document.querySelector('#status-indicator .dot') as HTMLElement;
+        
+        expect(text.textContent).toBe('Agent Running (2/30)');
+        expect(dot.className).toBe('dot running');
     });
 
     it('runtime status text 被 clear 后回退到 provider 状态', () => {

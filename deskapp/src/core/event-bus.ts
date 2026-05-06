@@ -77,6 +77,7 @@
    VOICE_CONTROL_RETRY: 'voice:retry',
    PROGRESS_UPDATE: 'progress:update',     // { event: any }
    GATEWAY_STATUS: 'gateway:status',       // { connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
+   GATEWAY_DISCONNECT: 'gateway:disconnect', // 连接断开，前端用于清理 streaming 状态
    RUNTIME_STATUS_TEXT: 'runtime:status_text', // { text: string } - 承载 Agent Running (x/y) 等临时运行文案
    RUNTIME_STATUS_TEXT_CLEAR: 'runtime:status_text:clear', // 清理临时运行文案
    PROVIDER_HEALTH_UPDATED: 'provider:health',

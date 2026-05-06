@@ -786,6 +786,8 @@ const zh: Record<string, string> = {
     'console.prompt_reload_success_unchanged': '配置已重新加载，内容未变化',
     'console.prompt_reload_failed': '重载失败，当前会话仍使用旧系统提示词',
     'console.prompt_reload_loading': '重载中...',
+    'console.prompt_sync_awaiting': '等待新版本同步',
+    'console.prompt_sync_synced': '已对齐版本',
     'console.prompt_version': '版本',
     'console.prompt_updated_at': '更新时间',
     'console.no_data': '暂无数据',

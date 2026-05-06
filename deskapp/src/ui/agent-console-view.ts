@@ -46,6 +46,7 @@ import type {
     WorkspaceRestoreView,
 } from '../core/types';
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed';
+type PromptReloadState = 'idle' | 'reloading' | 'awaiting_sync' | 'synced' | 'failed';
 
 interface ConsoleTogglePayload {
     visible: boolean;
@@ -60,7 +61,8 @@ interface ConsoleDataPayload {
 }
 
 interface GatewayStatusPayload {
-    status: ConnectionStatus;
+    connectionStatus?: ConnectionStatus;
+    status?: ConnectionStatus; // 向后兼容
 }
 
 /**
@@ -90,6 +92,12 @@ export class AgentConsoleView {
     private artifactsPanelWasOpen = false;
     private activeRunFilter: RunFilter = 'all';
     private promptReloading = false;
+    private promptReloadState: PromptReloadState = 'idle';
+    private expectedPromptVersion: string | null = null;
+    private displayedPromptVersion: string | null = null;
+    private promptReloadAttemptSeq = 0;
+    private static readonly PROMPT_SYNC_RETRY_TIMES = 3;
+    private static readonly PROMPT_SYNC_RETRY_DELAY_MS = 300;
     private unsubs: Array<() => void> = [];
     private keydownHandler = (event: KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'i') {
@@ -234,9 +242,10 @@ export class AgentConsoleView {
             this.bus.on<GatewayStatusPayload>(Events.GATEWAY_STATUS, payload => {
                 if (!payload) return;
 
-                this.connectionStatus = payload.status;
+                // 优先使用 connectionStatus（Plan 1 语义拆分）
+                this.connectionStatus = payload.connectionStatus ?? payload.status ?? this.connectionStatus;
                 this.updateFooter();
-                if (payload.status === 'connected' && this.state.consoleVisible) {
+                if (this.connectionStatus === 'connected' && this.state.consoleVisible) {
                     void this.loadTabDataIfNeeded(this.state.consoleActiveTab, true);
                 }
             })
@@ -1106,14 +1115,17 @@ export class AgentConsoleView {
             ? (this.state.getSessionResourceState(sessionId, 'runtime') as ResourceState<SessionRuntimeSnapshot> | undefined)
             : undefined;
         const systemPromptState = runtimeState?.data?.systemPromptState;
+        this.displayedPromptVersion = systemPromptState?.version ?? null;
         if (promptVersion) {
             if (systemPromptState?.version) {
                 const shortVersion = systemPromptState.version.slice(0, 8);
                 const updatedAt = systemPromptState.updatedAt > 0 ? formatTime(systemPromptState.updatedAt) : '—';
-                promptVersion.textContent = `${t('console.prompt_version')}: ${shortVersion}  ${t('console.prompt_updated_at')}: ${updatedAt}`;
+                const syncHint = this.getPromptSyncHint();
+                promptVersion.textContent = `${t('console.prompt_version')}: ${shortVersion}  ${t('console.prompt_updated_at')}: ${updatedAt}${syncHint ? `  ${syncHint}` : ''}`;
                 promptVersion.setAttribute('title', systemPromptState.version);
             } else {
-                promptVersion.textContent = '';
+                const syncHint = this.getPromptSyncHint();
+                promptVersion.textContent = syncHint;
                 promptVersion.removeAttribute('title');
             }
         }
@@ -1157,13 +1169,16 @@ export class AgentConsoleView {
             return;
         }
 
+        const attemptSeq = ++this.promptReloadAttemptSeq;
         this.promptReloading = true;
+        this.promptReloadState = 'reloading';
+        this.expectedPromptVersion = null;
         this.renderPromptMemory();
         try {
             const result = await this.state.gatewayClient.reloadSessionSystemPrompt(sessionId);
-            const runtime = await this.state.gatewayClient.getSessionRuntime(sessionId);
-            this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtime));
-            await this.loadPromptMemoryData(sessionId, true);
+            this.expectedPromptVersion = result.versionAfter ?? null;
+            const synced = await this.syncPromptStateWithRetry(sessionId, attemptSeq);
+            this.promptReloadState = synced ? 'synced' : 'awaiting_sync';
             this.bus.emit(Events.NOTIFICATION, {
                 type: 'success',
                 message: result.changed
@@ -1171,6 +1186,7 @@ export class AgentConsoleView {
                     : t('console.prompt_reload_success_unchanged'),
             });
         } catch (error) {
+            this.promptReloadState = 'failed';
             const detail = error instanceof Error ? `: ${error.message}` : '';
             this.bus.emit(Events.NOTIFICATION, {
                 type: 'error',
@@ -1180,6 +1196,71 @@ export class AgentConsoleView {
             this.promptReloading = false;
             this.renderPromptMemory();
         }
+    }
+
+    private async syncPromptStateWithRetry(sessionId: string, attemptSeq: number): Promise<boolean> {
+        if (!this.state.gatewayClient) {
+            return false;
+        }
+
+        for (let attempt = 0; attempt < AgentConsoleView.PROMPT_SYNC_RETRY_TIMES; attempt += 1) {
+            if (attemptSeq !== this.promptReloadAttemptSeq) {
+                return false;
+            }
+
+            const [runtimeResult, promptResult] = await Promise.allSettled([
+                this.state.gatewayClient.getSessionRuntime(sessionId),
+                this.state.gatewayClient.getSessionPromptPreview(sessionId),
+            ]);
+
+            if (attemptSeq !== this.promptReloadAttemptSeq) {
+                return false;
+            }
+
+            if (runtimeResult.status === 'fulfilled') {
+                this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtimeResult.value));
+            }
+
+            if (promptResult.status === 'fulfilled') {
+                this.state.updateSessionResourceState(sessionId, 'prompt', this.state.setLoadedResource(promptResult.value));
+            }
+
+            this.renderPromptMemory();
+            const runtimeVersion =
+                runtimeResult.status === 'fulfilled' ? runtimeResult.value.systemPromptState?.version ?? null : null;
+            this.displayedPromptVersion = runtimeVersion;
+            if (!this.expectedPromptVersion || runtimeVersion === this.expectedPromptVersion) {
+                return true;
+            }
+
+            if (attempt < AgentConsoleView.PROMPT_SYNC_RETRY_TIMES - 1) {
+                await this.delay(AgentConsoleView.PROMPT_SYNC_RETRY_DELAY_MS);
+            }
+        }
+
+        return false;
+    }
+
+    private getPromptSyncHint(): string {
+        switch (this.promptReloadState) {
+            case 'reloading':
+                return t('console.prompt_reload_loading');
+            case 'awaiting_sync':
+                return t('console.prompt_sync_awaiting');
+            case 'synced': {
+                const version = this.displayedPromptVersion ?? this.expectedPromptVersion ?? '';
+                const short = version ? version.slice(0, 8) : '—';
+                return `${t('console.prompt_sync_synced')} ${short}`;
+            }
+            case 'failed':
+                return t('console.prompt_reload_failed');
+            default:
+                return '';
+        }
+    }
+
+    private async delay(ms: number): Promise<void> {
+        await new Promise(resolve => setTimeout(resolve, ms));
     }
 
     private renderRuns() {

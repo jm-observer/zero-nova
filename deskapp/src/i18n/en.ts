@@ -782,6 +782,8 @@ const en: Record<string, string> = {
     'console.prompt_reload_success_unchanged': 'Configuration reloaded. Prompt content is unchanged.',
     'console.prompt_reload_failed': 'Reload failed. The current session is still using the previous system prompt.',
     'console.prompt_reload_loading': 'Reloading...',
+    'console.prompt_sync_awaiting': 'Waiting for new version sync',
+    'console.prompt_sync_synced': 'Synced version',
     'console.prompt_version': 'Version',
     'console.prompt_updated_at': 'Updated',
     'console.no_data': 'No Data',

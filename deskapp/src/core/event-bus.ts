@@ -76,7 +76,9 @@
    VOICE_CONTROL_STOP: 'voice:stop',
    VOICE_CONTROL_RETRY: 'voice:retry',
    PROGRESS_UPDATE: 'progress:update',     // { event: any }
-   GATEWAY_STATUS: 'gateway:status',       // { status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
+   GATEWAY_STATUS: 'gateway:status',       // { connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' }
+   RUNTIME_STATUS_TEXT: 'runtime:status_text', // { text: string } - 承载 Agent Running (x/y) 等临时运行文案
+   RUNTIME_STATUS_TEXT_CLEAR: 'runtime:status_text:clear', // 清理临时运行文案
    PROVIDER_HEALTH_UPDATED: 'provider:health',
    CHAT_INTENT: 'chat:intent',             // { sessionId: string, intent: string, agentId?: string }
    CONSOLE_TOGGLED: 'console:toggled',     // { visible: boolean }

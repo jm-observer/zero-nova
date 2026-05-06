@@ -32,6 +32,7 @@ export class ChatView {
     private pickerErrorMessage: string | null = null;
     private sessionFileTreeCache = new Map<string, Map<string, ProjectDirEntry[]>>();
     private sessionProjectDirState = new Map<string, string | null>();
+    private projectMenuReqSeq = 0;
     
     private streamingMessageEl: HTMLElement | null = null;
     private streamingContent = ''; // 仅作向后兼容和备份
@@ -61,15 +62,19 @@ export class ChatView {
         }
         
         this.bus.on(Events.SESSION_SELECTED, () => {
+            this.clearRuntimeStatusText();
             this.updateHeaderTitle();
             this.hideProjectPicker();
             this.hideProjectMenu();
             void this.refreshProjectMenuState();
         });
 
-        this.state.gatewayClient?.onSessionRuntimeUpdated((payload) => {
-            this.handleSessionRuntimeUpdated(payload);
-        });
+        const onSessionRuntimeUpdated = this.state.gatewayClient?.onSessionRuntimeUpdated;
+        if (typeof onSessionRuntimeUpdated === 'function') {
+            onSessionRuntimeUpdated((payload) => {
+                this.handleSessionRuntimeUpdated(payload);
+            });
+        }
         
         this.bus.on(Events.SESSION_CHANGED, (payload: any) => {
              console.log('[ChatView] Session changed:', payload.previousSessionId, '->', payload.sessionId);
@@ -106,6 +111,7 @@ export class ChatView {
                  this.streamingMessageEl = null;
                  this.streamingContent = '';
                  this.invalidateSessionFileTreeCache(payload.sessionId);
+                 this.clearRuntimeStatusText();
              }
         });
 
@@ -131,6 +137,7 @@ export class ChatView {
         
         this.bus.on('chat:error', (payload: any) => {
             if (payload.sessionId === this.state.currentSessionId) {
+                this.clearRuntimeStatusText();
                 this.handleChatError(payload);
             }
         });
@@ -252,27 +259,30 @@ export class ChatView {
             return;
         }
 
-        const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime') as { data?: SessionRuntimeSnapshot } | undefined;
-        if (runtimeState?.data) {
-            this.sessionProjectDirState.set(sessionId, runtimeState.data.projectDir ?? null);
-            this.renderProjectMenu();
-            return;
-        }
-
+        const reqId = ++this.projectMenuReqSeq;
         if (!this.state.gatewayClient) {
+            const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime') as { data?: SessionRuntimeSnapshot } | undefined;
+            if (runtimeState?.data) {
+                this.applySessionProjectDir(sessionId, runtimeState.data.projectDir ?? null);
+            }
             this.renderProjectMenu();
             return;
         }
 
         try {
             const runtime = await this.state.gatewayClient.getSessionRuntime(sessionId);
+            if (reqId !== this.projectMenuReqSeq) {
+                return;
+            }
             this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtime));
-            this.sessionProjectDirState.set(sessionId, runtime.projectDir ?? null);
+            this.applySessionProjectDir(sessionId, runtime.projectDir ?? null);
         } catch (error) {
             console.warn('[ChatView] Failed to refresh session runtime for project menu:', error);
         }
 
-        this.renderProjectMenu();
+        if (reqId === this.projectMenuReqSeq) {
+            this.renderProjectMenu();
+        }
     }
 
     private renderProjectMenu() {
@@ -622,16 +632,26 @@ export class ChatView {
             return;
         }
         const projectDir = this.readProjectDirFromRuntimePayload(payload);
-        const previousProjectDir = this.sessionProjectDirState.get(sessionId);
-        if (projectDir !== previousProjectDir) {
-            this.invalidateSessionFileTreeCache(sessionId);
-            if (projectDir !== undefined) {
-                this.sessionProjectDirState.set(sessionId, projectDir);
-            }
-        }
+        const changed = this.applySessionProjectDir(sessionId, projectDir);
         if (sessionId === this.state.currentSessionId) {
+            if (changed && this.pickerVisible) {
+                void this.loadProjectEntries(this.pickerCurrentPath);
+            }
             this.renderProjectMenu();
         }
+    }
+
+    private applySessionProjectDir(sessionId: string, projectDir: string | null | undefined): boolean {
+        if (projectDir === undefined) {
+            return false;
+        }
+        const previousProjectDir = this.sessionProjectDirState.get(sessionId);
+        const changed = projectDir !== previousProjectDir;
+        if (projectDir !== previousProjectDir) {
+            this.invalidateSessionFileTreeCache(sessionId);
+        }
+        this.sessionProjectDirState.set(sessionId, projectDir);
+        return changed;
     }
 
     private readProjectDirFromRuntimePayload(payload: Record<string, unknown>): string | null | undefined {
@@ -1181,10 +1201,15 @@ export class ChatView {
         const { iteration } = event;
         // 构建友好的状态文本
         const statusText = `Agent Running (${iteration}/30)`;
-        // 发布全局状态更新，TitleBar 会捕获并更新顶部的红绿灯/文字
-        this.bus.emit(Events.GATEWAY_STATUS, { status: 'running', text: statusText });
+        // 发布运行文案事件，不再写入连接态事件，避免与 TitleBar 连接态冲突
+        console.debug('[ChatView] Iteration progress:', statusText);
+        this.bus.emit(Events.RUNTIME_STATUS_TEXT, { text: statusText });
         
         // 可选：如果 5s 内没有任何新进度，Titlebar 会保持这个状态直到任务完成（chat:complete 回调会重置状态）
+    }
+
+    private clearRuntimeStatusText() {
+        this.bus.emit(Events.RUNTIME_STATUS_TEXT_CLEAR);
     }
 
     private scrollToBottom() {

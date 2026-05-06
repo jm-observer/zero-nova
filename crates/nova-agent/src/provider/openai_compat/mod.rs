@@ -1,3 +1,6 @@
+pub mod conv;
+pub mod types;
+
 use crate::message::{ContentBlock, Message, Role};
 use crate::provider::openai_compat::types::ChatCompletionChunk;
 use crate::provider::sse::{RawSseEvent, SseParser};
@@ -9,8 +12,6 @@ use log::{debug, trace};
 use reqwest::{header, Client};
 use serde_json::json;
 use std::collections::VecDeque;
-
-pub mod types;
 
 /// Client for interacting with OpenAI-compatible APIs.
 pub struct OpenAiCompatClient {

@@ -13,9 +13,11 @@ describe('ChatView @ project picker', () => {
         document.body.innerHTML = `
             <div id="messages"></div>
             <div class="input-container">
-                <textarea id="message-input"></textarea>
-                <button id="send-btn">send</button>
-                <button id="inspect-btn">inspect</button>
+                <div class="input-row">
+                    <textarea id="message-input"></textarea>
+                    <button id="send-btn">send</button>
+                    <button id="inspect-btn">inspect</button>
+                </div>
             </div>
         `;
         (globalThis as any).ResizeObserver = class {
@@ -173,5 +175,79 @@ describe('ChatView @ project picker', () => {
         const picker = document.querySelector('.project-picker') as HTMLElement;
         expect(listSessionFileTree).not.toHaveBeenCalled();
         expect(picker.textContent).toContain('当前会话未设置项目目录');
+    });
+
+    it('点击 Project 刷新时优先使用网关返回的最新 projectDir', async () => {
+        const bus = new EventBus();
+        const state = new AppState(bus);
+        state.setCurrentSession('session-1');
+        state.updateSessionResourceState(
+            'session-1',
+            'runtime',
+            state.setLoadedResource({
+                sessionId: 'session-1',
+                projectDir: '/old/project',
+                totalUsage: { inputTokens: 0, outputTokens: 0 },
+            } as any)
+        );
+        state.setGatewayClient({
+            getSessionRuntime: vi.fn().mockResolvedValue({
+                sessionId: 'session-1',
+                projectDir: '/new/project',
+                totalUsage: { inputTokens: 0, outputTokens: 0 },
+            }),
+        } as any);
+
+        const view = new ChatView(state, bus);
+        view.init();
+
+        const trigger = document.querySelector('.project-menu-trigger') as HTMLButtonElement;
+        trigger.click();
+        await flushAsync();
+        const refreshBtn = document.querySelector('.project-menu-action[data-action="refresh"]') as HTMLButtonElement;
+        refreshBtn.click();
+        await flushAsync();
+
+        const menuPath = document.querySelector('.project-menu-path') as HTMLElement;
+        expect(menuPath.textContent).toContain('/new/project');
+    });
+
+    it('连续刷新时只应用最后一次请求结果，避免旧响应回退', async () => {
+        const bus = new EventBus();
+        const state = new AppState(bus);
+        state.setCurrentSession('session-1');
+        state.setGatewayClient({
+            getSessionRuntime: vi
+                .fn()
+                .mockImplementationOnce(
+                    () => new Promise((resolve) => setTimeout(() => resolve({
+                        sessionId: 'session-1',
+                        projectDir: '/first/project',
+                        totalUsage: { inputTokens: 0, outputTokens: 0 },
+                    }), 30))
+                )
+                .mockImplementationOnce(
+                    () => new Promise((resolve) => setTimeout(() => resolve({
+                        sessionId: 'session-1',
+                        projectDir: '/second/project',
+                        totalUsage: { inputTokens: 0, outputTokens: 0 },
+                    }), 5))
+                ),
+        } as any);
+
+        const view = new ChatView(state, bus);
+        view.init();
+
+        const trigger = document.querySelector('.project-menu-trigger') as HTMLButtonElement;
+        trigger.click();
+        await flushAsync();
+        const refreshBtn = document.querySelector('.project-menu-action[data-action="refresh"]') as HTMLButtonElement;
+
+        refreshBtn.click();
+        refreshBtn.click();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const menuPath = document.querySelector('.project-menu-path') as HTMLElement;
+        expect(menuPath.textContent).toContain('/second/project');
     });
 });

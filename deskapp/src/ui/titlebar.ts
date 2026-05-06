@@ -12,6 +12,7 @@ export class TitleBarView {
     private btnClose: HTMLButtonElement;
     private themeToggle: HTMLButtonElement;
     private gatewayConnectionStatus: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' = 'connecting';
+    private runtimeStatusText: string | null = null;
     private providerHealthByScope = new Map<string, ProviderHealthSnapshotView>();
 
     constructor(_state: AppState, private bus: EventBus) {
@@ -32,8 +33,28 @@ export class TitleBarView {
             this.applyThemeToDOM(payload.theme);
         });
 
-        this.bus.on(Events.GATEWAY_STATUS, (payload: { status: string }) => {
-            this.handleGatewayStatusChange(payload.status);
+        // GATEWAY_STATUS 现在仅用于连接态
+        this.bus.on(Events.GATEWAY_STATUS, (payload: { connectionStatus?: string }) => {
+            if (payload.connectionStatus) {
+                this.gatewayConnectionStatus = payload.connectionStatus;
+                if (payload.connectionStatus !== 'connected') {
+                    // 连接态变化到非 connected 时，清理临时运行文案，避免断线后显示陈旧的 running 文案
+                    this.runtimeStatusText = null;
+                }
+                this.updateAggregateStatus();
+            }
+        });
+
+        // RUNTIME_STATUS_TEXT 用于运行文案（如 Agent Running (x/y)）
+        this.bus.on(Events.RUNTIME_STATUS_TEXT, (payload: { text: string }) => {
+            console.debug('[TitleBar] Runtime status text updated:', payload.text);
+            this.runtimeStatusText = payload.text;
+            this.updateAggregateStatus();
+        });
+
+        this.bus.on(Events.RUNTIME_STATUS_TEXT_CLEAR, () => {
+            this.runtimeStatusText = null;
+            this.updateAggregateStatus();
         });
 
         this.bus.on(Events.PROVIDER_HEALTH_UPDATED, (payload: { providers?: ProviderHealthSnapshotView[] }) => {
@@ -89,13 +110,19 @@ export class TitleBarView {
         }
 
         const providers = [...this.providerHealthByScope.values()];
-        if (providers.length === 0) {
-            this.setStatus(t('status.gateway_connected_provider_unknown'), 'running');
+        if (providers.some((item) => ['auth_failed', 'unreachable', 'misconfigured'].includes(item.status))) {
+            this.setStatus(t('status.gateway_connected_provider_error'), 'error');
             return;
         }
 
-        if (providers.some((item) => ['auth_failed', 'unreachable', 'misconfigured'].includes(item.status))) {
-            this.setStatus(t('status.gateway_connected_provider_error'), 'error');
+        // Provider 未报错时，允许临时运行文案覆盖文案层，但不改变连接态事实来源
+        if (this.runtimeStatusText) {
+            this.setStatus(this.runtimeStatusText, 'running');
+            return;
+        }
+
+        if (providers.length === 0) {
+            this.setStatus(t('status.gateway_connected_provider_unknown'), 'running');
             return;
         }
 

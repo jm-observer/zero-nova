@@ -92,7 +92,7 @@ where
                         } else {
                             json_str.to_string()
                         };
-                        debug!("[OUTBOUND] Sending response to peer: {}: {}", peer, preview);
+                        trace!("[OUTBOUND] Sending response to peer: {}: {}", peer, preview);
                         if ws_sink.send(WsMessage::Text(json_str)).await.is_err() {
                             break;
                         }

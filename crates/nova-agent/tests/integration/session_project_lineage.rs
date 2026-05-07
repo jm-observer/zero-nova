@@ -1,5 +1,6 @@
 use super::mock_client::MockClient;
 use nova_agent::app::ConversationService;
+use nova_agent::config::{AppConfig, OriginAppConfig};
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::{
     AgentConfig, AgentDescriptor, AgentRegistry, AgentRuntime, ModelConfig, ToolRegistry,
@@ -133,6 +134,7 @@ fn build_conversation_service(
         AgentConfig {
             max_iterations: 1,
             model_config: ModelConfig {
+                provider: Some("default".to_string()),
                 model: "test-model".to_string(),
                 max_tokens: 256,
                 temperature: None,
@@ -151,7 +153,12 @@ fn build_conversation_service(
         },
     );
 
-    ConversationService::new(runtime, registry, sessions)
+    ConversationService::new(
+        runtime,
+        registry,
+        sessions,
+        AppConfig::from_origin(OriginAppConfig::default(), data_dir.to_path_buf()),
+    )
 }
 
 fn agent_descriptor(id: &str) -> AgentDescriptor {
@@ -165,5 +172,7 @@ fn agent_descriptor(id: &str) -> AgentDescriptor {
         initial_template_vars: HashMap::new(),
         tool_whitelist: None,
         model_config: None,
+        provider_id: "default".to_string(),
+        llm_id: Some("default".to_string()),
     }
 }

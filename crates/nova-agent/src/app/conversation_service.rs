@@ -1,6 +1,7 @@
 use crate::agent::AgentRuntime;
 use crate::agent::TurnResult;
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
+use crate::config::AppConfig;
 use crate::conversation::control::{LastTurnSnapshot, ModelRef};
 use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
@@ -22,14 +23,21 @@ pub struct ConversationService<C: LlmClient> {
     pub agent: AgentRuntime<C>,
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
+    pub app_config: AppConfig,
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
-    pub fn new(agent: AgentRuntime<C>, agent_registry: AgentRegistry, sessions: SessionService) -> Self {
+    pub fn new(
+        agent: AgentRuntime<C>,
+        agent_registry: AgentRegistry,
+        sessions: SessionService,
+        app_config: AppConfig,
+    ) -> Self {
         Self {
             agent,
             agent_registry,
             sessions,
+            app_config,
         }
     }
 
@@ -37,16 +45,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         &self,
         session: &crate::conversation::session::Session,
         agent_descriptor: &AgentDescriptor,
-    ) -> (Option<ModelRef>, Option<ModelRef>) {
+    ) -> Result<(Option<ModelRef>, Option<ModelRef>, crate::config::ResolvedAgentBinding)> {
         let control = session.control.read().unwrap();
-        let default_model_name = agent_descriptor
-            .model_config
-            .as_ref()
-            .map(|config| config.model.clone())
-            .unwrap_or_else(|| self.agent.config.model_config.model.clone());
+        let base_binding = self
+            .app_config
+            .resolve_agent_binding_by_id(agent_descriptor.id.as_str())?;
         let default_model = ModelRef {
-            provider: "default".to_string(),
-            model: default_model_name,
+            provider: base_binding.provider_id.clone(),
+            model: base_binding.model_config.model.clone(),
         };
 
         let orchestration_model = control
@@ -56,7 +62,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .or(Some(default_model.clone()));
         let execution_model = control.model_override.execution.clone().or(Some(default_model));
 
-        (orchestration_model, execution_model)
+        Ok((orchestration_model, execution_model, base_binding))
     }
 
     /// 执行一轮对话逻辑
@@ -126,7 +132,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
-        let (orchestration_model, execution_model) = self.resolve_run_models(&session, &agent_descriptor);
+        let (orchestration_model, execution_model, base_binding) =
+            self.resolve_run_models(&session, &agent_descriptor)?;
 
         // Phase 2: Create Run record
         self.sessions
@@ -137,8 +144,8 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 status: "running".to_string(),
                 created_at: now,
                 updated_at: now,
-                orchestration_model,
-                execution_model,
+                orchestration_model: orchestration_model.clone(),
+                execution_model: execution_model.clone(),
                 tool_call_count: Some(0),
                 usage: None,
             })
@@ -250,6 +257,19 @@ impl<C: LlmClient + 'static> ConversationService<C> {
 
         // 渐进切换策略（Phase 3 G11）
         let use_turn_context = self.agent.config.use_turn_context;
+        let execution_binding = if let Some(override_model) = execution_model.as_ref() {
+            self.app_config.resolve_model_override(
+                &base_binding,
+                override_model.provider.as_str(),
+                override_model.model.as_str(),
+            )?
+        } else {
+            base_binding.clone()
+        };
+        let execution_environment = self.agent.config.initial_env_snapshot.clone().map(|mut env| {
+            env.model_id = Some(execution_binding.model_config.model.clone());
+            env
+        });
         if use_turn_context {
             let project_dir = self.sessions.get_project_dir(session_id).await?;
             let project_context = load_project_context_with_config_async(
@@ -275,12 +295,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             let mut env =
                 crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref())
                     .await;
-            env.model_id = self
-                .agent
-                .config
-                .initial_env_snapshot
-                .as_ref()
-                .and_then(|e| e.model_id.clone());
+            env.model_id = Some(execution_binding.model_config.model.clone());
             prompt_config = prompt_config.with_environment(env.clone());
 
             if let Some(content) = project_context {
@@ -331,7 +346,15 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
             let turn_result = match self
                 .agent
-                .run_turn_with_context(turn_ctx, user_message, session_id, Some(env), event_tx, Some(token))
+                .run_turn_with_context_and_model_config(
+                    turn_ctx,
+                    user_message,
+                    session_id,
+                    Some(env),
+                    event_tx,
+                    Some(token),
+                    &execution_binding.model_config,
+                )
                 .await
             {
                 Ok(res) => res,
@@ -435,13 +458,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             let history_for_turn: &[Message] = &history[..history.len() - 1];
             let turn_result = match self
                 .agent
-                .run_turn(
+                .run_turn_with_model_config(
                     history_for_turn,
                     input,
                     session_id,
-                    self.agent.config.initial_env_snapshot.clone(),
+                    execution_environment,
                     event_tx,
                     Some(token),
+                    &execution_binding.model_config,
                 )
                 .await
             {

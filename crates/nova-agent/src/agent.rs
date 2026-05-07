@@ -209,6 +209,28 @@ impl<C: LlmClient> AgentRuntime<C> {
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
+        self.run_turn_with_model_config(
+            history,
+            user_input,
+            session_id,
+            environment,
+            event_tx,
+            cancellation_token,
+            &self.config.model_config,
+        )
+        .await
+    }
+
+    pub async fn run_turn_with_model_config(
+        &self,
+        history: &[Message],
+        user_input: &str,
+        session_id: &str,
+        environment: Option<EnvironmentSnapshot>,
+        event_tx: mpsc::Sender<AgentEvent>,
+        cancellation_token: Option<CancellationToken>,
+        model_config: &ModelConfig,
+    ) -> Result<TurnResult> {
         let mut all_messages = history.to_vec();
 
         // Append initial user message
@@ -250,11 +272,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             let tool_defs = self.tools.tool_definitions();
 
-            let mut receiver = match self
-                .client
-                .stream(&all_messages, &tool_defs[..], &self.config.model_config)
-                .await
-            {
+            let mut receiver = match self.client.stream(&all_messages, &tool_defs[..], model_config).await {
                 Ok(r) => r,
                 Err(e) => {
                     let err_msg = format!("Failed to start stream: {}", e);
@@ -516,6 +534,28 @@ impl<C: LlmClient> AgentRuntime<C> {
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
+        self.run_turn_with_context_and_model_config(
+            ctx,
+            message,
+            session_id,
+            environment,
+            event_tx,
+            cancellation_token,
+            &self.config.model_config,
+        )
+        .await
+    }
+
+    pub async fn run_turn_with_context_and_model_config(
+        &self,
+        ctx: TurnContext,
+        message: Message,
+        session_id: &str,
+        environment: Option<EnvironmentSnapshot>,
+        event_tx: mpsc::Sender<AgentEvent>,
+        cancellation_token: Option<CancellationToken>,
+        model_config: &ModelConfig,
+    ) -> Result<TurnResult> {
         let mut all_messages = Arc::try_unwrap(ctx.history)
             .unwrap_or_else(|h| (*h).clone())
             .into_iter()
@@ -582,7 +622,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             let mut receiver = self
                 .client
-                .stream(&all_messages, &ctx.tool_definitions[..], &self.config.model_config)
+                .stream(&all_messages, &ctx.tool_definitions[..], model_config)
                 .await?;
 
             let mut current_text = String::new();

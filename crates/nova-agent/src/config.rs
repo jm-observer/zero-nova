@@ -96,6 +96,14 @@ pub struct RegisteredLlmConfig {
     pub model_config: ModelConfig,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResolvedAgentBinding {
+    pub provider_id: String,
+    pub provider: ProviderConfig,
+    pub llm_id: Option<String>,
+    pub model_config: ModelConfig,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProviderConfig {
     #[serde(default)]
@@ -175,6 +183,7 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             model_config: ModelConfig {
+                provider: Some(default_provider_binding_id()),
                 model: "gpt-oss-120b".to_string(),
                 max_tokens: 8192,
                 temperature: None,
@@ -422,12 +431,14 @@ impl Default for GatewayConfig {
 
 impl AppConfig {
     pub fn from_origin(origin: OriginAppConfig, config_dir: PathBuf) -> Self {
+        let (provider, llm) = resolve_default_runtime_binding(&origin.providers, &origin.llms, &origin.defaults)
+            .unwrap_or((origin.provider.clone(), origin.llm.clone()));
         Self {
             providers: origin.providers,
             llms: origin.llms,
             defaults: origin.defaults,
-            provider: origin.provider,
-            llm: origin.llm,
+            provider,
+            llm,
             search: origin.search,
             tool: origin.tool,
             gateway: origin.gateway,
@@ -482,6 +493,109 @@ impl AppConfig {
             }
             None => self.config_dir.join("config.toml"),
         }
+    }
+
+    pub fn find_agent(&self, agent_id: &str) -> Result<&AgentSpec> {
+        self.gateway
+            .agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .ok_or_else(|| anyhow::anyhow!("agent '{}' not found", agent_id))
+    }
+
+    pub fn resolve_default_binding(&self) -> Result<ResolvedAgentBinding> {
+        self.resolve_named_binding(self.defaults.provider.as_str(), self.defaults.llm.as_str())
+    }
+
+    pub fn resolve_agent_binding(&self, agent: &AgentSpec) -> Result<ResolvedAgentBinding> {
+        let llm_id = agent.llm.as_deref().unwrap_or(self.defaults.llm.as_str());
+        let binding = self.resolve_named_binding(agent.provider.as_str(), llm_id)?;
+        if binding.provider_id != agent.provider {
+            bail!(
+                "agent '{}' llm '{}' belongs to provider '{}', expected '{}'",
+                agent.id,
+                llm_id,
+                binding.provider_id,
+                agent.provider
+            );
+        }
+        Ok(binding)
+    }
+
+    pub fn resolve_agent_binding_by_id(&self, agent_id: &str) -> Result<ResolvedAgentBinding> {
+        let agent = self.find_agent(agent_id)?;
+        self.resolve_agent_binding(agent)
+    }
+
+    pub fn resolve_model_override(
+        &self,
+        base_binding: &ResolvedAgentBinding,
+        provider_id: &str,
+        model_or_llm: &str,
+    ) -> Result<ResolvedAgentBinding> {
+        let provider_id = provider_id.trim();
+        let model_or_llm = model_or_llm.trim();
+        if provider_id.is_empty() {
+            bail!("provider override cannot be empty");
+        }
+        if model_or_llm.is_empty() {
+            bail!("model override cannot be empty");
+        }
+
+        if let Some(llm) = self.llms.get(model_or_llm) {
+            if llm.provider != provider_id {
+                bail!(
+                    "override model '{}' belongs to provider '{}', expected '{}'",
+                    model_or_llm,
+                    llm.provider,
+                    provider_id
+                );
+            }
+            return self.resolve_named_binding(provider_id, model_or_llm);
+        }
+
+        let provider = self
+            .providers
+            .get(provider_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown provider override '{}'", provider_id))?;
+        let mut model_config = base_binding.model_config.clone();
+        model_config.provider = Some(provider_id.to_string());
+        model_config.model = model_or_llm.to_string();
+        Ok(ResolvedAgentBinding {
+            provider_id: provider_id.to_string(),
+            provider,
+            llm_id: None,
+            model_config,
+        })
+    }
+
+    fn resolve_named_binding(&self, provider_id: &str, llm_id: &str) -> Result<ResolvedAgentBinding> {
+        let provider = self
+            .providers
+            .get(provider_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("unknown provider '{}'", provider_id))?;
+        let llm = self
+            .llms
+            .get(llm_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown llm '{}'", llm_id))?;
+        if llm.provider != provider_id {
+            bail!(
+                "llm '{}' belongs to provider '{}', expected '{}'",
+                llm_id,
+                llm.provider,
+                provider_id
+            );
+        }
+        let mut model_config = llm.model_config.clone();
+        model_config.provider = Some(provider_id.to_string());
+        Ok(ResolvedAgentBinding {
+            provider_id: provider_id.to_string(),
+            provider,
+            llm_id: Some(llm_id.to_string()),
+            model_config,
+        })
     }
 }
 
@@ -586,6 +700,14 @@ impl OriginAppConfig {
                         agent.provider
                     );
                 }
+            } else if default_llm.provider != agent.provider {
+                bail!(
+                    "agent '{}' has no llm and defaults.llm '{}' belongs to provider '{}', expected '{}'",
+                    agent.id,
+                    self.defaults.llm,
+                    default_llm.provider,
+                    agent.provider
+                );
             }
             if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
                 bail!("agent '{}' cannot set both prompt_file and prompt_inline", agent.id);
@@ -936,6 +1058,7 @@ impl RawAppConfig {
 
 fn raw_model_config_with_defaults(raw: RawModelConfig, default_model: &ModelConfig) -> ModelConfig {
     ModelConfig {
+        provider: default_model.provider.clone(),
         model: raw.model.unwrap_or_else(|| default_model.model.clone()),
         max_tokens: raw.max_tokens.unwrap_or(default_model.max_tokens),
         temperature: raw.temperature,
@@ -943,6 +1066,18 @@ fn raw_model_config_with_defaults(raw: RawModelConfig, default_model: &ModelConf
         thinking_budget: raw.thinking_budget,
         reasoning_effort: raw.reasoning_effort,
     }
+}
+
+fn resolve_default_runtime_binding(
+    providers: &HashMap<String, ProviderConfig>,
+    llms: &HashMap<String, RegisteredLlmConfig>,
+    defaults: &DefaultBindingConfig,
+) -> Option<(ProviderConfig, LlmConfig)> {
+    let provider = providers.get(defaults.provider.as_str())?.clone();
+    let llm = llms.get(defaults.llm.as_str())?;
+    let mut model_config = llm.model_config.clone();
+    model_config.provider = Some(defaults.provider.clone());
+    Some((provider, LlmConfig { model_config }))
 }
 
 fn migrate_legacy_llm(

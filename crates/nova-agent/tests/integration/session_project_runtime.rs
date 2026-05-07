@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use nova_agent::app::ConversationService;
+use nova_agent::config::{AppConfig, OriginAppConfig};
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::message::ContentBlock;
 use nova_agent::prompt::TrimmerConfig;
@@ -422,7 +423,15 @@ fn build_conversation_service<C: LlmClient + 'static>(
         },
     );
 
-    (ConversationService::new(runtime, registry, sessions.clone()), sessions)
+    (
+        ConversationService::new(
+            runtime,
+            registry,
+            sessions.clone(),
+            AppConfig::from_origin(OriginAppConfig::default(), data_dir.to_path_buf()),
+        ),
+        sessions,
+    )
 }
 
 fn agent_descriptor(id: &str) -> AgentDescriptor {
@@ -436,6 +445,8 @@ fn agent_descriptor(id: &str) -> AgentDescriptor {
         initial_template_vars: HashMap::new(),
         tool_whitelist: None,
         model_config: None,
+        provider_id: "default".to_string(),
+        llm_id: Some("default".to_string()),
     }
 }
 

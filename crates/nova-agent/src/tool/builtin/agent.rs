@@ -91,10 +91,9 @@ impl AgentTool {
         context: Option<ToolContext>,
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
-        let client = OpenAiCompatClient::new(
-            self.config.provider.api_key.clone(),
-            self.config.provider.base_url.clone(),
-        );
+        let binding = self.config.resolve_agent_binding(spec)?;
+        let client =
+            OpenAiCompatClient::from_registry(self.config.providers.clone(), self.config.defaults.provider.clone());
         let sub_registry = ToolRegistry::new();
         if let Some(ctx) = &context {
             if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
@@ -111,6 +110,7 @@ impl AgentTool {
 
         let mut model_config = if let Some(m) = &spec.model_config {
             ModelConfig {
+                provider: Some(binding.provider_id.clone()),
                 model: m.model.clone(),
                 max_tokens: m.max_tokens.unwrap_or(8192),
                 temperature: Some(m.temperature as f64),
@@ -119,11 +119,18 @@ impl AgentTool {
                 reasoning_effort: None,
             }
         } else {
-            self.config.llm.model_config.clone()
+            binding.model_config.clone()
         };
         if let Some(m) = model_override {
             model_config.model = m.to_string();
         }
+        log::info!(
+            "[Agent] Subagent '{}' resolved provider='{}', llm={:?}, model='{}'",
+            spec.id,
+            binding.provider_id,
+            binding.llm_id,
+            model_config.model
+        );
 
         let agent_config = AgentConfig {
             max_iterations: self.config.gateway.max_iterations,
@@ -455,6 +462,8 @@ mod tests {
                     id: "nova".to_string(),
                     display_name: "Nova".to_string(),
                     description: "default".to_string(),
+                    provider: "default".to_string(),
+                    llm: Some("default".to_string()),
                     prompt_file: Some("agent-nova.md".to_string()),
                     ..AgentSpec::default()
                 },
@@ -462,6 +471,8 @@ mod tests {
                     id: "developer".to_string(),
                     display_name: "Developer".to_string(),
                     description: "developer".to_string(),
+                    provider: "default".to_string(),
+                    llm: Some("default".to_string()),
                     prompt_file: Some("agent-developer.md".to_string()),
                     ..AgentSpec::default()
                 },

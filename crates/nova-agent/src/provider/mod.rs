@@ -57,6 +57,8 @@ pub enum ProviderStreamEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Configuration for the LLM model behavior.
 pub struct ModelConfig {
+    #[serde(default)]
+    pub provider: Option<String>,
     pub model: String,
     pub max_tokens: u32,
     pub temperature: Option<f64>,

@@ -32,16 +32,20 @@ impl AgentWorkspaceService {
     pub async fn inspect_agent(&self, agent_id: &str, session_id: &str) -> Result<AgentInspectResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().unwrap();
-
-        // Resolve effective model: session override > agent default > global default
-        let agent_model = self.agent_registry.get(agent_id).and_then(|a| a.model_config.as_ref());
+        let config = self
+            .config
+            .read()
+            .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
+            .clone();
+        let base_binding = config.resolve_agent_binding_by_id(agent_id)?;
 
         let default_model = nova_protocol::ModelRef {
-            provider: "default".to_string(),
-            model: agent_model
-                .map(|m| m.model.clone())
-                .unwrap_or_else(|| "unknown".to_string()),
+            provider: base_binding.provider_id.clone(),
+            model: base_binding.model_config.model.clone(),
         };
+        let global_default = config.resolve_default_binding()?;
+        let has_agent_default = base_binding.provider_id != global_default.provider_id
+            || base_binding.model_config.model != global_default.model_config.model;
 
         let has_session_override =
             control.model_override.orchestration.is_some() || control.model_override.execution.is_some();
@@ -66,7 +70,7 @@ impl AgentWorkspaceService {
                 })
                 .unwrap_or_else(|| default_model.clone());
             (orch, exec, "session_override".to_string())
-        } else if agent_model.is_some() {
+        } else if has_agent_default {
             (default_model.clone(), default_model, "agent_default".to_string())
         } else {
             (default_model.clone(), default_model, "global_default".to_string())
@@ -241,19 +245,42 @@ impl AgentWorkspaceService {
         session_id: &str,
         req: SessionModelOverrideRequest,
     ) -> Result<SessionRuntimeSnapshot> {
+        let session = self.sessions.get(session_id).await?.context("Session not found")?;
+        let active_agent = {
+            let control = session.control.read().unwrap();
+            control.active_agent.clone()
+        };
+        let config = self
+            .config
+            .read()
+            .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
+            .clone();
+        let base_binding = config.resolve_agent_binding_by_id(active_agent.as_str())?;
+        let orchestration = req
+            .orchestration
+            .map(|m| {
+                config
+                    .resolve_model_override(&base_binding, m.provider.as_str(), m.model.as_str())
+                    .map(|binding| ModelRef {
+                        provider: binding.provider_id,
+                        model: binding.model_config.model,
+                    })
+            })
+            .transpose()?;
+        let execution = req
+            .execution
+            .map(|m| {
+                config
+                    .resolve_model_override(&base_binding, m.provider.as_str(), m.model.as_str())
+                    .map(|binding| ModelRef {
+                        provider: binding.provider_id,
+                        model: binding.model_config.model,
+                    })
+            })
+            .transpose()?;
         let session = self
             .sessions
-            .override_model(
-                session_id,
-                req.orchestration.map(|m| ModelRef {
-                    provider: m.provider,
-                    model: m.model,
-                }),
-                req.execution.map(|m| ModelRef {
-                    provider: m.provider,
-                    model: m.model,
-                }),
-            )
+            .override_model(session_id, orchestration, execution)
             .await?;
 
         let control = session.control.read().unwrap();
@@ -728,7 +755,15 @@ fn sort_file_tree_entries(entries: &mut [SessionFileTreeEntry]) {
 #[cfg(test)]
 mod tests {
     use super::{deserialize_skill_bindings, sort_file_tree_entries};
+    use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
+    use crate::app::agent_workspace_service::AgentWorkspaceService;
+    use crate::config::{AppConfig, OriginAppConfig};
+    use crate::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
     use nova_protocol::observability::SessionFileTreeEntry;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, RwLock};
+    use tempfile::tempdir;
 
     #[test]
     fn session_skill_bindings_reading_does_not_depend_on_last_turn() {
@@ -772,5 +807,78 @@ mod tests {
         sort_file_tree_entries(&mut entries);
         let names = entries.into_iter().map(|item| item.name).collect::<Vec<_>>();
         assert_eq!(names, vec!["alpha", "Beta", "Alpha.txt", "zeta.rs"]);
+    }
+
+    #[tokio::test]
+    async fn inspect_agent_returns_real_provider_id() {
+        let dir = tempdir().expect("temp dir should exist");
+        let manager = SqliteManager::new(dir.path()).await.expect("sqlite should init");
+        let repository = SqliteSessionRepository::new(manager.pool.clone());
+        let sessions = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let session = sessions
+            .create(Some("s".to_string()), "developer".to_string(), String::new())
+            .await
+            .expect("session should create");
+
+        let mut origin = OriginAppConfig::default();
+        origin.providers.insert(
+            "cloud".to_string(),
+            crate::config::ProviderConfig {
+                api_key: String::new(),
+                base_url: "https://api.openai.com/v1".to_string(),
+            },
+        );
+        origin.llms.insert(
+            "cloud_gpt4o".to_string(),
+            crate::config::RegisteredLlmConfig {
+                provider: "cloud".to_string(),
+                model_config: crate::provider::ModelConfig {
+                    provider: Some("cloud".to_string()),
+                    model: "gpt-4o".to_string(),
+                    max_tokens: 4096,
+                    temperature: Some(0.3),
+                    top_p: None,
+                    thinking_budget: None,
+                    reasoning_effort: None,
+                },
+            },
+        );
+        origin.defaults.provider = "default".to_string();
+        origin.defaults.llm = "default".to_string();
+        origin.gateway.agents = vec![crate::config::AgentSpec {
+            id: "developer".to_string(),
+            display_name: "Developer".to_string(),
+            description: "dev".to_string(),
+            aliases: Vec::new(),
+            provider: "cloud".to_string(),
+            llm: Some("cloud_gpt4o".to_string()),
+            prompt_file: None,
+            prompt_inline: None,
+            system_prompt_template: None,
+            tool_whitelist: None,
+            model_config: None,
+        }];
+        let config = Arc::new(RwLock::new(AppConfig::from_origin(origin, PathBuf::from("."))));
+        let registry = AgentRegistry::new(AgentDescriptor {
+            id: "developer".to_string(),
+            display_name: "Developer".to_string(),
+            description: "dev".to_string(),
+            aliases: Vec::new(),
+            system_prompt_template: String::new(),
+            system_prompt_base: String::new(),
+            initial_template_vars: HashMap::new(),
+            tool_whitelist: None,
+            model_config: None,
+            provider_id: "cloud".to_string(),
+            llm_id: Some("cloud_gpt4o".to_string()),
+        });
+        let service = AgentWorkspaceService::new(registry, sessions, config);
+
+        let response = service
+            .inspect_agent("developer", &session.id)
+            .await
+            .expect("inspect should succeed");
+        assert_eq!(response.effective_model.orchestration.provider, "cloud");
+        assert_eq!(response.effective_model.execution.provider, "cloud");
     }
 }

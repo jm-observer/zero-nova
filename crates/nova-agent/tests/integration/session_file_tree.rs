@@ -20,6 +20,8 @@ fn build_registry() -> AgentRegistry {
         initial_template_vars: HashMap::new(),
         tool_whitelist: None,
         model_config: None,
+        provider_id: "default".to_string(),
+        llm_id: Some("default".to_string()),
     })
 }
 

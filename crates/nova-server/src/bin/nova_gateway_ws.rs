@@ -2,7 +2,6 @@ use clap::Parser;
 use custom_utils::{args::workspace as resolve_workspace, logger::logger_feature};
 use nova_agent::app::bootstrap::build_application;
 use nova_agent::config::{AppConfig, OriginAppConfig};
-use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use std::{env::current_dir, future::pending, process::exit, time::Duration};
 use sysinfo::{Pid, System};
 use tokio::time::sleep;
@@ -15,6 +14,12 @@ pub struct Args {
 
     #[arg(long)]
     pub port: Option<u16>,
+
+    #[arg(long)]
+    pub provider: Option<String>,
+
+    #[arg(long)]
+    pub llm: Option<String>,
 
     #[arg(long)]
     pub model: Option<String>,
@@ -55,12 +60,30 @@ async fn main() -> anyhow::Result<()> {
     let mut origin_config = OriginAppConfig::load_from_file(&config_path)?;
 
     // Keep CLI flags as the highest priority so one-off runs do not require editing config files.
+    if let Some(provider) = &args.provider {
+        origin_config.defaults.provider = provider.clone();
+    }
+    if let Some(llm) = &args.llm {
+        origin_config.defaults.llm = llm.clone();
+    }
     if let Some(ref m) = args.model {
         origin_config.llm.model_config.model = m.clone();
+        if let Some(default_llm) = origin_config.llms.get_mut(origin_config.defaults.llm.as_str()) {
+            default_llm.model_config.model = m.clone();
+        }
     }
     origin_config.llm.model_config.max_tokens = args.max_tokens;
+    if let Some(default_llm) = origin_config.llms.get_mut(origin_config.defaults.llm.as_str()) {
+        default_llm.model_config.max_tokens = args.max_tokens;
+    }
     if let Some(ref url) = args.base_url {
         origin_config.provider.base_url = url.clone();
+        if let Some(default_provider) = origin_config
+            .providers
+            .get_mut(origin_config.defaults.provider.as_str())
+        {
+            default_provider.base_url = url.clone();
+        }
     }
     if let Some(host) = &args.host {
         origin_config.gateway.host = host.clone();
@@ -74,11 +97,7 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Starting Nova Gateway WS with config: {:?}", final_config);
 
     let addr = format!("{}:{}", final_config.gateway.host, final_config.gateway.port);
-    let client = OpenAiCompatClient::new(
-        final_config.provider.api_key.clone(),
-        final_config.provider.base_url.clone(),
-    );
-    let app = build_application(final_config, client).await?;
+    let app = build_application(final_config).await?;
 
     tokio::select! {
         res = nova_server_ws::run_server(&addr, app) => {

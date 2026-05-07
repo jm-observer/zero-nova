@@ -10,7 +10,7 @@ use crate::conversation::{SessionCache, SessionService};
 use crate::prompt::{
     EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector, SystemPromptBuilder, TrimmerConfig,
 };
-use crate::provider::LlmClient;
+use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::skill::SkillRegistry;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::builtin::task::TaskStore;
@@ -28,11 +28,9 @@ pub struct BootstrapOptions {
     pub bind_addr: SocketAddr,
 }
 
-pub async fn build_application<C: LlmClient + 'static>(
-    config: AppConfig,
-    client: C,
-) -> Result<Arc<dyn AgentApplication>> {
+pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplication>> {
     warn_unused_gateway_sections(&config)?;
+    let default_binding = config.resolve_default_binding()?;
 
     let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
@@ -42,7 +40,7 @@ pub async fn build_application<C: LlmClient + 'static>(
     let skill_registry = Arc::new(skill_registry);
 
     let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
-    env_snapshot.model_id = Some(config.llm.model_config.model.clone());
+    env_snapshot.model_id = Some(default_binding.model_config.model.clone());
 
     let task_store = Arc::new(Mutex::new(TaskStore::new()));
     let data_dir_path = config.data_dir_path();
@@ -64,7 +62,7 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
-        model_config: config.llm.model_config.clone(),
+        model_config: default_binding.model_config.clone(),
         tool_timeout: Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
         max_tokens: config.gateway.max_tokens,
         use_turn_context: config.gateway.use_turn_context,
@@ -82,6 +80,7 @@ pub async fn build_application<C: LlmClient + 'static>(
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
     for agent in &config.gateway.agents {
+        let binding = config.resolve_agent_binding(agent)?;
         let agent_prompt = load_agent_prompt(agent, &config).await?;
 
         let mut template_vars = HashMap::new();
@@ -107,7 +106,16 @@ pub async fn build_application<C: LlmClient + 'static>(
             initial_template_vars: template_vars,
             tool_whitelist: agent.tool_whitelist.clone(),
             model_config: agent.model_config.clone(),
+            provider_id: binding.provider_id.clone(),
+            llm_id: binding.llm_id.clone(),
         });
+        log::info!(
+            "Bootstrapped agent '{}' with provider='{}', llm={:?}, model='{}'",
+            agent.id,
+            binding.provider_id,
+            binding.llm_id,
+            binding.model_config.model
+        );
     }
 
     if agents.is_empty() {
@@ -119,6 +127,7 @@ pub async fn build_application<C: LlmClient + 'static>(
         agent_registry.register(agent);
     }
 
+    let client = OpenAiCompatClient::from_registry(config.providers.clone(), config.defaults.provider.clone());
     let mut agent = AgentRuntime::new(client, tools, agent_config);
     agent.task_store = Some(task_store);
     agent.skill_registry = Some(skill_registry);
@@ -136,7 +145,8 @@ pub async fn build_application<C: LlmClient + 'static>(
     let config_arc = Arc::new(RwLock::new(config.clone()));
     let config_path = config.config_path();
 
-    let conversation_service = ConversationService::new(agent, agent_registry.clone(), session_service.clone());
+    let conversation_service =
+        ConversationService::new(agent, agent_registry.clone(), session_service.clone(), config.clone());
     let workspace_service =
         super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service, config_arc.clone());
     let voice_service = build_voice_service(&config);

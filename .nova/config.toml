@@ -5,6 +5,10 @@
 # 12340
 base_url = "http://192.168.0.68:8085/v1"
 
+[providers.cloud]
+# api_key = ""
+base_url = "https://api.openai.com/v1"
+
 # 8000
 #base_url = "http://192.168.0.68:8082/v1"
 #base_url = "http://192.168.0.68:12340/v1"
@@ -22,6 +26,12 @@ provider = "local"
 model = "gpt-oss-120b"
 max_tokens = 8192
 temperature = 0.5
+
+[llms.cloud_gpt4o]
+provider = "cloud"
+model = "gpt-4o"
+max_tokens = 8192
+temperature = 0.3
 
 [defaults]
 provider = "local"

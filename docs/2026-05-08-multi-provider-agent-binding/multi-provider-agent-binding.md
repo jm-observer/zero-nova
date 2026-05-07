@@ -1,7 +1,7 @@
 # 多 Provider 与 Agent 绑定设计
 
 - **时间**：2026-05-08
-- **状态**：Plan 1 已完成，Plan 2 / Plan 3 待开始
+- **状态**：Plan 1 / Plan 2 / Plan 3 已完成
 
 ---
 
@@ -236,8 +236,8 @@ llm = "local_gemma"
 | Plan | 标题 | 职责 | 依赖 | 状态 |
 |---|---|---|---|---|
 | **Plan 1** | 配置模型与迁移 | 重构 TOML 结构、配置解析、兼容迁移与校验规则 | 无 | 已完成 |
-| **Plan 2** | 运行时绑定与客户端装配 | 将 Agent/会话解析到 Provider + LLM 绑定，并替换全局单 client 假设 | Plan 1 | 待开始 |
-| **Plan 3** | 观测、示例与测试补齐 | 更新示例配置、inspect/runtime 观测输出与回归测试 | Plan 1, Plan 2 | 待开始 |
+| **Plan 2** | 运行时绑定与客户端装配 | 将 Agent/会话解析到 Provider + LLM 绑定，并替换全局单 client 假设 | Plan 1 | 已完成 |
+| **Plan 3** | 观测、示例与测试补齐 | 更新示例配置、inspect/runtime 观测输出与回归测试 | Plan 1, Plan 2 | 已完成 |
 
 执行顺序：Plan 1 → Plan 2 → Plan 3
 

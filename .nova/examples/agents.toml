@@ -2,7 +2,7 @@
 #
 # 字段说明：
 #   provider       - Agent 默认绑定的 provider id
-#   llm            - Agent 默认绑定的 llm id；省略时回退到 [defaults].llm
+#   llm            - Agent 默认绑定的 llm id；省略时回退到 [defaults].llm，且 provider 必须匹配
 #   prompt_file    - 从 [tool].prompts_dir 加载模板文件
 #   prompt_inline  - 直接内联 prompt 文本（与 prompt_file 互斥）
 #   tool_whitelist - 允许调用的工具白名单，省略表示不限制

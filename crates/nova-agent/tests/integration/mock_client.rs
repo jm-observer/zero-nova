@@ -117,6 +117,7 @@ impl ModelConfig {
     /// 用于测试的默认配置
     pub fn default() -> Self {
         Self {
+            provider: Some("default".to_string()),
             model: "claude-sonnet-4-20250514".to_string(),
             max_tokens: 1024,
             temperature: Some(0.7),

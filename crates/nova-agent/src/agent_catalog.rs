@@ -20,6 +20,8 @@ pub struct AgentDescriptor {
     pub initial_template_vars: HashMap<String, String>, // 初始模板变量
     pub tool_whitelist: Option<Vec<String>>,            // None = 全部工具
     pub model_config: Option<ModelConfig>,              // None = 使用默认
+    pub provider_id: String,
+    pub llm_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +92,8 @@ mod tests {
             initial_template_vars: HashMap::new(),
             tool_whitelist: None,
             model_config: None,
+            provider_id: "default".to_string(),
+            llm_id: Some("default".to_string()),
         };
         AgentRegistry::new(primary)
     }

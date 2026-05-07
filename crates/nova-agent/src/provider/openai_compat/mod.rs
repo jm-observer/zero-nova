@@ -1,5 +1,6 @@
 pub mod conv;
 
+use crate::config::ProviderConfig;
 use crate::message::Message;
 use crate::provider::openai_compat::conv::{build_request, map_finish_reason, map_usage};
 use crate::provider::types::{StopReason, ToolDefinition, Usage};
@@ -11,22 +12,56 @@ use async_openai::Client as OpenAiSdkClient;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use log::{debug, trace};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use tokio_stream::Stream;
 
 /// Client for interacting with OpenAI-compatible APIs using async-openai SDK.
 pub struct OpenAiCompatClient {
-    client: OpenAiSdkClient<OpenAIConfig>,
+    endpoint: OpenAiCompatEndpoint,
+}
+
+enum OpenAiCompatEndpoint {
+    Fixed {
+        api_key: String,
+        base_url: String,
+    },
+    Registry {
+        providers: HashMap<String, ProviderConfig>,
+        default_provider: String,
+    },
 }
 
 impl OpenAiCompatClient {
     /// Constructs a new `OpenAiCompatClient` with the provided API key and base URL.
     pub fn new(api_key: String, base_url: String) -> Self {
-        let base = base_url.trim_end_matches('/').to_string();
-        let config = OpenAIConfig::new().with_api_key(api_key).with_api_base(base);
         Self {
-            client: OpenAiSdkClient::with_config(config),
+            endpoint: OpenAiCompatEndpoint::Fixed { api_key, base_url },
+        }
+    }
+
+    pub fn from_registry(providers: HashMap<String, ProviderConfig>, default_provider: String) -> Self {
+        Self {
+            endpoint: OpenAiCompatEndpoint::Registry {
+                providers,
+                default_provider,
+            },
+        }
+    }
+
+    fn resolve_endpoint(&self, config: &ModelConfig) -> Result<(String, String)> {
+        match &self.endpoint {
+            OpenAiCompatEndpoint::Fixed { api_key, base_url } => Ok((api_key.clone(), base_url.clone())),
+            OpenAiCompatEndpoint::Registry {
+                providers,
+                default_provider,
+            } => {
+                let provider_id = config.provider.as_deref().unwrap_or(default_provider.as_str());
+                let provider = providers
+                    .get(provider_id)
+                    .ok_or_else(|| anyhow!("Unknown provider '{}' for model '{}'", provider_id, config.model))?;
+                Ok((provider.api_key.clone(), provider.base_url.clone()))
+            }
         }
     }
 }
@@ -40,9 +75,14 @@ impl LlmClient for OpenAiCompatClient {
         config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
         let request = build_request(messages, tools, config);
+        let (api_key, base_url) = self.resolve_endpoint(config)?;
+        let base = base_url.trim_end_matches('/').to_string();
+        let client_config = OpenAIConfig::new().with_api_key(api_key).with_api_base(base);
+        let client = OpenAiSdkClient::with_config(client_config);
 
         debug!(
-            "[OUTBOUND] LLM HTTP request via async-openai: model={}, msg_count={}",
+            "[OUTBOUND] LLM HTTP request via async-openai: provider={:?}, model={}, msg_count={}",
+            config.provider,
             config.model,
             messages.len()
         );
@@ -50,8 +90,7 @@ impl LlmClient for OpenAiCompatClient {
         // 序列化请求体用于日志/诊断
         let request_body = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
 
-        let stream = self
-            .client
+        let stream = client
             .chat()
             .create_stream(request)
             .await

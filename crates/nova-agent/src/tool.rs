@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -37,6 +38,8 @@ pub struct ToolContext {
     pub environment: Option<EnvironmentSnapshot>,
     /// 同一 turn 内共享的可变环境快照（用于实时同步 project_dir 等变更）。
     pub shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
+    /// Cancellation token for cooperative cancellation of long-running tools (e.g., orchestration).
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 /// Definition of a tool, including name, description, and input schema.
@@ -818,6 +821,7 @@ mod tests {
                         current_date: "2026-05-04".to_string(),
                     }),
                     shared_environment: None,
+                    cancellation_token: None,
                 }),
             )
             .await

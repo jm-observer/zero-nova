@@ -463,5 +463,7 @@ fn tool_context_with_session(session_id: &str, project_dir: Option<String>) -> T
             model_id: None,
             current_date: "2026-05-04".to_string(),
         }),
+        shared_environment: None,
+        cancellation_token: None,
     }
 }

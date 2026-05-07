@@ -48,7 +48,18 @@ impl Tool for OrchestrateTaskTool {
             .get("planJson")
             .and_then(Value::as_str)
             .context("Missing 'planJson'")?;
+        log::info!(
+            "[OrchestrateTaskTool] Received orchestration request plan_json_chars={}",
+            plan_json.chars().count()
+        );
+
         let tool_context = context.context("OrchestrateTask requires tool context")?;
+
+        // Use cancellation token from parent context if available, otherwise create a new one.
+        let cancellation_token = tool_context
+            .cancellation_token
+            .clone()
+            .unwrap_or_else(CancellationToken::new);
 
         let engine = OrchestratorEngine::new(
             Arc::new(AgentTool::new(self.config.clone())),
@@ -56,9 +67,17 @@ impl Tool for OrchestrateTaskTool {
             Some(tool_context),
         );
         let outcome = engine
-            .execute_plan(plan_json, CancellationToken::new())
+            .execute_plan(plan_json, cancellation_token)
             .await
             .context("Failed to execute orchestration plan")?;
+
+        log::info!(
+            "[OrchestrateTaskTool] Execution finished plan_id={} stage_count={} result_count={} review_present={}",
+            outcome.plan.plan_id,
+            outcome.plan.stages.len(),
+            outcome.results.len(),
+            outcome.review.is_some()
+        );
 
         let review = outcome.review.as_ref();
         let output = json!({
@@ -139,6 +158,7 @@ mod tests {
                         current_date: "2026-05-06".to_string(),
                     }),
                     shared_environment: None,
+                    cancellation_token: None,
                 }),
             )
             .await

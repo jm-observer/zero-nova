@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 
 /// 编排计划发布事件（Orchestrator 完成拆分后广播）
 /// 通过 ProgressEvent { kind="orchestration_plan", args=<this> } 携带
+/// 注意：session_id 由 ProgressEvent 信封层携带，args 内不重复包含。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OrchestrationPlanEvent {
-    pub session_id: String,
     pub plan_id: String,
     pub description: String,
     pub stages: Vec<StageSummary>,
@@ -105,7 +105,6 @@ mod tests {
     #[test]
     fn test_orchestration_plan_event_roundtrip() {
         let event = OrchestrationPlanEvent {
-            session_id: "sess-1".to_string(),
             plan_id: "plan-1".to_string(),
             description: "编排测试".to_string(),
             stages: vec![StageSummary {

@@ -3,15 +3,16 @@
 [provider]
 # api_key = ""
 # 12340
-#base_url = "http://192.168.0.68:8085/v1"
+base_url = "http://192.168.0.68:8085/v1"
+
 # 8000
-base_url = "http://192.168.0.68:8082/v1"
+#base_url = "http://192.168.0.68:8082/v1"
 #base_url = "http://192.168.0.68:12340/v1"
 
 # ── 模型调用参数 ────────────────────────────────────────────────
 [llm]
-model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
-#model = "gemma-4-26B-A4B-it"
+#model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
+model = "gemma-4-26B-A4B-it"
 #model = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
 #model = "gpt-oss-120b"
 max_tokens = 8192
@@ -44,7 +45,7 @@ max_iterations = 80
 tool_timeout_secs = 3600
 subagent_timeout_secs = 300
 max_tokens = 4096
-skill_routing_enabled = false
+skill_routing_enabled = true
 skill_history_strategy = "global"
 use_turn_context = true
 

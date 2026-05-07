@@ -542,6 +542,7 @@ mod tests {
                 current_date: "2026-05-05".to_string(),
             }),
             shared_environment: None,
+            cancellation_token: None,
         };
         assert_eq!(tool.resolve_working_dir(Some(&ctx)), Some(PathBuf::from("D:/fallback")));
     }
@@ -570,6 +571,7 @@ mod tests {
                 current_date: "2026-05-05".to_string(),
             }),
             shared_environment: None,
+            cancellation_token: None,
         };
         assert_eq!(tool.resolve_working_dir(Some(&ctx)), Some(PathBuf::from("D:/project")));
     }

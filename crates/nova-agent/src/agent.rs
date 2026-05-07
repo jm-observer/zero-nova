@@ -146,6 +146,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                             read_files,
                             environment,
                             shared_environment,
+                            cancellation_token: None,
                         }),
                     ),
                 )

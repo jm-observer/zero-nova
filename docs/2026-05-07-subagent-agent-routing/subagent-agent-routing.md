@@ -115,6 +115,41 @@ Orchestrator 拆分子任务
 
 ---
 
+## 当前落地状态
+
+### 已完成
+
+1. `.nova/config.toml` 已注册 `developer` Agent，继续保留 `nova` 作为默认 Agent
+2. `.nova/prompts/agent-developer.md` 已落地，包含开发任务专用工程约束
+3. Orchestrator 计划解析层已支持 `subagent_type` 缺失时默认补为 `nova`
+4. `AgentTool` 已支持根据 `subagent_type` 选择已注册 Agent
+5. `subagent_type` 非法时，运行时会记录 warning 并回退 `nova`
+6. `orchestrator` Skill 已更新，要求开发类任务显式使用 `developer`
+
+### 当前实现语义
+
+首版实现为了兼容现有协议，没有重命名事件和计划字段，而是采用以下约定：
+
+- `agent_id`：编排 Plan 内唯一实例标识，例如 `a1`、`a2`
+- `subagent_type`：实际选择的执行 Agent，目前使用 `nova` / `developer`
+
+这意味着当前系统已经具备“开发类子任务走 `developer`，其他任务走 `nova`”的能力，但字段命名仍然存在历史包袱。
+
+### 关联提交
+
+- 已提交实现：`4e50667`
+- commit message：`Route coding subtasks through a dedicated agent`
+
+### 验证结果
+
+实现完成后，已通过完整检查循环：
+
+1. `cargo clippy --workspace -- -D warnings`
+2. `cargo fmt --all --check`
+3. `cargo test --workspace`
+
+---
+
 ## 风险与待定项
 
 | 类型 | 描述 | 缓解措施 |

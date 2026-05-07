@@ -36,7 +36,13 @@ pub struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let _ = logger_feature("nova-gateway-ws", "debug,sqlx=info,hyper_util=info,nova_agent::provider::openai_compat=info", log::LevelFilter::Debug, false).build();
+    let _ = logger_feature(
+        "nova-gateway-ws",
+        "debug,sqlx=info,hyper_util=info,nova_agent::provider::openai_compat=info",
+        log::LevelFilter::Debug,
+        false,
+    )
+    .build();
 
     let workspace = resolve_workspace(&args.workspace, ".nova")?;
 

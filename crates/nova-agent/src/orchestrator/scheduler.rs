@@ -1,5 +1,6 @@
 use super::planner::{AgentRequest, ExecutionStage, StageMode};
 use anyhow::Result;
+use log::debug;
 use std::future::Future;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -60,11 +61,22 @@ where
     let mut join_set = JoinSet::new();
     let mut pending_agents = stage.agents.clone();
 
+    debug!(
+        "[scheduler] execute_parallel start plan_id={} stage_id={} agent_count={}",
+        plan_id,
+        stage.stage_id,
+        stage.agents.len()
+    );
+
     for agent in &stage.agents {
         let stage_id = stage.stage_id.clone();
         let req = agent.clone();
         let agent_id = req.agent_id.clone();
         let runner = execute_agent.clone();
+        debug!(
+            "[scheduler] spawn parallel agent plan_id={} stage_id={} agent_id={}",
+            plan_id, stage.stage_id, agent_id
+        );
         join_set.spawn(async move { (agent_id, runner(req, stage_id).await) });
     }
 
@@ -72,25 +84,56 @@ where
     loop {
         tokio::select! {
             _ = cancellation_token.cancelled() => {
+                debug!(
+                    "[scheduler] cancellation observed plan_id={} stage_id={} pending_agents={}",
+                    plan_id,
+                    stage.stage_id,
+                    pending_agents.len()
+                );
                 join_set.abort_all();
                 break;
             }
             joined = join_set.join_next() => {
                 let Some(joined) = joined else {
+                    debug!(
+                        "[scheduler] execute_parallel drained plan_id={} stage_id={}",
+                        plan_id,
+                        stage.stage_id
+                    );
                     break;
                 };
                 match joined {
                     Ok((agent_id, Ok(result))) => {
+                        debug!(
+                            "[scheduler] parallel agent completed plan_id={} stage_id={} agent_id={} status={}",
+                            plan_id,
+                            stage.stage_id,
+                            agent_id,
+                            result.status.as_str()
+                        );
                         pending_agents.retain(|agent| agent.agent_id != agent_id);
                         results.push(result);
                     }
                     Ok((agent_id, Err(error))) => {
+                        debug!(
+                            "[scheduler] parallel agent failed plan_id={} stage_id={} agent_id={} error={}",
+                            plan_id,
+                            stage.stage_id,
+                            agent_id,
+                            error
+                        );
                         if let Some(agent) = pending_agents.iter().find(|item| item.agent_id == agent_id) {
                             results.push(failed_result(plan_id, &stage.stage_id, &agent.agent_id, error.to_string()));
                         }
                         pending_agents.retain(|agent| agent.agent_id != agent_id);
                     }
                     Err(error) => {
+                        debug!(
+                            "[scheduler] parallel join failure plan_id={} stage_id={} error={}",
+                            plan_id,
+                            stage.stage_id,
+                            error
+                        );
                         results.push(failed_result(
                             plan_id,
                             &stage.stage_id,
@@ -105,9 +148,20 @@ where
 
     if cancellation_token.is_cancelled() {
         for agent in pending_agents {
+            debug!(
+                "[scheduler] mark cancelled plan_id={} stage_id={} agent_id={}",
+                plan_id, stage.stage_id, agent.agent_id
+            );
             results.push(cancelled_result(plan_id, &stage.stage_id, &agent.agent_id));
         }
     }
+
+    debug!(
+        "[scheduler] execute_parallel end plan_id={} stage_id={} result_count={}",
+        plan_id,
+        stage.stage_id,
+        results.len()
+    );
 
     Ok(results)
 }
@@ -123,22 +177,55 @@ where
     Fut: Future<Output = Result<SubAgentResult>> + Send + 'static,
 {
     let mut results = Vec::new();
+    debug!(
+        "[scheduler] execute_serial start plan_id={} stage_id={} agent_count={}",
+        plan_id,
+        stage.stage_id,
+        stage.agents.len()
+    );
     for (index, agent) in stage.agents.iter().enumerate() {
         if cancellation_token.is_cancelled() {
+            debug!(
+                "[scheduler] serial cancellation observed plan_id={} stage_id={} remaining_agents={}",
+                plan_id,
+                stage.stage_id,
+                stage.agents.len().saturating_sub(index)
+            );
             append_cancelled_results(plan_id, &stage.stage_id, &stage.agents[index..], &mut results);
             break;
         }
+        debug!(
+            "[scheduler] serial agent start plan_id={} stage_id={} agent_id={}",
+            plan_id, stage.stage_id, agent.agent_id
+        );
         match execute_agent.clone()(agent.clone(), stage.stage_id.clone()).await {
             Ok(result) => {
                 let failed = result.status == SubAgentStatus::Failed;
                 let cancelled = result.status == SubAgentStatus::Cancelled;
+                debug!(
+                    "[scheduler] serial agent completed plan_id={} stage_id={} agent_id={} status={}",
+                    plan_id,
+                    stage.stage_id,
+                    result.agent_id,
+                    result.status.as_str()
+                );
                 results.push(result);
                 if failed || cancelled {
+                    debug!(
+                        "[scheduler] serial short-circuit plan_id={} stage_id={} remaining_agents={}",
+                        plan_id,
+                        stage.stage_id,
+                        stage.agents.len().saturating_sub(index + 1)
+                    );
                     append_cancelled_results(plan_id, &stage.stage_id, &stage.agents[index + 1..], &mut results);
                     break;
                 }
             }
             Err(error) => {
+                debug!(
+                    "[scheduler] serial agent failed plan_id={} stage_id={} agent_id={} error={}",
+                    plan_id, stage.stage_id, agent.agent_id, error
+                );
                 results.push(failed_result(
                     plan_id,
                     &stage.stage_id,
@@ -150,6 +237,12 @@ where
             }
         }
     }
+    debug!(
+        "[scheduler] execute_serial end plan_id={} stage_id={} result_count={}",
+        plan_id,
+        stage.stage_id,
+        results.len()
+    );
     Ok(results)
 }
 
@@ -188,7 +281,16 @@ mod tests {
     use super::{execute_stage, SubAgentResult, SubAgentStatus};
     use crate::orchestrator::planner::{AgentRequest, ExecutionStage, StageMode};
     use anyhow::anyhow;
+    use custom_utils::logger::logger_feature;
+    use std::sync::Once;
     use tokio_util::sync::CancellationToken;
+
+    fn init_test_logger() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let _ = logger_feature("nova-agent-test", "debug", log::LevelFilter::Debug, false).build();
+        });
+    }
 
     fn build_stage(mode: StageMode) -> ExecutionStage {
         ExecutionStage {
@@ -218,6 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_stage_preserves_failure_results() {
+        init_test_logger();
         let stage = build_stage(StageMode::Parallel);
         let results = execute_stage(
             "plan-1",
@@ -248,6 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn serial_stage_cancels_remaining_agents_after_failure() {
+        init_test_logger();
         let stage = build_stage(StageMode::Serial);
         let results = execute_stage(
             "plan-1",
@@ -284,6 +388,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancellation_marks_remaining_parallel_agents_cancelled() {
+        init_test_logger();
         let stage = build_stage(StageMode::Parallel);
         let token = CancellationToken::new();
         token.cancel();

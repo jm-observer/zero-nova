@@ -624,15 +624,32 @@ impl SkillRegistry {
             }
         }
 
-        // 检查 /skill-name 模式（带空格分隔）
-        if let Some(parts) = trimmed.strip_prefix("/skill ") {
-            let parts: Vec<&str> = parts.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let name = parts[1].to_string();
-                if let Some(pkg) = self.find_by_slug(&name) {
+        // 检查 /skill <name> 模式
+        if let Some(rest) = trimmed.strip_prefix("/skill ") {
+            if let Some(name) = rest.split_whitespace().next() {
+                if let Some(pkg) = self.find_by_slug(name) {
                     return Some(pkg.id.clone());
                 }
-                if let Some(pkg) = self.find_by_name(&name) {
+                if let Some(pkg) = self.find_by_alias(name) {
+                    return Some(pkg.id.clone());
+                }
+                if let Some(pkg) = self.find_by_name(name) {
+                    return Some(pkg.id.clone());
+                }
+            }
+        }
+
+        // 检查 /<skill> 直达模式，便于 `/orchestrator ...` 这类显式触发。
+        if let Some(rest) = trimmed.strip_prefix('/') {
+            if !rest.is_empty() {
+                let name = rest.split_whitespace().next()?;
+                if name.contains('/') {
+                    return None;
+                }
+                if let Some(pkg) = self.find_by_slug(name) {
+                    return Some(pkg.id.clone());
+                }
+                if let Some(pkg) = self.find_by_alias(name) {
                     return Some(pkg.id.clone());
                 }
             }
@@ -856,5 +873,55 @@ mod tests {
         let registry = SkillRegistry::new();
         let prompt = registry.generate_contextual_prompt(None);
         assert!(prompt.is_empty());
+    }
+
+    #[test]
+    fn match_skill_by_input_supports_skill_space_form() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "orchestrator".to_string(),
+            slug: "orchestrator".to_string(),
+            display_name: "Orchestrator".to_string(),
+            description: "multi-agent orchestrator".to_string(),
+            instructions: "instructions".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec!["multi-agent".to_string()],
+            examples: vec![],
+            source_path: PathBuf::from("orchestrator"),
+            compat_mode: false,
+        });
+
+        assert_eq!(
+            registry.match_skill_by_input("/skill orchestrator"),
+            Some("orchestrator".to_string())
+        );
+    }
+
+    #[test]
+    fn match_skill_by_input_supports_direct_skill_slash_form() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "orchestrator".to_string(),
+            slug: "orchestrator".to_string(),
+            display_name: "Orchestrator".to_string(),
+            description: "multi-agent orchestrator".to_string(),
+            instructions: "instructions".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec!["multi-agent".to_string()],
+            examples: vec![],
+            source_path: PathBuf::from("orchestrator"),
+            compat_mode: false,
+        });
+
+        assert_eq!(
+            registry.match_skill_by_input("/orchestrator 分两步完成任务"),
+            Some("orchestrator".to_string())
+        );
+        assert_eq!(
+            registry.match_skill_by_input("/multi-agent 执行这个任务"),
+            Some("orchestrator".to_string())
+        );
     }
 }

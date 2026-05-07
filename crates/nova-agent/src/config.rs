@@ -2,13 +2,22 @@ use crate::agent_catalog::ModelConfig as AgentModelConfig;
 use crate::provider::ModelConfig;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+const DEFAULT_BINDING_PROVIDER: &str = "default";
+const DEFAULT_BINDING_LLM: &str = "default";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct OriginAppConfig {
+    #[serde(default = "default_provider_registry")]
+    pub providers: HashMap<String, ProviderConfig>,
+    #[serde(default = "default_llm_registry")]
+    pub llms: HashMap<String, RegisteredLlmConfig>,
+    #[serde(default)]
+    pub defaults: DefaultBindingConfig,
     #[serde(default)]
     pub provider: ProviderConfig,
     #[serde(default)]
@@ -28,6 +37,12 @@ pub struct OriginAppConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
+    #[serde(default = "default_provider_registry")]
+    pub providers: HashMap<String, ProviderConfig>,
+    #[serde(default = "default_llm_registry")]
+    pub llms: HashMap<String, RegisteredLlmConfig>,
+    #[serde(default)]
+    pub defaults: DefaultBindingConfig,
     #[serde(default)]
     pub provider: ProviderConfig,
     #[serde(default)]
@@ -75,6 +90,13 @@ pub struct LlmConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RegisteredLlmConfig {
+    pub provider: String,
+    #[serde(flatten)]
+    pub model_config: ModelConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProviderConfig {
     #[serde(default)]
     pub api_key: String,
@@ -82,8 +104,39 @@ pub struct ProviderConfig {
     pub base_url: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DefaultBindingConfig {
+    #[serde(default = "default_provider_binding_id")]
+    pub provider: String,
+    #[serde(default = "default_llm_binding_id")]
+    pub llm: String,
+}
+
 fn default_base_url() -> String {
     "http://127.0.0.1:8082/v1".to_string()
+}
+
+fn default_provider_binding_id() -> String {
+    DEFAULT_BINDING_PROVIDER.to_string()
+}
+
+fn default_llm_binding_id() -> String {
+    DEFAULT_BINDING_LLM.to_string()
+}
+
+fn default_provider_registry() -> HashMap<String, ProviderConfig> {
+    HashMap::from([(default_provider_binding_id(), ProviderConfig::default())])
+}
+
+fn default_llm_registry() -> HashMap<String, RegisteredLlmConfig> {
+    let default_model = LlmConfig::default().model_config;
+    HashMap::from([(
+        default_llm_binding_id(),
+        RegisteredLlmConfig {
+            provider: default_provider_binding_id(),
+            model_config: default_model,
+        },
+    )])
 }
 
 fn default_voice_enabled() -> bool {
@@ -133,11 +186,29 @@ impl Default for LlmConfig {
     }
 }
 
+impl Default for RegisteredLlmConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_provider_binding_id(),
+            model_config: LlmConfig::default().model_config,
+        }
+    }
+}
+
 impl Default for ProviderConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
             base_url: default_base_url(),
+        }
+    }
+}
+
+impl Default for DefaultBindingConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_provider_binding_id(),
+            llm: default_llm_binding_id(),
         }
     }
 }
@@ -154,6 +225,23 @@ impl Default for VoiceConfig {
             max_input_bytes: default_voice_max_input_bytes(),
             auto_play: false,
             provider: default_voice_provider(),
+        }
+    }
+}
+
+impl Default for OriginAppConfig {
+    fn default() -> Self {
+        Self {
+            providers: default_provider_registry(),
+            llms: default_llm_registry(),
+            defaults: DefaultBindingConfig::default(),
+            provider: ProviderConfig::default(),
+            llm: LlmConfig::default(),
+            search: SearchConfig::default(),
+            tool: ToolConfig::default(),
+            gateway: GatewayConfig::default(),
+            voice: VoiceConfig::default(),
+            config_path: None,
         }
     }
 }
@@ -194,6 +282,10 @@ pub struct AgentSpec {
     pub display_name: String,
     pub description: String,
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub llm: Option<String>,
     /// 指向 prompts_dir 下的模板文件名
     #[serde(default)]
     pub prompt_file: Option<String>,
@@ -331,6 +423,9 @@ impl Default for GatewayConfig {
 impl AppConfig {
     pub fn from_origin(origin: OriginAppConfig, config_dir: PathBuf) -> Self {
         Self {
+            providers: origin.providers,
+            llms: origin.llms,
+            defaults: origin.defaults,
             provider: origin.provider,
             llm: origin.llm,
             search: origin.search,
@@ -407,6 +502,9 @@ impl OriginAppConfig {
         if let Ok(api_key) = env::var("NOVA_API_KEY") {
             if !api_key.is_empty() {
                 self.provider.api_key = api_key;
+                if let Some(provider) = self.providers.get_mut(self.defaults.provider.as_str()) {
+                    provider.api_key = self.provider.api_key.clone();
+                }
             }
         }
         if let Ok(tavily_api_key) = env::var("TAVILY_API_KEY") {
@@ -417,6 +515,46 @@ impl OriginAppConfig {
     }
 
     fn validate(&self) -> Result<()> {
+        if self.providers.is_empty() {
+            bail!("providers cannot be empty");
+        }
+        if self.llms.is_empty() {
+            bail!("llms cannot be empty");
+        }
+        if self.defaults.provider.trim().is_empty() {
+            bail!("defaults.provider cannot be empty");
+        }
+        if self.defaults.llm.trim().is_empty() {
+            bail!("defaults.llm cannot be empty");
+        }
+        if !self.providers.contains_key(self.defaults.provider.as_str()) {
+            bail!(
+                "defaults.provider '{}' does not reference a configured provider",
+                self.defaults.provider
+            );
+        }
+        let default_llm = self.llms.get(self.defaults.llm.as_str()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "defaults.llm '{}' does not reference a configured llm",
+                self.defaults.llm
+            )
+        })?;
+        if default_llm.provider != self.defaults.provider {
+            bail!(
+                "defaults.llm '{}' belongs to provider '{}', but defaults.provider is '{}'",
+                self.defaults.llm,
+                default_llm.provider,
+                self.defaults.provider
+            );
+        }
+        for (llm_id, llm) in &self.llms {
+            if llm.provider.trim().is_empty() {
+                bail!("llm '{}' provider cannot be empty", llm_id);
+            }
+            if !self.providers.contains_key(llm.provider.as_str()) {
+                bail!("llm '{}' references unknown provider '{}'", llm_id, llm.provider);
+            }
+        }
         if self.gateway.agents.is_empty() {
             bail!("gateway.agents cannot be empty");
         }
@@ -424,6 +562,30 @@ impl OriginAppConfig {
         for agent in &self.gateway.agents {
             if !ids.insert(agent.id.clone()) {
                 bail!("duplicate agent id found: {}", agent.id);
+            }
+            if agent.provider.trim().is_empty() {
+                bail!("agent '{}' provider cannot be empty", agent.id);
+            }
+            if !self.providers.contains_key(agent.provider.as_str()) {
+                bail!("agent '{}' references unknown provider '{}'", agent.id, agent.provider);
+            }
+            if let Some(llm_id) = agent.llm.as_deref() {
+                if llm_id.trim().is_empty() {
+                    bail!("agent '{}' llm cannot be empty", agent.id);
+                }
+                let llm = self
+                    .llms
+                    .get(llm_id)
+                    .ok_or_else(|| anyhow::anyhow!("agent '{}' references unknown llm '{}'", agent.id, llm_id))?;
+                if llm.provider != agent.provider {
+                    bail!(
+                        "agent '{}' llm '{}' belongs to provider '{}', expected '{}'",
+                        agent.id,
+                        llm_id,
+                        llm.provider,
+                        agent.provider
+                    );
+                }
             }
             if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
                 bail!("agent '{}' cannot set both prompt_file and prompt_inline", agent.id);
@@ -462,6 +624,12 @@ impl OriginAppConfig {
 #[derive(Debug, Deserialize, Default)]
 struct RawAppConfig {
     #[serde(default)]
+    pub providers: HashMap<String, ProviderConfig>,
+    #[serde(default)]
+    pub llms: HashMap<String, RawRegisteredLlmConfig>,
+    #[serde(default)]
+    pub defaults: Option<DefaultBindingConfig>,
+    #[serde(default)]
     pub provider: Option<ProviderConfig>,
     #[serde(default)]
     pub llm: Option<RawLlmConfig>,
@@ -499,6 +667,13 @@ struct RawLlmConfig {
     api_key: Option<String>,
     #[serde(default)]
     base_url: Option<String>,
+    #[serde(flatten)]
+    model_config: RawModelConfig,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RawRegisteredLlmConfig {
+    provider: String,
     #[serde(flatten)]
     model_config: RawModelConfig,
 }
@@ -555,6 +730,10 @@ struct RawAgentSpec {
     #[serde(default)]
     aliases: Vec<String>,
     #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    llm: Option<String>,
+    #[serde(default)]
     prompt_file: Option<String>,
     #[serde(default)]
     prompt_inline: Option<String>,
@@ -587,50 +766,58 @@ struct RawTrimmerConfigToml {
 impl RawAppConfig {
     fn migrate(self) -> (OriginAppConfig, Vec<String>) {
         let mut warnings = Vec::new();
-
-        let mut provider = self.provider.unwrap_or_default();
         let default_model = LlmConfig::default().model_config;
-        let mut llm = LlmConfig {
-            model_config: default_model.clone(),
+        let use_named_bindings = !self.providers.is_empty() || !self.llms.is_empty() || self.defaults.is_some();
+        let legacy_provider_present = self.provider.is_some();
+        let legacy_llm_present = self.llm.is_some();
+        let mut legacy_provider = self.provider.unwrap_or_default();
+        let legacy_llm = migrate_legacy_llm(self.llm, &mut legacy_provider, &default_model, &mut warnings);
+
+        let (providers, llms, defaults) = if use_named_bindings {
+            if legacy_provider_present {
+                warnings.push(
+                    "Detected legacy field provider together with providers; using providers and ignoring provider."
+                        .to_string(),
+                );
+            }
+            if legacy_llm_present {
+                warnings.push(
+                    "Detected legacy field llm together with llms/defaults; using named llms and ignoring llm."
+                        .to_string(),
+                );
+            }
+
+            let mut migrated_llms = HashMap::with_capacity(self.llms.len());
+            for (llm_id, raw_llm) in self.llms {
+                let mut model_config = raw_model_config_with_defaults(raw_llm.model_config, &default_model);
+                if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
+                    model_config.reasoning_effort = None;
+                    warnings.push(format!(
+                        "Both llms.{}.thinking_budget and llms.{}.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort.",
+                        llm_id, llm_id
+                    ));
+                }
+                migrated_llms.insert(
+                    llm_id,
+                    RegisteredLlmConfig {
+                        provider: raw_llm.provider,
+                        model_config,
+                    },
+                );
+            }
+
+            (self.providers, migrated_llms, self.defaults.unwrap_or_default())
+        } else {
+            let providers = HashMap::from([(default_provider_binding_id(), legacy_provider.clone())]);
+            let llms = HashMap::from([(
+                default_llm_binding_id(),
+                RegisteredLlmConfig {
+                    provider: default_provider_binding_id(),
+                    model_config: legacy_llm.model_config.clone(),
+                },
+            )]);
+            (providers, llms, DefaultBindingConfig::default())
         };
-        if let Some(raw_llm) = self.llm {
-            llm.model_config.model = raw_llm.model_config.model.unwrap_or(default_model.model);
-            llm.model_config.max_tokens = raw_llm.model_config.max_tokens.unwrap_or(default_model.max_tokens);
-            llm.model_config.temperature = raw_llm.model_config.temperature;
-            llm.model_config.top_p = raw_llm.model_config.top_p;
-            llm.model_config.thinking_budget = raw_llm.model_config.thinking_budget;
-            llm.model_config.reasoning_effort = raw_llm.model_config.reasoning_effort;
-
-            if !raw_llm.api_key.as_deref().unwrap_or_default().is_empty() {
-                if provider.api_key.is_empty() {
-                    provider.api_key = raw_llm.api_key.unwrap_or_default();
-                    warnings.push("Detected deprecated field llm.api_key; migrated to provider.api_key.".to_string());
-                } else {
-                    warnings.push(
-                        "Both provider.api_key and deprecated llm.api_key exist; using provider.api_key.".to_string(),
-                    );
-                }
-            }
-            if let Some(legacy_base_url) = raw_llm.base_url {
-                if provider.base_url == default_base_url() {
-                    provider.base_url = legacy_base_url;
-                    warnings.push("Detected deprecated field llm.base_url; migrated to provider.base_url.".to_string());
-                } else {
-                    warnings.push(
-                        "Both provider.base_url and deprecated llm.base_url exist; using provider.base_url."
-                            .to_string(),
-                    );
-                }
-            }
-        }
-
-        if llm.model_config.thinking_budget.is_some() && llm.model_config.reasoning_effort.is_some() {
-            llm.model_config.reasoning_effort = None;
-            warnings.push(
-                "Both llm.thinking_budget and llm.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort."
-                    .to_string(),
-            );
-        }
 
         let mut migrated_agents = Vec::with_capacity(self.gateway.agents.len());
         for mut agent in self.gateway.agents {
@@ -656,6 +843,14 @@ impl RawAppConfig {
                 display_name: agent.display_name,
                 description: agent.description,
                 aliases: agent.aliases,
+                provider: agent.provider.unwrap_or_else(|| {
+                    if use_named_bindings {
+                        String::new()
+                    } else {
+                        defaults.provider.clone()
+                    }
+                }),
+                llm: Some(agent.llm.unwrap_or_else(|| defaults.llm.clone())),
                 prompt_file: agent.prompt_file,
                 prompt_inline: agent.prompt_inline,
                 system_prompt_template: None,
@@ -691,8 +886,22 @@ impl RawAppConfig {
                     .to_string(),
             );
         }
+
+        let provider = providers
+            .get(defaults.provider.as_str())
+            .cloned()
+            .unwrap_or_else(|| legacy_provider.clone());
+        let llm = llms
+            .get(defaults.llm.as_str())
+            .map(|config| LlmConfig {
+                model_config: config.model_config.clone(),
+            })
+            .unwrap_or(legacy_llm);
         (
             OriginAppConfig {
+                providers,
+                llms,
+                defaults,
                 provider,
                 llm,
                 search: self.search,
@@ -725,6 +934,61 @@ impl RawAppConfig {
     }
 }
 
+fn raw_model_config_with_defaults(raw: RawModelConfig, default_model: &ModelConfig) -> ModelConfig {
+    ModelConfig {
+        model: raw.model.unwrap_or_else(|| default_model.model.clone()),
+        max_tokens: raw.max_tokens.unwrap_or(default_model.max_tokens),
+        temperature: raw.temperature,
+        top_p: raw.top_p,
+        thinking_budget: raw.thinking_budget,
+        reasoning_effort: raw.reasoning_effort,
+    }
+}
+
+fn migrate_legacy_llm(
+    raw_llm: Option<RawLlmConfig>,
+    provider: &mut ProviderConfig,
+    default_model: &ModelConfig,
+    warnings: &mut Vec<String>,
+) -> LlmConfig {
+    let mut llm = LlmConfig {
+        model_config: default_model.clone(),
+    };
+    if let Some(raw_llm) = raw_llm {
+        llm.model_config = raw_model_config_with_defaults(raw_llm.model_config, default_model);
+
+        if !raw_llm.api_key.as_deref().unwrap_or_default().is_empty() {
+            if provider.api_key.is_empty() {
+                provider.api_key = raw_llm.api_key.unwrap_or_default();
+                warnings.push("Detected deprecated field llm.api_key; migrated to provider.api_key.".to_string());
+            } else {
+                warnings.push(
+                    "Both provider.api_key and deprecated llm.api_key exist; using provider.api_key.".to_string(),
+                );
+            }
+        }
+        if let Some(legacy_base_url) = raw_llm.base_url {
+            if provider.base_url == default_base_url() {
+                provider.base_url = legacy_base_url;
+                warnings.push("Detected deprecated field llm.base_url; migrated to provider.base_url.".to_string());
+            } else {
+                warnings.push(
+                    "Both provider.base_url and deprecated llm.base_url exist; using provider.base_url.".to_string(),
+                );
+            }
+        }
+    }
+
+    if llm.model_config.thinking_budget.is_some() && llm.model_config.reasoning_effort.is_some() {
+        llm.model_config.reasoning_effort = None;
+        warnings.push(
+            "Both llm.thinking_budget and llm.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort."
+                .to_string(),
+        );
+    }
+    llm
+}
+
 fn looks_like_prompt_file(value: &str) -> bool {
     let trimmed = value.trim();
     trimmed.ends_with(".md") || trimmed.ends_with(".txt") || trimmed.contains('/') || trimmed.contains('\\')
@@ -738,17 +1002,35 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn new_config_deserializes_correctly() {
+    fn named_bindings_config_migrates_and_validates() {
         let toml = r#"
-[provider]
+[providers.local]
 api_key = "test-key"
 base_url = "http://localhost:8082/v1"
 
-[llm]
+[llms.local_default]
+provider = "local"
 model = "test-model"
 max_tokens = 4096
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "default"
+provider = "local"
+llm = "local_default"
 "#;
-        let config: OriginAppConfig = toml::from_str(toml).expect("config should deserialize");
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, warnings) = raw.migrate();
+        config.validate().expect("config should validate");
+        assert!(warnings.is_empty());
+        assert_eq!(config.providers["local"].api_key, "test-key");
+        assert_eq!(config.llms["local_default"].provider, "local");
+        assert_eq!(config.defaults.provider, "local");
         assert_eq!(config.provider.api_key, "test-key");
         assert_eq!(config.llm.model_config.model, "test-model");
     }
@@ -767,22 +1049,164 @@ max_tokens = 2048
         assert_eq!(config.provider.api_key, "old-key");
         assert_eq!(config.provider.base_url, "http://old-host/v1");
         assert_eq!(config.llm.model_config.model, "old-model");
+        assert_eq!(config.providers["default"].api_key, "old-key");
+        assert_eq!(config.llms["default"].provider, "default");
         assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn unknown_agent_provider_fails_validation() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
+[[gateway.agents]]
+id = "developer"
+display_name = "Developer"
+description = "test"
+provider = "cloud2"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate();
+        let error = config.validate().expect_err("config should fail validation");
+        assert!(error.to_string().contains("unknown provider 'cloud2'"));
+    }
+
+    #[test]
+    fn unknown_agent_llm_fails_validation() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
+[[gateway.agents]]
+id = "developer"
+display_name = "Developer"
+description = "test"
+provider = "local"
+llm = "missing"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate();
+        let error = config.validate().expect_err("config should fail validation");
+        assert!(error.to_string().contains("unknown llm 'missing'"));
+    }
+
+    #[test]
+    fn mismatched_agent_llm_provider_fails_validation() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[providers.cloud]
+base_url = "http://cloud.example/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[llms.cloud_default]
+provider = "cloud"
+model = "cloud-model"
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
+[[gateway.agents]]
+id = "developer"
+display_name = "Developer"
+description = "test"
+provider = "local"
+llm = "cloud_default"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate();
+        let error = config.validate().expect_err("config should fail validation");
+        assert!(error
+            .to_string()
+            .contains("belongs to provider 'cloud', expected 'local'"));
     }
 
     #[test]
     fn prompt_file_and_inline_conflict_fails_validation() {
         let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
 [[gateway.agents]]
 id = "test"
 display_name = "Test"
 description = "test"
+provider = "local"
+llm = "local_default"
 aliases = []
 prompt_file = "test.md"
 prompt_inline = "You are a test agent."
 "#;
-        let config: OriginAppConfig = toml::from_str(toml).expect("config should deserialize");
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate();
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn named_bindings_override_legacy_fields() {
+        let toml = r#"
+[provider]
+api_key = "legacy-key"
+base_url = "http://legacy/v1"
+
+[llm]
+model = "legacy-model"
+
+[providers.local]
+api_key = "named-key"
+base_url = "http://named/v1"
+
+[llms.local_default]
+provider = "local"
+model = "named-model"
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "default"
+provider = "local"
+llm = "local_default"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, warnings) = raw.migrate();
+        assert_eq!(config.provider.api_key, "named-key");
+        assert_eq!(config.llm.model_config.model, "named-model");
+        assert!(warnings.iter().any(|warning| warning.contains("ignoring provider")));
+        assert!(warnings.iter().any(|warning| warning.contains("ignoring llm")));
     }
 
     #[test]

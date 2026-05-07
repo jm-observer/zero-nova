@@ -1,16 +1,20 @@
 # Agent 配置示例（与 [[gateway.agents]] 字段一致）
 #
 # 字段说明：
+#   provider       - Agent 默认绑定的 provider id
+#   llm            - Agent 默认绑定的 llm id；省略时回退到 [defaults].llm
 #   prompt_file    - 从 [tool].prompts_dir 加载模板文件
 #   prompt_inline  - 直接内联 prompt 文本（与 prompt_file 互斥）
 #   tool_whitelist - 允许调用的工具白名单，省略表示不限制
-#   model_config   - 覆盖全局 [llm] 的模型参数（仅当前 Agent 生效）
+#   model_config   - 覆盖当前 Agent 绑定 llm 的模型参数（仅当前 Agent 生效）
 
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
 description = "默认通用助手"
 aliases = ["助手"]
+provider = "local"
+llm = "local_gemma"
 prompt_file = "agent-nova.md"
 
 [[gateway.agents]]
@@ -18,6 +22,8 @@ id = "openclaw"
 display_name = "OpenClaw"
 description = "代码助手：偏向工程实现与调试"
 aliases = ["oc", "架构师"]
+provider = "local"
+llm = "local_gpt_oss"
 prompt_file = "agent-openclaw.md"
 
 [ gateway.agents.model_config ]
@@ -30,5 +36,6 @@ id = "safe-tool"
 display_name = "Safe Tool Agent"
 description = "工具受限助手：只允许白名单工具"
 aliases = ["安全助手"]
+provider = "local"
 prompt_inline = "你是一个受限工具助手，只能使用允许的工具完成任务。"
 tool_whitelist = ["read_file", "web_search"]

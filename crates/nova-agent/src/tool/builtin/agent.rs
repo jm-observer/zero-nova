@@ -23,6 +23,7 @@ use tokio::time::Instant;
 pub struct AgentTool {
     config: AppConfig,
     agent_types: HashMap<String, AgentSpec>,
+    default_agent_type: String,
 }
 
 struct NoopProjectDirService;
@@ -44,7 +45,42 @@ impl AgentTool {
         for agent in &config.gateway.agents {
             agent_types.insert(agent.id.clone(), agent.clone());
         }
-        Self { config, agent_types }
+        let default_agent_type = config
+            .gateway
+            .agents
+            .first()
+            .map(|agent| agent.id.clone())
+            .unwrap_or_else(|| "default".to_string());
+        Self {
+            config,
+            agent_types,
+            default_agent_type,
+        }
+    }
+
+    fn resolve_agent_spec<'a>(&'a self, requested_type: Option<&str>) -> Result<(&'a AgentSpec, Vec<String>)> {
+        let requested_type = requested_type.map(str::trim).filter(|value| !value.is_empty());
+        if let Some(agent_type) = requested_type {
+            if let Some(spec) = self.agent_types.get(agent_type) {
+                return Ok((spec, Vec::new()));
+            }
+        }
+
+        let fallback = self
+            .agent_types
+            .get(&self.default_agent_type)
+            .ok_or_else(|| anyhow::anyhow!("Default agent '{}' is not registered", self.default_agent_type))?;
+
+        let warnings = requested_type
+            .map(|agent_type| {
+                vec![format!(
+                    "Unknown subagent_type '{}'; fell back to default agent '{}'.",
+                    agent_type, self.default_agent_type
+                )]
+            })
+            .unwrap_or_default();
+
+        Ok((fallback, warnings))
     }
 
     async fn run_subagent(
@@ -53,8 +89,8 @@ impl AgentTool {
         subagent_type: Option<&str>,
         model_override: Option<&str>,
         context: Option<ToolContext>,
-    ) -> Result<(String, u128)> {
-        let spec = subagent_type.and_then(|t| self.agent_types.get(t));
+    ) -> Result<(String, u128, Vec<String>)> {
+        let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
         let client = OpenAiCompatClient::new(
             self.config.provider.api_key.clone(),
             self.config.provider.base_url.clone(),
@@ -67,24 +103,20 @@ impl AgentTool {
                     &self.config,
                     task_store.clone(),
                     skill_registry.clone(),
-                    spec.and_then(|agent| agent.tool_whitelist.as_deref()),
+                    spec.tool_whitelist.as_deref(),
                     Arc::new(NoopProjectDirService),
                 );
             }
         }
 
-        let mut model_config = if let Some(s) = spec {
-            if let Some(m) = &s.model_config {
-                ModelConfig {
-                    model: m.model.clone(),
-                    max_tokens: m.max_tokens.unwrap_or(8192),
-                    temperature: Some(m.temperature as f64),
-                    top_p: Some(m.top_p as f64),
-                    thinking_budget: None,
-                    reasoning_effort: None,
-                }
-            } else {
-                self.config.llm.model_config.clone()
+        let mut model_config = if let Some(m) = &spec.model_config {
+            ModelConfig {
+                model: m.model.clone(),
+                max_tokens: m.max_tokens.unwrap_or(8192),
+                temperature: Some(m.temperature as f64),
+                top_p: Some(m.top_p as f64),
+                thinking_budget: None,
+                reasoning_effort: None,
             }
         } else {
             self.config.llm.model_config.clone()
@@ -117,11 +149,7 @@ impl AgentTool {
             runtime.read_files = ctx.read_files.clone();
         }
 
-        let mut system_prompt = if let Some(s) = spec {
-            s.system_prompt_template.clone().unwrap_or_default()
-        } else {
-            "You are a helpful assistant.".to_string()
-        };
+        let mut system_prompt = spec.system_prompt_template.clone().unwrap_or_default();
         if system_prompt.is_empty() {
             system_prompt = "You are a helpful assistant.".to_string();
         }
@@ -215,7 +243,16 @@ impl AgentTool {
                 })
             })
             .unwrap_or_default();
-        Ok((final_assistant_msg, start_time.elapsed().as_millis()))
+        if !warnings.is_empty() {
+            for warning in &warnings {
+                log::warn!("[Agent] {}", warning);
+            }
+        }
+        Ok((
+            final_assistant_msg,
+            start_time.elapsed().as_millis(),
+            std::mem::take(&mut warnings),
+        ))
     }
 }
 
@@ -232,7 +269,10 @@ impl Tool for AgentTool {
                 "properties": {
                     "prompt": { "type": "string", "description": "Specific task for the agent to perform" },
                     "description": { "type": "string", "description": "3-5 word summary of what the agent is doing" },
-                    "subagent_type": { "type": "string", "description": "The type of agent to spawn (e.g., 'Explore', 'Plan', 'Coder')" },
+                    "subagent_type": {
+                        "type": "string",
+                        "description": "Registered agent id to execute this subtask with (e.g., 'nova', 'developer'). Unknown values fall back to the default agent."
+                    },
                     "run_in_background": { "type": "boolean", "default": false, "description": "Whether to run the agent in the background" },
                     "isolation": { "type": "string", "enum": ["none", "worktree"], "default": "none", "description": "Isolation mode for the agent" },
                     "model": { "type": "string", "description": "Optional model override" },
@@ -327,12 +367,19 @@ impl Tool for AgentTool {
                     .await;
 
                 let completion_event = match run {
-                    Ok((output, _duration)) => {
+                    Ok((output, _duration, run_warnings)) => {
                         let output_summary = if output_format == "summary" {
                             output.chars().take(500).collect::<String>()
                         } else {
                             output
                         };
+                        if !run_warnings.is_empty() {
+                            log::warn!(
+                                "[Agent] Background subagent {} completed with warnings: {:?}",
+                                agent_id,
+                                run_warnings
+                            );
+                        }
                         AgentEvent::OrchestrationProgress {
                             kind: "sub_agent_complete".to_string(),
                             args: json!({
@@ -374,9 +421,10 @@ impl Tool for AgentTool {
             });
         }
 
-        let (final_assistant_msg, duration_ms) = self
+        let (final_assistant_msg, duration_ms, run_warnings) = self
             .run_subagent(prompt, subagent_type, model_override, context.clone())
             .await?;
+        warnings.extend(run_warnings);
 
         let output_json = json!({
             "output": final_assistant_msg,
@@ -390,5 +438,61 @@ impl Tool for AgentTool {
             content: serde_json::to_string_pretty(&output_json)?,
             is_error: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgentTool;
+    use crate::config::{AgentSpec, AppConfig, GatewayConfig, OriginAppConfig};
+    use std::path::PathBuf;
+
+    fn build_tool() -> AgentTool {
+        let mut origin = OriginAppConfig::default();
+        origin.gateway = GatewayConfig {
+            agents: vec![
+                AgentSpec {
+                    id: "nova".to_string(),
+                    display_name: "Nova".to_string(),
+                    description: "default".to_string(),
+                    prompt_file: Some("agent-nova.md".to_string()),
+                    ..AgentSpec::default()
+                },
+                AgentSpec {
+                    id: "developer".to_string(),
+                    display_name: "Developer".to_string(),
+                    description: "developer".to_string(),
+                    prompt_file: Some("agent-developer.md".to_string()),
+                    ..AgentSpec::default()
+                },
+            ],
+            ..GatewayConfig::default()
+        };
+        AgentTool::new(AppConfig::from_origin(origin, PathBuf::from("D:/workspace/.nova")))
+    }
+
+    #[test]
+    fn resolve_agent_spec_uses_requested_registered_agent() {
+        let tool = build_tool();
+        let (spec, warnings) = tool.resolve_agent_spec(Some("developer")).unwrap();
+        assert_eq!(spec.id, "developer");
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn resolve_agent_spec_falls_back_to_default_for_unknown_agent() {
+        let tool = build_tool();
+        let (spec, warnings) = tool.resolve_agent_spec(Some("coder-plus")).unwrap();
+        assert_eq!(spec.id, "nova");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("fell back to default agent 'nova'"));
+    }
+
+    #[test]
+    fn resolve_agent_spec_falls_back_to_default_for_missing_agent() {
+        let tool = build_tool();
+        let (spec, warnings) = tool.resolve_agent_spec(None).unwrap();
+        assert_eq!(spec.id, "nova");
+        assert!(warnings.is_empty());
     }
 }

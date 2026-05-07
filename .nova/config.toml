@@ -68,6 +68,13 @@ description = "默认通用助手"
 aliases = ["助手"]
 prompt_file = "agent-nova.md"
 
+[[gateway.agents]]
+id = "developer"
+display_name = "Developer"
+description = "开发任务子代理"
+aliases = ["开发", "coder"]
+prompt_file = "agent-developer.md"
+
 # ── 桌面端远程连接 ──────────────────────────────────────────────
 [remote]
 enabled = true

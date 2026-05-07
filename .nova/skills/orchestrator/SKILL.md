@@ -53,7 +53,7 @@ tools:
       "agents": [
         {
           "agentId": "a1",
-          "subagentType": "Coder",
+          "subagentType": "developer",
           "description": "<3-5字描述>",
           "prompt": "<完整、自包含的子任务提示词>",
           "contextFiles": ["src/models/"]
@@ -67,7 +67,7 @@ tools:
       "agents": [
         {
           "agentId": "a3",
-          "subagentType": "Coder",
+          "subagentType": "nova",
           "description": "<描述>",
           "prompt": "<提示词，可引用上一阶段预期输出>",
           "contextFiles": ["tests/"]
@@ -79,6 +79,15 @@ tools:
 ```
 
 ## 子 Agent 提示词规范
+
+`agentId` 是当前编排 Plan 内的唯一实例标识，例如 `a1`、`a2`。
+
+`subagentType` 用来选择已注册的执行 Agent。首版只允许：
+
+- `developer`：实现、修改、修复、补测试等开发任务
+- `nova`：汇总、检查、一致性判断或无法明确归类的默认任务
+
+不要输出未注册的 `subagentType`。若无法判断，默认使用 `nova`。
 
 每个子 Agent 的 `prompt` 必须：
 1. 自包含：不依赖其他子 Agent 上下文，包含所有必要信息
@@ -121,7 +130,7 @@ Review Agent 会收到每个子 Agent 的输出摘要，并判断：
 用户：帮我实现一个简单的 JWT 认证系统，包括数据库模型、API 路由和测试
 
 Orchestrator 分析：
-- Stage 1（并行）：数据库模型（models/）、路由定义（routes/）可独立实现
-- Stage 2（串行，依赖 s1）：集成测试需要依赖 s1 的输出
+- Stage 1（并行）：数据库模型（models/）、路由定义（routes/）可独立实现，`subagentType=developer`
+- Stage 2（串行，依赖 s1）：集成测试需要依赖 s1 的输出，`subagentType=developer`
 
 -> 调用 OrchestrateTask { planJson: "..." }

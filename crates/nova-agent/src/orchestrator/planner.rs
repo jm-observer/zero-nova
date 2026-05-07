@@ -40,6 +40,7 @@ impl StageMode {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRequest {
     pub agent_id: String,
+    #[serde(default = "default_subagent_type")]
     pub subagent_type: String,
     pub description: String,
     pub prompt: String,
@@ -47,6 +48,10 @@ pub struct AgentRequest {
     pub context_files: Vec<String>,
     #[serde(default)]
     pub output_format: Option<String>,
+}
+
+fn default_subagent_type() -> String {
+    "nova".to_string()
 }
 
 pub fn parse_and_validate(plan_json: &str) -> Result<OrchestrationPlan> {
@@ -158,5 +163,18 @@ mod tests {
           ]
         }"#;
         assert!(parse_and_validate(json).is_err());
+    }
+
+    #[test]
+    fn defaults_missing_subagent_type_to_nova() {
+        let json = r#"{
+          "planId":"p1",
+          "description":"d",
+          "stages":[
+            {"stageId":"s1","mode":"parallel","dependsOn":[],"agents":[{"agentId":"a1","description":"task","prompt":"do it"}]}
+          ]
+        }"#;
+        let plan = parse_and_validate(json).expect("plan should parse");
+        assert_eq!(plan.stages[0].agents[0].subagent_type, "nova");
     }
 }

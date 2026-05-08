@@ -1,7 +1,7 @@
 use anyhow::Result;
 use nova_agent::agent_catalog::AgentDescriptor;
 use nova_agent::app::agent_workspace_service::AgentWorkspaceService;
-use nova_agent::config::{AppConfig, OriginAppConfig};
+use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::AgentRegistry;
 use std::collections::HashMap;
@@ -20,16 +20,13 @@ fn build_registry() -> AgentRegistry {
         initial_template_vars: HashMap::new(),
         tool_whitelist: None,
         model_config: None,
-        provider_id: "default".to_string(),
-        llm_id: Some("default".to_string()),
+        provider_id: "openai_compat".to_string(),
+        llm_id: "gpt_oss_primary".to_string(),
     })
 }
 
 fn build_config() -> Arc<RwLock<AppConfig>> {
-    Arc::new(RwLock::new(AppConfig::from_origin(
-        OriginAppConfig::default(),
-        PathBuf::from("."),
-    )))
+    Arc::new(RwLock::new(AppConfig::new(PathBuf::from("."))))
 }
 
 #[tokio::test]

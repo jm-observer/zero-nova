@@ -142,7 +142,7 @@ fn legacy_tool_names(tool_name: &str) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::register_builtin_tools;
-    use crate::config::{AppConfig, OriginAppConfig};
+    use crate::config::AppConfig;
     use crate::skill::SkillRegistry;
     use crate::tool::{ToolRegistry, UnavailableProjectDirService};
     use std::sync::Arc;
@@ -153,7 +153,7 @@ mod tests {
         let registry = ToolRegistry::new();
         register_builtin_tools(
             &registry,
-            &AppConfig::from_origin(OriginAppConfig::default(), "D:/config".into()),
+            &AppConfig::new("D:/config".into()),
             Arc::new(Mutex::new(super::task::TaskStore::default())),
             Arc::new(SkillRegistry::new()),
             None,
@@ -169,7 +169,7 @@ mod tests {
         let whitelist = vec!["OrchestrateTask".to_string()];
         register_builtin_tools(
             &registry,
-            &AppConfig::from_origin(OriginAppConfig::default(), "D:/config".into()),
+            &AppConfig::new("D:/config".into()),
             Arc::new(Mutex::new(super::task::TaskStore::default())),
             Arc::new(SkillRegistry::new()),
             Some(&whitelist),

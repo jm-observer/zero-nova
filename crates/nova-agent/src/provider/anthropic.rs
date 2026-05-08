@@ -106,8 +106,8 @@ impl LlmClient for AnthropicClient {
         let mut body = MessageRequest {
             model: config.model.clone(),
             max_tokens: config.max_tokens,
-            temperature: config.temperature,
-            top_p: config.top_p,
+            temperature: config.temperature.map(f64::from),
+            top_p: config.top_p.map(f64::from),
             stream: true,
             messages: input_messages,
             system: system_prompt,

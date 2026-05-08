@@ -98,7 +98,7 @@ impl Tool for OrchestrateTaskTool {
 #[cfg(test)]
 mod tests {
     use super::OrchestrateTaskTool;
-    use crate::config::{AppConfig, OriginAppConfig};
+    use crate::config::AppConfig;
     use crate::event::AgentEvent;
     use crate::prompt::EnvironmentSnapshot;
     use crate::tool::{Tool, ToolContext};
@@ -107,7 +107,7 @@ mod tests {
     use tokio::sync::{mpsc, Mutex};
 
     fn test_config() -> AppConfig {
-        AppConfig::from_origin(OriginAppConfig::default(), "D:/config".into())
+        AppConfig::new("D:/config".into())
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
-use crate::config::{AppConfig, OriginAppConfig};
+use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
@@ -119,8 +119,10 @@ impl AgentWorkspaceService {
             .read()
             .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
             .clone();
-        let reloaded_origin = OriginAppConfig::load_from_file(app_config_snapshot.config_path())?;
-        let reloaded_config = AppConfig::from_origin(reloaded_origin, app_config_snapshot.config_dir.clone());
+        let reloaded_config = AppConfig::load_from_file(
+            app_config_snapshot.config_path(),
+            app_config_snapshot.config_dir.clone(),
+        )?;
 
         let agent_spec = reloaded_config
             .gateway
@@ -750,9 +752,10 @@ fn sort_file_tree_entries(entries: &mut [SessionFileTreeEntry]) {
 #[cfg(test)]
 mod tests {
     use super::{deserialize_skill_bindings, sort_file_tree_entries};
+    use crate::agent_catalog::ModelConfig as AgentModelConfig;
     use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
     use crate::app::agent_workspace_service::AgentWorkspaceService;
-    use crate::config::{AppConfig, OriginAppConfig};
+    use crate::config::AppConfig;
     use crate::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
     use nova_protocol::observability::SessionFileTreeEntry;
     use std::collections::HashMap;
@@ -815,15 +818,15 @@ mod tests {
             .await
             .expect("session should create");
 
-        let mut origin = OriginAppConfig::default();
-        origin.providers.insert(
+        let mut config_value = AppConfig::new(PathBuf::from("."));
+        config_value.providers.insert(
             "cloud".to_string(),
             crate::config::ProviderConfig {
                 api_key: String::new(),
                 base_url: "https://api.openai.com/v1".to_string(),
             },
         );
-        origin.llms.insert(
+        config_value.llms.insert(
             "cloud_gpt4o".to_string(),
             crate::config::RegisteredLlmConfig {
                 provider: "cloud".to_string(),
@@ -838,7 +841,7 @@ mod tests {
                 },
             },
         );
-        origin.gateway.agents = vec![crate::config::AgentSpec {
+        config_value.gateway.agents = vec![crate::config::AgentSpec {
             id: "developer".to_string(),
             display_name: "Developer".to_string(),
             description: "dev".to_string(),
@@ -849,9 +852,14 @@ mod tests {
             prompt_inline: None,
             system_prompt_template: None,
             tool_whitelist: None,
-            model_config: None,
+            model_config: AgentModelConfig {
+                model: "gpt-4o".to_string(),
+                temperature: 0.3,
+                max_tokens: Some(4096),
+                top_p: 1.0,
+            },
         }];
-        let config = Arc::new(RwLock::new(AppConfig::from_origin(origin, PathBuf::from("."))));
+        let config = Arc::new(RwLock::new(config_value));
         let registry = AgentRegistry::new(AgentDescriptor {
             id: "developer".to_string(),
             display_name: "Developer".to_string(),
@@ -863,7 +871,7 @@ mod tests {
             tool_whitelist: None,
             model_config: None,
             provider_id: "cloud".to_string(),
-            llm_id: Some("cloud_gpt4o".to_string()),
+            llm_id: "cloud_gpt4o".to_string(),
         });
         let service = AgentWorkspaceService::new(registry, sessions, config);
 

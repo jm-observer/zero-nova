@@ -23,7 +23,7 @@ use tokio::time::Instant;
 pub struct AgentTool {
     config: AppConfig,
     agent_types: HashMap<String, AgentSpec>,
-    default_agent_type: String,
+    primary_agent_type: String,
 }
 
 struct NoopProjectDirService;
@@ -45,16 +45,16 @@ impl AgentTool {
         for agent in &config.gateway.agents {
             agent_types.insert(agent.id.clone(), agent.clone());
         }
-        let default_agent_type = config
+        let primary_agent_type = config
             .gateway
             .agents
             .first()
             .map(|agent| agent.id.clone())
-            .unwrap_or_else(|| "default".to_string());
+            .unwrap_or_else(|| "primary".to_string());
         Self {
             config,
             agent_types,
-            default_agent_type,
+            primary_agent_type,
         }
     }
 
@@ -68,14 +68,14 @@ impl AgentTool {
 
         let fallback = self
             .agent_types
-            .get(&self.default_agent_type)
-            .ok_or_else(|| anyhow::anyhow!("Default agent '{}' is not registered", self.default_agent_type))?;
+            .get(&self.primary_agent_type)
+            .ok_or_else(|| anyhow::anyhow!("Primary agent '{}' is not registered", self.primary_agent_type))?;
 
         let warnings = requested_type
             .map(|agent_type| {
                 vec![format!(
-                    "Unknown subagent_type '{}'; fell back to default agent '{}'.",
-                    agent_type, self.default_agent_type
+                    "Unknown subagent_type '{}'; fell back to primary agent '{}'.",
+                    agent_type, self.primary_agent_type
                 )]
             })
             .unwrap_or_default();
@@ -92,8 +92,7 @@ impl AgentTool {
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
         let binding = self.config.resolve_agent_binding(spec)?;
-        let client =
-            OpenAiCompatClient::from_registry(self.config.providers.clone(), self.config.defaults.provider.clone());
+        let client = OpenAiCompatClient::from_registry(self.config.providers.clone(), binding.provider_id.clone());
         let sub_registry = ToolRegistry::new();
         if let Some(ctx) = &context {
             if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
@@ -108,18 +107,14 @@ impl AgentTool {
             }
         }
 
-        let mut model_config = if let Some(m) = &spec.model_config {
-            ModelConfig {
-                provider: Some(binding.provider_id.clone()),
-                model: m.model.clone(),
-                max_tokens: m.max_tokens.unwrap_or(8192),
-                temperature: Some(m.temperature as f64),
-                top_p: Some(m.top_p as f64),
-                thinking_budget: None,
-                reasoning_effort: None,
-            }
-        } else {
-            binding.model_config.clone()
+        let mut model_config = ModelConfig {
+            provider: Some(binding.provider_id.clone()),
+            model: spec.model_config.model.clone(),
+            max_tokens: spec.model_config.max_tokens.unwrap_or(binding.model_config.max_tokens),
+            temperature: Some(spec.model_config.temperature),
+            top_p: Some(spec.model_config.top_p),
+            thinking_budget: None,
+            reasoning_effort: None,
         };
         if let Some(m) = model_override {
             model_config.model = m.to_string();
@@ -278,7 +273,7 @@ impl Tool for AgentTool {
                     "description": { "type": "string", "description": "3-5 word summary of what the agent is doing" },
                     "subagent_type": {
                         "type": "string",
-                        "description": "Registered agent id to execute this subtask with (e.g., 'nova', 'developer'). Unknown values fall back to the default agent."
+                        "description": "Registered agent id to execute this subtask with (e.g., 'nova', 'developer'). Unknown values fall back to the primary agent."
                     },
                     "run_in_background": { "type": "boolean", "default": false, "description": "Whether to run the agent in the background" },
                     "isolation": { "type": "string", "enum": ["none", "worktree"], "default": "none", "description": "Isolation mode for the agent" },
@@ -451,35 +446,54 @@ impl Tool for AgentTool {
 #[cfg(test)]
 mod tests {
     use super::AgentTool;
-    use crate::config::{AgentSpec, AppConfig, GatewayConfig, OriginAppConfig};
+    use crate::agent_catalog::ModelConfig as AgentModelConfig;
+    use crate::config::{AgentSpec, AppConfig, GatewayConfig};
     use std::path::PathBuf;
 
     fn build_tool() -> AgentTool {
-        let mut origin = OriginAppConfig::default();
-        origin.gateway = GatewayConfig {
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace/.nova"));
+        config.gateway = GatewayConfig {
             agents: vec![
                 AgentSpec {
                     id: "nova".to_string(),
                     display_name: "Nova".to_string(),
                     description: "default".to_string(),
                     provider: "default".to_string(),
-                    llm: Some("default".to_string()),
+                    llm: "default".to_string(),
                     prompt_file: Some("agent-nova.md".to_string()),
-                    ..AgentSpec::default()
+                    aliases: Vec::new(),
+                    prompt_inline: None,
+                    system_prompt_template: None,
+                    tool_whitelist: None,
+                    model_config: AgentModelConfig {
+                        model: "gpt-oss-120b".to_string(),
+                        temperature: 0.0,
+                        max_tokens: Some(8192),
+                        top_p: 1.0,
+                    },
                 },
                 AgentSpec {
                     id: "developer".to_string(),
                     display_name: "Developer".to_string(),
                     description: "developer".to_string(),
                     provider: "default".to_string(),
-                    llm: Some("default".to_string()),
+                    llm: "default".to_string(),
                     prompt_file: Some("agent-developer.md".to_string()),
-                    ..AgentSpec::default()
+                    aliases: Vec::new(),
+                    prompt_inline: None,
+                    system_prompt_template: None,
+                    tool_whitelist: None,
+                    model_config: AgentModelConfig {
+                        model: "gpt-oss-120b".to_string(),
+                        temperature: 0.0,
+                        max_tokens: Some(8192),
+                        top_p: 1.0,
+                    },
                 },
             ],
             ..GatewayConfig::default()
         };
-        AgentTool::new(AppConfig::from_origin(origin, PathBuf::from("D:/workspace/.nova")))
+        AgentTool::new(config)
     }
 
     #[test]
@@ -496,7 +510,7 @@ mod tests {
         let (spec, warnings) = tool.resolve_agent_spec(Some("coder-plus")).unwrap();
         assert_eq!(spec.id, "nova");
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("fell back to default agent 'nova'"));
+        assert!(warnings[0].contains("fell back to primary agent 'nova'"));
     }
 
     #[test]

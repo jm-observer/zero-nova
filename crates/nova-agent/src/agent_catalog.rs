@@ -21,7 +21,7 @@ pub struct AgentDescriptor {
     pub tool_whitelist: Option<Vec<String>>,            // None = 全部工具
     pub model_config: Option<ModelConfig>,              // None = 使用默认
     pub provider_id: String,
-    pub llm_id: Option<String>,
+    pub llm_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -85,15 +85,15 @@ mod tests {
         let primary = AgentDescriptor {
             id: "openclaw".to_string(),
             display_name: "OpenClaw".to_string(),
-            description: "Default agent".to_string(),
+            description: "Primary agent".to_string(),
             aliases: vec!["oc".to_string(), "open-claw".to_string()],
             system_prompt_template: "You are OpenClaw".to_string(),
             system_prompt_base: "You are OpenClaw".to_string(),
             initial_template_vars: HashMap::new(),
             tool_whitelist: None,
             model_config: None,
-            provider_id: "default".to_string(),
-            llm_id: Some("default".to_string()),
+            provider_id: "openai_compat".to_string(),
+            llm_id: "gpt_oss_primary".to_string(),
         };
         AgentRegistry::new(primary)
     }

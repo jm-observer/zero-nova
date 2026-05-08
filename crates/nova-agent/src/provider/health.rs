@@ -17,7 +17,8 @@ enum ProviderKind {
 
 pub async fn collect_provider_health(config: &AppConfig) -> Result<ProviderHealthSnapshotResponse> {
     let checked_at = Utc::now().timestamp_millis();
-    let providers: Vec<JoinHandle<ProviderHealthSnapshot>> = config.providers
+    let providers: Vec<JoinHandle<ProviderHealthSnapshot>> = config
+        .providers
         .iter()
         .map(|(scope, config)| {
             let provider_kind = infer_provider_kind(&config.base_url);
@@ -72,10 +73,7 @@ async fn probe_provider_by_url(base_url: &str, api_key: &str, provider_kind: Pro
 
     let url = build_probe_url(base_url.trim(), provider_kind);
     let started_at = Instant::now();
-    let response = match build_probe_request(&client, &url, provider_kind, api_key)
-        .send()
-        .await
-    {
+    let response = match build_probe_request(&client, &url, provider_kind, api_key).send().await {
         Ok(response) => response,
         Err(error) => return classify_transport_error(error),
     };
@@ -189,23 +187,6 @@ impl HealthProbeResult {
             status: "unreachable".to_string(),
             latency_ms: None,
             message: Some(message.into()),
-        }
-    }
-
-    fn unknown(message: impl Into<String>) -> Self {
-        Self {
-            status: "unknown".to_string(),
-            latency_ms: None,
-            message: Some(message.into()),
-        }
-    }
-}
-
-impl ProviderKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            ProviderKind::OpenAiCompat => "openai_compat",
-            ProviderKind::Anthropic => "anthropic",
         }
     }
 }

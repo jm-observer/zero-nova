@@ -7,7 +7,7 @@ use custom_utils::args::workspace as resolve_workspace;
 use custom_utils::logger::logger_feature;
 use log::info;
 use nova_agent::agent::{AgentConfig, AgentRuntime};
-use nova_agent::config::{AppConfig, OriginAppConfig};
+use nova_agent::config::AppConfig;
 use nova_agent::event::AgentEvent;
 use nova_agent::mcp::client::McpClient;
 use nova_agent::message::{ContentBlock, Message, Role};
@@ -91,18 +91,9 @@ enum OutputFormat {
 #[derive(Parser)]
 #[command(name = "nova-cli", about = "Zero-Nova agent test CLI", version)]
 struct Cli {
-    /// Model name
+    /// Agent id from config
     #[arg(long, global = true)]
-    model: Option<String>,
-    /// Provider id
-    #[arg(long, global = true)]
-    provider: Option<String>,
-    /// Registered llm id
-    #[arg(long, global = true)]
-    llm: Option<String>,
-    /// Optional custom base URL for the LLM provider
-    #[arg(long, global = true)]
-    base_url: Option<String>,
+    agent: Option<String>,
     /// Optional workspace directory for config and prompts
     #[arg(long, global = true)]
     workspace: Option<String>,
@@ -147,36 +138,16 @@ async fn main() -> Result<()> {
     info!("workspace {}", workspace.display());
     let config_path = workspace.join("config.toml");
 
-    let mut config = OriginAppConfig::load_from_file(&config_path)?;
-
-    if let Some(provider) = &cli.provider {
-        config.defaults.provider = provider.clone();
-    }
-    if let Some(llm) = &cli.llm {
-        config.defaults.llm = llm.clone();
-    }
-    if let Some(model) = &cli.model {
-        config.llm.model_config.model = model.to_string();
-        if let Some(default_llm) = config.llms.get_mut(config.defaults.llm.as_str()) {
-            default_llm.model_config.model = model.to_string();
-        }
-    }
-    if let Some(base_url) = &cli.base_url {
-        config.provider.base_url = base_url.to_string();
-        if let Some(default_provider) = config.providers.get_mut(config.defaults.provider.as_str()) {
-            default_provider.base_url = base_url.to_string();
-        }
-    }
-
-    let config = AppConfig::from_origin(config, workspace.clone());
-    let default_binding = config.resolve_default_binding()?;
+    let config = AppConfig::load_from_file(&config_path, workspace.clone())?;
+    let root_agent = config.selected_agent(cli.agent.as_deref())?;
+    let root_binding = config.resolve_agent_binding(root_agent)?;
 
     log::info!("Starting Nova CLI with : {:?}", config);
-    let client = OpenAiCompatClient::from_registry(config.providers.clone(), config.defaults.provider.clone());
+    let client = OpenAiCompatClient::from_registry(config.providers.clone(), root_binding.provider_id.clone());
 
     let env_snapshot = {
         let mut snapshot = EnvironmentSnapshot::collect(&config.config_dir, Some(&config.config_dir)).await;
-        snapshot.model_id = Some(default_binding.model_config.model.clone());
+        snapshot.model_id = Some(root_binding.model_config.model.clone());
         snapshot
     };
 
@@ -219,7 +190,7 @@ async fn main() -> Result<()> {
     let tool_timeout_secs = config.gateway.tool_timeout_secs.unwrap_or(300);
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
-        model_config: default_binding.model_config.clone(),
+        model_config: root_binding.model_config.clone(),
         tool_timeout: Duration::from_secs(tool_timeout_secs),
         max_tokens: config.gateway.max_tokens,
         use_turn_context: config.gateway.use_turn_context,

@@ -1,6 +1,6 @@
 use super::mock_client::MockClient;
 use nova_agent::app::ConversationService;
-use nova_agent::config::{AppConfig, OriginAppConfig};
+use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::{
     AgentConfig, AgentDescriptor, AgentRegistry, AgentRuntime, ModelConfig, ToolRegistry,
@@ -157,7 +157,7 @@ fn build_conversation_service(
         runtime,
         registry,
         sessions,
-        AppConfig::from_origin(OriginAppConfig::default(), data_dir.to_path_buf()),
+        AppConfig::new(data_dir.to_path_buf()),
     )
 }
 
@@ -172,7 +172,7 @@ fn agent_descriptor(id: &str) -> AgentDescriptor {
         initial_template_vars: HashMap::new(),
         tool_whitelist: None,
         model_config: None,
-        provider_id: "default".to_string(),
-        llm_id: Some("default".to_string()),
+        provider_id: "openai_compat".to_string(),
+        llm_id: "gpt_oss_primary".to_string(),
     }
 }

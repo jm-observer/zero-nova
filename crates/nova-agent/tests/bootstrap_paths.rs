@@ -4,11 +4,11 @@
 /// (prompts_dir, data_dir_path, config_path, skills_dir) are used
 /// correctly in the bootstrap sequence for prompt loading, session
 /// database placement, skills loading, and config re-export.
-use nova_agent::config::{AppConfig, OriginAppConfig};
+use nova_agent::config::AppConfig;
 use std::path::PathBuf;
 
 fn make_test_config(workspace: PathBuf) -> AppConfig {
-    AppConfig::from_origin(OriginAppConfig::default(), workspace)
+    AppConfig::new(workspace)
 }
 
 // --- Default path tests ---
@@ -27,12 +27,10 @@ fn default_paths_are_consistent() {
 
 #[test]
 fn relative_overrides_are_resolved_from_workspace() {
-    let mut origin = OriginAppConfig::default();
-    origin.tool.skills_dir = Some("mods".to_string());
-    origin.tool.prompts_dir = Some("prompts".to_string());
-    origin.config_path = Some("conf/custom.toml".to_string());
-
-    let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+    let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+    config.tool.skills_dir = Some("mods".to_string());
+    config.tool.prompts_dir = Some("prompts".to_string());
+    config.config_path = Some("conf/custom.toml".to_string());
 
     assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/mods"));
     assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
@@ -44,12 +42,10 @@ fn relative_overrides_are_resolved_from_workspace() {
 
 #[test]
 fn absolute_paths_are_used_directly() {
-    let mut origin = OriginAppConfig::default();
-    origin.tool.skills_dir = Some("D:/shared/skills".to_string());
-    origin.tool.prompts_dir = Some("D:/shared/prompts".to_string());
-    origin.config_path = Some("D:/shared/config.toml".to_string());
-
-    let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+    let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+    config.tool.skills_dir = Some("D:/shared/skills".to_string());
+    config.tool.prompts_dir = Some("D:/shared/prompts".to_string());
+    config.config_path = Some("D:/shared/config.toml".to_string());
 
     // Absolute paths should NOT be joined with workspace
     assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
@@ -76,8 +72,7 @@ fn prompt_file_path_construction() {
 
 #[test]
 fn bootstrap_path_sequence_is_consistent() {
-    let origin = OriginAppConfig::default();
-    let config = AppConfig::from_origin(origin, PathBuf::from("D:/project"));
+    let config = AppConfig::new(PathBuf::from("D:/project"));
 
     // bootstrap.rs reads these in sequence:
     // 1. config_path() → used to re-export path in AgentApplicationImpl
@@ -109,7 +104,7 @@ fn bootstrap_path_sequence_is_consistent() {
     );
 
     // Verify data_dir is under workspace by default when not absolute
-    let default_config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+    let default_config = AppConfig::new(PathBuf::from("D:/workspace"));
     let default_data_dir = default_config.data_dir_path();
     // Windows normalize paths with forward slashes; check common variants
     assert!(

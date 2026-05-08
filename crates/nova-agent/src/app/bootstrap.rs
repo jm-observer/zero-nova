@@ -1,6 +1,5 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
-use super::voice_service::VoiceService;
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
@@ -15,9 +14,7 @@ use crate::skill::SkillRegistry;
 use crate::tool::builtin::register_builtin_tools;
 use crate::tool::builtin::task::TaskStore;
 use crate::tool::ToolRegistry;
-use crate::voice::mock::{MockSttProvider, MockTtsProvider};
-use crate::voice::openai_compat::{OpenAiCompatSttProvider, OpenAiCompatTtsProvider};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
@@ -39,7 +36,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     let skill_registry = Arc::new(skill_registry);
 
     let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
-    // env_snapshot.model_id = Some(default_binding.model_config.model.clone());
+    let root_agent = config.primary_agent()?;
+    let root_binding = config.resolve_agent_binding(root_agent)?;
+    env_snapshot.model_id = Some(root_binding.model_config.model.clone());
 
     let task_store = Arc::new(Mutex::new(TaskStore::new()));
     let data_dir_path = config.data_dir_path();
@@ -59,11 +58,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         Arc::new(session_service.clone()),
     );
 
-    config.gateway.agents.first().ok_or_else(|| anyhow!("No gateway agents found"))?.model_config;
-
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
-        model_config: default_binding.model_config.clone(),
+        model_config: root_binding.model_config.clone(),
         tool_timeout: Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
         max_tokens: config.gateway.max_tokens,
         use_turn_context: config.gateway.use_turn_context,
@@ -106,9 +103,12 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             system_prompt_base: agent_prompt,
             initial_template_vars: template_vars,
             tool_whitelist: agent.tool_whitelist.clone(),
-            model_config: agent.model_config.clone(),
+            model_config: Some(agent.model_config.clone()),
             provider_id: binding.provider_id.clone(),
-            llm_id: binding.llm_id.clone(),
+            llm_id: binding
+                .llm_id
+                .clone()
+                .expect("configured agent binding must always resolve to a concrete llm"),
         });
         log::info!(
             "Bootstrapped agent '{}' with provider='{}', llm={:?}, model='{}'",
@@ -128,7 +128,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         agent_registry.register(agent);
     }
 
-    let client = OpenAiCompatClient::from_registry(config.providers.clone(), config.defaults.provider.clone());
+    let client = OpenAiCompatClient::from_registry(config.providers.clone(), root_binding.provider_id.clone());
     let mut agent = AgentRuntime::new(client, tools, agent_config);
     agent.task_store = Some(task_store);
     agent.skill_registry = Some(skill_registry);
@@ -159,30 +159,6 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         config_path,
     )))
 }
-
-fn build_voice_service(config: &AppConfig) -> VoiceService {
-    let voice_config = config.voice.clone();
-    if voice_config.provider.eq_ignore_ascii_case("mock") {
-        return VoiceService::new(voice_config, Arc::new(MockSttProvider), Arc::new(MockTtsProvider));
-    }
-
-    todo!()
-    // VoiceService::new(
-    //     voice_config.clone(),
-    //     Arc::new(OpenAiCompatSttProvider::new(
-    //         config.provider.api_key.clone(),
-    //         config.provider.base_url.clone(),
-    //         voice_config.stt_model.clone(),
-    //     )),
-    //     Arc::new(OpenAiCompatTtsProvider::new(
-    //         config.provider.api_key.clone(),
-    //         config.provider.base_url.clone(),
-    //         voice_config.tts_model.clone(),
-    //         voice_config.tts_voice.clone(),
-    //     )),
-    // )
-}
-
 async fn load_agent_prompt(agent: &crate::config::AgentSpec, config: &AppConfig) -> Result<String> {
     if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
         bail!(

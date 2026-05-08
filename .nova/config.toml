@@ -16,21 +16,17 @@ model = "gemma-4-26B-A4B-it"
 max_tokens = 8192
 temperature = 0.5
 
-[llms.qwen3-6-4.6]
+[llms."qwen3-6-4.6"]
 provider = "spark-8000"
 model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
 max_tokens = 8192
 temperature = 0.5
 
-[llms.qwen3-6-4.7]
+[llms."qwen3-6-4.7"]
 provider = "spark-8000"
 model = "Huihui-Qwen3.6-35B-A3B-Claude-4.7"
 max_tokens = 8192
 temperature = 0.3
-
-[defaults]
-provider = "spark-12340"
-llm = "gemma"
 
 # ── 搜索 ───────────────────────────────────────────────────────
 # Tavily 接入时替换占位符；如果当前不启用搜索，可先保留该值

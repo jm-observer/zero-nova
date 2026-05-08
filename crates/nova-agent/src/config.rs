@@ -1,6 +1,7 @@
 use crate::agent_catalog::ModelConfig as AgentModelConfig;
 use crate::provider::ModelConfig;
 use anyhow::{bail, Result};
+use serde::de::{self, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -9,25 +10,6 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_BINDING_PROVIDER: &str = "default";
 const DEFAULT_BINDING_LLM: &str = "default";
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OriginAppConfig {
-    #[serde(default = "default_provider_registry")]
-    pub providers: HashMap<String, ProviderConfig>,
-    #[serde(default = "default_llm_registry")]
-    pub llms: HashMap<String, RegisteredLlmConfig>,
-    #[serde(default)]
-    pub search: SearchConfig,
-    #[serde(default)]
-    pub tool: ToolConfig,
-    #[serde(default)]
-    pub gateway: GatewayConfig,
-    #[serde(default)]
-    pub voice: VoiceConfig,
-    /// Path to the configuration file relative to config_dir. When None, defaults to `config.toml`.
-    #[serde(default)]
-    pub config_path: Option<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
@@ -44,8 +26,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub voice: VoiceConfig,
     #[serde(alias = "workspace")]
+    #[serde(default)]
     pub config_dir: PathBuf,
     /// Path to the configuration file relative to config_dir. When None, defaults to `config.toml`.
+    #[serde(default)]
     pub config_path: Option<String>,
 }
 
@@ -98,14 +82,6 @@ pub struct ProviderConfig {
     pub api_key: String,
     #[serde(default = "default_base_url")]
     pub base_url: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DefaultBindingConfig {
-    #[serde(default = "default_provider_binding_id")]
-    pub provider: String,
-    #[serde(default = "default_llm_binding_id")]
-    pub llm: String,
 }
 
 fn default_base_url() -> String {
@@ -201,15 +177,6 @@ impl Default for ProviderConfig {
     }
 }
 
-impl Default for DefaultBindingConfig {
-    fn default() -> Self {
-        Self {
-            provider: default_provider_binding_id(),
-            llm: default_llm_binding_id(),
-        }
-    }
-}
-
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
@@ -226,7 +193,7 @@ impl Default for VoiceConfig {
     }
 }
 
-impl Default for OriginAppConfig {
+impl Default for AppConfig {
     fn default() -> Self {
         Self {
             providers: default_provider_registry(),
@@ -235,6 +202,7 @@ impl Default for OriginAppConfig {
             tool: ToolConfig::default(),
             gateway: GatewayConfig::default(),
             voice: VoiceConfig::default(),
+            config_dir: PathBuf::new(),
             config_path: None,
         }
     }
@@ -415,17 +383,23 @@ impl Default for GatewayConfig {
 }
 
 impl AppConfig {
-    pub fn from_origin(origin: OriginAppConfig, config_dir: PathBuf) -> Self {
+    pub fn new(config_dir: PathBuf) -> Self {
         Self {
-            providers: origin.providers,
-            llms: origin.llms,
-            search: origin.search,
-            tool: origin.tool,
-            gateway: origin.gateway,
-            voice: origin.voice,
             config_dir,
-            config_path: origin.config_path,
+            ..Self::default()
         }
+    }
+
+    pub fn load_from_file<P: AsRef<Path>>(path: P, config_dir: PathBuf) -> Result<Self> {
+        let content = fs::read_to_string(path)?;
+        let raw_config: RawAppConfig = toml::from_str(&content)?;
+        let (mut config, warnings) = raw_config.migrate(config_dir);
+        config.apply_env_overrides();
+        config.validate()?;
+        for warning in warnings {
+            log::warn!("{}", warning);
+        }
+        Ok(config)
     }
 
     /// Return the skills directory. Defaults to `{config_dir}/skills`.
@@ -481,6 +455,20 @@ impl AppConfig {
             .iter()
             .find(|agent| agent.id == agent_id)
             .ok_or_else(|| anyhow::anyhow!("agent '{}' not found", agent_id))
+    }
+
+    pub fn primary_agent(&self) -> Result<&AgentSpec> {
+        self.gateway
+            .agents
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("gateway.agents cannot be empty"))
+    }
+
+    pub fn selected_agent(&self, agent_id: Option<&str>) -> Result<&AgentSpec> {
+        match agent_id {
+            Some(agent_id) => self.find_agent(agent_id),
+            None => self.primary_agent(),
+        }
     }
 
     pub fn resolve_agent_binding(&self, agent: &AgentSpec) -> Result<ResolvedAgentBinding> {
@@ -572,20 +560,6 @@ impl AppConfig {
             model_config,
         })
     }
-}
-
-impl OriginAppConfig {
-    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let content = fs::read_to_string(path)?;
-        let raw_config: RawAppConfig = toml::from_str(&content)?;
-        let (mut config, warnings) = raw_config.migrate();
-        config.apply_env_overrides();
-        config.validate()?;
-        for warning in warnings {
-            log::warn!("{}", warning);
-        }
-        Ok(config)
-    }
 
     fn apply_env_overrides(&mut self) {
         // if let Ok(api_key) = env::var("NOVA_API_KEY") {
@@ -632,22 +606,22 @@ impl OriginAppConfig {
             if !self.providers.contains_key(agent.provider.as_str()) {
                 bail!("agent '{}' references unknown provider '{}'", agent.id, agent.provider);
             }
-                if agent.llm.trim().is_empty() {
-                    bail!("agent '{}' llm cannot be empty", agent.id);
-                }
-                let llm = self
-                    .llms
-                    .get(&agent.llm)
-                    .ok_or_else(|| anyhow::anyhow!("agent '{}' references unknown llm '{}'", agent.id, agent.llm))?;
-                if llm.provider != agent.provider {
-                    bail!(
-                        "agent '{}' llm '{}' belongs to provider '{}', expected '{}'",
-                        agent.id,
-                        agent.llm,
-                        llm.provider,
-                        agent.provider
-                    );
-                }
+            if agent.llm.trim().is_empty() {
+                bail!("agent '{}' llm cannot be empty", agent.id);
+            }
+            let llm = self
+                .llms
+                .get(&agent.llm)
+                .ok_or_else(|| anyhow::anyhow!("agent '{}' references unknown llm '{}'", agent.id, agent.llm))?;
+            if llm.provider != agent.provider {
+                bail!(
+                    "agent '{}' llm '{}' belongs to provider '{}', expected '{}'",
+                    agent.id,
+                    agent.llm,
+                    llm.provider,
+                    agent.provider
+                );
+            }
             if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
                 bail!("agent '{}' cannot set both prompt_file and prompt_inline", agent.id);
             }
@@ -688,8 +662,8 @@ struct RawAppConfig {
     pub providers: HashMap<String, ProviderConfig>,
     #[serde(default)]
     pub llms: HashMap<String, RawRegisteredLlmConfig>,
-    #[serde(default)]
-    pub defaults: Option<DefaultBindingConfig>,
+    #[serde(rename = "defaults", default, deserialize_with = "reject_removed_defaults")]
+    _removed_defaults: Option<IgnoredAny>,
     #[serde(default)]
     pub search: SearchConfig,
     #[serde(default)]
@@ -700,6 +674,19 @@ struct RawAppConfig {
     pub voice: VoiceConfig,
     #[serde(default)]
     pub config_path: Option<String>,
+}
+
+fn reject_removed_defaults<'de, D>(deserializer: D) -> std::result::Result<Option<IgnoredAny>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<IgnoredAny>::deserialize(deserializer)?;
+    if value.is_some() {
+        return Err(de::Error::custom(
+            "[defaults] has been removed; bind provider/llm explicitly on each [[gateway.agents]] entry",
+        ));
+    }
+    Ok(None)
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -716,16 +703,6 @@ struct RawToolConfig {
     /// 默认能力策略 ("minimal" | "full" | "workflow")。
     #[serde(default)]
     pub default_policy: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct RawLlmConfig {
-    #[serde(default)]
-    api_key: Option<String>,
-    #[serde(default)]
-    base_url: Option<String>,
-    #[serde(flatten)]
-    model_config: RawModelConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -820,60 +797,37 @@ struct RawTrimmerConfigToml {
 }
 
 impl RawAppConfig {
-    fn migrate(self) -> (OriginAppConfig, Vec<String>) {
+    fn migrate(self, config_dir: PathBuf) -> (AppConfig, Vec<String>) {
         let mut warnings = Vec::new();
-        // let default_model = LlmConfig::default().model_config;
-        // let use_named_bindings = !self.providers.is_empty() || !self.llms.is_empty() || self.defaults.is_some();
-        // let legacy_provider_present = self.provider.is_some();
-        // let legacy_llm_present = self.llm.is_some();
-        // let mut legacy_provider = self.provider.unwrap_or_default();
-        // let legacy_llm = migrate_legacy_llm(self.llm, &mut legacy_provider, &default_model, &mut warnings);
-        //
-        // let (providers, llms, defaults) = if use_named_bindings {
-        //     if legacy_provider_present {
-        //         warnings.push(
-        //             "Detected legacy field provider together with providers; using providers and ignoring provider."
-        //                 .to_string(),
-        //         );
-        //     }
-        //     if legacy_llm_present {
-        //         warnings.push(
-        //             "Detected legacy field llm together with llms/defaults; using named llms and ignoring llm."
-        //                 .to_string(),
-        //         );
-        //     }
-        //
-        //     let mut migrated_llms = HashMap::with_capacity(self.llms.len());
-        //     for (llm_id, raw_llm) in self.llms {
-        //         let mut model_config = raw_model_config_with_defaults(raw_llm.model_config, &default_model);
-        //         if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
-        //             model_config.reasoning_effort = None;
-        //             warnings.push(format!(
-        //                 "Both llms.{}.thinking_budget and llms.{}.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort.",
-        //                 llm_id, llm_id
-        //             ));
-        //         }
-        //         migrated_llms.insert(
-        //             llm_id,
-        //             RegisteredLlmConfig {
-        //                 provider: raw_llm.provider,
-        //                 model_config,
-        //             },
-        //         );
-        //     }
-        //
-        //     (self.providers, migrated_llms, self.defaults.unwrap_or_default())
-        // } else {
-        //     let providers = HashMap::from([(default_provider_binding_id(), legacy_provider.clone())]);
-        //     let llms = HashMap::from([(
-        //         default_llm_binding_id(),
-        //         RegisteredLlmConfig {
-        //             provider: default_provider_binding_id(),
-        //             model_config: legacy_llm.model_config.clone(),
-        //         },
-        //     )]);
-        //     (providers, llms, DefaultBindingConfig::default())
-        // };
+        let llms: HashMap<String, RegisteredLlmConfig> = self
+            .llms
+            .into_iter()
+            .map(|(llm_id, raw_llm)| {
+                let mut model_config = ModelConfig {
+                    provider: Some(raw_llm.provider.clone()),
+                    model: raw_llm.model_config.model,
+                    max_tokens: raw_llm.model_config.max_tokens.unwrap_or(LlmConfig::default().model_config.max_tokens),
+                    temperature: Some(raw_llm.model_config.temperature),
+                    top_p: raw_llm.model_config.top_p,
+                    thinking_budget: raw_llm.model_config.thinking_budget,
+                    reasoning_effort: raw_llm.model_config.reasoning_effort,
+                };
+                if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
+                    model_config.reasoning_effort = None;
+                    warnings.push(format!(
+                        "Both llms.{}.thinking_budget and llms.{}.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort.",
+                        llm_id, llm_id
+                    ));
+                }
+                (
+                    llm_id,
+                    RegisteredLlmConfig {
+                        provider: raw_llm.provider,
+                        model_config,
+                    },
+                )
+            })
+            .collect();
 
         let mut migrated_agents = Vec::with_capacity(self.gateway.agents.len());
         for mut agent in self.gateway.agents {
@@ -894,14 +848,22 @@ impl RawAppConfig {
                     }
                 }
             }
-            // todo
-            let llm = self.llms.get(&agent.llm).unwrap();
-            let model_config = crate::agent_catalog::ModelConfig {
-                model: llm.model_config.model.clone(),
-                temperature: llm.model_config.temperature,
-                max_tokens: llm.model_config.max_tokens,
-                // todo what is the default value
-                top_p: llm.model_config.top_p.unwrap_or(1.0),
+            let model_config = if let Some(model_config) = agent.model_config.take() {
+                model_config
+            } else if let Some(llm) = llms.get(&agent.llm) {
+                crate::agent_catalog::ModelConfig {
+                    model: llm.model_config.model.clone(),
+                    temperature: llm.model_config.temperature.unwrap_or(0.0),
+                    max_tokens: Some(llm.model_config.max_tokens),
+                    top_p: llm.model_config.top_p.unwrap_or(1.0),
+                }
+            } else {
+                crate::agent_catalog::ModelConfig {
+                    model: LlmConfig::default().model_config.model,
+                    temperature: LlmConfig::default().model_config.temperature.unwrap_or(0.0),
+                    max_tokens: Some(LlmConfig::default().model_config.max_tokens),
+                    top_p: LlmConfig::default().model_config.top_p.unwrap_or(1.0),
+                }
             };
             migrated_agents.push(AgentSpec {
                 id: agent.id,
@@ -946,9 +908,9 @@ impl RawAppConfig {
             );
         }
         (
-            OriginAppConfig {
+            AppConfig {
                 providers: self.providers,
-                llms: self.llms,
+                llms,
                 search: self.search,
                 tool: ToolConfig {
                     bash: self.tool.bash,
@@ -972,79 +934,12 @@ impl RawAppConfig {
                     side_channel: self.gateway.side_channel,
                 },
                 voice: self.voice,
+                config_dir,
                 config_path: self.config_path,
             },
             warnings,
         )
     }
-}
-
-fn raw_model_config_with_defaults(raw: RawModelConfig, default_model: &ModelConfig) -> ModelConfig {
-    ModelConfig {
-        provider: default_model.provider.clone(),
-        model: raw.model,
-        max_tokens: raw.max_tokens.unwrap_or(default_model.max_tokens),
-        temperature: raw.temperature,
-        top_p: raw.top_p,
-        thinking_budget: raw.thinking_budget,
-        reasoning_effort: raw.reasoning_effort,
-    }
-}
-
-fn resolve_default_runtime_binding(
-    providers: &HashMap<String, ProviderConfig>,
-    llms: &HashMap<String, RegisteredLlmConfig>,
-    defaults: &DefaultBindingConfig,
-) -> Option<(ProviderConfig, LlmConfig)> {
-    let provider = providers.get(defaults.provider.as_str())?.clone();
-    let llm = llms.get(defaults.llm.as_str())?;
-    let mut model_config = llm.model_config.clone();
-    model_config.provider = Some(defaults.provider.clone());
-    Some((provider, LlmConfig { model_config }))
-}
-
-fn migrate_legacy_llm(
-    raw_llm: Option<RawLlmConfig>,
-    provider: &mut ProviderConfig,
-    default_model: &ModelConfig,
-    warnings: &mut Vec<String>,
-) -> LlmConfig {
-    let mut llm = LlmConfig {
-        model_config: default_model.clone(),
-    };
-    if let Some(raw_llm) = raw_llm {
-        llm.model_config = raw_model_config_with_defaults(raw_llm.model_config, default_model);
-
-        if !raw_llm.api_key.as_deref().unwrap_or_default().is_empty() {
-            if provider.api_key.is_empty() {
-                provider.api_key = raw_llm.api_key.unwrap_or_default();
-                warnings.push("Detected deprecated field llm.api_key; migrated to provider.api_key.".to_string());
-            } else {
-                warnings.push(
-                    "Both provider.api_key and deprecated llm.api_key exist; using provider.api_key.".to_string(),
-                );
-            }
-        }
-        if let Some(legacy_base_url) = raw_llm.base_url {
-            if provider.base_url == default_base_url() {
-                provider.base_url = legacy_base_url;
-                warnings.push("Detected deprecated field llm.base_url; migrated to provider.base_url.".to_string());
-            } else {
-                warnings.push(
-                    "Both provider.base_url and deprecated llm.base_url exist; using provider.base_url.".to_string(),
-                );
-            }
-        }
-    }
-
-    if llm.model_config.thinking_budget.is_some() && llm.model_config.reasoning_effort.is_some() {
-        llm.model_config.reasoning_effort = None;
-        warnings.push(
-            "Both llm.thinking_budget and llm.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort."
-                .to_string(),
-        );
-    }
-    llm
 }
 
 fn looks_like_prompt_file(value: &str) -> bool {
@@ -1054,7 +949,7 @@ fn looks_like_prompt_file(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, GatewayConfig, OriginAppConfig, RawAppConfig};
+    use super::{AppConfig, GatewayConfig, RawAppConfig};
     use anyhow::Result;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1071,10 +966,6 @@ provider = "local"
 model = "test-model"
 max_tokens = 4096
 
-[defaults]
-provider = "local"
-llm = "local_default"
-
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
@@ -1083,28 +974,12 @@ provider = "local"
 llm = "local_default"
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, warnings) = raw.migrate();
+        let (config, warnings) = raw.migrate(PathBuf::from("D:/workspace"));
         config.validate().expect("config should validate");
         assert!(warnings.is_empty());
         assert_eq!(config.providers["local"].api_key, "test-key");
         assert_eq!(config.llms["local_default"].provider, "local");
-        assert_eq!(config.defaults.provider, "local");
-    }
-
-    #[test]
-    fn legacy_llm_api_key_migrates_to_provider() {
-        let toml = r#"
-[llm]
-api_key = "old-key"
-base_url = "http://old-host/v1"
-model = "old-model"
-max_tokens = 2048
-"#;
-        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, warnings) = raw.migrate();
-        assert_eq!(config.providers["default"].api_key, "old-key");
-        assert_eq!(config.llms["default"].provider, "default");
-        assert!(!warnings.is_empty());
+        assert_eq!(config.config_dir, PathBuf::from("D:/workspace"));
     }
 
     #[test]
@@ -1117,10 +992,6 @@ base_url = "http://localhost:8082/v1"
 provider = "local"
 model = "test-model"
 
-[defaults]
-provider = "local"
-llm = "local_default"
-
 [[gateway.agents]]
 id = "developer"
 display_name = "Developer"
@@ -1128,7 +999,7 @@ description = "test"
 provider = "cloud2"
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, _) = raw.migrate();
+        let (config, _) = raw.migrate(PathBuf::from("."));
         let error = config.validate().expect_err("config should fail validation");
         assert!(error.to_string().contains("unknown provider 'cloud2'"));
     }
@@ -1143,10 +1014,6 @@ base_url = "http://localhost:8082/v1"
 provider = "local"
 model = "test-model"
 
-[defaults]
-provider = "local"
-llm = "local_default"
-
 [[gateway.agents]]
 id = "developer"
 display_name = "Developer"
@@ -1155,7 +1022,7 @@ provider = "local"
 llm = "missing"
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, _) = raw.migrate();
+        let (config, _) = raw.migrate(PathBuf::from("."));
         let error = config.validate().expect_err("config should fail validation");
         assert!(error.to_string().contains("unknown llm 'missing'"));
     }
@@ -1177,10 +1044,6 @@ model = "test-model"
 provider = "cloud"
 model = "cloud-model"
 
-[defaults]
-provider = "local"
-llm = "local_default"
-
 [[gateway.agents]]
 id = "developer"
 display_name = "Developer"
@@ -1189,7 +1052,7 @@ provider = "local"
 llm = "cloud_default"
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, _) = raw.migrate();
+        let (config, _) = raw.migrate(PathBuf::from("."));
         let error = config.validate().expect_err("config should fail validation");
         assert!(error
             .to_string()
@@ -1206,10 +1069,6 @@ base_url = "http://localhost:8082/v1"
 provider = "local"
 model = "test-model"
 
-[defaults]
-provider = "local"
-llm = "local_default"
-
 [[gateway.agents]]
 id = "test"
 display_name = "Test"
@@ -1221,43 +1080,8 @@ prompt_file = "test.md"
 prompt_inline = "You are a test agent."
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, _) = raw.migrate();
+        let (config, _) = raw.migrate(PathBuf::from("."));
         assert!(config.validate().is_err());
-    }
-
-    #[test]
-    fn named_bindings_override_legacy_fields() {
-        let toml = r#"
-[provider]
-api_key = "legacy-key"
-base_url = "http://legacy/v1"
-
-[llm]
-model = "legacy-model"
-
-[providers.local]
-api_key = "named-key"
-base_url = "http://named/v1"
-
-[llms.local_default]
-provider = "local"
-model = "named-model"
-
-[defaults]
-provider = "local"
-llm = "local_default"
-
-[[gateway.agents]]
-id = "nova"
-display_name = "Nova"
-description = "default"
-provider = "local"
-llm = "local_default"
-"#;
-        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, warnings) = raw.migrate();
-        assert!(warnings.iter().any(|warning| warning.contains("ignoring provider")));
-        assert!(warnings.iter().any(|warning| warning.contains("ignoring llm")));
     }
 
     #[test]
@@ -1268,7 +1092,7 @@ max_history_tokens = 50000
 preserve_recent = 5
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        let (config, warnings) = raw.migrate();
+        let (config, warnings) = raw.migrate(PathBuf::from("."));
         assert_eq!(config.gateway.trimmer.context_window, 58_192);
         assert_eq!(config.gateway.trimmer.output_reserve, 8_192);
         assert_eq!(config.gateway.trimmer.min_recent_messages, 5);
@@ -1284,73 +1108,67 @@ preserve_recent = 5
 
     #[test]
     fn skills_dir_defaults_to_workspace_nova_skills() {
-        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        let config = AppConfig::new(PathBuf::from("D:/workspace"));
         assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/skills"));
     }
 
     #[test]
     fn skills_dir_uses_relative_override_from_workspace() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.skills_dir = Some("skills".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.tool.skills_dir = Some("skills".to_string());
         assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/skills"));
     }
 
     #[test]
     fn data_dir_defaults_to_workspace_nova_data() {
-        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        let config = AppConfig::new(PathBuf::from("D:/workspace"));
         assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
     }
 
     #[test]
     fn prompts_dir_defaults_to_workspace_prompts() {
-        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        let config = AppConfig::new(PathBuf::from("D:/workspace"));
         assert_eq!(config.prompts_dir(), PathBuf::from("D:/workspace/prompts"));
     }
 
     #[test]
     fn prompts_dir_uses_relative_override_from_workspace() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.prompts_dir = Some("templates".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.tool.prompts_dir = Some("templates".to_string());
         assert_eq!(config.prompts_dir(), PathBuf::from("D:/workspace/templates"));
     }
 
     #[test]
     fn prompts_dir_uses_absolute_path_directly() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.prompts_dir = Some("D:/etc/prompts".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.tool.prompts_dir = Some("D:/etc/prompts".to_string());
         assert_eq!(config.prompts_dir(), PathBuf::from("D:/etc/prompts"));
     }
 
     #[test]
     fn project_context_file_uses_absolute_path_directly() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.project_context_file = Some("D:/etc/PROJECT.md".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.tool.project_context_file = Some("D:/etc/PROJECT.md".to_string());
         assert_eq!(config.project_context_file(), Some(PathBuf::from("D:/etc/PROJECT.md")));
     }
 
     #[test]
     fn config_path_defaults_to_workspace_config_toml() {
-        let config = AppConfig::from_origin(OriginAppConfig::default(), PathBuf::from("D:/workspace"));
+        let config = AppConfig::new(PathBuf::from("D:/workspace"));
         assert_eq!(config.config_path(), PathBuf::from("D:/workspace/config.toml"));
     }
 
     #[test]
     fn config_path_uses_relative_override_from_workspace() {
-        let mut origin = OriginAppConfig::default();
-        origin.config_path = Some("custom.toml".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.config_path = Some("custom.toml".to_string());
         assert_eq!(config.config_path(), PathBuf::from("D:/workspace/custom.toml"));
     }
 
     #[test]
     fn config_path_uses_absolute_path_directly() {
-        let mut origin = OriginAppConfig::default();
-        origin.config_path = Some("D:/etc/app.toml".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.config_path = Some("D:/etc/app.toml".to_string());
         assert_eq!(config.config_path(), PathBuf::from("D:/etc/app.toml"));
     }
 
@@ -1364,38 +1182,81 @@ workspace = "D:/legacy-workspace"
     }
 
     #[test]
-    fn legacy_llm_api_key_is_migrated_to_provider() -> Result<()> {
+    fn app_config_loads_named_bindings_from_file() -> Result<()> {
         let raw = r#"
-[llm]
-api_key = "legacy-key"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
 model = "gpt-oss-120b"
 
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
 description = "d"
+provider = "local"
+llm = "local_default"
 "#;
         let file = write_temp_config(raw)?;
-        let config = OriginAppConfig::load_from_file(&file)?;
+        let config = AppConfig::load_from_file(&file, PathBuf::from("D:/workspace"))?;
         let _ = std::fs::remove_file(&file);
+        assert_eq!(config.providers["local"].base_url, "http://localhost:8082/v1");
         Ok(())
+    }
+
+    #[test]
+    fn defaults_section_is_rejected() {
+        let raw = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[defaults]
+provider = "local"
+llm = "local_default"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+provider = "local"
+llm = "local_default"
+"#;
+        let error = toml::from_str::<RawAppConfig>(raw).expect_err("defaults section should be rejected");
+        assert!(error.to_string().contains("[defaults] has been removed"));
     }
 
     #[test]
     fn duplicate_agent_id_is_rejected() -> Result<()> {
         let raw = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
 description = "d"
+provider = "local"
+llm = "local_default"
 
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova2"
 description = "d2"
+provider = "local"
+llm = "local_default"
 "#;
         let file = write_temp_config(raw)?;
-        let error = OriginAppConfig::load_from_file(&file).expect_err("should reject duplicate id");
+        let error =
+            AppConfig::load_from_file(&file, PathBuf::from("D:/workspace")).expect_err("should reject duplicate id");
         let _ = std::fs::remove_file(&file);
         assert!(error.to_string().contains("duplicate agent id"));
         Ok(())
@@ -1407,13 +1268,23 @@ description = "d2"
 [search]
 backend = "tavily"
 
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
 [[gateway.agents]]
 id = "nova"
 display_name = "Nova"
 description = "d"
+provider = "local"
+llm = "local_default"
 "#;
         let file = write_temp_config(raw)?;
-        let error = OriginAppConfig::load_from_file(&file).expect_err("should reject missing tavily key");
+        let error = AppConfig::load_from_file(&file, PathBuf::from("D:/workspace"))
+            .expect_err("should reject missing tavily key");
         let _ = std::fs::remove_file(&file);
         assert!(error.to_string().contains("tavily_api_key"));
         Ok(())
@@ -1421,9 +1292,8 @@ description = "d"
 
     #[test]
     fn skills_dir_resolves_relative_to_workspace() {
-        let mut origin = OriginAppConfig::default();
-        origin.tool.skills_dir = Some("my-skills".to_string());
-        let config = AppConfig::from_origin(origin, PathBuf::from("D:/workspace"));
+        let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
+        config.tool.skills_dir = Some("my-skills".to_string());
         assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/my-skills"));
     }
 

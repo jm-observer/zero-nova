@@ -199,8 +199,8 @@ pub fn build_request(
         messages: openai_messages,
         tools: openai_tools,
         max_completion_tokens: Some(config.max_tokens),
-        temperature: config.temperature.map(|t| t as f32),
-        top_p: config.top_p.map(|p| p as f32),
+        temperature: config.temperature,
+        top_p: config.top_p,
         reasoning_effort,
         stream: Some(true),
         stream_options: Some(ChatCompletionStreamOptions {

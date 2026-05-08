@@ -688,7 +688,11 @@ export class GatewayClient {
     }
 
     private restoreSubscriptionsAfterReconnect(): void {
+        console.log('[GatewayClient] Restoring subscriptions after reconnect', {
+            debugLogSubscribed: this.debugLogSubscribed,
+        });
         if (this.debugLogSubscribed) {
+            console.log('[GatewayClient] Re-subscribing debug log stream');
             this.send({ type: 'debug.subscribe' });
         }
     }

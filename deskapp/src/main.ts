@@ -484,14 +484,20 @@ async function init() {
         // Listen for session selection to load messages
         bus.on(Events.SESSION_SELECTED, async (payload: { sessionId: string }) => {
              if (!payload.sessionId) {
+                 console.log('[Main] Session cleared, resetting visible messages');
                  state.setMessages([]);
                  return;
              }
 
              const requestedSessionId = payload.sessionId;
-             console.log('[Main] Restoring session progress for:', requestedSessionId);
+             console.log('[Main] Restoring session progress for:', requestedSessionId, {
+                 currentSessionId: state.currentSessionId,
+             });
              try {
                 await restoreSessionProgress(state, gatewayClient, requestedSessionId);
+                console.log('[Main] Session progress restore finished for:', requestedSessionId, {
+                    currentSessionId: state.currentSessionId,
+                });
              } catch (err) {
                 console.error('[Main] Failed to restore session progress:', err);
              }

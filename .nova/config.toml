@@ -49,8 +49,8 @@ sandbox = false
 # ── 开发项目提示词 ──────────────────────────────────────────────
 developer_prompt_files = [
   "AGENTS.md",
-  "DEVELOPER.md",
-  ".nova/developer-prompt.md",
+#  "DEVELOPER.md",
+#  ".nova/developer-prompt.md",
 ]
 
 # ── 网关 ───────────────────────────────────────────────────────

@@ -61,8 +61,8 @@ pub struct ModelConfig {
     pub provider: Option<String>,
     pub model: String,
     pub max_tokens: u32,
-    pub temperature: Option<f64>,
-    pub top_p: Option<f64>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
     /// Anthropic: 映射为 budget_tokens; 其他 Provider: 仅作为"是否启用"的开关
     pub thinking_budget: Option<u32>,
     /// OpenAI: 映射为 reasoning_effort 参数 ("low"/"medium"/"high")

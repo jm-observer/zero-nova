@@ -4,6 +4,7 @@ use chrono::Utc;
 use nova_protocol::observability::{ProviderHealthSnapshot, ProviderHealthSnapshotResponse};
 use reqwest::{header, Client, StatusCode};
 use std::time::Instant;
+use tokio::task::JoinHandle;
 
 const PROVIDER_HEALTH_TIMEOUT_SECS: u64 = 5;
 const PROVIDER_HEALTH_DEGRADED_MS: u64 = 1_500;
@@ -16,33 +17,49 @@ enum ProviderKind {
 
 pub async fn collect_provider_health(config: &AppConfig) -> Result<ProviderHealthSnapshotResponse> {
     let checked_at = Utc::now().timestamp_millis();
-    let provider_kind = infer_provider_kind(&config.provider.base_url);
-    let provider_name = provider_kind.as_str().to_string();
-    let probe = probe_provider(config, provider_kind).await;
-
-    let providers = ["orchestration", "execution"]
-        .into_iter()
-        .map(|scope| ProviderHealthSnapshot {
-            provider: provider_name.clone(),
-            scope: scope.to_string(),
-            status: probe.status.clone(),
-            checked_at,
-            latency_ms: probe.latency_ms,
-            message: probe.message.clone(),
+    let providers: Vec<JoinHandle<ProviderHealthSnapshot>> = config.providers
+        .iter()
+        .map(|(scope, config)| {
+            let provider_kind = infer_provider_kind(&config.base_url);
+            let scope = scope.clone();
+            let base_url = config.base_url.clone();
+            let api_key = config.api_key.clone();
+            tokio::spawn(async move {
+                let probe = probe_provider_by_url(&base_url, &api_key, provider_kind).await;
+                ProviderHealthSnapshot {
+                    provider: scope.clone(),
+                    scope: scope.to_string(),
+                    status: probe.status.clone(),
+                    checked_at,
+                    latency_ms: probe.latency_ms,
+                    message: probe.message.clone(),
+                }
+            })
         })
         .collect();
 
+    let mut snapshots = Vec::with_capacity(providers.len());
+    for handle in providers {
+        match handle.await {
+            Ok(snapshot) => snapshots.push(snapshot),
+            Err(error) => snapshots.push(ProviderHealthSnapshot {
+                provider: "unknown".to_string(),
+                scope: "unknown".to_string(),
+                status: "unknown".to_string(),
+                checked_at,
+                latency_ms: None,
+                message: Some(format!("Provider health task join failed: {error}")),
+            }),
+        }
+    }
+
     Ok(ProviderHealthSnapshotResponse {
-        providers,
+        providers: snapshots,
         updated_at: checked_at,
     })
 }
 
-async fn probe_provider(config: &AppConfig, provider_kind: ProviderKind) -> HealthProbeResult {
-    if config.provider.api_key.trim().is_empty() || config.provider.base_url.trim().is_empty() {
-        return HealthProbeResult::unknown("Provider not configured (missing API key or base URL)");
-    }
-
+async fn probe_provider_by_url(base_url: &str, api_key: &str, provider_kind: ProviderKind) -> HealthProbeResult {
     let client = match Client::builder()
         .timeout(std::time::Duration::from_secs(PROVIDER_HEALTH_TIMEOUT_SECS))
         .build()
@@ -53,9 +70,9 @@ async fn probe_provider(config: &AppConfig, provider_kind: ProviderKind) -> Heal
         }
     };
 
-    let url = build_probe_url(config.provider.base_url.trim(), provider_kind);
+    let url = build_probe_url(base_url.trim(), provider_kind);
     let started_at = Instant::now();
-    let response = match build_probe_request(&client, &url, provider_kind, &config.provider.api_key)
+    let response = match build_probe_request(&client, &url, provider_kind, api_key)
         .send()
         .await
     {

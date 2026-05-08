@@ -1,6 +1,5 @@
 use super::conversation_service::ConversationService;
 use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
-use super::voice_service::VoiceService;
 use crate::agent::TurnResult;
 use crate::config::AppConfig;
 use crate::message::Role;
@@ -122,7 +121,7 @@ pub struct AgentApplicationImpl<C: LlmClient> {
     workspace_service: super::agent_workspace_service::AgentWorkspaceService,
     config: Arc<RwLock<AppConfig>>,
     config_path: PathBuf,
-    voice_service: VoiceService,
+    // voice_service: VoiceService,
 }
 
 impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
@@ -131,14 +130,14 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         workspace_service: super::agent_workspace_service::AgentWorkspaceService,
         config: Arc<RwLock<AppConfig>>,
         config_path: PathBuf,
-        voice_service: VoiceService,
+        // voice_service: VoiceService,
     ) -> Self {
         Self {
             conversation_service,
             workspace_service,
             config,
             config_path,
-            voice_service,
+            // voice_service,
         }
     }
 }
@@ -584,23 +583,25 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 
     async fn voice_transcribe(
         &self,
-        req: &nova_protocol::voice::VoiceTranscribeRequest,
+        _req: &nova_protocol::voice::VoiceTranscribeRequest,
     ) -> Result<nova_protocol::voice::VoiceTranscribeResponse> {
-        self.voice_service
-            .transcribe(
-                req.session_id.as_deref(),
-                &req.audio_base64,
-                &req.audio_format,
-                req.language.as_deref(),
-            )
-            .await
+        todo!()
+        // self.voice_service
+        //     .transcribe(
+        //         req.session_id.as_deref(),
+        //         &req.audio_base64,
+        //         &req.audio_format,
+        //         req.language.as_deref(),
+        //     )
+        //     .await
     }
 
     async fn voice_tts(
         &self,
-        req: &nova_protocol::voice::VoiceTtsRequest,
+        _req: &nova_protocol::voice::VoiceTtsRequest,
     ) -> Result<nova_protocol::voice::VoiceTtsResponse> {
-        self.voice_service.synthesize(&req.text, req.voice.as_deref()).await
+        todo!()
+        // self.voice_service.synthesize(&req.text, req.voice.as_deref()).await
     }
 }
 

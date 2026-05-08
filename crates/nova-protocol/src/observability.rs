@@ -10,6 +10,7 @@ pub struct ProviderHealthRequest {}
 #[serde(rename_all = "camelCase")]
 pub struct ProviderHealthSnapshot {
     pub provider: String,
+    // ?
     pub scope: String,
     pub status: String,
     pub checked_at: i64,

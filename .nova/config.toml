@@ -1,49 +1,43 @@
 # ── 供应商接入 ──────────────────────────────────────────────────
-# api_key 建议通过环境变量 NOVA_API_KEY 设置，避免明文提交到仓库
-[providers.local]
+# 按实际环境替换以下占位符；密钥建议通过环境变量注入，避免明文提交
+[providers.spark-12340]
 # api_key = ""
-# 12340
 base_url = "http://192.168.0.68:8085/v1"
 
-[providers.cloud]
-# api_key = ""
-base_url = "https://api.openai.com/v1"
-
-# 8000
-#base_url = "http://192.168.0.68:8082/v1"
-#base_url = "http://192.168.0.68:12340/v1"
+[providers.spark-8000]
+# api_key = "<CLOUD_PROVIDER_API_KEY>"
+base_url = "http://192.168.0.68:8082/v1"
 
 # ── 模型调用参数 ────────────────────────────────────────────────
-[llms.local_gemma]
-provider = "local"
+[llms.gemma]
+provider = "spark-12340"
 #model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
 model = "gemma-4-26B-A4B-it"
 max_tokens = 8192
 temperature = 0.5
 
-[llms.local_gpt_oss]
-provider = "local"
-model = "gpt-oss-120b"
+[llms.qwen3-6-4.6]
+provider = "spark-8000"
+model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
 max_tokens = 8192
 temperature = 0.5
 
-[llms.cloud_gpt4o]
-provider = "cloud"
-model = "gpt-4o"
+[llms.qwen3-6-4.7]
+provider = "spark-8000"
+model = "Huihui-Qwen3.6-35B-A3B-Claude-4.7"
 max_tokens = 8192
 temperature = 0.3
 
 [defaults]
-provider = "local"
-llm = "local_gemma"
+provider = "spark-12340"
+llm = "gemma"
 
 # ── 搜索 ───────────────────────────────────────────────────────
-# tavily_api_key 建议通过环境变量 TAVILY_API_KEY 设置
+# Tavily 接入时替换占位符；如果当前不启用搜索，可先保留该值
 [search]
 backend = "tavily"
 tavily_api_key = "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"
 
-# ── 工具与能力 ──────────────────────────────────────────────────
 # ── 工具与能力 ──────────────────────────────────────────────────
 [tool]
 skills_dir = "skills"
@@ -85,8 +79,8 @@ id = "nova"
 display_name = "Nova"
 description = "默认通用助手"
 aliases = ["助手"]
-provider = "local"
-llm = "local_gemma"
+provider = "spark-12340"
+llm = "gemma"
 prompt_file = "agent-nova.md"
 
 [[gateway.agents]]
@@ -94,8 +88,8 @@ id = "developer"
 display_name = "Developer"
 description = "开发任务子代理"
 aliases = ["开发", "coder"]
-provider = "local"
-llm = "local_gpt_oss"
+provider = "spark-8000"
+llm = "qwen3-6-4.6"
 prompt_file = "agent-developer.md"
 
 # ── 桌面端远程连接 ──────────────────────────────────────────────

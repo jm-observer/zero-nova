@@ -43,9 +43,6 @@ impl AgentWorkspaceService {
             provider: base_binding.provider_id.clone(),
             model: base_binding.model_config.model.clone(),
         };
-        let global_default = config.resolve_default_binding()?;
-        let has_agent_default = base_binding.provider_id != global_default.provider_id
-            || base_binding.model_config.model != global_default.model_config.model;
 
         let has_session_override =
             control.model_override.orchestration.is_some() || control.model_override.execution.is_some();
@@ -70,8 +67,6 @@ impl AgentWorkspaceService {
                 })
                 .unwrap_or_else(|| default_model.clone());
             (orch, exec, "session_override".to_string())
-        } else if has_agent_default {
-            (default_model.clone(), default_model, "agent_default".to_string())
         } else {
             (default_model.clone(), default_model, "global_default".to_string())
         };
@@ -843,15 +838,13 @@ mod tests {
                 },
             },
         );
-        origin.defaults.provider = "default".to_string();
-        origin.defaults.llm = "default".to_string();
         origin.gateway.agents = vec![crate::config::AgentSpec {
             id: "developer".to_string(),
             display_name: "Developer".to_string(),
             description: "dev".to_string(),
             aliases: Vec::new(),
             provider: "cloud".to_string(),
-            llm: Some("cloud_gpt4o".to_string()),
+            llm: "cloud_gpt4o".to_string(),
             prompt_file: None,
             prompt_inline: None,
             system_prompt_template: None,

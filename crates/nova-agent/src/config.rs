@@ -17,12 +17,6 @@ pub struct OriginAppConfig {
     #[serde(default = "default_llm_registry")]
     pub llms: HashMap<String, RegisteredLlmConfig>,
     #[serde(default)]
-    pub defaults: DefaultBindingConfig,
-    #[serde(default)]
-    pub provider: ProviderConfig,
-    #[serde(default)]
-    pub llm: LlmConfig,
-    #[serde(default)]
     pub search: SearchConfig,
     #[serde(default)]
     pub tool: ToolConfig,
@@ -41,12 +35,6 @@ pub struct AppConfig {
     pub providers: HashMap<String, ProviderConfig>,
     #[serde(default = "default_llm_registry")]
     pub llms: HashMap<String, RegisteredLlmConfig>,
-    #[serde(default)]
-    pub defaults: DefaultBindingConfig,
-    #[serde(default)]
-    pub provider: ProviderConfig,
-    #[serde(default)]
-    pub llm: LlmConfig,
     #[serde(default)]
     pub search: SearchConfig,
     #[serde(default)]
@@ -243,9 +231,6 @@ impl Default for OriginAppConfig {
         Self {
             providers: default_provider_registry(),
             llms: default_llm_registry(),
-            defaults: DefaultBindingConfig::default(),
-            provider: ProviderConfig::default(),
-            llm: LlmConfig::default(),
             search: SearchConfig::default(),
             tool: ToolConfig::default(),
             gateway: GatewayConfig::default(),
@@ -285,7 +270,7 @@ pub struct BashConfig {
     pub sandbox: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AgentSpec {
     pub id: String,
     pub display_name: String,
@@ -294,7 +279,7 @@ pub struct AgentSpec {
     #[serde(default)]
     pub provider: String,
     #[serde(default)]
-    pub llm: Option<String>,
+    pub llm: String,
     /// 指向 prompts_dir 下的模板文件名
     #[serde(default)]
     pub prompt_file: Option<String>,
@@ -304,7 +289,7 @@ pub struct AgentSpec {
     #[serde(default)]
     pub system_prompt_template: Option<String>,
     pub tool_whitelist: Option<Vec<String>>,
-    pub model_config: Option<AgentModelConfig>,
+    pub model_config: AgentModelConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -431,14 +416,9 @@ impl Default for GatewayConfig {
 
 impl AppConfig {
     pub fn from_origin(origin: OriginAppConfig, config_dir: PathBuf) -> Self {
-        let (provider, llm) = resolve_default_runtime_binding(&origin.providers, &origin.llms, &origin.defaults)
-            .unwrap_or((origin.provider.clone(), origin.llm.clone()));
         Self {
             providers: origin.providers,
             llms: origin.llms,
-            defaults: origin.defaults,
-            provider,
-            llm,
             search: origin.search,
             tool: origin.tool,
             gateway: origin.gateway,
@@ -503,18 +483,13 @@ impl AppConfig {
             .ok_or_else(|| anyhow::anyhow!("agent '{}' not found", agent_id))
     }
 
-    pub fn resolve_default_binding(&self) -> Result<ResolvedAgentBinding> {
-        self.resolve_named_binding(self.defaults.provider.as_str(), self.defaults.llm.as_str())
-    }
-
     pub fn resolve_agent_binding(&self, agent: &AgentSpec) -> Result<ResolvedAgentBinding> {
-        let llm_id = agent.llm.as_deref().unwrap_or(self.defaults.llm.as_str());
-        let binding = self.resolve_named_binding(agent.provider.as_str(), llm_id)?;
+        let binding = self.resolve_named_binding(agent.provider.as_str(), &agent.llm)?;
         if binding.provider_id != agent.provider {
             bail!(
                 "agent '{}' llm '{}' belongs to provider '{}', expected '{}'",
                 agent.id,
-                llm_id,
+                agent.llm,
                 binding.provider_id,
                 agent.provider
             );
@@ -613,14 +588,14 @@ impl OriginAppConfig {
     }
 
     fn apply_env_overrides(&mut self) {
-        if let Ok(api_key) = env::var("NOVA_API_KEY") {
-            if !api_key.is_empty() {
-                self.provider.api_key = api_key;
-                if let Some(provider) = self.providers.get_mut(self.defaults.provider.as_str()) {
-                    provider.api_key = self.provider.api_key.clone();
-                }
-            }
-        }
+        // if let Ok(api_key) = env::var("NOVA_API_KEY") {
+        //     if !api_key.is_empty() {
+        //         self.provider.api_key = api_key;
+        //         if let Some(provider) = self.providers.get_mut(self.defaults.provider.as_str()) {
+        //             provider.api_key = self.provider.api_key.clone();
+        //         }
+        //     }
+        // }
         if let Ok(tavily_api_key) = env::var("TAVILY_API_KEY") {
             if !tavily_api_key.is_empty() {
                 self.search.tavily_api_key = Some(tavily_api_key);
@@ -634,32 +609,6 @@ impl OriginAppConfig {
         }
         if self.llms.is_empty() {
             bail!("llms cannot be empty");
-        }
-        if self.defaults.provider.trim().is_empty() {
-            bail!("defaults.provider cannot be empty");
-        }
-        if self.defaults.llm.trim().is_empty() {
-            bail!("defaults.llm cannot be empty");
-        }
-        if !self.providers.contains_key(self.defaults.provider.as_str()) {
-            bail!(
-                "defaults.provider '{}' does not reference a configured provider",
-                self.defaults.provider
-            );
-        }
-        let default_llm = self.llms.get(self.defaults.llm.as_str()).ok_or_else(|| {
-            anyhow::anyhow!(
-                "defaults.llm '{}' does not reference a configured llm",
-                self.defaults.llm
-            )
-        })?;
-        if default_llm.provider != self.defaults.provider {
-            bail!(
-                "defaults.llm '{}' belongs to provider '{}', but defaults.provider is '{}'",
-                self.defaults.llm,
-                default_llm.provider,
-                self.defaults.provider
-            );
         }
         for (llm_id, llm) in &self.llms {
             if llm.provider.trim().is_empty() {
@@ -683,32 +632,22 @@ impl OriginAppConfig {
             if !self.providers.contains_key(agent.provider.as_str()) {
                 bail!("agent '{}' references unknown provider '{}'", agent.id, agent.provider);
             }
-            if let Some(llm_id) = agent.llm.as_deref() {
-                if llm_id.trim().is_empty() {
+                if agent.llm.trim().is_empty() {
                     bail!("agent '{}' llm cannot be empty", agent.id);
                 }
                 let llm = self
                     .llms
-                    .get(llm_id)
-                    .ok_or_else(|| anyhow::anyhow!("agent '{}' references unknown llm '{}'", agent.id, llm_id))?;
+                    .get(&agent.llm)
+                    .ok_or_else(|| anyhow::anyhow!("agent '{}' references unknown llm '{}'", agent.id, agent.llm))?;
                 if llm.provider != agent.provider {
                     bail!(
                         "agent '{}' llm '{}' belongs to provider '{}', expected '{}'",
                         agent.id,
-                        llm_id,
+                        agent.llm,
                         llm.provider,
                         agent.provider
                     );
                 }
-            } else if default_llm.provider != agent.provider {
-                bail!(
-                    "agent '{}' has no llm and defaults.llm '{}' belongs to provider '{}', expected '{}'",
-                    agent.id,
-                    self.defaults.llm,
-                    default_llm.provider,
-                    agent.provider
-                );
-            }
             if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
                 bail!("agent '{}' cannot set both prompt_file and prompt_inline", agent.id);
             }
@@ -724,9 +663,9 @@ impl OriginAppConfig {
             );
         }
 
-        if self.llm.model_config.thinking_budget.is_some() && self.llm.model_config.reasoning_effort.is_some() {
-            bail!("llm.thinking_budget and llm.reasoning_effort cannot both be set");
-        }
+        // if self.llm.model_config.thinking_budget.is_some() && self.llm.model_config.reasoning_effort.is_some() {
+        //     bail!("llm.thinking_budget and llm.reasoning_effort cannot both be set");
+        // }
 
         if self.search.backend.as_deref() == Some("tavily")
             && self
@@ -751,10 +690,6 @@ struct RawAppConfig {
     pub llms: HashMap<String, RawRegisteredLlmConfig>,
     #[serde(default)]
     pub defaults: Option<DefaultBindingConfig>,
-    #[serde(default)]
-    pub provider: Option<ProviderConfig>,
-    #[serde(default)]
-    pub llm: Option<RawLlmConfig>,
     #[serde(default)]
     pub search: SearchConfig,
     #[serde(default)]
@@ -802,14 +737,13 @@ struct RawRegisteredLlmConfig {
 
 #[derive(Debug, Deserialize, Default)]
 struct RawModelConfig {
-    #[serde(default)]
-    model: Option<String>,
+    model: String,
     #[serde(default)]
     max_tokens: Option<u32>,
     #[serde(default)]
-    temperature: Option<f64>,
+    temperature: f32,
     #[serde(default)]
-    top_p: Option<f64>,
+    top_p: Option<f32>,
     #[serde(default)]
     thinking_budget: Option<u32>,
     #[serde(default)]
@@ -852,9 +786,9 @@ struct RawAgentSpec {
     #[serde(default)]
     aliases: Vec<String>,
     #[serde(default)]
-    provider: Option<String>,
+    provider: String,
     #[serde(default)]
-    llm: Option<String>,
+    llm: String,
     #[serde(default)]
     prompt_file: Option<String>,
     #[serde(default)]
@@ -888,58 +822,58 @@ struct RawTrimmerConfigToml {
 impl RawAppConfig {
     fn migrate(self) -> (OriginAppConfig, Vec<String>) {
         let mut warnings = Vec::new();
-        let default_model = LlmConfig::default().model_config;
-        let use_named_bindings = !self.providers.is_empty() || !self.llms.is_empty() || self.defaults.is_some();
-        let legacy_provider_present = self.provider.is_some();
-        let legacy_llm_present = self.llm.is_some();
-        let mut legacy_provider = self.provider.unwrap_or_default();
-        let legacy_llm = migrate_legacy_llm(self.llm, &mut legacy_provider, &default_model, &mut warnings);
-
-        let (providers, llms, defaults) = if use_named_bindings {
-            if legacy_provider_present {
-                warnings.push(
-                    "Detected legacy field provider together with providers; using providers and ignoring provider."
-                        .to_string(),
-                );
-            }
-            if legacy_llm_present {
-                warnings.push(
-                    "Detected legacy field llm together with llms/defaults; using named llms and ignoring llm."
-                        .to_string(),
-                );
-            }
-
-            let mut migrated_llms = HashMap::with_capacity(self.llms.len());
-            for (llm_id, raw_llm) in self.llms {
-                let mut model_config = raw_model_config_with_defaults(raw_llm.model_config, &default_model);
-                if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
-                    model_config.reasoning_effort = None;
-                    warnings.push(format!(
-                        "Both llms.{}.thinking_budget and llms.{}.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort.",
-                        llm_id, llm_id
-                    ));
-                }
-                migrated_llms.insert(
-                    llm_id,
-                    RegisteredLlmConfig {
-                        provider: raw_llm.provider,
-                        model_config,
-                    },
-                );
-            }
-
-            (self.providers, migrated_llms, self.defaults.unwrap_or_default())
-        } else {
-            let providers = HashMap::from([(default_provider_binding_id(), legacy_provider.clone())]);
-            let llms = HashMap::from([(
-                default_llm_binding_id(),
-                RegisteredLlmConfig {
-                    provider: default_provider_binding_id(),
-                    model_config: legacy_llm.model_config.clone(),
-                },
-            )]);
-            (providers, llms, DefaultBindingConfig::default())
-        };
+        // let default_model = LlmConfig::default().model_config;
+        // let use_named_bindings = !self.providers.is_empty() || !self.llms.is_empty() || self.defaults.is_some();
+        // let legacy_provider_present = self.provider.is_some();
+        // let legacy_llm_present = self.llm.is_some();
+        // let mut legacy_provider = self.provider.unwrap_or_default();
+        // let legacy_llm = migrate_legacy_llm(self.llm, &mut legacy_provider, &default_model, &mut warnings);
+        //
+        // let (providers, llms, defaults) = if use_named_bindings {
+        //     if legacy_provider_present {
+        //         warnings.push(
+        //             "Detected legacy field provider together with providers; using providers and ignoring provider."
+        //                 .to_string(),
+        //         );
+        //     }
+        //     if legacy_llm_present {
+        //         warnings.push(
+        //             "Detected legacy field llm together with llms/defaults; using named llms and ignoring llm."
+        //                 .to_string(),
+        //         );
+        //     }
+        //
+        //     let mut migrated_llms = HashMap::with_capacity(self.llms.len());
+        //     for (llm_id, raw_llm) in self.llms {
+        //         let mut model_config = raw_model_config_with_defaults(raw_llm.model_config, &default_model);
+        //         if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
+        //             model_config.reasoning_effort = None;
+        //             warnings.push(format!(
+        //                 "Both llms.{}.thinking_budget and llms.{}.reasoning_effort are set; preferring thinking_budget and ignoring reasoning_effort.",
+        //                 llm_id, llm_id
+        //             ));
+        //         }
+        //         migrated_llms.insert(
+        //             llm_id,
+        //             RegisteredLlmConfig {
+        //                 provider: raw_llm.provider,
+        //                 model_config,
+        //             },
+        //         );
+        //     }
+        //
+        //     (self.providers, migrated_llms, self.defaults.unwrap_or_default())
+        // } else {
+        //     let providers = HashMap::from([(default_provider_binding_id(), legacy_provider.clone())]);
+        //     let llms = HashMap::from([(
+        //         default_llm_binding_id(),
+        //         RegisteredLlmConfig {
+        //             provider: default_provider_binding_id(),
+        //             model_config: legacy_llm.model_config.clone(),
+        //         },
+        //     )]);
+        //     (providers, llms, DefaultBindingConfig::default())
+        // };
 
         let mut migrated_agents = Vec::with_capacity(self.gateway.agents.len());
         for mut agent in self.gateway.agents {
@@ -960,24 +894,27 @@ impl RawAppConfig {
                     }
                 }
             }
+            // todo
+            let llm = self.llms.get(&agent.llm).unwrap();
+            let model_config = crate::agent_catalog::ModelConfig {
+                model: llm.model_config.model.clone(),
+                temperature: llm.model_config.temperature,
+                max_tokens: llm.model_config.max_tokens,
+                // todo what is the default value
+                top_p: llm.model_config.top_p.unwrap_or(1.0),
+            };
             migrated_agents.push(AgentSpec {
                 id: agent.id,
                 display_name: agent.display_name,
                 description: agent.description,
                 aliases: agent.aliases,
-                provider: agent.provider.unwrap_or_else(|| {
-                    if use_named_bindings {
-                        String::new()
-                    } else {
-                        defaults.provider.clone()
-                    }
-                }),
-                llm: Some(agent.llm.unwrap_or_else(|| defaults.llm.clone())),
+                provider: agent.provider,
+                llm: agent.llm,
                 prompt_file: agent.prompt_file,
                 prompt_inline: agent.prompt_inline,
                 system_prompt_template: None,
                 tool_whitelist: agent.tool_whitelist,
-                model_config: agent.model_config,
+                model_config,
             });
         }
 
@@ -1008,24 +945,10 @@ impl RawAppConfig {
                     .to_string(),
             );
         }
-
-        let provider = providers
-            .get(defaults.provider.as_str())
-            .cloned()
-            .unwrap_or_else(|| legacy_provider.clone());
-        let llm = llms
-            .get(defaults.llm.as_str())
-            .map(|config| LlmConfig {
-                model_config: config.model_config.clone(),
-            })
-            .unwrap_or(legacy_llm);
         (
             OriginAppConfig {
-                providers,
-                llms,
-                defaults,
-                provider,
-                llm,
+                providers: self.providers,
+                llms: self.llms,
                 search: self.search,
                 tool: ToolConfig {
                     bash: self.tool.bash,
@@ -1059,7 +982,7 @@ impl RawAppConfig {
 fn raw_model_config_with_defaults(raw: RawModelConfig, default_model: &ModelConfig) -> ModelConfig {
     ModelConfig {
         provider: default_model.provider.clone(),
-        model: raw.model.unwrap_or_else(|| default_model.model.clone()),
+        model: raw.model,
         max_tokens: raw.max_tokens.unwrap_or(default_model.max_tokens),
         temperature: raw.temperature,
         top_p: raw.top_p,
@@ -1166,8 +1089,6 @@ llm = "local_default"
         assert_eq!(config.providers["local"].api_key, "test-key");
         assert_eq!(config.llms["local_default"].provider, "local");
         assert_eq!(config.defaults.provider, "local");
-        assert_eq!(config.provider.api_key, "test-key");
-        assert_eq!(config.llm.model_config.model, "test-model");
     }
 
     #[test]
@@ -1181,9 +1102,6 @@ max_tokens = 2048
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, warnings) = raw.migrate();
-        assert_eq!(config.provider.api_key, "old-key");
-        assert_eq!(config.provider.base_url, "http://old-host/v1");
-        assert_eq!(config.llm.model_config.model, "old-model");
         assert_eq!(config.providers["default"].api_key, "old-key");
         assert_eq!(config.llms["default"].provider, "default");
         assert!(!warnings.is_empty());
@@ -1338,8 +1256,6 @@ llm = "local_default"
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, warnings) = raw.migrate();
-        assert_eq!(config.provider.api_key, "named-key");
-        assert_eq!(config.llm.model_config.model, "named-model");
         assert!(warnings.iter().any(|warning| warning.contains("ignoring provider")));
         assert!(warnings.iter().any(|warning| warning.contains("ignoring llm")));
     }
@@ -1462,7 +1378,6 @@ description = "d"
         let file = write_temp_config(raw)?;
         let config = OriginAppConfig::load_from_file(&file)?;
         let _ = std::fs::remove_file(&file);
-        assert_eq!(config.provider.api_key, "legacy-key");
         Ok(())
     }
 

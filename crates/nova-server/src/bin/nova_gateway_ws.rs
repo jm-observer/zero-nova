@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = logger_feature(
         "nova-gateway-ws",
-        "debug,sqlx=info,hyper_util=info,nova_agent::provider::openai_compat=info",
+        "debug,reqwest=info,sqlx=info,hyper_util=info,nova_agent::provider::openai_compat=info",
         log::LevelFilter::Debug,
         false,
     )

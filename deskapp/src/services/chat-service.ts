@@ -105,12 +105,18 @@ export class ChatService {
             this.bus.emit('chat:complete', event);
             // Refresh messages after completion to sync persistent state
             if (event.sessionId) {
-                const messages = await this.client.getMessages(event.sessionId);
+                const sessionId = event.sessionId;
+                if (this.state.currentSessionId !== sessionId) {
+                    return;
+                }
+                const messages = await this.client.getMessages(sessionId);
+                // 请求返回后再次确认当前会话，避免异步竞态覆盖新会话内容
+                if (this.state.currentSessionId !== sessionId) {
+                    return;
+                }
                 const usage = this.normalizeMessageTokenUsage(event.usage);
                 const nextMessages = usage ? this.attachUsageToLastAssistantMessage(messages as any[], usage) : messages;
-                if (event.sessionId === this.state.currentSessionId) {
-                    this.state.setMessages(nextMessages as any[]);
-                }
+                this.state.setMessages(nextMessages as any[]);
             }
         } else if (event.type === 'tool_start') {
             this.bus.emit('tool:start', event);

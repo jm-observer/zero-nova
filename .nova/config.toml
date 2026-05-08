@@ -46,6 +46,13 @@ default_policy = "workflow"
 shell = "powershell"
 sandbox = false
 
+# ── 开发项目提示词 ──────────────────────────────────────────────
+developer_prompt_files = [
+  "AGENTS.md",
+  "DEVELOPER.md",
+  ".nova/developer-prompt.md",
+]
+
 # ── 网关 ───────────────────────────────────────────────────────
 [gateway]
 host = "127.0.0.1"
@@ -87,6 +94,7 @@ aliases = ["开发", "coder"]
 provider = "spark-8000"
 llm = "qwen3-6-4.6"
 prompt_file = "agent-developer.md"
+enable_project_developer_prompt = true
 
 # ── 桌面端远程连接 ──────────────────────────────────────────────
 [remote]

@@ -5,6 +5,7 @@ import enPack from './i18n/en';
 import { GatewayClient, GatewayRequestError } from './gateway-client';
 import { EventBus, Events } from './core/event-bus';
 import { AppState } from './core/state';
+import { resolveSessionMessages } from './core/session-message-sync';
 import { ChatService } from './services/chat-service';
 import { bargeInDetector, player, recorder, setVoiceSynthesizeCallback, streamingTtsManager, ttsManager } from './voice';
 
@@ -487,31 +488,20 @@ async function init() {
                  return;
              }
 
-             console.log('[Main] Loading messages for session:', payload.sessionId);
+             const requestedSessionId = payload.sessionId;
+             console.log('[Main] Loading messages for session:', requestedSessionId);
              try {
-                const messages = await gatewayClient.getMessages(payload.sessionId);
-
-                if (state.currentSessionId === payload.sessionId) {
-                    const localMsgs = state.messages;
-                    const localTmpMsgs = localMsgs.filter(m => String(m.id).startsWith('tmp-'));
-                    if (localTmpMsgs.length > 0) {
-                        const serverMsgs = messages as any[];
-                        const merged = [...serverMsgs];
-                        for (const tmpMsg of localTmpMsgs) {
-                            const duplicated = serverMsgs.some(serverMsg =>
-                                serverMsg.role === tmpMsg.role &&
-                                String(serverMsg.content ?? '') === String(tmpMsg.content ?? ''),
-                            );
-                            if (!duplicated) {
-                                merged.push(tmpMsg);
-                            }
-                        }
-                        state.setMessages(merged as any[]);
-                        return;
-                    }
+                const messages = await gatewayClient.getMessages(requestedSessionId);
+                const nextMessages = resolveSessionMessages(
+                    state.currentSessionId,
+                    requestedSessionId,
+                    state.messages,
+                    messages as any[],
+                );
+                if (!nextMessages) {
+                    return;
                 }
-
-                state.setMessages(messages as any[]);
+                state.setMessages(nextMessages as any[]);
              } catch (err) {
                 console.error('[Main] Failed to load messages:', err);
              }

@@ -471,6 +471,7 @@ mod tests {
                         max_tokens: Some(8192),
                         top_p: 1.0,
                     },
+                    enable_project_developer_prompt: false,
                 },
                 AgentSpec {
                     id: "developer".to_string(),
@@ -489,6 +490,7 @@ mod tests {
                         max_tokens: Some(8192),
                         top_p: 1.0,
                     },
+                    enable_project_developer_prompt: true,
                 },
             ],
             ..GatewayConfig::default()

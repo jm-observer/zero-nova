@@ -858,6 +858,7 @@ mod tests {
                 max_tokens: Some(4096),
                 top_p: 1.0,
             },
+            enable_project_developer_prompt: true,
         }];
         let config = Arc::new(RwLock::new(config_value));
         let registry = AgentRegistry::new(AgentDescriptor {

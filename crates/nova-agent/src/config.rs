@@ -31,6 +31,10 @@ pub struct AppConfig {
     /// Path to the configuration file relative to config_dir. When None, defaults to `config.toml`.
     #[serde(default)]
     pub config_path: Option<String>,
+    /// 开发项目提示词文件列表，按优先级顺序。
+    /// 相对路径相对于项目根目录解析。
+    #[serde(default)]
+    pub developer_prompt_files: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -204,6 +208,7 @@ impl Default for AppConfig {
             voice: VoiceConfig::default(),
             config_dir: PathBuf::new(),
             config_path: None,
+            developer_prompt_files: Vec::new(),
         }
     }
 }
@@ -258,6 +263,9 @@ pub struct AgentSpec {
     pub system_prompt_template: Option<String>,
     pub tool_whitelist: Option<Vec<String>>,
     pub model_config: AgentModelConfig,
+    /// 是否启用开发项目提示词读取。
+    #[serde(default)]
+    pub enable_project_developer_prompt: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -641,6 +649,13 @@ impl AppConfig {
         //     bail!("llm.thinking_budget and llm.reasoning_effort cannot both be set");
         // }
 
+        // 检查 developer_prompt_files 中不包含空字符串
+        for (i, file) in self.developer_prompt_files.iter().enumerate() {
+            if file.trim().is_empty() {
+                bail!("developer_prompt_files[{}] cannot be empty", i);
+            }
+        }
+
         if self.search.backend.as_deref() == Some("tavily")
             && self
                 .search
@@ -674,6 +689,8 @@ struct RawAppConfig {
     pub voice: VoiceConfig,
     #[serde(default)]
     pub config_path: Option<String>,
+    #[serde(default)]
+    pub developer_prompt_files: Vec<String>,
 }
 
 fn reject_removed_defaults<'de, D>(deserializer: D) -> std::result::Result<Option<IgnoredAny>, D::Error>
@@ -776,6 +793,8 @@ struct RawAgentSpec {
     tool_whitelist: Option<Vec<String>>,
     #[serde(default)]
     model_config: Option<AgentModelConfig>,
+    #[serde(default)]
+    pub enable_project_developer_prompt: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -799,6 +818,7 @@ struct RawTrimmerConfigToml {
 impl RawAppConfig {
     fn migrate(self, config_dir: PathBuf) -> (AppConfig, Vec<String>) {
         let mut warnings = Vec::new();
+        println!("Migrating with developer_prompt_files: {:?}", self.developer_prompt_files);
         let llms: HashMap<String, RegisteredLlmConfig> = self
             .llms
             .into_iter()
@@ -877,6 +897,7 @@ impl RawAppConfig {
                 system_prompt_template: None,
                 tool_whitelist: agent.tool_whitelist,
                 model_config,
+                enable_project_developer_prompt: agent.enable_project_developer_prompt,
             });
         }
 
@@ -936,6 +957,7 @@ impl RawAppConfig {
                 voice: self.voice,
                 config_dir,
                 config_path: self.config_path,
+                developer_prompt_files: self.developer_prompt_files,
             },
             warnings,
         )
@@ -1295,6 +1317,106 @@ llm = "local_default"
         let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
         config.tool.skills_dir = Some("my-skills".to_string());
         assert_eq!(config.skills_dir(), PathBuf::from("D:/workspace/my-skills"));
+    }
+
+    #[test]
+    fn developer_prompt_files_empty_string_is_rejected() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+provider = "local"
+llm = "local_default"
+
+developer_prompt_files = ["AGENTS.md", "", "DEVELOPER.md"]
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        println!("Raw developer_prompt_files: {:?}", raw.developer_prompt_files);
+        let (config, _) = raw.migrate(PathBuf::from("."));
+        // Debug: print the developer_prompt_files
+        println!("Config developer_prompt_files: {:?}", config.developer_prompt_files);
+        for (i, file) in config.developer_prompt_files.iter().enumerate() {
+            println!("  [{}]: '{}' (is_empty: {})", i, file, file.trim().is_empty());
+        }
+        let error = config.validate().expect_err("config should fail validation");
+        assert!(error.to_string().contains("developer_prompt_files[1] cannot be empty"));
+    }
+
+    #[test]
+    fn developer_prompt_files_defaults_to_empty_list() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+provider = "local"
+llm = "local_default"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate(PathBuf::from("."));
+        assert!(config.developer_prompt_files.is_empty());
+    }
+
+    #[test]
+    fn agent_enable_project_developer_prompt_defaults_to_false() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+provider = "local"
+llm = "local_default"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate(PathBuf::from("."));
+        let agent = config.find_agent("nova").expect("agent should exist");
+        assert!(!agent.enable_project_developer_prompt);
+    }
+
+    #[test]
+    fn agent_enable_project_developer_prompt_can_be_set_to_true() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[[gateway.agents]]
+id = "developer"
+display_name = "Developer"
+description = "d"
+provider = "local"
+llm = "local_default"
+enable_project_developer_prompt = true
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate(PathBuf::from("."));
+        let agent = config.find_agent("developer").expect("agent should exist");
+        assert!(agent.enable_project_developer_prompt);
     }
 
     fn write_temp_config(content: &str) -> Result<PathBuf> {

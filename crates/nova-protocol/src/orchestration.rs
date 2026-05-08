@@ -1,6 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+fn default_subagent_type() -> String {
+    "nova".to_string()
+}
+
 /// 编排计划发布事件（Orchestrator 完成拆分后广播）
 /// 通过 ProgressEvent { kind="orchestration_plan", args=<this> } 携带
 /// 注意：session_id 由 ProgressEvent 信封层携带，args 内不重复包含。
@@ -28,7 +32,12 @@ pub struct AgentSummary {
     /// 编排 Plan 内唯一，如 "agent-1"
     pub agent_id: String,
     pub description: String,
+    #[serde(default = "default_subagent_type")]
     pub subagent_type: String,
+    /// 受控 catalog 中的 agent 选择（Plan 1 新增）。
+    /// 当 subagent_type 存在时，此字段优先使用。
+    #[serde(default)]
+    pub agent_selection: Option<String>,
 }
 
 /// 子 Agent 启动事件

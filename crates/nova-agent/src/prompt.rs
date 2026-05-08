@@ -6,6 +6,7 @@ use crate::skill::{SkillPackage, ToolPolicy};
 use crate::tool::ToolRegistry;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +36,35 @@ pub const BEHAVIOR_GUARDS: &str = r#"
 - Textual confirmation of an action is only valid AFTER the tool has been invoked.
 "#;
 
+/// 系统提示词 section 名称。
+///
+/// 每个 section 按优先级和条件注入到最终 prompt 中。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SectionName {
+    /// 身份与角色（Base）
+    Base,
+    /// Agent 配置
+    Agent,
+    /// 可用 Skills
+    Skill,
+    /// 项目上下文
+    ProjectContext,
+    /// 行为约束
+    BehaviorGuards,
+    /// 运行环境
+    Environment,
+    /// 工作流状态
+    Workflow,
+    /// 工具能力指导
+    ToolGuidance,
+    /// 对话历史摘要
+    History,
+    /// 开发项目提示词（Plan 2）
+    DeveloperProjectPrompt,
+    /// 可用 Agent 目录（Plan 1）
+    AgentCatalog,
+}
+
 /// Prompt 构建所需的完整配置。
 ///
 /// 由 bootstrap / CLI / ConversationService 统一创建。
@@ -62,6 +92,8 @@ pub struct PromptConfig {
     pub developer_prompt_files: Vec<String>,
     /// 已合并完成的开发项目提示词内容
     pub developer_project_prompt_content: Option<String>,
+    /// Orchestrator agent catalog（Plan 1）。为空时不注入 catalog section。
+    pub agent_catalog: Option<String>,
 }
 
 impl PromptConfig {
@@ -128,6 +160,12 @@ impl PromptConfig {
 
     pub fn with_developer_project_prompt_content(mut self, content: String) -> Self {
         self.developer_project_prompt_content = Some(content);
+        self
+    }
+
+    /// 设置 agent catalog 文本（Plan 1）。
+    pub fn with_agent_catalog(mut self, catalog: String) -> Self {
+        self.agent_catalog = Some(catalog);
         self
     }
 }
@@ -500,19 +538,123 @@ pub fn load_developer_project_prompt(project_dir: Option<&Path>, files: &[String
     }
 }
 
-/// 系统提示词具名 section 名称。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SectionName {
-    Base,
-    Agent,
-    Skill,
-    ProjectContext,
-    BehaviorGuards,
-    Environment,
-    Workflow,
-    ToolGuidance,
-    History,
-    DeveloperProjectPrompt,
+/// 单个 agent 在 catalog 中的条目。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCatalogEntry {
+    /// Agent 唯一标识（对应 `gateway.agents[].id`）
+    pub id: String,
+    /// 显示名称
+    pub display_name: String,
+    /// 简短描述
+    pub description: String,
+    /// 是否默认 agent
+    pub is_default: bool,
+    /// 适用场景说明（可选）
+    pub use_cases: Vec<String>,
+}
+
+/// 构建 orchestrator 提示词中的 agent catalog section。
+///
+/// 内容格式示例：
+/// ```
+/// ## Available Agents
+///
+/// The following agents are available for task execution.
+/// Choose from this list only — do not invent new agent names.
+///
+/// | ID | Display Name | Default | Description | Use Cases |
+/// |----|-------------|---------|-------------|-----------|
+/// | nova | Nova | ✓ | Primary general-purpose agent | general, planning, coding |
+/// | developer | Developer | | Developer agent for code tasks | code, testing, debugging |
+///
+/// Rules:
+/// - Always select an agent from the list above.
+/// - If unsure, use the default agent.
+/// - Do not use natural language names like "reviewer" or "coder".
+/// ```
+pub fn build_agent_catalog_section(
+    agents: &[crate::config::AgentSpec],
+    primary_agent_id: &str,
+) -> String {
+    if agents.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = Vec::new();
+    lines.push("## Available Agents".to_string());
+    lines.push(String::new());
+    lines.push(
+        "The following agents are available for task execution.".to_string(),
+    );
+    lines.push("Choose from this list only — do not invent new agent names.".to_string());
+    lines.push(String::new());
+
+    // Build markdown table header
+    lines.push("| ID | Display Name | Default | Description | Use Cases |".to_string());
+    lines.push("|----|-------------|---------|-------------|-----------|".to_string());
+
+    for agent in agents {
+        let is_default = agent.id == primary_agent_id;
+        let default_mark = if is_default { "✓" } else { " " };
+        let use_cases = if agent.description.is_empty() {
+            "general".to_string()
+        } else {
+            agent.description.clone()
+        };
+        lines.push(format!(
+            "| {} | {} | {} | {} | {} |",
+            agent.id,
+            agent.display_name,
+            default_mark,
+            use_cases,
+            agent.aliases.join(", ")
+        ));
+    }
+
+    lines.push(String::new());
+    lines.push("Rules:".to_string());
+    lines.push("- Always select an agent from the list above.".to_string());
+    lines.push("- If unsure, use the default agent.".to_string());
+    lines.push(
+        "- Do not use natural language names like \"reviewer\" or \"coder\".".to_string(),
+    );
+    lines.push(
+        "- The `subagent_type` field is deprecated; use the agent `id` directly.".to_string(),
+    );
+
+    lines.join("\n")
+}
+
+/// 生成 orchestrator 专用的 agent catalog 文本（简洁版，适合嵌入 plan schema hint）。
+pub fn build_agent_catalog_hint(
+    agents: &[crate::config::AgentSpec],
+    primary_agent_id: &str,
+) -> String {
+    if agents.is_empty() {
+        return String::new();
+    }
+
+    let mut parts = Vec::new();
+    parts.push("## Available Agents (Orchestrator Catalog)".to_string());
+    parts.push(String::new());
+    parts.push("When creating or selecting agents for orchestration, use only these IDs:".to_string());
+    parts.push(String::new());
+
+    for agent in agents {
+        let is_default = agent.id == primary_agent_id;
+        let default_note = if is_default { " (default)" } else { "" };
+        parts.push(format!("- `{}`: {}{}", agent.id, agent.display_name, default_note));
+    }
+
+    parts.push(String::new());
+    parts.push(
+        "Do NOT use natural language names like 'reviewer', 'coder', or 'researcher'.".to_string(),
+    );
+    parts.push(
+        "If you need a new agent, use the default agent or refer to the full catalog.".to_string(),
+    );
+
+    parts.join("\n")
 }
 
 impl SectionName {
@@ -529,6 +671,7 @@ impl SectionName {
             Self::ToolGuidance => "Tool Capabilities",
             Self::History => "Conversation Summary",
             Self::DeveloperProjectPrompt => DEVELOPER_PROMPT_SECTION_HEADING,
+            Self::AgentCatalog => "Available Agents",
         }
     }
 }
@@ -718,6 +861,11 @@ impl SystemPromptBuilder {
         self.add_section(SectionName::DeveloperProjectPrompt, content, PromptPriority::Medium)
     }
 
+    /// 添加 agent catalog section（Plan 1）。
+    pub fn agent_catalog_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::AgentCatalog, content, PromptPriority::Medium)
+    }
+
     /// 添加环境快照 section。
     pub fn environment_snapshot(self, env: &EnvironmentSnapshot) -> Self {
         self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
@@ -821,6 +969,13 @@ impl SystemPromptBuilder {
         // L6: 环境快照
         if let Some(env) = &config.environment {
             builder = builder.environment_snapshot(env);
+        }
+
+        // L7: Agent Catalog（Plan 1，仅当存在时注入）
+        if let Some(ref catalog) = config.agent_catalog {
+            if !catalog.is_empty() {
+                builder = builder.agent_catalog_section(catalog);
+            }
         }
 
         if let Some(stage) = config.template_vars.get(template_vars::WORKFLOW_STAGE) {

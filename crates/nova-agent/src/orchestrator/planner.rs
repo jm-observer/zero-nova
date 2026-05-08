@@ -40,8 +40,15 @@ impl StageMode {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRequest {
     pub agent_id: String,
+    /// 已废弃：由模型直接填写的 subagent_type（Plan 1 标记为 deprecated）。
+    /// 运行时优先使用 catalog 中的 agent 选择。
     #[serde(default = "default_subagent_type")]
+    #[serde(alias = "agentType")]
     pub subagent_type: String,
+    /// 受控 catalog 中的 agent 选择（Plan 1 新增）。
+    /// 当存在时优先使用，否则回退到 subagent_type。
+    #[serde(default)]
+    pub agent_selection: Option<String>,
     pub description: String,
     pub prompt: String,
     #[serde(default)]

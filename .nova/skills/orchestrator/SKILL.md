@@ -53,7 +53,7 @@ tools:
       "agents": [
         {
           "agentId": "a1",
-          "subagentType": "developer",
+          "agentSelection": "developer",
           "description": "<3-5字描述>",
           "prompt": "<完整、自包含的子任务提示词>",
           "contextFiles": ["src/models/"]
@@ -67,7 +67,7 @@ tools:
       "agents": [
         {
           "agentId": "a3",
-          "subagentType": "nova",
+          "agentSelection": "nova",
           "description": "<描述>",
           "prompt": "<提示词，可引用上一阶段预期输出>",
           "contextFiles": ["tests/"]
@@ -78,16 +78,49 @@ tools:
 }
 ```
 
-## 子 Agent 提示词规范
+## 子 Agent 选择规则
 
 `agentId` 是当前编排 Plan 内的唯一实例标识，例如 `a1`、`a2`。
 
-`subagentType` 用来选择已注册的执行 Agent。首版只允许：
+`agentSelection` 用来选择已注册的执行 Agent（优先于 `subagentType`）。首版只允许：
 
 - `developer`：实现、修改、修复、补测试等开发任务
 - `nova`：汇总、检查、一致性判断或无法明确归类的默认任务
 
-不要输出未注册的 `subagentType`。若无法判断，默认使用 `nova`。
+不要输出未注册的 `agentSelection`。若无法判断，默认使用 `nova`。
+
+> 注：`subagentType` 字段已标记为 deprecated，但仍可兼容使用。建议优先使用 `agentSelection`。
+
+## 输出格式示例（推荐）
+
+```json
+{
+  "planId": "plan-abc12345",
+  "description": "Implement JWT authentication system",
+  "stages": [
+    {
+      "stageId": "s1",
+      "mode": "parallel",
+      "dependsOn": [],
+      "agents": [
+        {
+          "agentId": "a1",
+          "agentSelection": "developer",
+          "description": "Database model",
+          "prompt": "Implement User model in src/models/user.rs...",
+          "contextFiles": ["src/models/"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**关键规则：**
+1. `agentId` = 计划内唯一实例 ID（如 `a1`, `agent-1`）
+2. `agentSelection` = 从 catalog 中选择的执行 Agent（如 `developer`, `nova`）
+3. 不要编造 catalog 外的 Agent 名称
+4. 如果不确定，使用默认 Agent（`nova`）
 
 每个子 Agent 的 `prompt` 必须：
 1. 自包含：不依赖其他子 Agent 上下文，包含所有必要信息

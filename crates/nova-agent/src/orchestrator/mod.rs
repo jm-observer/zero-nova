@@ -23,6 +23,10 @@ pub struct OrchestratorEngine {
     agent_tool: Arc<AgentTool>,
     event_tx: mpsc::Sender<AgentEvent>,
     tool_context: Option<ToolContext>,
+    /// Catalog 中已注册的 agent ID 集合（用于验证 LLM 的 agent 选择）。
+    catalog_agent_ids: std::sync::Arc<std::collections::HashSet<String>>,
+    /// 默认 agent ID（用于 fallback）。
+    default_agent_id: String,
 }
 
 pub struct ExecutionOutcome {
@@ -37,10 +41,57 @@ impl OrchestratorEngine {
         event_tx: mpsc::Sender<AgentEvent>,
         tool_context: Option<ToolContext>,
     ) -> Self {
+        // 从 AgentTool 中提取 catalog 信息
+        let catalog_agent_ids = Arc::new(
+            agent_tool
+                .config
+                .gateway
+                .agents
+                .iter()
+                .map(|a| a.id.clone())
+                .collect(),
+        );
+        let default_agent_id = agent_tool
+            .config
+            .gateway
+            .agents
+            .first()
+            .map(|a| a.id.clone())
+            .unwrap_or_else(|| "nova".to_string());
+
         Self {
             agent_tool,
             event_tx,
             tool_context,
+            catalog_agent_ids,
+            default_agent_id,
+        }
+    }
+
+    /// 验证 agent 选择是否在 catalog 中。
+    /// 如果不在 catalog 中，返回 warning 消息并 fallback 到默认 agent。
+    pub fn validate_agent_selection(&self, selection: &str) -> (String, Option<String>) {
+        if self.catalog_agent_ids.contains(selection) {
+            (selection.to_string(), None)
+        } else {
+            let warning = format!(
+                "Agent selection '{}' not found in catalog, falling back to '{}'",
+                selection, self.default_agent_id
+            );
+            log::warn!("[OrchestratorEngine] {}", warning);
+            (self.default_agent_id.clone(), Some(warning))
+        }
+    }
+
+    /// 获取 review 阶段应使用的 agent ID。
+    /// 优先使用 catalog 中的默认 agent，如果 catalog 中没有则 fallback 到 primary agent。
+    pub fn review_agent_id(&self) -> String {
+        // 检查 catalog 中是否有 "reviewer" agent
+        if self.catalog_agent_ids.contains("reviewer") {
+            "reviewer".to_string()
+        } else {
+            // 使用默认 agent
+            self.default_agent_id.clone()
         }
     }
 
@@ -171,6 +222,7 @@ impl OrchestratorEngine {
                                     "prompt": agent_req.prompt,
                                     "description": agent_req.description,
                                     "subagent_type": agent_req.subagent_type,
+                                    "agent_selection": agent_req.agent_selection.clone(),
                                     "run_in_background": false,
                                     "agent_id": agent_req.agent_id,
                                     "parent_plan_id": plan_id,
@@ -349,6 +401,7 @@ impl OrchestratorEngine {
                     "prompt": prompt,
                     "description": "Review orchestration outputs",
                     "subagent_type": "Reviewer",
+                    "agent_selection": "Reviewer",
                     "run_in_background": false,
                 }),
                 self.tool_context.clone(),

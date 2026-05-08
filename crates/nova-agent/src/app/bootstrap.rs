@@ -7,7 +7,8 @@ use crate::conversation::repository::SqliteSessionRepository;
 use crate::conversation::sqlite_manager::SqliteManager;
 use crate::conversation::{SessionCache, SessionService};
 use crate::prompt::{
-    EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector, SystemPromptBuilder, TrimmerConfig,
+    build_agent_catalog_section, EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector,
+    SystemPromptBuilder, TrimmerConfig,
 };
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::skill::SkillRegistry;
@@ -91,6 +92,12 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             .with_project_context_path_opt(config.project_context_file())
             .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))
             .with_template_vars(template_vars.clone());
+
+        // Plan 1: 注入 agent catalog 到 orchestrator prompt
+        let catalog_text = build_agent_catalog_section(&config.gateway.agents, &config.primary_agent()?.id);
+        if !catalog_text.is_empty() {
+            prompt_config = prompt_config.with_agent_catalog(catalog_text);
+        }
 
         // 如果 agent 启用了开发项目提示词，则注入文件列表
         if agent.enable_project_developer_prompt {

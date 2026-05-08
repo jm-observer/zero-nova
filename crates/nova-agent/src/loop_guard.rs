@@ -37,6 +37,7 @@ pub struct ToolCallSignature {
     pub tool_name: String,
     pub canonical_primary_target: Option<String>,
     pub normalized_input: String,
+    /// 用于 telemetry 与事件跟踪，重复判断本身依赖 Eq 特化
     pub input_hash: u64,
 }
 
@@ -90,14 +91,14 @@ impl LoopGuardState {
             && self.config.duplicate_read_mode == DuplicateReadMode::WarnThenReject
         {
             return LoopGuardDecision::Reject {
-                message: "System Guard: You have repeated the exact same tool call multiple times. Stop retrying this exact request and either continue your analysis from existing results, or change the parameters (for Read, increase `offset` to inspect a new range).".to_string(),
+                message: "System Guard: You have repeated the exact same tool call multiple times. The system has blocked this request. If your previous result was truncated from the context due to length limits, you MUST change your request parameters to avoid this error (e.g. for Bash use `| head -n 50` or `grep`, for Read adjust offset/limit). Do NOT retry the exact same tool call.".to_string(),
                 reason_code: "duplicate_tool_call_rejected".to_string(),
             };
         }
 
         if self.consecutive_duplicate_count >= DUPLICATE_WARNING_THRESHOLD {
             return LoopGuardDecision::AllowWithWarning {
-                message: "System Guard Warning: This tool call is identical to your previous one. Reuse earlier output when possible; for Read, prefer a higher `offset` instead of re-reading the same range.".to_string(),
+                message: "System Guard Warning: This tool call is identical to your previous one. If your earlier output was truncated due to length limits, consider modifying the command (e.g. piping to `head` or `grep` in Bash, or using a smaller limit in Read) so it doesn't get truncated again.".to_string(),
             };
         }
 

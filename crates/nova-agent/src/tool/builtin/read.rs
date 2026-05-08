@@ -9,7 +9,7 @@ use std::path::Path;
 use tokio::fs;
 
 const DEFAULT_OFFSET: usize = 1;
-const DEFAULT_LIMIT: usize = 200;
+const DEFAULT_LIMIT: usize = 2000;
 const MAX_LIMIT: usize = 2000;
 const REPEAT_SUMMARY_TRIGGER_LINES: usize = 400;
 
@@ -124,7 +124,7 @@ impl ReadTool {
                             .map(|(i, line)| format!("{}\t{}", end - 2 + i, line))
                             .collect::<Vec<_>>()
                             .join("\n");
-                        output.push_str("summary: this range has already been returned once in this turn.\n");
+                        output.push_str("summary: this range has already been returned once in this turn. Returning summary to save context.\n");
                         output.push_str("head:\n");
                         output.push_str(&head);
                         output.push_str("\ntail:\n");
@@ -132,8 +132,12 @@ impl ReadTool {
                         output.push('\n');
                     } else {
                         output.push_str(
-                            "suggestion: reuse prior content for analysis, or increase offset to read a new range.\n",
+                            "suggestion: returning full content again since the requested range is short.\n\n",
                         );
+                        for (i, line) in result_lines.iter().enumerate() {
+                            let line_num = start + i + 1;
+                            output.push_str(&format!("{}\t{}\n", line_num, line));
+                        }
                     }
                 } else {
                     output.push_str(&format!(
@@ -203,7 +207,7 @@ impl Tool for ReadTool {
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
                     "offset": { "type": "integer", "default": 1, "description": "1-based start line. Increase this offset to continue reading later lines." },
-                    "limit": { "type": "integer", "default": 200, "description": "Number of lines to read (default 200, max 2000)" },
+                    "limit": { "type": "integer", "default": 2000, "description": "Number of lines to read (default 2000, max 2000)" },
                     "pages": { "type": "string", "description": "Page range for PDF files (e.g., '1-5') - Currently not implemented" }
                 },
                 "required": ["file_path"]

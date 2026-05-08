@@ -521,9 +521,7 @@ mod tests {
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
-        let wrapped = args
-            .last()
-            .expect("powershell backend should pass wrapped command");
+        let wrapped = args.last().expect("powershell backend should pass wrapped command");
         assert!(wrapped.contains("$OutputEncoding = [System.Text.Encoding]::UTF8;"));
         assert!(wrapped.contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"));
         assert!(wrapped.contains("$PSDefaultParameterValues['*:Encoding'] = 'utf8';"));

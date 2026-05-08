@@ -5,7 +5,7 @@ import enPack from './i18n/en';
 import { GatewayClient, GatewayRequestError } from './gateway-client';
 import { EventBus, Events } from './core/event-bus';
 import { AppState } from './core/state';
-import { resolveSessionMessages } from './core/session-message-sync';
+import { restoreSessionProgress } from './core/session-progress-restore';
 import { ChatService } from './services/chat-service';
 import { bargeInDetector, player, recorder, setVoiceSynthesizeCallback, streamingTtsManager, ttsManager } from './voice';
 
@@ -489,21 +489,11 @@ async function init() {
              }
 
              const requestedSessionId = payload.sessionId;
-             console.log('[Main] Loading messages for session:', requestedSessionId);
+             console.log('[Main] Restoring session progress for:', requestedSessionId);
              try {
-                const messages = await gatewayClient.getMessages(requestedSessionId);
-                const nextMessages = resolveSessionMessages(
-                    state.currentSessionId,
-                    requestedSessionId,
-                    state.messages,
-                    messages as any[],
-                );
-                if (!nextMessages) {
-                    return;
-                }
-                state.setMessages(nextMessages as any[]);
+                await restoreSessionProgress(state, gatewayClient, requestedSessionId);
              } catch (err) {
-                console.error('[Main] Failed to load messages:', err);
+                console.error('[Main] Failed to restore session progress:', err);
              }
         });
 

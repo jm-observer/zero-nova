@@ -22,6 +22,8 @@ pub struct AgentDescriptor {
     pub model_config: Option<ModelConfig>,              // None = 使用默认
     pub provider_id: String,
     pub llm_id: String,
+    /// 是否启用开发项目提示词（Plan 2）
+    pub enable_project_developer_prompt: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -94,6 +96,7 @@ mod tests {
             model_config: None,
             provider_id: "openai_compat".to_string(),
             llm_id: "gpt_oss_primary".to_string(),
+            enable_project_developer_prompt: false,
         };
         AgentRegistry::new(primary)
     }

@@ -21,6 +21,9 @@ const PROJECT_CONTEXT_FILES: &[&str] = &["PROJECT.md", "NOVA.md"];
 /// 项目上下文最大字符数（约 4000 token）
 const MAX_PROJECT_CONTEXT_CHARS: usize = 16000;
 
+/// 开发项目提示词 section 标题
+const DEVELOPER_PROMPT_SECTION_HEADING: &str = "Developer Project Instructions";
+
 /// 内置行为约束文本。
 ///
 /// 与 bootstrap.rs 中原始硬编码字符串语义一致，Phase 1 不做内容变更。
@@ -55,6 +58,10 @@ pub struct PromptConfig {
     pub project_context_content: Option<String>,
     /// workflow-stages.md 路径
     pub workflow_prompt_path: Option<PathBuf>,
+    /// 开发项目提示词文件名列表（按配置顺序）
+    pub developer_prompt_files: Vec<String>,
+    /// 已合并完成的开发项目提示词内容
+    pub developer_project_prompt_content: Option<String>,
 }
 
 impl PromptConfig {
@@ -69,6 +76,8 @@ impl PromptConfig {
             project_context_path: None,
             project_context_content: None,
             workflow_prompt_path: None,
+            developer_prompt_files: Vec::new(),
+            developer_project_prompt_content: None,
         }
     }
 
@@ -109,6 +118,16 @@ impl PromptConfig {
 
     pub fn with_workflow_prompt_path(mut self, path: PathBuf) -> Self {
         self.workflow_prompt_path = Some(path);
+        self
+    }
+
+    pub fn with_developer_prompt_files(mut self, files: Vec<String>) -> Self {
+        self.developer_prompt_files = files;
+        self
+    }
+
+    pub fn with_developer_project_prompt_content(mut self, content: String) -> Self {
+        self.developer_project_prompt_content = Some(content);
         self
     }
 }
@@ -403,6 +422,84 @@ fn load_single_project_context(path: &Path) -> Option<String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+//  开发项目提示词加载（Plan 2）
+// ---------------------------------------------------------------------------
+
+/// 异步从项目根目录加载开发项目提示词。
+///
+/// 处理规则：
+/// 1. `project_dir` 为空则直接返回 `None`
+/// 2. 按 `files` 顺序逐个检查 `<project_dir>/<file>`
+/// 3. 文件不存在则跳过
+/// 4. 文件存在但内容为空白则跳过
+/// 5. 文件读取失败则记录 `warn!` 并继续
+/// 6. 命中多个文件时按顺序拼接
+pub async fn load_developer_project_prompt_async(project_dir: Option<&Path>, files: &[String]) -> Option<String> {
+    let project_dir = project_dir?;
+    let mut parts = Vec::new();
+
+    for file_name in files {
+        let path = project_dir.join(file_name);
+        match tokio::fs::read_to_string(&path).await {
+            Ok(content) if !content.trim().is_empty() => {
+                log::info!(
+                    "Loaded developer project prompt from {:?} ({} chars)",
+                    path,
+                    content.len()
+                );
+                parts.push(format!("### Source: {}\n{}", file_name, content.trim_end()));
+            }
+            Ok(_) => {
+                log::debug!("Developer project prompt file {:?} is empty, skipping", path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                log::warn!("Failed to read developer project prompt file {:?}: {}", path, e);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n---\n\n"))
+    }
+}
+
+/// 同步从项目根目录加载开发项目提示词。
+pub fn load_developer_project_prompt(project_dir: Option<&Path>, files: &[String]) -> Option<String> {
+    let project_dir = project_dir?;
+    let mut parts = Vec::new();
+
+    for file_name in files {
+        let path = project_dir.join(file_name);
+        match std::fs::read_to_string(&path) {
+            Ok(content) if !content.trim().is_empty() => {
+                log::info!(
+                    "Loaded developer project prompt from {:?} ({} chars)",
+                    path,
+                    content.len()
+                );
+                parts.push(format!("### Source: {}\n{}", file_name, content.trim_end()));
+            }
+            Ok(_) => {
+                log::debug!("Developer project prompt file {:?} is empty, skipping", path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                log::warn!("Failed to read developer project prompt file {:?}: {}", path, e);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n---\n\n"))
+    }
+}
+
 /// 系统提示词具名 section 名称。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SectionName {
@@ -415,6 +512,7 @@ pub enum SectionName {
     Workflow,
     ToolGuidance,
     History,
+    DeveloperProjectPrompt,
 }
 
 impl SectionName {
@@ -430,6 +528,7 @@ impl SectionName {
             Self::Workflow => "Workflow State",
             Self::ToolGuidance => "Tool Capabilities",
             Self::History => "Conversation Summary",
+            Self::DeveloperProjectPrompt => DEVELOPER_PROMPT_SECTION_HEADING,
         }
     }
 }
@@ -614,6 +713,11 @@ impl SystemPromptBuilder {
         self.add_section(SectionName::ProjectContext, content, PromptPriority::Medium)
     }
 
+    /// 添加开发项目提示词 section。
+    pub fn developer_project_prompt_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::DeveloperProjectPrompt, content, PromptPriority::Medium)
+    }
+
     /// 添加环境快照 section。
     pub fn environment_snapshot(self, env: &EnvironmentSnapshot) -> Self {
         self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
@@ -673,7 +777,7 @@ impl SystemPromptBuilder {
     /// 从配置创建完整的 system prompt builder（Phase 2 版本）。
     ///
     /// 构建的 section 顺序：
-    ///   Base (agent prompt) → BehaviorGuards → Skill → ProjectContext → Environment
+    ///   Base (agent prompt) → BehaviorGuards → Skill → DeveloperProjectPrompt → ProjectContext → Environment → Workflow
     pub fn from_config(config: &PromptConfig, skills: &SkillRegistry) -> Self {
         let mut builder = Self::new();
 
@@ -696,7 +800,16 @@ impl SystemPromptBuilder {
             builder = builder.skill_section(&skill_prompt);
         }
 
-        // L3: 项目上下文
+        // L4: 开发项目提示词（在 ProjectContext 之前）
+        if let Some(content) = &config.developer_project_prompt_content {
+            builder = builder.developer_project_prompt_section(content);
+        } else if let Some(content) =
+            load_developer_project_prompt(config.project_dir.as_deref(), &config.developer_prompt_files)
+        {
+            builder = builder.developer_project_prompt_section(&content);
+        }
+
+        // L5: 项目上下文
         if let Some(content) = &config.project_context_content {
             builder = builder.project_context_section(content);
         } else if let Some(content) =
@@ -705,7 +818,7 @@ impl SystemPromptBuilder {
             builder = builder.project_context_section(&content);
         }
 
-        // L5: 环境快照
+        // L6: 环境快照
         if let Some(env) = &config.environment {
             builder = builder.environment_snapshot(env);
         }
@@ -1687,5 +1800,145 @@ mod tests {
     fn load_project_context_with_no_project_returns_none() {
         assert!(load_project_context(None).is_none());
         assert!(load_project_context_with_config(None, None).is_none());
+    }
+
+    // ---------------------------------------------------------------------------
+    //  Plan 2 — 开发项目提示词测试
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn load_developer_project_prompt_empty_project_dir() {
+        assert!(load_developer_project_prompt(None, &["AGENTS.md".to_string()]).is_none());
+    }
+
+    #[test]
+    fn load_developer_project_prompt_single_file() {
+        let dir = create_temp_dir("dev-prompt-single");
+        fs::write(dir.join("AGENTS.md"), "Agent instructions").unwrap();
+
+        let content = load_developer_project_prompt(Some(&dir), &["AGENTS.md".to_string()]).unwrap();
+        assert!(content.contains("### Source: AGENTS.md"));
+        assert!(content.contains("Agent instructions"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_developer_project_prompt_multiple_files() {
+        let dir = create_temp_dir("dev-prompt-multi");
+        fs::write(dir.join("AGENTS.md"), "AGENTS content").unwrap();
+        fs::write(dir.join("DEVELOPER.md"), "DEVELOPER content").unwrap();
+
+        let files = vec!["AGENTS.md".to_string(), "DEVELOPER.md".to_string()];
+        let content = load_developer_project_prompt(Some(&dir), &files).unwrap();
+        assert!(content.contains("### Source: AGENTS.md"));
+        assert!(content.contains("AGENTS content"));
+        assert!(content.contains("### Source: DEVELOPER.md"));
+        assert!(content.contains("DEVELOPER content"));
+        assert!(content.contains("\n\n---\n\n"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_developer_project_prompt_skips_empty_files() {
+        let dir = create_temp_dir("dev-prompt-empty");
+        fs::write(dir.join("AGENTS.md"), "   \n").unwrap();
+        fs::write(dir.join("DEVELOPER.md"), "developer").unwrap();
+
+        let files = vec!["AGENTS.md".to_string(), "DEVELOPER.md".to_string()];
+        let content = load_developer_project_prompt(Some(&dir), &files).unwrap();
+        assert!(!content.contains("AGENTS.md"));
+        assert!(content.contains("DEVELOPER.md"));
+        assert!(content.contains("developer"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_developer_project_prompt_missing_file_skipped() {
+        let dir = create_temp_dir("dev-prompt-missing");
+        fs::write(dir.join("AGENTS.md"), "agents").unwrap();
+
+        let files = vec!["AGENTS.md".to_string(), "MISSING.md".to_string()];
+        let content = load_developer_project_prompt(Some(&dir), &files).unwrap();
+        assert!(content.contains("AGENTS.md"));
+        assert!(!content.contains("MISSING.md"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_developer_project_prompt_all_missing_returns_none() {
+        let dir = create_temp_dir("dev-prompt-all-missing");
+
+        let files = vec!["AGENTS.md".to_string(), "DEVELOPER.md".to_string()];
+        assert!(load_developer_project_prompt(Some(&dir), &files).is_none());
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn from_config_includes_developer_project_prompt_section() {
+        let dir = create_temp_dir("dev-prompt-from-config");
+        fs::write(dir.join("AGENTS.md"), "Agent instructions").unwrap();
+
+        let config = PromptConfig::new("agent", "base", Some(dir.clone()))
+            .with_developer_prompt_files(vec!["AGENTS.md".to_string()]);
+        let skills = SkillRegistry::new();
+
+        let prompt = SystemPromptBuilder::from_config(&config, &skills).build();
+        assert!(prompt.contains("## Developer Project Instructions"));
+        assert!(prompt.contains("### Source: AGENTS.md"));
+        assert!(prompt.contains("Agent instructions"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn from_config_developer_prompt_before_project_context() {
+        let dir = create_temp_dir("dev-prompt-order");
+        fs::write(dir.join("AGENTS.md"), "Agent instructions").unwrap();
+        fs::write(dir.join("PROJECT.md"), "Project context").unwrap();
+
+        let config = PromptConfig::new("agent", "base", Some(dir.clone()))
+            .with_developer_prompt_files(vec!["AGENTS.md".to_string()]);
+        let skills = SkillRegistry::new();
+
+        let prompt = SystemPromptBuilder::from_config(&config, &skills).build();
+
+        // 找到两个 section 的位置
+        let dev_pos = prompt.find("## Developer Project Instructions").unwrap();
+        let ctx_pos = prompt.find("## Project Context").unwrap();
+        assert!(
+            dev_pos < ctx_pos,
+            "DeveloperProjectPrompt should come before ProjectContext"
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn from_config_developer_prompt_with_preloaded_content() {
+        let dir = create_temp_dir("dev-prompt-preloaded");
+        fs::write(dir.join("AGENTS.md"), "should be skipped").unwrap();
+
+        let config = PromptConfig::new("agent", "base", Some(dir.clone()))
+            .with_developer_prompt_files(vec!["AGENTS.md".to_string()])
+            .with_developer_project_prompt_content("Preloaded content".to_string());
+        let skills = SkillRegistry::new();
+
+        let prompt = SystemPromptBuilder::from_config(&config, &skills).build();
+        assert!(prompt.contains("Preloaded content"));
+        // 预加载内容不应包含 Source 标识
+        assert!(prompt.contains("Preloaded content"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn developer_prompt_section_heading() {
+        let section = SectionName::DeveloperProjectPrompt;
+        assert_eq!(section.heading(), "Developer Project Instructions");
     }
 }

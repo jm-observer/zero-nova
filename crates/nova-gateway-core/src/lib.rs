@@ -1,8 +1,10 @@
 pub mod bridge;
 pub mod handlers;
+pub mod push_center;
 pub mod router;
 
 pub use bridge::{app_agent_to_protocol, app_event_to_gateway, app_message_to_protocol, app_session_to_protocol};
+pub use push_center::PushCenter;
 pub use router::dispatch;
 
 use anyhow::Result;
@@ -15,11 +17,15 @@ use std::sync::Arc;
 
 pub struct GatewayHandler {
     app: Arc<dyn AgentApplication>,
+    push_center: Arc<PushCenter>,
 }
 
 impl GatewayHandler {
     pub fn new(app: Arc<dyn AgentApplication>) -> Self {
-        Self { app }
+        Self {
+            app,
+            push_center: Arc::new(PushCenter::new()),
+        }
     }
 }
 
@@ -37,13 +43,15 @@ impl ChannelHandler for GatewayHandler {
         Ok(responses)
     }
 
-    async fn on_message(&self, _peer: PeerId, req: Self::Req, sink: ResponseSink<Self::Resp>) -> Result<()> {
+    async fn on_message(&self, peer: PeerId, req: Self::Req, sink: ResponseSink<Self::Resp>) -> Result<()> {
         debug!("[INBOUND] GatewayHandler::on_message: {:?}", req);
-        dispatch(req, &*self.app, sink).await;
+        self.push_center.register_peer(peer.clone(), sink.clone()).await;
+        dispatch(req, &peer, &*self.app, sink, self.push_center.clone()).await;
         Ok(())
     }
 
     async fn on_disconnect(&self, peer: PeerId) {
+        self.push_center.unregister_peer(&peer).await;
         self.app.on_disconnect(&peer).await;
     }
 }

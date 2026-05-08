@@ -4,7 +4,7 @@ use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
-use crate::prompt::{PromptConfig, SystemPromptBuilder};
+use crate::prompt::{load_developer_project_prompt_async, PromptConfig, SystemPromptBuilder};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
@@ -138,6 +138,23 @@ impl AgentWorkspaceService {
             .with_project_context_path_opt(reloaded_config.project_context_file())
             .with_workflow_prompt_path(reloaded_config.prompts_dir().join("workflow-stages.md"))
             .with_template_vars(agent_descriptor.initial_template_vars.clone());
+
+        if agent_spec.enable_project_developer_prompt {
+            prompt_config = prompt_config.with_developer_prompt_files(reloaded_config.developer_prompt_files.clone());
+            let project_dir = {
+                let control = session.control.read().unwrap();
+                control.project_dir.clone()
+            };
+            let dev_prompt_content =
+                load_developer_project_prompt_async(project_dir.as_deref(), &reloaded_config.developer_prompt_files)
+                    .await;
+            if let Some(ref content) = dev_prompt_content {
+                let file_count = content.matches("### Source:").count();
+                log::info!("Reloaded developer project prompt: {} files matched", file_count);
+                prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
+            }
+        }
+
         let env = crate::prompt::EnvironmentSnapshot::collect(&reloaded_config.config_dir, None).await;
         prompt_config = prompt_config.with_environment(env);
         let compiled_prompt = SystemPromptBuilder::from_config(&prompt_config, &default_skill_registry()).build();
@@ -873,6 +890,7 @@ mod tests {
             model_config: None,
             provider_id: "cloud".to_string(),
             llm_id: "cloud_gpt4o".to_string(),
+            enable_project_developer_prompt: true,
         });
         let service = AgentWorkspaceService::new(registry, sessions, config);
 

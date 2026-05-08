@@ -86,11 +86,17 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), None)
+        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), None)
             .with_environment(env_snapshot.clone())
             .with_project_context_path_opt(config.project_context_file())
             .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))
             .with_template_vars(template_vars.clone());
+
+        // 如果 agent 启用了开发项目提示词，则注入文件列表
+        if agent.enable_project_developer_prompt {
+            let files = config.developer_prompt_files.to_vec();
+            prompt_config = prompt_config.with_developer_prompt_files(files);
+        }
 
         let full_system_prompt = SystemPromptBuilder::from_config(&prompt_config, &skill_registry).build();
 
@@ -109,6 +115,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
                 .llm_id
                 .clone()
                 .expect("configured agent binding must always resolve to a concrete llm"),
+            enable_project_developer_prompt: agent.enable_project_developer_prompt,
         });
         log::info!(
             "Bootstrapped agent '{}' with provider='{}', llm={:?}, model='{}'",

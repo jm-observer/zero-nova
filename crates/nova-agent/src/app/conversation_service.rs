@@ -7,7 +7,7 @@ use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
-use crate::prompt::{load_project_context_with_config_async, PromptConfig};
+use crate::prompt::{load_developer_project_prompt_async, load_project_context_with_config_async, PromptConfig};
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -291,6 +291,20 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     .with_project_context_path_opt(self.agent.config.project_context_file.clone())
                     .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
                     .with_template_vars(agent_descriptor.initial_template_vars.clone());
+
+            // 如果 agent 启用了开发项目提示词，则注入文件列表
+            if agent_descriptor.enable_project_developer_prompt {
+                let files = self.app_config.developer_prompt_files.clone();
+                prompt_config = prompt_config.with_developer_prompt_files(files.clone());
+
+                // 会话执行期加载开发项目提示词内容（Plan 3）
+                let dev_prompt_content = load_developer_project_prompt_async(project_dir.as_deref(), &files).await;
+                if let Some(ref content) = dev_prompt_content {
+                    let file_count = content.matches("### Source:").count();
+                    log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
+                    prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
+                }
+            }
 
             let mut env =
                 crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref())

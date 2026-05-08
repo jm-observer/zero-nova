@@ -1,7 +1,7 @@
 # 开发项目提示词加载设计
 
 - **时间**：2026-05-08
-- **状态**：Plan 1 / Plan 2 / Plan 3 待开始
+- **状态**：Plan 1 / Plan 2 / Plan 3 已完成
 
 ---
 
@@ -271,9 +271,9 @@ pub developer_project_prompt_sources: Vec<PathBuf>
 
 | Plan | 标题 | 职责 | 依赖 | 状态 |
 |---|---|---|---|---|
-| **Plan 1** | 配置模型扩展 | 新增顶层文件列表配置与 agent 开关，补齐默认值和校验 | 无 | 待开始 |
-| **Plan 2** | 提示词加载与拼装 | 实现项目根文件读取、内容合并、PromptConfig 与 SystemPromptBuilder 扩展 | Plan 1 | 待开始 |
-| **Plan 3** | 会话链路接入与验证 | 将加载逻辑接入会话执行、reload、必要的 CLI/测试路径 | Plan 1, Plan 2 | 待开始 |
+| **Plan 1** | 配置模型扩展 | 新增顶层文件列表配置与 agent 开关，补齐默认值和校验 | 无 | 已完成 |
+| **Plan 2** | 提示词加载与拼装 | 实现项目根文件读取、内容合并、PromptConfig 与 SystemPromptBuilder 扩展 | Plan 1 | 已完成 |
+| **Plan 3** | 会话链路接入与验证 | 将加载逻辑接入会话执行、reload、必要的 CLI/测试路径 | Plan 1, Plan 2 | 已完成 |
 
 执行顺序：Plan 1 → Plan 2 → Plan 3
 

@@ -240,7 +240,11 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
         AppEvent::WorkspaceRestoreAvailable(payload) => MessageEnvelope::WorkspaceRestoreAvailable(payload),
     };
 
-    GatewayMessage::new(request_id.to_string(), envelope)
+    if request_id.is_empty() {
+        GatewayMessage::new_event(envelope)
+    } else {
+        GatewayMessage::new(request_id.to_string(), envelope)
+    }
 }
 
 pub fn app_session_to_protocol(session: AppSession) -> SessionProtocol {

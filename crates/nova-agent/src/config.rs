@@ -818,7 +818,6 @@ struct RawTrimmerConfigToml {
 impl RawAppConfig {
     fn migrate(self, config_dir: PathBuf) -> (AppConfig, Vec<String>) {
         let mut warnings = Vec::new();
-        println!("Migrating with developer_prompt_files: {:?}", self.developer_prompt_files);
         let llms: HashMap<String, RegisteredLlmConfig> = self
             .llms
             .into_iter()
@@ -1322,6 +1321,8 @@ llm = "local_default"
     #[test]
     fn developer_prompt_files_empty_string_is_rejected() {
         let toml = r#"
+developer_prompt_files = ["AGENTS.md", "", "DEVELOPER.md"]
+
 [providers.local]
 base_url = "http://localhost:8082/v1"
 
@@ -1335,17 +1336,9 @@ display_name = "Nova"
 description = "d"
 provider = "local"
 llm = "local_default"
-
-developer_prompt_files = ["AGENTS.md", "", "DEVELOPER.md"]
 "#;
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
-        println!("Raw developer_prompt_files: {:?}", raw.developer_prompt_files);
         let (config, _) = raw.migrate(PathBuf::from("."));
-        // Debug: print the developer_prompt_files
-        println!("Config developer_prompt_files: {:?}", config.developer_prompt_files);
-        for (i, file) in config.developer_prompt_files.iter().enumerate() {
-            println!("  [{}]: '{}' (is_empty: {})", i, file, file.trim().is_empty());
-        }
         let error = config.validate().expect_err("config should fail validation");
         assert!(error.to_string().contains("developer_prompt_files[1] cannot be empty"));
     }

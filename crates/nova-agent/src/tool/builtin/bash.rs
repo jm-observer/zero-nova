@@ -530,6 +530,7 @@ mod tests {
             task_store: None,
             skill_registry: None,
             read_files: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            turn_read_state: None,
             environment: Some(crate::prompt::EnvironmentSnapshot {
                 config_dir: "D:/config".to_string(),
                 project_dir: Some("D:/project".to_string()),
@@ -559,6 +560,7 @@ mod tests {
             task_store: None,
             skill_registry: None,
             read_files: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            turn_read_state: None,
             environment: Some(crate::prompt::EnvironmentSnapshot {
                 config_dir: "D:/config".to_string(),
                 project_dir: Some("D:/project".to_string()),

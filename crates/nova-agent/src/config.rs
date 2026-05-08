@@ -300,6 +300,9 @@ pub struct GatewayConfig {
     /// 侧信道注入配置（Phase 3 新增）。
     #[serde(default)]
     pub side_channel: SideChannelConfigToml,
+    /// 循环保护配置（Plan 3 新增）。
+    #[serde(default)]
+    pub loop_guard: LoopGuardConfigToml,
 }
 
 fn default_host() -> String {
@@ -340,6 +343,21 @@ fn default_side_channel_enabled() -> bool {
 fn default_skill_reminder_interval() -> usize {
     5
 }
+fn default_loop_guard_enabled() -> bool {
+    true
+}
+fn default_max_consecutive_duplicate_tool_calls() -> usize {
+    2
+}
+fn default_max_stalled_iterations() -> usize {
+    3
+}
+fn default_duplicate_read_mode() -> String {
+    "warn_then_reject".to_string()
+}
+fn default_iteration_trim_ratio() -> f32 {
+    0.85
+}
 
 /// 历史裁剪配置（TOML 序列化版本）。
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -371,6 +389,33 @@ pub struct SideChannelConfigToml {
     pub inject_date: Option<bool>,
 }
 
+/// 循环保护配置（TOML 序列化版本）。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LoopGuardConfigToml {
+    #[serde(default = "default_loop_guard_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_max_consecutive_duplicate_tool_calls")]
+    pub max_consecutive_duplicate_tool_calls: usize,
+    #[serde(default = "default_max_stalled_iterations")]
+    pub max_stalled_iterations: usize,
+    #[serde(default = "default_duplicate_read_mode")]
+    pub duplicate_read_mode: String,
+    #[serde(default = "default_iteration_trim_ratio")]
+    pub iteration_trim_ratio: f32,
+}
+
+impl Default for LoopGuardConfigToml {
+    fn default() -> Self {
+        Self {
+            enabled: default_loop_guard_enabled(),
+            max_consecutive_duplicate_tool_calls: default_max_consecutive_duplicate_tool_calls(),
+            max_stalled_iterations: default_max_stalled_iterations(),
+            duplicate_read_mode: default_duplicate_read_mode(),
+            iteration_trim_ratio: default_iteration_trim_ratio(),
+        }
+    }
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -386,6 +431,7 @@ impl Default for GatewayConfig {
             use_turn_context: false,
             trimmer: TrimmerConfigToml::default(),
             side_channel: SideChannelConfigToml::default(),
+            loop_guard: LoopGuardConfigToml::default(),
         }
     }
 }
@@ -644,6 +690,21 @@ impl AppConfig {
                 self.gateway.skill_history_strategy
             );
         }
+        if !matches!(
+            self.gateway.loop_guard.duplicate_read_mode.as_str(),
+            "warn_then_reject" | "warn_only"
+        ) {
+            bail!(
+                "gateway.loop_guard.duplicate_read_mode must be one of: warn_then_reject, warn_only; got '{}'",
+                self.gateway.loop_guard.duplicate_read_mode
+            );
+        }
+        if !(0.0..1.0).contains(&self.gateway.loop_guard.iteration_trim_ratio) {
+            bail!(
+                "gateway.loop_guard.iteration_trim_ratio must be in (0, 1), got {}",
+                self.gateway.loop_guard.iteration_trim_ratio
+            );
+        }
 
         // if self.llm.model_config.thinking_budget.is_some() && self.llm.model_config.reasoning_effort.is_some() {
         //     bail!("llm.thinking_budget and llm.reasoning_effort cannot both be set");
@@ -770,6 +831,8 @@ struct RawGatewayConfig {
     trimmer: RawTrimmerConfigToml,
     #[serde(default)]
     side_channel: SideChannelConfigToml,
+    #[serde(default)]
+    loop_guard: LoopGuardConfigToml,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -952,6 +1015,7 @@ impl RawAppConfig {
                     use_turn_context: self.gateway.use_turn_context,
                     trimmer,
                     side_channel: self.gateway.side_channel,
+                    loop_guard: self.gateway.loop_guard,
                 },
                 voice: self.voice,
                 config_dir,
@@ -1410,6 +1474,40 @@ enable_project_developer_prompt = true
         let (config, _) = raw.migrate(PathBuf::from("."));
         let agent = config.find_agent("developer").expect("agent should exist");
         assert!(agent.enable_project_developer_prompt);
+    }
+
+    #[test]
+    fn loop_guard_defaults_are_applied() {
+        let config = GatewayConfig::default();
+        assert!(config.loop_guard.enabled);
+        assert_eq!(config.loop_guard.max_consecutive_duplicate_tool_calls, 2);
+        assert_eq!(config.loop_guard.max_stalled_iterations, 3);
+        assert_eq!(config.loop_guard.duplicate_read_mode, "warn_then_reject");
+    }
+
+    #[test]
+    fn loop_guard_warn_only_is_accepted() {
+        let toml = r#"
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[gateway.loop_guard]
+duplicate_read_mode = "warn_only"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+provider = "local"
+llm = "local_default"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate(PathBuf::from("."));
+        config.validate().expect("config should validate");
     }
 
     fn write_temp_config(content: &str) -> Result<PathBuf> {

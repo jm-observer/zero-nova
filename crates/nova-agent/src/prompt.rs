@@ -110,6 +110,7 @@ impl PromptConfig {
             workflow_prompt_path: None,
             developer_prompt_files: Vec::new(),
             developer_project_prompt_content: None,
+            agent_catalog: None,
         }
     }
 
@@ -556,7 +557,7 @@ pub struct AgentCatalogEntry {
 /// 构建 orchestrator 提示词中的 agent catalog section。
 ///
 /// 内容格式示例：
-/// ```
+/// ```text
 /// ## Available Agents
 ///
 /// The following agents are available for task execution.
@@ -572,22 +573,18 @@ pub struct AgentCatalogEntry {
 /// - If unsure, use the default agent.
 /// - Do not use natural language names like "reviewer" or "coder".
 /// ```
-pub fn build_agent_catalog_section(
-    agents: &[crate::config::AgentSpec],
-    primary_agent_id: &str,
-) -> String {
+pub fn build_agent_catalog_section(agents: &[crate::config::AgentSpec], primary_agent_id: &str) -> String {
     if agents.is_empty() {
         return String::new();
     }
 
-    let mut lines = Vec::new();
-    lines.push("## Available Agents".to_string());
-    lines.push(String::new());
-    lines.push(
+    let mut lines = vec![
+        "## Available Agents".to_string(),
+        String::new(),
         "The following agents are available for task execution.".to_string(),
-    );
-    lines.push("Choose from this list only — do not invent new agent names.".to_string());
-    lines.push(String::new());
+        "Choose from this list only — do not invent new agent names.".to_string(),
+        String::new(),
+    ];
 
     // Build markdown table header
     lines.push("| ID | Display Name | Default | Description | Use Cases |".to_string());
@@ -615,30 +612,24 @@ pub fn build_agent_catalog_section(
     lines.push("Rules:".to_string());
     lines.push("- Always select an agent from the list above.".to_string());
     lines.push("- If unsure, use the default agent.".to_string());
-    lines.push(
-        "- Do not use natural language names like \"reviewer\" or \"coder\".".to_string(),
-    );
-    lines.push(
-        "- The `subagent_type` field is deprecated; use the agent `id` directly.".to_string(),
-    );
+    lines.push("- Do not use natural language names like \"reviewer\" or \"coder\".".to_string());
+    lines.push("- The `subagent_type` field is deprecated; use the agent `id` directly.".to_string());
 
     lines.join("\n")
 }
 
 /// 生成 orchestrator 专用的 agent catalog 文本（简洁版，适合嵌入 plan schema hint）。
-pub fn build_agent_catalog_hint(
-    agents: &[crate::config::AgentSpec],
-    primary_agent_id: &str,
-) -> String {
+pub fn build_agent_catalog_hint(agents: &[crate::config::AgentSpec], primary_agent_id: &str) -> String {
     if agents.is_empty() {
         return String::new();
     }
 
-    let mut parts = Vec::new();
-    parts.push("## Available Agents (Orchestrator Catalog)".to_string());
-    parts.push(String::new());
-    parts.push("When creating or selecting agents for orchestration, use only these IDs:".to_string());
-    parts.push(String::new());
+    let mut parts = vec![
+        "## Available Agents (Orchestrator Catalog)".to_string(),
+        String::new(),
+        "When creating or selecting agents for orchestration, use only these IDs:".to_string(),
+        String::new(),
+    ];
 
     for agent in agents {
         let is_default = agent.id == primary_agent_id;
@@ -647,12 +638,8 @@ pub fn build_agent_catalog_hint(
     }
 
     parts.push(String::new());
-    parts.push(
-        "Do NOT use natural language names like 'reviewer', 'coder', or 'researcher'.".to_string(),
-    );
-    parts.push(
-        "If you need a new agent, use the default agent or refer to the full catalog.".to_string(),
-    );
+    parts.push("Do NOT use natural language names like 'reviewer', 'coder', or 'researcher'.".to_string());
+    parts.push("If you need a new agent, use the default agent or refer to the full catalog.".to_string());
 
     parts.join("\n")
 }

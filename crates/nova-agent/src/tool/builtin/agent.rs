@@ -1,6 +1,7 @@
 use crate::agent::{AgentConfig, AgentRuntime};
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
+use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::TrimmerConfig;
 use crate::prompt::{
@@ -59,6 +60,24 @@ impl AgentTool {
             agent_types,
             primary_agent_type,
         }
+    }
+
+    pub fn catalog_agent_ids(&self) -> std::collections::HashSet<String> {
+        self.config
+            .gateway
+            .agents
+            .iter()
+            .map(|agent| agent.id.clone())
+            .collect()
+    }
+
+    pub fn default_agent_id(&self) -> String {
+        self.config
+            .gateway
+            .agents
+            .first()
+            .map(|agent| agent.id.clone())
+            .unwrap_or_else(|| "nova".to_string())
     }
 
     fn resolve_agent_spec<'a>(&'a self, requested_type: Option<&str>) -> Result<(&'a AgentSpec, Vec<String>)> {
@@ -160,6 +179,20 @@ impl AgentTool {
             prompts_dir: self.config.prompts_dir(),
             project_context_file: self.config.project_context_file(),
             initial_env_snapshot: Some(environment.clone()),
+            loop_guard: LoopGuardConfig {
+                enabled: self.config.gateway.loop_guard.enabled,
+                max_consecutive_duplicate_tool_calls: self
+                    .config
+                    .gateway
+                    .loop_guard
+                    .max_consecutive_duplicate_tool_calls,
+                max_stalled_iterations: self.config.gateway.loop_guard.max_stalled_iterations,
+                duplicate_read_mode: if self.config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
+                    DuplicateReadMode::WarnOnly
+                } else {
+                    DuplicateReadMode::WarnThenReject
+                },
+            },
         };
         let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);
         if let Some(ctx) = &context {
@@ -324,10 +357,8 @@ impl AgentTool {
 #[async_trait]
 impl Tool for AgentTool {
     fn definition(&self) -> ToolDefinition {
-        let catalog_hint = crate::prompt::build_agent_catalog_hint(
-            &self.config.gateway.agents,
-            &self.primary_agent_type,
-        );
+        let catalog_hint =
+            crate::prompt::build_agent_catalog_hint(&self.config.gateway.agents, &self.primary_agent_type);
 
         ToolDefinition {
             name: "Agent".to_string(),

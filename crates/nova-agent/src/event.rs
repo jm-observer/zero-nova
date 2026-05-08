@@ -102,4 +102,16 @@ pub enum AgentEvent {
         log: Option<String>,
         stream: Option<String>,
     },
+    /// Loop guard was triggered for duplicate or stalled behavior.
+    LoopGuardTriggered {
+        reason: String,
+        tool: Option<String>,
+        session_id: String,
+        canonical_target: Option<String>,
+        duplicate_count: usize,
+        stalled_iteration_count: usize,
+        decision: String,
+        reason_code: String,
+        signature_hash: Option<u64>,
+    },
 }

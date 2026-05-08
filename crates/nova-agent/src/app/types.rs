@@ -229,6 +229,20 @@ impl From<AgentEvent> for AppEvent {
                 log,
                 stream,
             },
+            AgentEvent::LoopGuardTriggered {
+                reason,
+                tool,
+                session_id,
+                canonical_target,
+                duplicate_count,
+                stalled_iteration_count,
+                decision,
+                reason_code,
+                signature_hash,
+            } => AppEvent::SystemLog(format!(
+                "loop_guard_triggered session_id={} reason={} reason_code={} decision={} tool={:?} canonical_target={:?} duplicate_count={} stalled_iteration_count={} signature_hash={:?}",
+                session_id, reason, reason_code, decision, tool, canonical_target, duplicate_count, stalled_iteration_count, signature_hash
+            )),
         }
     }
 }

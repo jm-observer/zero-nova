@@ -301,6 +301,7 @@ mod tests {
                 AgentRequest {
                     agent_id: "a1".to_string(),
                     subagent_type: "Coder".to_string(),
+                    agent_selection: None,
                     description: "first".to_string(),
                     prompt: "p1".to_string(),
                     context_files: vec![],
@@ -309,6 +310,7 @@ mod tests {
                 AgentRequest {
                     agent_id: "a2".to_string(),
                     subagent_type: "Coder".to_string(),
+                    agent_selection: None,
                     description: "second".to_string(),
                     prompt: "p2".to_string(),
                     context_files: vec![],

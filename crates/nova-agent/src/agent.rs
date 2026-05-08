@@ -1,4 +1,8 @@
 use crate::event::AgentEvent;
+use crate::loop_guard::{
+    assistant_fingerprint_from_blocks, build_tool_call_signature, tool_calls_hash, LoopGuardConfig, LoopGuardDecision,
+    LoopGuardState,
+};
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
     ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, SideChannelInjector, SystemPromptBuilder,
@@ -8,6 +12,7 @@ use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent};
 use crate::skill::{CapabilityPolicy, SkillRegistry, ToolPolicy};
 use crate::tool::builtin::task::TaskStore;
+use crate::tool::read_cache::TurnReadState;
 pub use crate::tool::ToolRegistry;
 use crate::tool::{Tool, ToolContext};
 use anyhow::Result;
@@ -62,9 +67,59 @@ pub struct AgentConfig {
     pub project_context_file: Option<PathBuf>,
     /// 启动时采集的环境快照
     pub initial_env_snapshot: Option<EnvironmentSnapshot>,
+    /// 循环保护配置
+    pub loop_guard: LoopGuardConfig,
 }
 
 impl<C: LlmClient> AgentRuntime<C> {
+    fn estimate_message_tokens(message: &Message) -> usize {
+        let chars = message
+            .content
+            .iter()
+            .map(|block| match block {
+                ContentBlock::Text { text } => text.len(),
+                ContentBlock::Thinking { thinking } => thinking.len(),
+                ContentBlock::ToolUse { input, .. } => input.to_string().len(),
+                ContentBlock::ToolResult { output, .. } => output.len(),
+            })
+            .sum::<usize>();
+        chars / 4
+    }
+
+    fn trim_iteration_messages_if_needed(&self, all_messages: &mut Vec<Message>) {
+        let budget = self.config.max_tokens.saturating_mul(80) / 100;
+        if budget == 0 {
+            return;
+        }
+        let mut total = all_messages.iter().map(Self::estimate_message_tokens).sum::<usize>();
+        if total <= budget {
+            return;
+        }
+
+        let mut idx = 0usize;
+        while total > budget && idx + 1 < all_messages.len() {
+            let can_remove_pair = matches!(
+                (&all_messages[idx].role, &all_messages[idx + 1].role),
+                (Role::Assistant, Role::User)
+            ) && all_messages[idx]
+                .content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::ToolUse { name, .. } if name == "Read"))
+                && all_messages[idx + 1]
+                    .content
+                    .iter()
+                    .all(|block| matches!(block, ContentBlock::ToolResult { .. }));
+            if can_remove_pair {
+                total = total.saturating_sub(Self::estimate_message_tokens(&all_messages[idx]));
+                total = total.saturating_sub(Self::estimate_message_tokens(&all_messages[idx + 1]));
+                all_messages.remove(idx + 1);
+                all_messages.remove(idx);
+                continue;
+            }
+            idx += 1;
+        }
+    }
+
     /// Creates a new `AgentRuntime` instance.
     pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
         Self {
@@ -104,15 +159,63 @@ impl<C: LlmClient> AgentRuntime<C> {
     async fn execute_tool_calls(
         &self,
         parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
+        loop_guard_state: &mut LoopGuardState,
+        turn_read_state: Arc<RwLock<TurnReadState>>,
         session_id: &str,
         environment: Option<EnvironmentSnapshot>,
         shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
         event_tx: &mpsc::Sender<AgentEvent>,
-        cancellation_token: &Option<CancellationToken>,
     ) -> Result<Vec<ContentBlock>> {
         let mut tool_results_fut = FuturesUnordered::new();
+        let mut indexed_results = Vec::new();
 
         for (call_idx, (id, name, input_val)) in parsed_tool_calls.into_iter().enumerate() {
+            let signature = build_tool_call_signature(&name, &input_val);
+            let signature_hash = signature.input_hash;
+            let decision = loop_guard_state.evaluate_tool_call(signature.clone());
+            match decision {
+                LoopGuardDecision::Allow => {}
+                LoopGuardDecision::AllowWithWarning { message } => {
+                    let _ = event_tx
+                        .send(AgentEvent::LoopGuardTriggered {
+                            reason: "duplicate_tool_call_warning".to_string(),
+                            tool: Some(name.clone()),
+                            session_id: session_id.to_string(),
+                            canonical_target: signature.canonical_primary_target.clone(),
+                            duplicate_count: loop_guard_state.duplicate_count(),
+                            stalled_iteration_count: loop_guard_state.stalled_count(),
+                            decision: "warn".to_string(),
+                            reason_code: "duplicate_tool_call_warning".to_string(),
+                            signature_hash: Some(signature_hash),
+                        })
+                        .await;
+                    let _ = event_tx.send(AgentEvent::SystemLog(message)).await;
+                }
+                LoopGuardDecision::Reject { message, reason_code } => {
+                    let _ = event_tx
+                        .send(AgentEvent::LoopGuardTriggered {
+                            reason: reason_code.clone(),
+                            tool: Some(name.clone()),
+                            session_id: session_id.to_string(),
+                            canonical_target: signature.canonical_primary_target.clone(),
+                            duplicate_count: loop_guard_state.duplicate_count(),
+                            stalled_iteration_count: loop_guard_state.stalled_count(),
+                            decision: "reject".to_string(),
+                            reason_code,
+                            signature_hash: Some(signature_hash),
+                        })
+                        .await;
+                    indexed_results.push((
+                        call_idx,
+                        ContentBlock::ToolResult {
+                            tool_use_id: id,
+                            output: message,
+                            is_error: true,
+                        },
+                    ));
+                    continue;
+                }
+            }
             let tool_registry = &self.tools;
             let tx = event_tx.clone();
             let tool_timeout_duration = self.config.tool_timeout;
@@ -121,6 +224,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             let task_store = self.task_store.clone();
             let skill_registry = self.skill_registry.clone();
             let read_files = self.read_files.clone();
+            let turn_read_state = turn_read_state.clone();
             let shared_environment = shared_environment.clone();
 
             tool_results_fut.push(async move {
@@ -144,6 +248,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                             task_store,
                             skill_registry,
                             read_files,
+                            turn_read_state: Some(turn_read_state.clone()),
                             environment,
                             shared_environment,
                             cancellation_token: None,
@@ -185,13 +290,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             });
         }
 
-        let mut indexed_results = Vec::new();
         while let Some(res) = tool_results_fut.next().await {
-            if let Some(token) = cancellation_token {
-                if token.is_cancelled() {
-                    break;
-                }
-            }
             indexed_results.push(res);
         }
         indexed_results.sort_by_key(|&(idx, _)| idx);
@@ -232,6 +331,8 @@ impl<C: LlmClient> AgentRuntime<C> {
         model_config: &ModelConfig,
     ) -> Result<TurnResult> {
         let mut all_messages = history.to_vec();
+        let mut loop_guard_state = LoopGuardState::new(self.config.loop_guard.clone());
+        let turn_read_state = Arc::new(RwLock::new(TurnReadState::default()));
 
         // Append initial user message
         all_messages.push(Message::new(
@@ -390,6 +491,30 @@ impl<C: LlmClient> AgentRuntime<C> {
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
+            let assistant_fp = assistant_fingerprint_from_blocks(all_messages.last().map_or(&[], |m| &m.content));
+            let signatures = parsed_tool_calls
+                .iter()
+                .map(|(_, name, input)| build_tool_call_signature(name, input))
+                .collect::<Vec<_>>();
+            let calls_hash = tool_calls_hash(&signatures);
+            if loop_guard_state.detect_stalled_iteration(assistant_fp, calls_hash) {
+                let _ = event_tx
+                    .send(AgentEvent::LoopGuardTriggered {
+                        reason: "stalled_iteration_abort".to_string(),
+                        tool: None,
+                        session_id: session_id.to_string(),
+                        canonical_target: None,
+                        duplicate_count: loop_guard_state.duplicate_count(),
+                        stalled_iteration_count: loop_guard_state.stalled_count(),
+                        decision: "reject".to_string(),
+                        reason_code: "stalled_iteration_abort".to_string(),
+                        signature_hash: Some(calls_hash),
+                    })
+                    .await;
+                completed_naturally = true;
+                break;
+            }
+
             // 3.4 MaxTokens 自动续写（run_turn 路径）
             if last_stop_reason == Some(StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
@@ -429,17 +554,19 @@ impl<C: LlmClient> AgentRuntime<C> {
             let tool_result_blocks = self
                 .execute_tool_calls(
                     parsed_tool_calls,
+                    &mut loop_guard_state,
+                    turn_read_state.clone(),
                     session_id,
                     current_environment,
                     shared_environment.clone(),
                     &event_tx,
-                    &cancellation_token,
                 )
                 .await?;
 
             let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
             all_messages.push(tool_res_msg.clone());
             turn_messages.push(tool_res_msg);
+            self.trim_iteration_messages_if_needed(&mut all_messages);
         }
 
         if !completed_naturally {
@@ -560,6 +687,8 @@ impl<C: LlmClient> AgentRuntime<C> {
             .unwrap_or_else(|h| (*h).clone())
             .into_iter()
             .collect::<Vec<_>>();
+        let mut loop_guard_state = LoopGuardState::new(self.config.loop_guard.clone());
+        let turn_read_state = Arc::new(RwLock::new(TurnReadState::default()));
 
         // 注入最新的系统提示词（N1 关键修复）
         if let Some(first) = all_messages.get_mut(0) {
@@ -734,6 +863,30 @@ impl<C: LlmClient> AgentRuntime<C> {
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
+            let assistant_fp = assistant_fingerprint_from_blocks(all_messages.last().map_or(&[], |m| &m.content));
+            let signatures = parsed_tool_calls
+                .iter()
+                .map(|(_, name, input)| build_tool_call_signature(name, input))
+                .collect::<Vec<_>>();
+            let calls_hash = tool_calls_hash(&signatures);
+            if loop_guard_state.detect_stalled_iteration(assistant_fp, calls_hash) {
+                let _ = event_tx
+                    .send(AgentEvent::LoopGuardTriggered {
+                        reason: "stalled_iteration_abort".to_string(),
+                        tool: None,
+                        session_id: session_id.to_string(),
+                        canonical_target: None,
+                        duplicate_count: loop_guard_state.duplicate_count(),
+                        stalled_iteration_count: loop_guard_state.stalled_count(),
+                        decision: "reject".to_string(),
+                        reason_code: "stalled_iteration_abort".to_string(),
+                        signature_hash: Some(calls_hash),
+                    })
+                    .await;
+                completed_naturally = true;
+                break;
+            }
+
             // MaxTokens 自动续写
             if last_stop_reason == Some(StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
@@ -769,17 +922,19 @@ impl<C: LlmClient> AgentRuntime<C> {
             let tool_result_blocks = self
                 .execute_tool_calls(
                     parsed_tool_calls,
+                    &mut loop_guard_state,
+                    turn_read_state.clone(),
                     session_id,
                     current_environment,
                     shared_environment.clone(),
                     &event_tx,
-                    &cancellation_token,
                 )
                 .await?;
 
             let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
             all_messages.push(tool_res_msg.clone());
             turn_messages.push(tool_res_msg);
+            self.trim_iteration_messages_if_needed(&mut all_messages);
         }
 
         if !completed_naturally {

@@ -5,7 +5,7 @@
 | 时间 | 创建：2026-05-08；最后更新：2026-05-08 |
 | 项目现状 | 当前 orchestrator / agent 运行时允许模型在单个 turn 内进行多轮 `Read`、`Bash`、`Agent` 等工具调用，但缺少“重复调用检测”“单轮内历史收敛”“长文本读取摘要化”三类保护。一次失败案例中，同一文件被连续读取十余次，assistant 分析文本也被反复追加回上下文，最终形成高成本的重复 `Read` 循环。 |
 | 整体目标 | 为 orchestrator 和通用 agent 增加面向单轮执行的循环保护机制：在不破坏正常探索能力的前提下，主动识别重复读取、限制无效重试、压缩长文件回显，并让模型在进入重复模式前得到明确反馈或被运行时终止。 |
-| Plan 拆分 | 1. **Plan 1: 单轮循环检测与熔断** - 在 `AgentRuntime` 内识别重复 tool call、重复 reasoning 模式与无进展 iteration，并提供 warning / hard stop。依赖：无。状态：待开始。<br>2. **Plan 2: Read 输出收敛与上下文预算控制** - 为 `Read` 增加重复读取提示、可选摘要模式，并在单轮 iteration 间引入增量裁剪。依赖：Plan 1。状态：待开始。<br>3. **Plan 3: 观测、配置与测试补齐** - 暴露循环保护指标、可配置阈值，补充单测和集成测试。依赖：Plan 1、Plan 2。状态：待开始。 |
+| Plan 拆分 | 1. **Plan 1: 单轮循环检测与熔断** - 在 `AgentRuntime` 内识别重复 tool call、重复 reasoning 模式与无进展 iteration，并提供 warning / hard stop。依赖：无。状态：已完成。<br>2. **Plan 2: Read 输出收敛与上下文预算控制** - 为 `Read` 增加重复读取提示、可选摘要模式，并在单轮 iteration 间引入增量裁剪。依赖：Plan 1。状态：待开始。<br>3. **Plan 3: 观测、配置与测试补齐** - 暴露循环保护指标、可配置阈值，补充单测和集成测试。依赖：Plan 1、Plan 2。状态：待开始。 |
 | 风险与待定项 | 1. 过严的重复检测可能误伤合法的分页读取与逐段分析。<br>2. 如果只在 `Read` 工具侧截断，不同步优化 runtime 历史裁剪，仍可能因重复 assistant 文本而膨胀上下文。<br>3. 循环保护策略需要对 orchestrator 和普通 developer/nova 会话保持一致语义，否则用户很难理解何时会被拦截。<br>4. `ReadTool` 必须保持无状态，turn-scoped 读取历史不能挂在全局共享 tool 实例上。 |
 
 ## 项目现状

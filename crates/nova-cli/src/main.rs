@@ -9,6 +9,7 @@ use log::info;
 use nova_agent::agent::{AgentConfig, AgentRuntime};
 use nova_agent::config::AppConfig;
 use nova_agent::event::AgentEvent;
+use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::mcp::client::McpClient;
 use nova_agent::message::{ContentBlock, Message, Role};
 use nova_agent::prompt::{EnvironmentSnapshot, SystemPromptBuilder, TrimmerConfig};
@@ -204,6 +205,16 @@ async fn main() -> Result<()> {
         prompts_dir: config.prompts_dir(),
         project_context_file: config.project_context_file(),
         initial_env_snapshot: Some(env_snapshot),
+        loop_guard: LoopGuardConfig {
+            enabled: config.gateway.loop_guard.enabled,
+            max_consecutive_duplicate_tool_calls: config.gateway.loop_guard.max_consecutive_duplicate_tool_calls,
+            max_stalled_iterations: config.gateway.loop_guard.max_stalled_iterations,
+            duplicate_read_mode: if config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
+                DuplicateReadMode::WarnOnly
+            } else {
+                DuplicateReadMode::WarnThenReject
+            },
+        },
     };
 
     let mut agent = AgentRuntime::new(client, tools, agent_config);
@@ -662,6 +673,24 @@ impl EventPrinter {
                 AgentEvent::OrchestrationProgress { kind, args, .. } => {
                     if self.verbose {
                         println!("\n{} {}", format!("[orchestration:{kind}]").bright_black(), args);
+                    }
+                }
+                AgentEvent::LoopGuardTriggered {
+                    reason,
+                    tool,
+                    duplicate_count,
+                    stalled_iteration_count,
+                    ..
+                } => {
+                    if self.verbose {
+                        println!(
+                            "\n{}",
+                            format!(
+                                "[loop-guard] reason={} tool={:?} duplicate_count={} stalled_iteration_count={}",
+                                reason, tool, duplicate_count, stalled_iteration_count
+                            )
+                            .yellow()
+                        );
                     }
                 }
             },

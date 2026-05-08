@@ -18,6 +18,7 @@ const NO_PROJECT_RELATIVE_PATH_ERROR: &str =
     "Current session has no project directory. Set a project before using relative paths.";
 
 pub mod builtin;
+pub mod read_cache;
 
 /// Context for tool execution, providing access to event channels and other runtime info.
 #[derive(Clone)]
@@ -34,6 +35,8 @@ pub struct ToolContext {
     pub skill_registry: Option<Arc<SkillRegistry>>,
     /// Session-level state: files that have been read (for Write pre-read enforcement).
     pub read_files: Arc<Mutex<HashSet<String>>>,
+    /// Turn-level read history (for duplicate-read convergence).
+    pub turn_read_state: Option<Arc<RwLock<read_cache::TurnReadState>>>,
     /// 运行时环境快照
     pub environment: Option<EnvironmentSnapshot>,
     /// 同一 turn 内共享的可变环境快照（用于实时同步 project_dir 等变更）。
@@ -809,6 +812,7 @@ mod tests {
                     task_store: None,
                     skill_registry: None,
                     read_files: Arc::new(Mutex::new(HashSet::new())),
+                    turn_read_state: None,
                     environment: Some(EnvironmentSnapshot {
                         config_dir: "D:/config".to_string(),
                         project_dir: None,

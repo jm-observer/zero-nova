@@ -42,22 +42,8 @@ impl OrchestratorEngine {
         tool_context: Option<ToolContext>,
     ) -> Self {
         // 从 AgentTool 中提取 catalog 信息
-        let catalog_agent_ids = Arc::new(
-            agent_tool
-                .config
-                .gateway
-                .agents
-                .iter()
-                .map(|a| a.id.clone())
-                .collect(),
-        );
-        let default_agent_id = agent_tool
-            .config
-            .gateway
-            .agents
-            .first()
-            .map(|a| a.id.clone())
-            .unwrap_or_else(|| "nova".to_string());
+        let catalog_agent_ids = Arc::new(agent_tool.catalog_agent_ids());
+        let default_agent_id = agent_tool.default_agent_id();
 
         Self {
             agent_tool,
@@ -133,6 +119,7 @@ impl OrchestratorEngine {
                             agent_id: agent.agent_id.clone(),
                             description: agent.description.clone(),
                             subagent_type: agent.subagent_type.clone(),
+                            agent_selection: agent.agent_selection.clone(),
                         })
                         .collect(),
                 })

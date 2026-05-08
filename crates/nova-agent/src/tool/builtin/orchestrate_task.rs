@@ -146,6 +146,7 @@ mod tests {
                     task_store: None,
                     skill_registry: None,
                     read_files: Arc::new(Mutex::new(HashSet::new())),
+                    turn_read_state: None,
                     environment: Some(EnvironmentSnapshot {
                         config_dir: "D:/config".to_string(),
                         project_dir: None,

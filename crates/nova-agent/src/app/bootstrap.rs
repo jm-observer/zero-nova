@@ -6,6 +6,7 @@ use crate::config::AppConfig;
 use crate::conversation::repository::SqliteSessionRepository;
 use crate::conversation::sqlite_manager::SqliteManager;
 use crate::conversation::{SessionCache, SessionService};
+use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::prompt::{
     build_agent_catalog_section, EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector,
     SystemPromptBuilder, TrimmerConfig,
@@ -75,6 +76,16 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         prompts_dir: config.prompts_dir(),
         project_context_file: config.project_context_file(),
         initial_env_snapshot: Some(env_snapshot.clone()),
+        loop_guard: LoopGuardConfig {
+            enabled: config.gateway.loop_guard.enabled,
+            max_consecutive_duplicate_tool_calls: config.gateway.loop_guard.max_consecutive_duplicate_tool_calls,
+            max_stalled_iterations: config.gateway.loop_guard.max_stalled_iterations,
+            duplicate_read_mode: if config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
+                DuplicateReadMode::WarnOnly
+            } else {
+                DuplicateReadMode::WarnThenReject
+            },
+        },
     };
 
     let mut agents = Vec::with_capacity(config.gateway.agents.len());

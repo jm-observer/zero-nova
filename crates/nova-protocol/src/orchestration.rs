@@ -124,6 +124,7 @@ mod tests {
                     agent_id: "agent-1".to_string(),
                     description: "任务A".to_string(),
                     subagent_type: "general-purpose".to_string(),
+                    agent_selection: None,
                 }],
             }],
         };

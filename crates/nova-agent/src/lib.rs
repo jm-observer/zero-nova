@@ -6,6 +6,7 @@ pub mod agent;
 pub mod agent_catalog;
 pub mod config;
 pub mod event;
+pub mod loop_guard;
 pub mod mcp;
 pub mod message;
 pub mod orchestrator;

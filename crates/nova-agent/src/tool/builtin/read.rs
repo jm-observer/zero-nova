@@ -1,9 +1,17 @@
+use crate::tool::read_cache::ReadRange;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use tokio::fs;
+
+const DEFAULT_OFFSET: usize = 1;
+const DEFAULT_LIMIT: usize = 200;
+const MAX_LIMIT: usize = 2000;
+const REPEAT_SUMMARY_TRIGGER_LINES: usize = 400;
 
 pub struct ReadTool {
     pub root_dir: Option<std::path::PathBuf>,
@@ -47,7 +55,13 @@ impl ReadTool {
         }
     }
 
-    async fn read_text(&self, path: &Path, offset: usize, limit: usize) -> Result<ToolOutput> {
+    async fn read_text(
+        &self,
+        path: &Path,
+        offset: usize,
+        limit: usize,
+        turn_read_state: Option<&tokio::sync::RwLock<crate::tool::read_cache::TurnReadState>>,
+    ) -> Result<ToolOutput> {
         match fs::read_to_string(path).await {
             Ok(content) => {
                 let lines: Vec<&str> = content.lines().collect();
@@ -61,12 +75,96 @@ impl ReadTool {
 
                 let end = (start + limit).min(lines.len());
                 let result_lines = &lines[start..end];
+                let returned_line_count = end.saturating_sub(start);
+                let has_more = end < lines.len();
+                let next_offset = if has_more { end + 1 } else { end.max(1) };
+                let canonical_path = path.to_string_lossy().to_string();
+                let is_repeat_range = if let Some(state) = turn_read_state {
+                    let guard = state.read().await;
+                    guard
+                        .file_state(&canonical_path)
+                        .is_some_and(|f| f.ranges.iter().any(|r| r.offset_start == offset && r.offset_end == end))
+                } else {
+                    false
+                };
 
                 let mut output = String::new();
-                for (i, line) in result_lines.iter().enumerate() {
-                    let line_num = start + i + 1;
-                    // Tab-separated line numbers as per spec
-                    output.push_str(&format!("{}\t{}\n", line_num, line));
+
+                if is_repeat_range {
+                    output.push_str("Read repeat detected in current turn.\n");
+                    output.push_str(&format!(
+                        "file_path: {}\ntotal_lines: {}\nreturned_range: {}-{}\nhas_more: {}\nnext_offset: {}\n",
+                        canonical_path,
+                        lines.len(),
+                        offset,
+                        end,
+                        has_more,
+                        next_offset
+                    ));
+                    if returned_line_count >= REPEAT_SUMMARY_TRIGGER_LINES {
+                        let head = result_lines
+                            .iter()
+                            .take(3)
+                            .enumerate()
+                            .map(|(i, line)| format!("{}\t{}", start + i + 1, line))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let tail = result_lines
+                            .iter()
+                            .rev()
+                            .take(3)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .enumerate()
+                            .map(|(i, line)| format!("{}\t{}", end - 2 + i, line))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        output.push_str("summary: this range has already been returned once in this turn.\n");
+                        output.push_str("head:\n");
+                        output.push_str(&head);
+                        output.push_str("\ntail:\n");
+                        output.push_str(&tail);
+                        output.push('\n');
+                    } else {
+                        output.push_str(
+                            "suggestion: reuse prior content for analysis, or increase offset to read a new range.\n",
+                        );
+                    }
+                } else {
+                    output.push_str(&format!(
+                        "file_path: {}\ntotal_lines: {}\nreturned_range: {}-{}\nhas_more: {}\nnext_offset: {}\n\n",
+                        canonical_path,
+                        lines.len(),
+                        offset,
+                        end,
+                        has_more,
+                        next_offset
+                    ));
+                    for (i, line) in result_lines.iter().enumerate() {
+                        let line_num = start + i + 1;
+                        output.push_str(&format!("{}\t{}\n", line_num, line));
+                    }
+                }
+
+                if let Some(state) = turn_read_state {
+                    let mut hasher = DefaultHasher::new();
+                    result_lines.len().hash(&mut hasher);
+                    if let Some(first) = result_lines.first() {
+                        first.hash(&mut hasher);
+                    }
+                    if let Some(last) = result_lines.last() {
+                        last.hash(&mut hasher);
+                    }
+                    state.write().await.record_range(
+                        canonical_path,
+                        ReadRange {
+                            offset_start: offset,
+                            offset_end: end,
+                            returned_line_count,
+                        },
+                        hasher.finish(),
+                    );
                 }
 
                 Ok(ToolOutput {
@@ -100,8 +198,8 @@ impl Tool for ReadTool {
                 "type": "object",
                 "properties": {
                     "file_path": { "type": "string", "description": "The absolute path to the file to read" },
-                    "offset": { "type": "integer", "description": "Line number to start reading from (1-based, default 1)" },
-                    "limit": { "type": "integer", "description": "Number of lines to read (max 2000, default 2000)" },
+                    "offset": { "type": "integer", "default": 1, "description": "1-based start line. Increase this offset to continue reading later lines." },
+                    "limit": { "type": "integer", "default": 200, "description": "Number of lines to read (default 200, max 2000)" },
                     "pages": { "type": "string", "description": "Page range for PDF files (e.g., '1-5') - Currently not implemented" }
                 },
                 "required": ["file_path"]
@@ -112,8 +210,11 @@ impl Tool for ReadTool {
 
     async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
         let file_path_str = self.get_file_path(&input)?;
-        let offset = input["offset"].as_u64().unwrap_or(1) as usize;
-        let limit = input["limit"].as_u64().unwrap_or(2000).min(2000) as usize;
+        let offset = input["offset"].as_u64().unwrap_or(DEFAULT_OFFSET as u64) as usize;
+        let limit = input["limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_LIMIT as u64)
+            .min(MAX_LIMIT as u64) as usize;
 
         let full_path = match self.validate_path(file_path_str) {
             Ok(p) => p,
@@ -141,7 +242,10 @@ impl Tool for ReadTool {
         match ext.to_lowercase().as_str() {
             "png" | "jpg" | "jpeg" | "gif" | "webp" => self.read_image(&full_path).await,
             // Add other types here
-            _ => self.read_text(&full_path, offset, limit).await,
+            _ => {
+                let turn_read_state = context.as_ref().and_then(|ctx| ctx.turn_read_state.as_deref());
+                self.read_text(&full_path, offset, limit, turn_read_state).await
+            }
         }
     }
 }

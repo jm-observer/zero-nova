@@ -5,18 +5,19 @@ use std::hash::{Hash, Hasher};
 
 const DUPLICATE_WARNING_THRESHOLD: usize = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DuplicateReadMode {
     WarnThenReject,
     WarnOnly,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LoopGuardConfig {
     pub enabled: bool,
     pub max_consecutive_duplicate_tool_calls: usize,
     pub max_stalled_iterations: usize,
     pub duplicate_read_mode: DuplicateReadMode,
+    pub iteration_trim_ratio: f32,
 }
 
 impl Default for LoopGuardConfig {
@@ -26,6 +27,7 @@ impl Default for LoopGuardConfig {
             max_consecutive_duplicate_tool_calls: 2,
             max_stalled_iterations: 3,
             duplicate_read_mode: DuplicateReadMode::WarnThenReject,
+            iteration_trim_ratio: 0.8,
         }
     }
 }
@@ -41,6 +43,7 @@ pub struct ToolCallSignature {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AssistantFingerprint {
     pub prefix_hash: u64,
+    pub suffix_hash: u64,
     pub total_len: usize,
 }
 
@@ -135,20 +138,20 @@ pub fn build_tool_call_signature(tool_name: &str, input: &Value) -> ToolCallSign
 
     let target = match canonical_tool_name.as_str() {
         "Read" => {
-            copy_if_present(input, &mut canonical, "file_path");
+            let path_val = input.get("file_path").or_else(|| input.get("path"));
+            if let Some(p) = path_val {
+                canonical.insert("file_path".to_string(), p.clone());
+            }
             copy_if_present(input, &mut canonical, "offset");
             copy_if_present(input, &mut canonical, "limit");
-            input
-                .get("file_path")
-                .and_then(Value::as_str)
-                .map(|s| s.trim().to_string())
+            path_val.and_then(Value::as_str).map(|s| s.trim().to_string())
         }
         "Write" | "Edit" => {
-            copy_if_present(input, &mut canonical, "file_path");
-            input
-                .get("file_path")
-                .and_then(Value::as_str)
-                .map(|s| s.trim().to_string())
+            let path_val = input.get("file_path").or_else(|| input.get("path"));
+            if let Some(p) = path_val {
+                canonical.insert("file_path".to_string(), p.clone());
+            }
+            path_val.and_then(Value::as_str).map(|s| s.trim().to_string())
         }
         "Bash" => {
             let command = input
@@ -200,9 +203,16 @@ pub fn assistant_fingerprint_from_blocks(blocks: &[ContentBlock]) -> AssistantFi
 
 pub fn assistant_fingerprint_from_text(text: &str) -> AssistantFingerprint {
     let prefix: String = text.chars().take(64).collect();
+    let chars = text.chars().collect::<Vec<_>>();
+    let suffix = if chars.len() <= 64 {
+        chars.iter().collect::<String>()
+    } else {
+        chars[chars.len() - 64..].iter().collect::<String>()
+    };
     AssistantFingerprint {
         prefix_hash: hash_text(&prefix),
-        total_len: text.chars().count(),
+        suffix_hash: hash_text(&suffix),
+        total_len: chars.len(),
     }
 }
 
@@ -304,6 +314,17 @@ mod tests {
     }
 
     #[test]
+    fn different_path_field_targets_are_not_duplicate() {
+        let mut state = LoopGuardState::new(LoopGuardConfig::default());
+        let first = build_tool_call_signature("Read", &json!({"path":"a.rs","offset":1,"limit":100}));
+        let second = build_tool_call_signature("Read", &json!({"path":"b.rs","offset":1,"limit":100}));
+
+        let _ = state.evaluate_tool_call(first);
+        let decision = state.evaluate_tool_call(second);
+        assert!(matches!(decision, LoopGuardDecision::Allow));
+    }
+
+    #[test]
     fn disabled_guard_allows_duplicate_and_stall() {
         let mut state = LoopGuardState::new(LoopGuardConfig {
             enabled: false,
@@ -320,5 +341,32 @@ mod tests {
         assert!(!state.detect_stalled_iteration(fp.clone(), 1));
         assert!(!state.detect_stalled_iteration(fp.clone(), 1));
         assert!(!state.detect_stalled_iteration(fp, 1));
+    }
+
+    #[test]
+    fn assistant_fingerprint_distinguishes_suffix_with_same_prefix_and_len() {
+        let prefix = "a".repeat(64);
+        let left = format!("{}{}", prefix, "left");
+        let right = format!("{}{}", prefix, "rigt");
+        assert_eq!(left.chars().count(), right.chars().count());
+
+        let left_fp = assistant_fingerprint_from_text(&left);
+        let right_fp = assistant_fingerprint_from_text(&right);
+        assert_ne!(left_fp, right_fp);
+    }
+
+    #[test]
+    fn loop_guard_config_supports_serde_round_trip() {
+        let cfg = LoopGuardConfig::default();
+        let json = serde_json::to_string(&cfg).expect("serialize loop guard config");
+        let de: LoopGuardConfig = serde_json::from_str(&json).expect("deserialize loop guard config");
+        assert_eq!(cfg.enabled, de.enabled);
+        assert_eq!(
+            cfg.max_consecutive_duplicate_tool_calls,
+            de.max_consecutive_duplicate_tool_calls
+        );
+        assert_eq!(cfg.max_stalled_iterations, de.max_stalled_iterations);
+        assert_eq!(cfg.duplicate_read_mode, de.duplicate_read_mode);
+        assert_eq!(cfg.iteration_trim_ratio, de.iteration_trim_ratio);
     }
 }

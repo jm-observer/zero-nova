@@ -84,7 +84,7 @@ impl ShellBackend for PowerShellBackend {
         if self.executable == "powershell" {
             // Windows PowerShell 5.x 需要额外设置编码
             let wrapped = format!(
-                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {}",
+                "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; {}",
                 command_str
             );
             cmd.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
@@ -508,6 +508,25 @@ mod tests {
         let (decoded_invalid, invalid_lossy) = decode_lossy_with_flag(&invalid);
         assert!(decoded_invalid.contains('\u{FFFD}'));
         assert!(invalid_lossy);
+    }
+
+    #[test]
+    fn powershell_legacy_wrapper_enables_utf8_io_defaults() {
+        let backend = PowerShellBackend {
+            executable: "powershell".to_string(),
+        };
+        let cmd = backend.build_command("Get-Content -Raw test.txt");
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let wrapped = args
+            .last()
+            .expect("powershell backend should pass wrapped command");
+        assert!(wrapped.contains("$OutputEncoding = [System.Text.Encoding]::UTF8;"));
+        assert!(wrapped.contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"));
+        assert!(wrapped.contains("$PSDefaultParameterValues['*:Encoding'] = 'utf8';"));
     }
 
     #[test]

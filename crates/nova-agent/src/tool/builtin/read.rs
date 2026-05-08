@@ -78,7 +78,11 @@ impl ReadTool {
                 let returned_line_count = end.saturating_sub(start);
                 let has_more = end < lines.len();
                 let next_offset = if has_more { end + 1 } else { end.max(1) };
-                let canonical_path = path.to_string_lossy().to_string();
+                let canonical_path = path
+                    .canonicalize()
+                    .unwrap_or_else(|_| path.to_path_buf())
+                    .to_string_lossy()
+                    .to_string();
                 let is_repeat_range = if let Some(state) = turn_read_state {
                     let guard = state.read().await;
                     guard
@@ -247,5 +251,112 @@ impl Tool for ReadTool {
                 self.read_text(&full_path, offset, limit, turn_read_state).await
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReadTool;
+    use crate::prompt::EnvironmentSnapshot;
+    use crate::tool::read_cache::TurnReadState;
+    use crate::tool::{Tool, ToolContext};
+    use serde_json::json;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+    use tokio::sync::{mpsc, Mutex, RwLock};
+
+    fn build_context(state: Arc<RwLock<TurnReadState>>) -> ToolContext {
+        let (event_tx, _event_rx) = mpsc::channel(4);
+        ToolContext {
+            event_tx,
+            tool_use_id: "read-tool-test".to_string(),
+            session_id: "read-tool-session".to_string(),
+            task_store: None,
+            skill_registry: None,
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            turn_read_state: Some(state),
+            environment: Some(EnvironmentSnapshot {
+                config_dir: "D:/git/zero-nova".to_string(),
+                project_dir: None,
+                platform: "windows".to_string(),
+                shell: "powershell".to_string(),
+                git_branch: None,
+                git_status_summary: None,
+                recent_commits: None,
+                model_id: None,
+                current_date: "2026-05-09".to_string(),
+            }),
+            shared_environment: None,
+            cancellation_token: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn repeat_range_is_detected_within_same_turn() {
+        let temp = tempdir().expect("create tempdir");
+        let file_path = temp.path().join("a.txt");
+        tokio::fs::write(&file_path, "line1\nline2\nline3\n")
+            .await
+            .expect("write file");
+
+        let tool = ReadTool::new(Some(temp.path().to_path_buf()));
+        let state = Arc::new(RwLock::new(TurnReadState::default()));
+        let ctx = build_context(state);
+        let absolute = file_path.to_string_lossy().to_string();
+
+        let first = tool
+            .execute(
+                json!({"file_path": absolute, "offset": 1, "limit": 2}),
+                Some(ctx.clone()),
+            )
+            .await
+            .expect("first read");
+        assert!(!first.is_error);
+        assert!(first.content.contains("returned_range: 1-2"));
+
+        let second = tool
+            .execute(
+                json!({"file_path": file_path.to_string_lossy().to_string(), "offset": 1, "limit": 2}),
+                Some(ctx),
+            )
+            .await
+            .expect("second read");
+        assert!(!second.is_error);
+        assert!(second.content.contains("Read repeat detected in current turn."));
+    }
+
+    #[tokio::test]
+    async fn repeat_range_is_detected_for_canonicalized_equivalent_paths() {
+        let temp = tempdir().expect("create tempdir");
+        let nested = temp.path().join("nested");
+        tokio::fs::create_dir_all(&nested).await.expect("create nested dir");
+        let file_path = nested.join("b.txt");
+        tokio::fs::write(&file_path, "x\ny\nz\n").await.expect("write file");
+
+        let tool = ReadTool::new(Some(temp.path().to_path_buf()));
+        let state = Arc::new(RwLock::new(TurnReadState::default()));
+        let ctx = build_context(state);
+
+        let relative = std::path::PathBuf::from("nested").join("b.txt");
+        let absolute = file_path.to_string_lossy().to_string();
+
+        let _ = tool
+            .execute(
+                json!({"file_path": relative.to_string_lossy().to_string(), "offset": 1, "limit": 2}),
+                Some(ctx.clone()),
+            )
+            .await
+            .expect("first read canonical");
+
+        let second = tool
+            .execute(json!({"file_path": absolute, "offset": 1, "limit": 2}), Some(ctx))
+            .await
+            .expect("second read equivalent path");
+        assert!(
+            second.content.contains("Read repeat detected in current turn."),
+            "unexpected second output: {}",
+            second.content
+        );
     }
 }

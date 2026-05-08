@@ -57,9 +57,20 @@ pub struct SessionRuntimeSnapshot {
     pub system_prompt_state: SessionSystemPromptState,
     pub last_turn: Option<LastTurnSnapshot>,
     pub token_counters: SessionTokenCounters,
+    #[serde(default)]
+    pub loop_guard_metrics: LoopGuardMetrics,
     pub project_dir: Option<String>,
     pub project_dir_source: Option<String>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LoopGuardMetrics {
+    pub total_triggers: u64,
+    pub duplicate_tool_calls: u64,
+    pub stalled_iterations: u64,
+    pub rejected_calls: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]

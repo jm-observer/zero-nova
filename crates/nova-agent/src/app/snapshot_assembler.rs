@@ -72,6 +72,7 @@ impl RuntimeSnapshotAssembler {
                 cache_read_input_tokens: control.token_counters.cache_read_input_tokens,
                 updated_at: control.token_counters.updated_at,
             },
+            loop_guard_metrics: LoopGuardMetrics::default(),
             project_dir: control
                 .project_dir
                 .as_ref()

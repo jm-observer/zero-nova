@@ -192,6 +192,7 @@ impl AgentTool {
                 } else {
                     DuplicateReadMode::WarnThenReject
                 },
+                iteration_trim_ratio: self.config.gateway.loop_guard.iteration_trim_ratio,
             },
         };
         let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);

@@ -6,6 +6,7 @@ use nova_agent::{
     AgentConfig, AgentDescriptor, AgentRegistry, AgentRuntime, ModelConfig, ToolRegistry,
     prompt::TrimmerConfig,
 };
+use nova_agent::loop_guard::LoopGuardConfig;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -150,6 +151,7 @@ fn build_conversation_service(
             prompts_dir: data_dir.to_path_buf(),
             project_context_file: None,
             initial_env_snapshot: None,
+            loop_guard: LoopGuardConfig::default(),
         },
     );
 

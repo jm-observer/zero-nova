@@ -8,6 +8,7 @@ use nova_agent::prompt::TrimmerConfig;
 use nova_agent::provider::types::{StopReason, ToolDefinition, Usage};
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use nova_agent::prompt::PromptConfig;
+use nova_agent::loop_guard::LoopGuardConfig;
 use nova_agent::tool::builtin::edit::EditTool;
 use nova_agent::tool::builtin::project_manager::ProjectManagerTool;
 use nova_agent::tool::builtin::read::ReadTool;
@@ -264,6 +265,7 @@ async fn prepare_turn_exposes_project_manager_by_default() {
                 model_id: Some("test-model".to_string()),
                 current_date: "2026-05-04".to_string(),
             }),
+            loop_guard: LoopGuardConfig::default(),
         },
     );
 
@@ -420,6 +422,7 @@ fn build_conversation_service<C: LlmClient + 'static>(
                 model_id: Some("test-model".to_string()),
                 current_date: "2026-05-04".to_string(),
             }),
+            loop_guard: LoopGuardConfig::default(),
         },
     );
 

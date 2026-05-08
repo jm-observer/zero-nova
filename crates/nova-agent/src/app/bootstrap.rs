@@ -85,6 +85,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             } else {
                 DuplicateReadMode::WarnThenReject
             },
+            iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
         },
     };
 

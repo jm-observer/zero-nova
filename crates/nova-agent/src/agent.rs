@@ -87,7 +87,8 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     fn trim_iteration_messages_if_needed(&self, all_messages: &mut Vec<Message>) {
-        let budget = self.config.max_tokens.saturating_mul(80) / 100;
+        let ratio = self.config.loop_guard.iteration_trim_ratio.clamp(0.0, 1.0);
+        let budget = ((self.config.max_tokens as f32) * ratio) as usize;
         if budget == 0 {
             return;
         }
@@ -96,27 +97,35 @@ impl<C: LlmClient> AgentRuntime<C> {
             return;
         }
 
-        let mut idx = 0usize;
-        while total > budget && idx + 1 < all_messages.len() {
-            let can_remove_pair = matches!(
-                (&all_messages[idx].role, &all_messages[idx + 1].role),
-                (Role::Assistant, Role::User)
-            ) && all_messages[idx]
-                .content
-                .iter()
-                .any(|block| matches!(block, ContentBlock::ToolUse { name, .. } if name == "Read"))
-                && all_messages[idx + 1]
-                    .content
-                    .iter()
-                    .all(|block| matches!(block, ContentBlock::ToolResult { .. }));
-            if can_remove_pair {
-                total = total.saturating_sub(Self::estimate_message_tokens(&all_messages[idx]));
-                total = total.saturating_sub(Self::estimate_message_tokens(&all_messages[idx + 1]));
-                all_messages.remove(idx + 1);
-                all_messages.remove(idx);
-                continue;
+        while total > budget {
+            let mut best: Option<(usize, usize)> = None;
+            for idx in 0..all_messages.len().saturating_sub(1) {
+                let assistant = &all_messages[idx];
+                let user = &all_messages[idx + 1];
+                let can_remove_pair = matches!((&assistant.role, &user.role), (Role::Assistant, Role::User))
+                    && assistant
+                        .content
+                        .iter()
+                        .any(|block| matches!(block, ContentBlock::ToolUse { .. }))
+                    && user
+                        .content
+                        .iter()
+                        .all(|block| matches!(block, ContentBlock::ToolResult { .. }));
+                if can_remove_pair {
+                    let pair_tokens = Self::estimate_message_tokens(assistant) + Self::estimate_message_tokens(user);
+                    match best {
+                        Some((_, best_tokens)) if best_tokens >= pair_tokens => {}
+                        _ => best = Some((idx, pair_tokens)),
+                    }
+                }
             }
-            idx += 1;
+
+            let Some((remove_idx, removed_tokens)) = best else {
+                break;
+            };
+            total = total.saturating_sub(removed_tokens);
+            all_messages.remove(remove_idx + 1);
+            all_messages.remove(remove_idx);
         }
     }
 

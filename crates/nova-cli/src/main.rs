@@ -214,6 +214,7 @@ async fn main() -> Result<()> {
             } else {
                 DuplicateReadMode::WarnThenReject
             },
+            iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
         },
     };
 

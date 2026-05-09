@@ -3,22 +3,20 @@ pub mod conv;
 use crate::config::ProviderConfig;
 use crate::message::Message;
 use crate::provider::openai_compat::conv::{build_request, map_finish_reason, map_usage};
+use crate::provider::sse::{RawSseEvent, SseParser};
 use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::{anyhow, Result};
-use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::CreateChatCompletionStreamResponse;
-use async_openai::Client as OpenAiSdkClient;
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use log::{debug, trace};
+use reqwest::{header, Client};
 use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
-use tokio_stream::Stream;
 
 /// Client for interacting with OpenAI-compatible APIs using async-openai SDK.
 pub struct OpenAiCompatClient {
     endpoint: OpenAiCompatEndpoint,
+    http: Client,
 }
 
 enum OpenAiCompatEndpoint {
@@ -37,6 +35,7 @@ impl OpenAiCompatClient {
     pub fn new(api_key: String, base_url: String) -> Self {
         Self {
             endpoint: OpenAiCompatEndpoint::Fixed { api_key, base_url },
+            http: Client::new(),
         }
     }
 
@@ -46,6 +45,7 @@ impl OpenAiCompatClient {
                 providers,
                 default_provider,
             },
+            http: Client::new(),
         }
     }
 
@@ -77,26 +77,43 @@ impl LlmClient for OpenAiCompatClient {
         let request = build_request(messages, tools, config);
         let (api_key, base_url) = self.resolve_endpoint(config)?;
         let base = base_url.trim_end_matches('/').to_string();
-        let client_config = OpenAIConfig::new().with_api_key(api_key).with_api_base(base);
-        let client = OpenAiSdkClient::with_config(client_config);
 
         debug!(
-            "[OUTBOUND] LLM HTTP request via async-openai: provider={:?}, model={}, msg_count={}",
+            "[OUTBOUND] LLM HTTP request via reqwest: provider={:?}, model={}, msg_count={}",
             config.provider,
             config.model,
             messages.len()
         );
 
-        // 序列化请求体用于日志/诊断
-        let request_body = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
+        // 序列化请求体并注入 openai-compatible 扩展参数用于日志/诊断
+        let mut request_body = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
+        if let Some(obj) = request_body.as_object_mut() {
+            obj.insert(
+                "extra_body".to_string(),
+                serde_json::json!({
+                    "top_k": 20,
+                    "chat_template_kwargs": {
+                        "enable_thinking": true,
+                        "preserve_thinking": true
+                    }
+                }),
+            );
+        }
 
-        let stream = client
-            .chat()
-            .create_stream(request)
+        let url = format!("{}/chat/completions", base);
+        let response = self
+            .http
+            .post(url)
+            .header(header::CONTENT_TYPE, "application/json")
+            .bearer_auth(api_key)
+            .json(&request_body)
+            .send()
             .await
-            .map_err(|e| anyhow!("Failed to create chat stream: {}", e))?;
+            .map_err(|e| anyhow!("Failed to create chat stream: {}", e))?
+            .error_for_status()
+            .map_err(|e| anyhow!("OpenAI-compatible response error status: {}", e))?;
 
-        Ok(Box::new(OpenAiCompatStreamReceiver::new(stream, request_body)))
+        Ok(Box::new(OpenAiCompatStreamReceiver::new(response, request_body)))
     }
 }
 
@@ -110,10 +127,8 @@ struct PendingToolCall {
 }
 
 pub struct OpenAiCompatStreamReceiver {
-    /// async-openai 返回的流式响应
-    stream: Pin<
-        Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, async_openai::error::OpenAIError>> + Send>,
-    >,
+    response: reqwest::Response,
+    parser: SseParser,
     /// 按 index 存储正在组装的 tool calls
     pending_tool_calls: Vec<Option<PendingToolCall>>,
     pending_stop_reason: Option<StopReason>,
@@ -124,14 +139,10 @@ pub struct OpenAiCompatStreamReceiver {
 }
 
 impl OpenAiCompatStreamReceiver {
-    fn new(
-        stream: Pin<
-            Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, async_openai::error::OpenAIError>> + Send>,
-        >,
-        request_body: serde_json::Value,
-    ) -> Self {
+    fn new(response: reqwest::Response, request_body: serde_json::Value) -> Self {
         Self {
-            stream,
+            response,
+            parser: SseParser::new(),
             pending_tool_calls: Vec::new(),
             pending_stop_reason: None,
             event_queue: VecDeque::new(),
@@ -154,29 +165,41 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
                 return Ok(Some(event));
             }
 
-            // 2. 从 async-openai stream 获取下一个 chunk
-            match self.stream.next().await {
-                Some(Ok(response)) => {
-                    // 记录原始响应用于诊断
-                    if let Ok(json) = serde_json::to_value(&response) {
-                        self.response_chunks.push(json);
+            // 2. 尝试先从 parser 消费一个 SSE 帧
+            if let Some(raw_event) = self.parser.next_raw()? {
+                match raw_event {
+                    RawSseEvent::Done => {
+                        debug!("[INBOUND] Stream: [DONE] received from LLM");
+                        self.flush_pending_tool_calls();
+                        if let Some(event) = self.event_queue.pop_front() {
+                            return Ok(Some(event));
+                        }
+                        return Ok(None);
                     }
-                    self.process_response(response);
-                    // 回到循环顶部消费 event_queue
-                    continue;
+                    RawSseEvent::Data(json_str) => {
+                        let response: CreateChatCompletionStreamResponse = serde_json::from_str(&json_str)
+                            .map_err(|e| anyhow!("Failed to parse openai-compatible SSE JSON: {}", e))?;
+                        if let Ok(json) = serde_json::to_value(&response) {
+                            self.response_chunks.push(json);
+                        }
+                        self.process_response(response);
+                        continue;
+                    }
                 }
-                Some(Err(e)) => {
-                    return Err(anyhow!("OpenAI stream error: {}", e));
-                }
-                None => {
-                    // 流结束：flush pending tool calls
-                    debug!("[INBOUND] Stream: [DONE] received from LLM");
+            }
+
+            // 3. 拉取新的字节块喂给 parser
+            match self.response.chunk().await {
+                Ok(Some(chunk)) => self.parser.feed(&chunk),
+                Ok(None) => {
+                    debug!("[INBOUND] Stream: upstream closed");
                     self.flush_pending_tool_calls();
                     if let Some(event) = self.event_queue.pop_front() {
                         return Ok(Some(event));
                     }
                     return Ok(None);
                 }
+                Err(e) => return Err(anyhow!("OpenAI stream error: {}", e)),
             }
         }
     }

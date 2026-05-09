@@ -1911,3 +1911,129 @@
   background: var(--color-bg-tertiary);
   color: var(--color-text);
 }
+
+/* ===== 工具结果容器（嵌套在 tool-use-card 内部） ===== */
+.tool-result-container {
+    margin-top: 8px;
+    padding: 4px 0 0 0;
+    border-top: 1px solid var(--color-border, #e5e7eb);
+    min-height: 24px;
+    transition: opacity 0.2s ease;
+}
+
+/* 结果容器有内容时增加上边距 */
+.tool-result-container:has(.tool-result-card) {
+    padding-top: 8px;
+}
+
+/* ===== 嵌套工具结果卡片的样式微调 ===== */
+.tool-use-card .tool-result-card {
+    margin: 8px 0 0 0;
+    border-left: 3px solid var(--color-border, #e5e7eb);
+}
+
+.tool-use-card .tool-result-card.error {
+    border-left-color: var(--color-error, #ef4444);
+}
+
+/* ===== 折叠状态下的工具结果容器 ===== */
+.tool-use-card.collapsed .tool-result-container {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.2s ease;
+    opacity: 0.5;
+}
+
+.tool-use-card:not(.collapsed) .tool-result-container {
+    max-height: 500px;
+    opacity: 1;
+}
+
+/* ===== 工具调用卡片的样式调整 ===== */
+.tool-use-card {
+    padding: 8px 12px;
+    margin: 4px 0;
+}
+
+.tool-use-card .tool-log-streamer {
+    max-height: 150px;
+    overflow-y: auto;
+    margin: 4px 0;
+}
+
+.tool-use-card .tool-log-streamer.hidden {
+    display: none;
+}
+
+/* ===== 工具结果卡片内部样式 ===== */
+.tool-result-card .tool-result-header {
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+    font-weight: 500;
+}
+
+.tool-result-card .tool-result-content {
+    padding: 4px 0;
+}
+
+.tool-result-card pre.json-result {
+    background: var(--color-bg-tertiary, #f9fafb);
+    padding: 8px 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    margin: 4px 0;
+}
+
+/* ===== 折叠图标动画 ===== */
+.tool-use-card .collapse-icon,
+.tool-result-card .collapse-icon {
+    display: inline-block;
+    transition: transform 0.2s ease;
+}
+
+.tool-use-card.collapsed .collapse-icon,
+.tool-result-card.collapsed .collapse-icon {
+    transform: rotate(-90deg);
+}
+
+/* ===== 工具结果文件列表样式 ===== */
+.tool-result-files {
+    padding: 4px 0;
+}
+
+/* ===== 子代理日志详情样式 ===== */
+.subagent-logs-detail {
+    margin-top: 12px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.subagent-logs-detail summary {
+    padding: 8px 12px;
+    background: var(--color-bg-tertiary, #f9fafb);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.subagent-logs-detail pre {
+    margin: 0;
+    padding: 12px;
+    white-space: pre-wrap;
+    line-height: 1.4;
+}
+
+/* ===== :has() 降级方案 ===== */
+.no-has-support .tool-result-container.has-result {
+    padding-top: 8px;
+}
+
+.no-has-support .tool-result-container:not(.has-result) {
+    padding-top: 4px;
+}

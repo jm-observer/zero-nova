@@ -36,7 +36,7 @@
 - Plan 4：回归测试与稳定性验证
   - 依赖：Plan 1、Plan 2、Plan 3
   - 顺序：4
-  - 状态：待开始
+  - 状态：已完成
 
 ## 风险与待定项
 - 风险：若在 `ConversationService` 内直接耦合具体 LLM provider，后续迁移成本高；需先引入窄接口。

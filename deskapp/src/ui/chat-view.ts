@@ -48,6 +48,13 @@ export class ChatView {
     // 本次消息的 token 使用量（用于在聊天窗口额外展示）
     private thisTurnTokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
 
+    // 工具结果缓存：处理到达顺序错乱（结果工具调用到达）
+    // 结构：sessionId -> Map<toolUseId, ToolResultEvent>
+    private pendingToolResults = new Map<string, Map<string, any>>();
+    
+    // 上次会话 ID（用于会话切换时的缓存清理）
+    private lastSessionId: string | null = null;
+
     constructor(private state: AppState, private bus: EventBus) {
         this.messagesContainer = document.getElementById('messages') as HTMLElement;
         this.messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
@@ -62,6 +69,11 @@ export class ChatView {
         new OrchestrationView(this.bus, this.messagesContainer, () => this.state.currentSessionId);
         this.ensureProjectMenu();
         this.bindEvents();
+        
+        // 检测 :has() 支持，不支持时添加降级类
+        if (typeof CSS !== 'undefined' && !CSS.supports('selector(:has(.foo))')) {
+            document.documentElement.classList.add('no-has-support');
+        }
         
         // 监听消息容器大小变化，更新右侧的 Minimap 导航条
         if (window.ResizeObserver) {
@@ -101,12 +113,19 @@ export class ChatView {
              if (payload.previousSessionId) {
                  this.invalidateSessionFileTreeCache(payload.previousSessionId);
              }
-             // 如果是从初始状态 (null) 切换到第一个会话，说明正在通过首条消息建立会话，
-             // 此时应保留当前显示的乐观消息（用户刚发出的那一条），不执行清空。
-             if (payload.previousSessionId === null && payload.sessionId !== null) {
-                 return;
+             // 清理离开前会话的缓存结果，避免误清理新会话缓存
+             const cacheKey = payload.fromSessionId || this.lastSessionId;
+             if (cacheKey) {
+                 this.clearPendingResultsForSession(cacheKey);
              }
-             this.clear();
+             this.lastSessionId = payload.toSessionId || this.state.currentSessionId;
+
+            // 如果是从初始状态 (null) 切换到第一个会话，说明正在通过首条消息建立会话，
+            // 此时应保留当前显示的乐观消息（用户刚发出的那一条），不执行清空。
+            if (payload.previousSessionId === null && payload.sessionId !== null) {
+                return;
+            }
+            this.clear();
         });
 
         this.bus.on(Events.MESSAGES_UPDATED, (payload: any) => {
@@ -160,6 +179,8 @@ export class ChatView {
                  this.clearRuntimeStatusText();
                  // 重置本次请求的 token 使用量
                  this.thisTurnTokenUsage = null;
+                // 清理工具结果缓存
+                 this.pendingToolResults.delete(payload.sessionId);
              }
         });
 
@@ -289,6 +310,17 @@ export class ChatView {
                 void this.handleTraceCopyClick(traceCopyBtn);
                 return;
             }
+            
+            // 允许结果卡内部的 <details>/<summary>、链接、按钮等交互
+            // 只阻止对折叠按钮的点击冒泡
+            const isResultCardHeader = target.closest('.tool-result-header');
+            const isResultCardContentInteractive = target.closest('a, button, details, summary');
+            
+            if (isResultCardHeader && !isResultCardContentInteractive) {
+                // 点击结果卡头部，阻止冒泡到父卡片
+                e.stopPropagation();
+            }
+            
             // 允许点击整个 Header 或 Header 内部的任何元素
             const header = target.closest('.tool-name, .tool-result-header');
             if (header) {
@@ -1051,12 +1083,13 @@ export class ChatView {
             }
             
             // Nested structure: tool_use contains tool_result
+            const containerClass = resultHtml ? 'tool-result-container has-result' : 'tool-result-container';
             const html = `
                 <div class="tool-use-card collapsible collapsed" data-tool-use-id="${toolUseId}">
                     <div class="tool-name">🛠️ ${name} <span class="collapse-icon">⌄</span></div>
                     <pre class="tool-args">${JSON.stringify(args || {}, null, 2)}</pre>
                     <div class="tool-log-streamer hidden"></div>
-                    <div class="tool-result-container" data-rel-id="${toolUseId}">
+                    <div class="${containerClass}" data-rel-id="${toolUseId}">
                         ${resultHtml}
                     </div>
                 </div>
@@ -1402,7 +1435,11 @@ export class ChatView {
     }
 
     private handleToolStart(event: any) {
+        const cachedToolUseId = this.resolveToolUseId(event);
         const { toolName, args, toolUseId } = event;
+        // 使用统一解析的 ID
+        const finalToolUseId = cachedToolUseId || toolUseId;
+        
         if (!this.streamingMessageEl) {
             this.streamingMessageEl = this.createStreamingMessage();
             this.messagesContainer.appendChild(this.streamingMessageEl);
@@ -1411,15 +1448,24 @@ export class ChatView {
         const markdownBody = this.streamingMessageEl.querySelector('.markdown-body');
         if (markdownBody) {
             const html = `
-                <div class="tool-use-card collapsible" data-tool-use-id="${toolUseId}">
+                <div class="tool-use-card collapsible" data-tool-use-id="${finalToolUseId}">
                     <div class="tool-name">🛠️ ${toolName} <span class="collapse-icon">⌄</span></div>
                     <pre class="tool-args">${JSON.stringify(args || {}, null, 2)}</pre>
                     <div class="tool-log-streamer hidden"></div>
-                    <div class="tool-result-container" data-rel-id="${toolUseId}"></div>
+                    <div class="tool-result-container" data-rel-id="${finalToolUseId}"></div>
                 </div>
             `;
             markdownBody.insertAdjacentHTML('beforeend', html);
             this.scrollToBottom();
+            
+            // 检查并立即渲染缓存的结果
+            const sessionId = event.sessionId || this.state.currentSessionId;
+            const sessionCache = this.pendingToolResults.get(sessionId);
+            if (sessionCache && sessionCache.has(finalToolUseId)) {
+                const cachedResult = sessionCache.get(finalToolUseId);
+                this.renderCachedResult(markdownBody, finalToolUseId, cachedResult);
+                sessionCache.delete(finalToolUseId);
+            }
         }
     }
 
@@ -1427,8 +1473,18 @@ export class ChatView {
         const { toolUseId, result, isError } = event;
         this.handleProjectManagerResult(event);
         
-        // 我们需要找到对应的 tool-use-card 并在其后插入结果，或者直接在 streaming message 中寻找
-        if (!this.streamingMessageEl) return;
+        // 当 streamingMessageEl 不存在时，缓存结果以便后续渲染
+        if (!this.streamingMessageEl) {
+            const sessionId = event.sessionId || this.state.currentSessionId;
+            if (!this.pendingToolResults.has(sessionId)) {
+                this.pendingToolResults.set(sessionId, new Map());
+            }
+            const sessionCache = this.pendingToolResults.get(sessionId);
+            if (sessionCache) {
+                sessionCache.set(toolUseId, { result, isError, sessionId });
+            }
+            return;
+        }
 
         const markdownBody = this.streamingMessageEl.querySelector('.markdown-body');
         if (markdownBody) {
@@ -1456,9 +1512,17 @@ export class ChatView {
             this.scrollToBottom();
             this.updateMinimap();
 
+            // 将 has-result 类添加到最近的 tool-result-container
+            const resultContainer = markdownBody.querySelector(`.tool-result-container[data-rel-id="${toolUseId}"]`);
+            if (resultContainer) {
+                resultContainer.classList.add('has-result');
+            }
+
             // 15s 后自动折叠工具调用和结果，给用户更多阅读时间
             setTimeout(() => {
-                const toolCard = markdownBody.querySelector(`.tool-use-card[data-tool-use-id="${toolUseId}"]`);
+                // 查找嵌套结构中的 tool-use-card（通过 closest 向上查找）
+                const toolCard = markdownBody.querySelector(`.tool-result-container[data-rel-id="${toolUseId}"]`)
+                    ?.closest('.tool-use-card');
                 const resultCard = markdownBody.querySelector(`.tool-result-card[data-rel-id="${toolUseId}"]`);
                 if (toolCard) toolCard.classList.add('collapsed');
                 if (resultCard) resultCard.classList.add('collapsed');
@@ -1693,6 +1757,51 @@ export class ChatView {
             this.sendBtn.classList.remove('is-stop');
             this.sendBtn.disabled = false;
             this.sendBtn.setAttribute('aria-label', '发送');
+        }
+    }
+
+    // ========================
+    // 工具结果缓存管理
+    // ========================
+
+    /**
+     * 清理指定会话的工具结果缓存
+     */
+    private clearPendingResultsForSession(sessionId: string) {
+        this.pendingToolResults.delete(sessionId);
+    }
+
+    /**
+     * 渲染缓存的工具结果到 streaming message 中
+     */
+    private renderCachedResult(markdownBody: Element, toolUseId: string, cachedResult: any) {
+        if (!markdownBody) return;
+        
+        const originalContent = cachedResult.result || '';
+        let displayContent = '';
+        let isErrorCode = this.hasExitCodeError(originalContent, cachedResult.isError);
+        try {
+            const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
+            if (parsed && typeof parsed === 'object' && parsed.output_summary) {
+                displayContent = renderMarkdown(parsed.output_summary);
+            } else {
+                displayContent = `<pre class="json-result"><code>${escapeHtml(JSON.stringify(parsed, null, 2))}</code></pre>`;
+            }
+        } catch (e) {
+            displayContent = escapeHtml(String(originalContent));
+        }
+
+        const html = `
+            <div class="tool-result-card collapsible ${isErrorCode ? 'error' : ''}" data-rel-id="${toolUseId}">
+                <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
+                <div class="tool-result-content">${displayContent}</div>
+            </div>
+        `;
+        markdownBody.insertAdjacentHTML('beforeend', html);
+        
+        const resultContainer = markdownBody.querySelector(`.tool-result-container[data-rel-id="${toolUseId}"]`);
+        if (resultContainer) {
+            resultContainer.classList.add('has-result');
         }
     }
 }

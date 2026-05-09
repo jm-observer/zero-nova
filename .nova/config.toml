@@ -15,6 +15,7 @@ base_url = "http://192.168.0.68:8085/v1"
 [providers.spark-8000]
 # api_key = "<CLOUD_PROVIDER_API_KEY>"
 base_url = "http://192.168.0.68:8082/v1"
+#base_url = "http://127.0.0.1:8082/v1"
 
 # ── 模型调用参数 ────────────────────────────────────────────────
 [llms.gemma]

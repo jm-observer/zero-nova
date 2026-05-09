@@ -156,6 +156,13 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .ok()
             .map(|response| response.skills)
             .unwrap_or_default();
+        let before_title = self
+            .conversation_service
+            .sessions
+            .get(session_id)
+            .await?
+            .map(|session| session.get_name())
+            .unwrap_or_default();
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
         let sender_clone = sender.clone();
@@ -184,6 +191,31 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             if should_emit_skill_bindings_updated(&before_skill_bindings, &after.skills) {
                 if let Err(err) = sender.send(AppEvent::SessionSkillBindingsUpdated(after)).await {
                     log::warn!("Failed to emit SessionSkillBindingsUpdated event: {}", err);
+                }
+            }
+        }
+        if let Some(session) = self.conversation_service.sessions.get(session_id).await? {
+            let after_title = session.get_name();
+            if after_title != before_title {
+                let payload = nova_protocol::session::SessionSummaryUpdatedPayload {
+                    session_id: session.id.clone(),
+                    title: Some(after_title),
+                    updated_at: session.updated_at.load(Ordering::SeqCst),
+                    message_count: session
+                        .history
+                        .read()
+                        .map_err(|_| anyhow!("Session history lock poisoned"))?
+                        .len(),
+                    agent_id: session
+                        .control
+                        .read()
+                        .map_err(|_| anyhow!("Session control lock poisoned"))?
+                        .active_agent
+                        .clone(),
+                    version: "1.0".to_string(),
+                };
+                if let Err(err) = sender.send(AppEvent::SessionSummaryUpdated(payload)).await {
+                    log::warn!("Failed to emit SessionSummaryUpdated event: {}", err);
                 }
             }
         }

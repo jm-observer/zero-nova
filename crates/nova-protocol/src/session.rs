@@ -57,7 +57,7 @@ pub struct Session {
     pub message_count: usize,
 }
 
-/// 会话标题更新推送事件 payload（Plan 2）
+/// 会话标题更新推送事件 payload（Plan 2 + Plan 3）
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummaryUpdatedPayload {
@@ -66,6 +66,13 @@ pub struct SessionSummaryUpdatedPayload {
     pub updated_at: i64,
     pub message_count: usize,
     pub agent_id: String,
+    /// 事件版本，用于前端兼容处理（Plan 3）
+    #[serde(default = "default_version")]
+    pub version: String,
+}
+
+fn default_version() -> String {
+    "1.0".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

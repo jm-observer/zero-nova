@@ -6,7 +6,7 @@ use colored::Colorize;
 use custom_utils::args::workspace as resolve_workspace;
 use custom_utils::logger::logger_feature;
 use log::info;
-use nova_agent::agent::{AgentConfig, AgentRuntime};
+use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig};
 use nova_agent::config::AppConfig;
 use nova_agent::event::AgentEvent;
 use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
@@ -215,6 +215,12 @@ async fn main() -> Result<()> {
                 DuplicateReadMode::WarnThenReject
             },
             iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
+        },
+        prompt_diagnostics: PromptDiagnosticsConfig {
+            enabled: config.gateway.prompt_diagnostics.enabled,
+            large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
+            large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
+            large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
         },
     };
 

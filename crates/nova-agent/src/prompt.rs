@@ -759,6 +759,22 @@ pub struct NamedSection {
     pub priority: PromptPriority,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptSectionSize {
+    pub name: SectionName,
+    pub heading: String,
+    pub chars: usize,
+    pub priority: PromptPriority,
+    pub required: bool,
+    pub is_large: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolSize {
+    pub name: String,
+    pub chars: usize,
+}
+
 #[derive(Default)]
 /// Builder for constructing system prompts with optional sections.
 pub struct SystemPromptBuilder {
@@ -979,6 +995,36 @@ impl SystemPromptBuilder {
     /// 追加当前轮次实际可见的工具定义，确保 prompt 与 API tools 参数一致。
     pub fn with_tool_definitions(self, definitions: &[ToolDefinition]) -> Self {
         self.with_tool_definitions_internal(definitions)
+    }
+
+    pub fn size_report(&self, large_section_chars: usize) -> Vec<PromptSectionSize> {
+        self.sections
+            .iter()
+            .map(|(name, section)| PromptSectionSize {
+                name: name.clone(),
+                heading: name.heading().to_string(),
+                chars: section.content.chars().count(),
+                priority: section.priority.clone(),
+                required: section.required,
+                is_large: section.content.chars().count() > large_section_chars,
+            })
+            .collect()
+    }
+
+    pub fn tool_size_report(definitions: &[ToolDefinition]) -> Vec<ToolSize> {
+        definitions
+            .iter()
+            .map(|tool| ToolSize {
+                name: tool.name.clone(),
+                chars: Self::single_tool_chars(tool),
+            })
+            .collect()
+    }
+
+    fn single_tool_chars(tool: &ToolDefinition) -> usize {
+        let schema = serde_json::to_string(&tool.input_schema).unwrap_or_else(|_| "{}".to_string());
+        let joined = [tool.name.as_str(), tool.description.as_str(), schema.as_str()].join("");
+        joined.chars().count()
     }
 
     /// 从配置创建完整的 system prompt builder（Phase 2 版本）。
@@ -2169,5 +2215,36 @@ mod tests {
         assert_eq!(normalize_shell_command("/usr/bin/bash -lc"), Some("bash".to_string()));
         assert_eq!(normalize_shell_command(""), None);
         assert_eq!(normalize_shell_command("   "), None);
+    }
+
+    #[test]
+    fn size_report_marks_large_sections() {
+        let builder = SystemPromptBuilder::new()
+            .base_section("abc")
+            .project_context_section("x".repeat(5));
+        let report = builder.size_report(4);
+        assert_eq!(report.len(), 2);
+        assert_eq!(report[0].chars, 3);
+        assert!(!report[0].is_large);
+        assert_eq!(report[1].chars, 5);
+        assert!(report[1].is_large);
+    }
+
+    #[test]
+    fn tool_size_report_includes_each_tool_chars() {
+        let tools = vec![ToolDefinition {
+            name: "Read".to_string(),
+            description: "Read file".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                }
+            }),
+        }];
+        let report = SystemPromptBuilder::tool_size_report(&tools);
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].name, "Read");
+        assert!(report[0].chars > 0);
     }
 }

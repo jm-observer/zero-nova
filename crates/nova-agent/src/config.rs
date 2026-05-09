@@ -303,6 +303,8 @@ pub struct GatewayConfig {
     /// 循环保护配置（Plan 3 新增）。
     #[serde(default)]
     pub loop_guard: LoopGuardConfigToml,
+    #[serde(default)]
+    pub prompt_diagnostics: PromptDiagnosticsConfigToml,
 }
 
 fn default_host() -> String {
@@ -358,6 +360,18 @@ fn default_duplicate_read_mode() -> String {
 fn default_iteration_trim_ratio() -> f32 {
     0.85
 }
+fn default_prompt_diagnostics_enabled() -> bool {
+    false
+}
+fn default_large_section_chars() -> usize {
+    8_000
+}
+fn default_large_message_chars() -> usize {
+    12_000
+}
+fn default_large_tool_result_chars() -> usize {
+    8_000
+}
 
 /// 历史裁剪配置（TOML 序列化版本）。
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -404,6 +418,29 @@ pub struct LoopGuardConfigToml {
     pub iteration_trim_ratio: f32,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptDiagnosticsConfigToml {
+    #[serde(default = "default_prompt_diagnostics_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_large_section_chars")]
+    pub large_section_chars: usize,
+    #[serde(default = "default_large_message_chars")]
+    pub large_message_chars: usize,
+    #[serde(default = "default_large_tool_result_chars")]
+    pub large_tool_result_chars: usize,
+}
+
+impl Default for PromptDiagnosticsConfigToml {
+    fn default() -> Self {
+        Self {
+            enabled: default_prompt_diagnostics_enabled(),
+            large_section_chars: default_large_section_chars(),
+            large_message_chars: default_large_message_chars(),
+            large_tool_result_chars: default_large_tool_result_chars(),
+        }
+    }
+}
+
 impl Default for LoopGuardConfigToml {
     fn default() -> Self {
         Self {
@@ -432,6 +469,7 @@ impl Default for GatewayConfig {
             trimmer: TrimmerConfigToml::default(),
             side_channel: SideChannelConfigToml::default(),
             loop_guard: LoopGuardConfigToml::default(),
+            prompt_diagnostics: PromptDiagnosticsConfigToml::default(),
         }
     }
 }
@@ -833,6 +871,8 @@ struct RawGatewayConfig {
     side_channel: SideChannelConfigToml,
     #[serde(default)]
     loop_guard: LoopGuardConfigToml,
+    #[serde(default)]
+    prompt_diagnostics: PromptDiagnosticsConfigToml,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -1016,6 +1056,7 @@ impl RawAppConfig {
                     trimmer,
                     side_channel: self.gateway.side_channel,
                     loop_guard: self.gateway.loop_guard,
+                    prompt_diagnostics: self.gateway.prompt_diagnostics,
                 },
                 voice: self.voice,
                 config_dir,
@@ -1508,6 +1549,15 @@ llm = "local_default"
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, _) = raw.migrate(PathBuf::from("."));
         config.validate().expect("config should validate");
+    }
+
+    #[test]
+    fn prompt_diagnostics_defaults_are_applied() {
+        let config = GatewayConfig::default();
+        assert!(!config.prompt_diagnostics.enabled);
+        assert_eq!(config.prompt_diagnostics.large_section_chars, 8_000);
+        assert_eq!(config.prompt_diagnostics.large_message_chars, 12_000);
+        assert_eq!(config.prompt_diagnostics.large_tool_result_chars, 8_000);
     }
 
     fn write_temp_config(content: &str) -> Result<PathBuf> {

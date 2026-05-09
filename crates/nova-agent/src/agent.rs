@@ -5,8 +5,8 @@ use crate::loop_guard::{
 };
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, SideChannelInjector, SystemPromptBuilder,
-    TrimmerConfig, TurnContext,
+    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, PromptSectionSize, SideChannelInjector,
+    SystemPromptBuilder, ToolSize, TrimmerConfig, TurnContext,
 };
 use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent};
@@ -69,6 +69,28 @@ pub struct AgentConfig {
     pub initial_env_snapshot: Option<EnvironmentSnapshot>,
     /// 循环保护配置
     pub loop_guard: LoopGuardConfig,
+    /// Prompt 体量诊断配置
+    pub prompt_diagnostics: PromptDiagnosticsConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct PromptDiagnosticsConfig {
+    pub enabled: bool,
+    pub large_section_chars: usize,
+    pub large_message_chars: usize,
+    pub large_tool_result_chars: usize,
+}
+
+#[derive(Debug, Clone)]
+struct MessageSize {
+    index: usize,
+    role: Role,
+    chars: usize,
+    tool_calls: usize,
+    tool_result_chars: usize,
+    has_large_tool_result: bool,
+    is_empty_assistant: bool,
+    is_large: bool,
 }
 
 fn has_loop_guard_rejection(blocks: &[ContentBlock]) -> bool {
@@ -358,6 +380,7 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         // 5. 裁剪历史（如果 active skill 切换了则裁剪）
         let history = self.trim_history(&current_history, &system_prompt, &active_skill)?;
+        self.log_history_diagnostics(history.as_ref());
 
         // 6. 构造 TurnContext
         Ok(TurnContext {
@@ -735,10 +758,9 @@ impl<C: LlmClient> AgentRuntime<C> {
     fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
         let empty = SkillRegistry::new();
         let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
-
-        SystemPromptBuilder::from_config(config, skills)
-            .with_tool_definitions(tool_definitions)
-            .build()
+        let builder = SystemPromptBuilder::from_config(config, skills).with_tool_definitions(tool_definitions);
+        self.log_prompt_diagnostics(&builder, tool_definitions);
+        builder.build()
     }
 
     /// 过滤工具定义（基于 `CapabilityPolicy` 和 `active skill`）。
@@ -798,5 +820,108 @@ impl<C: LlmClient> AgentRuntime<C> {
         }
 
         Ok(Arc::new(result.messages))
+    }
+
+    fn log_prompt_diagnostics(&self, builder: &SystemPromptBuilder, tool_definitions: &[ToolDefinition]) {
+        let cfg = &self.config.prompt_diagnostics;
+        if !cfg.enabled {
+            return;
+        }
+        let section_reports = builder.size_report(cfg.large_section_chars);
+        let tool_reports = SystemPromptBuilder::tool_size_report(tool_definitions);
+        let tools_chars = tool_reports.iter().map(|r| r.chars).sum::<usize>();
+        let system_chars = section_reports.iter().map(|r| r.chars).sum::<usize>();
+        log::info!("Prompt size summary: system={}, tools={}", system_chars, tools_chars);
+
+        for PromptSectionSize {
+            name, chars, is_large, ..
+        } in &section_reports
+        {
+            if *is_large {
+                log::warn!("Large section: {:?} chars={}", name, chars);
+            }
+        }
+        for ToolSize { name, chars } in &tool_reports {
+            log::debug!("Tool schema size: {} chars={}", name, chars);
+        }
+    }
+
+    fn log_history_diagnostics(&self, history: &[Message]) {
+        let cfg = &self.config.prompt_diagnostics;
+        if !cfg.enabled {
+            return;
+        }
+        let reports = history
+            .iter()
+            .enumerate()
+            .map(|(index, message)| self.build_message_size(index, message))
+            .collect::<Vec<_>>();
+        let history_chars = reports.iter().map(|r| r.chars).sum::<usize>();
+        log::info!(
+            "History size summary: total_chars={}, messages={}",
+            history_chars,
+            reports.len()
+        );
+        for report in reports {
+            log::debug!(
+                "History message: index={} role={:?} chars={} tool_calls={} tool_result_chars={}",
+                report.index,
+                report.role,
+                report.chars,
+                report.tool_calls,
+                report.tool_result_chars
+            );
+            if report.is_large {
+                log::warn!(
+                    "Large message: index={} role={:?} chars={}",
+                    report.index,
+                    report.role,
+                    report.chars
+                );
+            }
+            if report.has_large_tool_result {
+                log::warn!(
+                    "Large tool result message: index={} role={:?} tool_result_chars={}",
+                    report.index,
+                    report.role,
+                    report.tool_result_chars
+                );
+            }
+            if report.is_empty_assistant {
+                log::warn!("Empty assistant message: index={}", report.index);
+            }
+        }
+    }
+
+    fn build_message_size(&self, index: usize, message: &Message) -> MessageSize {
+        let cfg = &self.config.prompt_diagnostics;
+        let mut chars = 0usize;
+        let mut tool_calls = 0usize;
+        let mut tool_result_chars = 0usize;
+        for block in &message.content {
+            match block {
+                ContentBlock::Text { text } => chars += text.chars().count(),
+                ContentBlock::Thinking { thinking } => chars += thinking.chars().count(),
+                ContentBlock::ToolUse { .. } => {
+                    tool_calls += 1;
+                }
+                ContentBlock::ToolResult { output, .. } => {
+                    let c = output.chars().count();
+                    chars += c;
+                    tool_result_chars += c;
+                }
+            }
+        }
+        let is_empty_assistant = matches!(message.role, Role::Assistant) && chars == 0 && tool_calls == 0;
+        MessageSize {
+            index,
+            role: message.role.clone(),
+            chars,
+            tool_calls,
+            tool_result_chars,
+            has_large_tool_result: tool_result_chars > cfg.large_tool_result_chars,
+            is_empty_assistant,
+            is_large: chars > cfg.large_message_chars,
+        }
     }
 }

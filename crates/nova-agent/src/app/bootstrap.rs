@@ -1,6 +1,6 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
-use crate::agent::{AgentConfig, AgentRuntime};
+use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
 use crate::conversation::repository::SqliteSessionRepository;
@@ -86,6 +86,12 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
                 DuplicateReadMode::WarnThenReject
             },
             iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
+        },
+        prompt_diagnostics: PromptDiagnosticsConfig {
+            enabled: config.gateway.prompt_diagnostics.enabled,
+            large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
+            large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
+            large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
         },
     };
 

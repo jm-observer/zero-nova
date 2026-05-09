@@ -6,7 +6,7 @@ use colored::Colorize;
 use custom_utils::args::workspace as resolve_workspace;
 use custom_utils::logger::logger_feature;
 use log::info;
-use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig};
+use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use nova_agent::config::AppConfig;
 use nova_agent::event::AgentEvent;
 use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
@@ -221,6 +221,19 @@ async fn main() -> Result<()> {
             large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
             large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
             large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
+        },
+        tool_result_compaction: ToolResultCompactionConfig {
+            enabled: config.gateway.tool_result_compaction.enabled,
+            max_chars: config.gateway.tool_result_compaction.max_chars,
+            head_chars: config.gateway.tool_result_compaction.head_chars,
+            tail_chars: config.gateway.tool_result_compaction.tail_chars,
+            disable_for_tools: config
+                .gateway
+                .tool_result_compaction
+                .disable_for_tools
+                .iter()
+                .map(|name| name.to_ascii_lowercase())
+                .collect(),
         },
     };
 

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig};
+use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use nova_agent::event::AgentEvent;
 use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::message::Message;
@@ -183,6 +183,13 @@ fn build_runtime_with_loop_guard<C: LlmClient>(
             large_section_chars: 8_000,
             large_message_chars: 12_000,
             large_tool_result_chars: 8_000,
+        },
+        tool_result_compaction: ToolResultCompactionConfig {
+            enabled: true,
+            max_chars: 12_000,
+            head_chars: 4_000,
+            tail_chars: 4_000,
+            disable_for_tools: std::collections::HashSet::new(),
         },
     };
     AgentRuntime::new(client, ToolRegistry::new(), config)

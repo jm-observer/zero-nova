@@ -1,4 +1,4 @@
-use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig};
+use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
@@ -199,6 +199,20 @@ impl AgentTool {
                 large_section_chars: self.config.gateway.prompt_diagnostics.large_section_chars,
                 large_message_chars: self.config.gateway.prompt_diagnostics.large_message_chars,
                 large_tool_result_chars: self.config.gateway.prompt_diagnostics.large_tool_result_chars,
+            },
+            tool_result_compaction: ToolResultCompactionConfig {
+                enabled: self.config.gateway.tool_result_compaction.enabled,
+                max_chars: self.config.gateway.tool_result_compaction.max_chars,
+                head_chars: self.config.gateway.tool_result_compaction.head_chars,
+                tail_chars: self.config.gateway.tool_result_compaction.tail_chars,
+                disable_for_tools: self
+                    .config
+                    .gateway
+                    .tool_result_compaction
+                    .disable_for_tools
+                    .iter()
+                    .map(|name| name.to_ascii_lowercase())
+                    .collect(),
             },
         };
         let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);

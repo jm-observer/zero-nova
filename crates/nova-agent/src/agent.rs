@@ -71,6 +71,8 @@ pub struct AgentConfig {
     pub loop_guard: LoopGuardConfig,
     /// Prompt 体量诊断配置
     pub prompt_diagnostics: PromptDiagnosticsConfig,
+    /// Tool result 历史压缩配置
+    pub tool_result_compaction: ToolResultCompactionConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +81,15 @@ pub struct PromptDiagnosticsConfig {
     pub large_section_chars: usize,
     pub large_message_chars: usize,
     pub large_tool_result_chars: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolResultCompactionConfig {
+    pub enabled: bool,
+    pub max_chars: usize,
+    pub head_chars: usize,
+    pub tail_chars: usize,
+    pub disable_for_tools: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -270,7 +281,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                     call_idx,
                     ContentBlock::ToolResult {
                         tool_use_id: id,
-                        output: content,
+                        output: self.compact_tool_output(&name, is_error, &content),
                         is_error,
                     },
                 )
@@ -924,5 +935,139 @@ impl<C: LlmClient> AgentRuntime<C> {
             is_empty_assistant,
             is_large: chars > cfg.large_message_chars,
         }
+    }
+
+    fn compact_tool_output(&self, tool_name: &str, is_error: bool, output: &str) -> String {
+        let cfg = &self.config.tool_result_compaction;
+        if !cfg.enabled || cfg.disable_for_tools.contains(&tool_name.to_ascii_lowercase()) {
+            return output.to_string();
+        }
+
+        let total_chars = output.chars().count();
+        if total_chars <= cfg.max_chars {
+            return output.to_string();
+        }
+
+        let head = output.chars().take(cfg.head_chars).collect::<String>();
+        let tail = output
+            .chars()
+            .skip(total_chars.saturating_sub(cfg.tail_chars))
+            .collect::<String>();
+        let total_lines = output.lines().count();
+
+        format!(
+            "[Tool output compacted]\nTool: {tool_name}\nIs error: {is_error}\nOriginal chars: {total_chars}\nOriginal lines: {total_lines}\nKept head chars: {}\nKept tail chars: {}\nReason: output exceeded {} chars\n\n--- head ---\n{}\n\n--- tail ---\n{}\n\n[Full output omitted from model context. Re-run a narrower command or read a specific range if needed.]",
+            head.chars().count(),
+            tail.chars().count(),
+            cfg.max_chars,
+            head,
+            tail
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
+    use crate::loop_guard::LoopGuardConfig;
+    use crate::message::Message;
+    use crate::prompt::TrimmerConfig;
+    use crate::provider::types::ToolDefinition;
+    use crate::provider::{LlmClient, ModelConfig, StreamReceiver};
+    use crate::tool::ToolRegistry;
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use std::collections::HashSet;
+    use std::time::Duration;
+
+    struct NoopClient;
+
+    #[async_trait]
+    impl LlmClient for NoopClient {
+        async fn stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDefinition],
+            _config: &ModelConfig,
+        ) -> Result<Box<dyn StreamReceiver>> {
+            unreachable!("not used in compaction unit tests")
+        }
+    }
+
+    fn build_runtime(disable_for_tools: HashSet<String>) -> AgentRuntime<NoopClient> {
+        AgentRuntime::new(
+            NoopClient,
+            ToolRegistry::new(),
+            AgentConfig {
+                max_iterations: 1,
+                model_config: ModelConfig {
+                    provider: None,
+                    model: "test".to_string(),
+                    max_tokens: 128,
+                    temperature: None,
+                    top_p: None,
+                    thinking_budget: None,
+                    reasoning_effort: None,
+                },
+                tool_timeout: Duration::from_secs(1),
+                max_tokens: 128,
+                use_turn_context: false,
+                trimmer: TrimmerConfig::default(),
+                config_dir: std::path::PathBuf::new(),
+                prompts_dir: std::path::PathBuf::new(),
+                project_context_file: None,
+                initial_env_snapshot: None,
+                loop_guard: LoopGuardConfig::default(),
+                prompt_diagnostics: PromptDiagnosticsConfig {
+                    enabled: false,
+                    large_section_chars: 8_000,
+                    large_message_chars: 12_000,
+                    large_tool_result_chars: 8_000,
+                },
+                tool_result_compaction: ToolResultCompactionConfig {
+                    enabled: true,
+                    max_chars: 20,
+                    head_chars: 6,
+                    tail_chars: 6,
+                    disable_for_tools,
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn compact_tool_output_keeps_short_output() {
+        let runtime = build_runtime(HashSet::new());
+        let output = runtime.compact_tool_output("Read", false, "short");
+        assert_eq!(output, "short");
+    }
+
+    #[test]
+    fn compact_tool_output_compacts_long_output() {
+        let runtime = build_runtime(HashSet::new());
+        let output = runtime.compact_tool_output("Read", false, "0123456789abcdefghijklmnopqrstuvwxyz");
+        assert!(output.contains("[Tool output compacted]"));
+        assert!(output.contains("Tool: Read"));
+        assert!(output.contains("--- head ---"));
+        assert!(output.contains("--- tail ---"));
+    }
+
+    #[test]
+    fn compact_tool_output_respects_tool_disable_list() {
+        let mut disabled = HashSet::new();
+        disabled.insert("read".to_string());
+        let runtime = build_runtime(disabled);
+        let raw = "0123456789abcdefghijklmnopqrstuvwxyz";
+        let output = runtime.compact_tool_output("Read", false, raw);
+        assert_eq!(output, raw);
+    }
+
+    #[test]
+    fn compact_tool_output_handles_utf8_boundaries() {
+        let runtime = build_runtime(HashSet::new());
+        let raw = "你好🙂世界🙂你好🙂世界🙂你好🙂世界🙂你好🙂世界🙂";
+        let output = runtime.compact_tool_output("Read", false, raw);
+        assert!(output.contains("[Tool output compacted]"));
+        assert!(std::str::from_utf8(output.as_bytes()).is_ok());
     }
 }

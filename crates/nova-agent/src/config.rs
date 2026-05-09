@@ -345,6 +345,8 @@ pub struct GatewayConfig {
     pub loop_guard: LoopGuardConfigToml,
     #[serde(default)]
     pub prompt_diagnostics: PromptDiagnosticsConfigToml,
+    #[serde(default)]
+    pub tool_result_compaction: ToolResultCompactionConfigToml,
 }
 
 fn default_host() -> String {
@@ -412,6 +414,18 @@ fn default_large_message_chars() -> usize {
 fn default_large_tool_result_chars() -> usize {
     8_000
 }
+fn default_tool_result_compaction_enabled() -> bool {
+    true
+}
+fn default_tool_result_compaction_max_chars() -> usize {
+    12_000
+}
+fn default_tool_result_compaction_head_chars() -> usize {
+    4_000
+}
+fn default_tool_result_compaction_tail_chars() -> usize {
+    4_000
+}
 
 /// 历史裁剪配置（TOML 序列化版本）。
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -470,6 +484,32 @@ pub struct PromptDiagnosticsConfigToml {
     pub large_tool_result_chars: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ToolResultCompactionConfigToml {
+    #[serde(default = "default_tool_result_compaction_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_tool_result_compaction_max_chars")]
+    pub max_chars: usize,
+    #[serde(default = "default_tool_result_compaction_head_chars")]
+    pub head_chars: usize,
+    #[serde(default = "default_tool_result_compaction_tail_chars")]
+    pub tail_chars: usize,
+    #[serde(default)]
+    pub disable_for_tools: Vec<String>,
+}
+
+impl Default for ToolResultCompactionConfigToml {
+    fn default() -> Self {
+        Self {
+            enabled: default_tool_result_compaction_enabled(),
+            max_chars: default_tool_result_compaction_max_chars(),
+            head_chars: default_tool_result_compaction_head_chars(),
+            tail_chars: default_tool_result_compaction_tail_chars(),
+            disable_for_tools: Vec::new(),
+        }
+    }
+}
+
 impl Default for PromptDiagnosticsConfigToml {
     fn default() -> Self {
         Self {
@@ -510,6 +550,7 @@ impl Default for GatewayConfig {
             side_channel: SideChannelConfigToml::default(),
             loop_guard: LoopGuardConfigToml::default(),
             prompt_diagnostics: PromptDiagnosticsConfigToml::default(),
+            tool_result_compaction: ToolResultCompactionConfigToml::default(),
         }
     }
 }
@@ -783,6 +824,14 @@ impl AppConfig {
                 self.gateway.loop_guard.iteration_trim_ratio
             );
         }
+        if self.gateway.tool_result_compaction.max_chars == 0 {
+            bail!("gateway.tool_result_compaction.max_chars must be greater than 0");
+        }
+        if self.gateway.tool_result_compaction.head_chars + self.gateway.tool_result_compaction.tail_chars
+            >= self.gateway.tool_result_compaction.max_chars
+        {
+            bail!("gateway.tool_result_compaction.head_chars + tail_chars must be less than max_chars");
+        }
 
         // if self.llm.model_config.thinking_budget.is_some() && self.llm.model_config.reasoning_effort.is_some() {
         //     bail!("llm.thinking_budget and llm.reasoning_effort cannot both be set");
@@ -930,6 +979,8 @@ struct RawGatewayConfig {
     loop_guard: LoopGuardConfigToml,
     #[serde(default)]
     prompt_diagnostics: PromptDiagnosticsConfigToml,
+    #[serde(default)]
+    tool_result_compaction: ToolResultCompactionConfigToml,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -1114,6 +1165,7 @@ impl RawAppConfig {
                     side_channel: self.gateway.side_channel,
                     loop_guard: self.gateway.loop_guard,
                     prompt_diagnostics: self.gateway.prompt_diagnostics,
+                    tool_result_compaction: self.gateway.tool_result_compaction,
                 },
                 voice: self.voice,
                 config_dir,
@@ -1651,6 +1703,16 @@ llm = "local_default"
         assert_eq!(config.prompt_diagnostics.large_section_chars, 8_000);
         assert_eq!(config.prompt_diagnostics.large_message_chars, 12_000);
         assert_eq!(config.prompt_diagnostics.large_tool_result_chars, 8_000);
+    }
+
+    #[test]
+    fn tool_result_compaction_defaults_are_applied() {
+        let config = GatewayConfig::default();
+        assert!(config.tool_result_compaction.enabled);
+        assert_eq!(config.tool_result_compaction.max_chars, 12_000);
+        assert_eq!(config.tool_result_compaction.head_chars, 4_000);
+        assert_eq!(config.tool_result_compaction.tail_chars, 4_000);
+        assert!(config.tool_result_compaction.disable_for_tools.is_empty());
     }
 
     fn write_temp_config(content: &str) -> Result<PathBuf> {

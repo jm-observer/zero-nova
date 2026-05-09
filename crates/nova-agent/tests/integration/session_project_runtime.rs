@@ -5,6 +5,7 @@ use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::message::ContentBlock;
 use nova_agent::prompt::TrimmerConfig;
+use nova_agent::agent::{PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use nova_agent::provider::types::{StopReason, ToolDefinition, Usage};
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use nova_agent::prompt::PromptConfig;
@@ -266,6 +267,19 @@ async fn prepare_turn_exposes_project_manager_by_default() {
                 current_date: "2026-05-04".to_string(),
             }),
             loop_guard: LoopGuardConfig::default(),
+            prompt_diagnostics: PromptDiagnosticsConfig {
+                enabled: false,
+                large_section_chars: 8_000,
+                large_message_chars: 12_000,
+                large_tool_result_chars: 8_000,
+            },
+            tool_result_compaction: ToolResultCompactionConfig {
+                enabled: true,
+                max_chars: 12_000,
+                head_chars: 4_000,
+                tail_chars: 4_000,
+                disable_for_tools: std::collections::HashSet::new(),
+            },
         },
     );
 
@@ -423,6 +437,19 @@ fn build_conversation_service<C: LlmClient + 'static>(
                 current_date: "2026-05-04".to_string(),
             }),
             loop_guard: LoopGuardConfig::default(),
+            prompt_diagnostics: PromptDiagnosticsConfig {
+                enabled: false,
+                large_section_chars: 8_000,
+                large_message_chars: 12_000,
+                large_tool_result_chars: 8_000,
+            },
+            tool_result_compaction: ToolResultCompactionConfig {
+                enabled: true,
+                max_chars: 12_000,
+                head_chars: 4_000,
+                tail_chars: 4_000,
+                disable_for_tools: std::collections::HashSet::new(),
+            },
         },
     );
 

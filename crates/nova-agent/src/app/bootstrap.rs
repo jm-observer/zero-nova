@@ -1,6 +1,6 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
-use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig};
+use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
 use crate::conversation::repository::SqliteSessionRepository;
@@ -92,6 +92,19 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
             large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
             large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
+        },
+        tool_result_compaction: ToolResultCompactionConfig {
+            enabled: config.gateway.tool_result_compaction.enabled,
+            max_chars: config.gateway.tool_result_compaction.max_chars,
+            head_chars: config.gateway.tool_result_compaction.head_chars,
+            tail_chars: config.gateway.tool_result_compaction.tail_chars,
+            disable_for_tools: config
+                .gateway
+                .tool_result_compaction
+                .disable_for_tools
+                .iter()
+                .map(|name| name.to_ascii_lowercase())
+                .collect(),
         },
     };
 

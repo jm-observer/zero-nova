@@ -198,7 +198,7 @@ pub fn build_request(
         model: config.model.clone(),
         messages: openai_messages,
         tools: openai_tools,
-        max_completion_tokens: Some(config.max_tokens),
+        max_completion_tokens: None,
         temperature: config.temperature,
         top_p: config.top_p,
         reasoning_effort,
@@ -211,13 +211,75 @@ pub fn build_request(
         ..Default::default()
     };
 
-    // 一些 OpenAI-compatible 服务端仍要求 `max_tokens`，这里保留兼容写法。
-    #[allow(deprecated)]
-    {
-        request.max_tokens = Some(config.max_tokens);
+    match config.max_tokens_field.as_str() {
+        "completion" => {
+            request.max_completion_tokens = Some(config.max_tokens);
+        }
+        "legacy" => {
+            #[allow(deprecated)]
+            {
+                request.max_tokens = Some(config.max_tokens);
+            }
+        }
+        _ => {
+            request.max_completion_tokens = Some(config.max_tokens);
+            #[allow(deprecated)]
+            {
+                request.max_tokens = Some(config.max_tokens);
+            }
+        }
     }
 
     request
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_request;
+    use crate::provider::ModelConfig;
+
+    fn base_config(max_tokens_field: &str) -> ModelConfig {
+        ModelConfig {
+            provider: None,
+            model: "gpt-oss-120b".to_string(),
+            max_tokens: 1024,
+            temperature: None,
+            top_p: None,
+            thinking_budget: None,
+            reasoning_effort: None,
+            max_tokens_field: max_tokens_field.to_string(),
+        }
+    }
+
+    #[test]
+    fn max_tokens_field_completion_only_sets_completion_tokens() {
+        let request = build_request(&[], &[], &base_config("completion"));
+        assert_eq!(request.max_completion_tokens, Some(1024));
+        #[allow(deprecated)]
+        {
+            assert!(request.max_tokens.is_none());
+        }
+    }
+
+    #[test]
+    fn max_tokens_field_legacy_only_sets_legacy_tokens() {
+        let request = build_request(&[], &[], &base_config("legacy"));
+        assert!(request.max_completion_tokens.is_none());
+        #[allow(deprecated)]
+        {
+            assert_eq!(request.max_tokens, Some(1024));
+        }
+    }
+
+    #[test]
+    fn max_tokens_field_both_sets_both_fields() {
+        let request = build_request(&[], &[], &base_config("both"));
+        assert_eq!(request.max_completion_tokens, Some(1024));
+        #[allow(deprecated)]
+        {
+            assert_eq!(request.max_tokens, Some(1024));
+        }
+    }
 }
 
 // ============================================================================

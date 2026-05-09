@@ -64,6 +64,9 @@ fn default_skill_injection() -> String {
 fn default_tool_guidance() -> String {
     "compact".to_string()
 }
+fn default_max_tokens_field() -> String {
+    "both".to_string()
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VoiceConfig {
@@ -186,6 +189,7 @@ impl Default for LlmConfig {
                 top_p: None,
                 thinking_budget: None,
                 reasoning_effort: None,
+                max_tokens_field: default_max_tokens_field(),
             },
         }
     }
@@ -322,6 +326,8 @@ pub struct GatewayConfig {
     pub subagent_timeout_secs: u64,
     #[serde(default = "default_max_tokens")]
     pub max_tokens: usize,
+    #[serde(default = "default_max_tokens_field")]
+    pub max_tokens_field: String,
     #[serde(default)]
     pub agents: Vec<AgentSpec>,
     /// 是否启用自动 skill 路由 (Plan 1 新增)。
@@ -542,6 +548,7 @@ impl Default for GatewayConfig {
             tool_timeout_secs: None,
             subagent_timeout_secs: default_subagent_timeout(),
             max_tokens: default_max_tokens(),
+            max_tokens_field: default_max_tokens_field(),
             agents: Vec::new(),
             skill_routing_enabled: false,
             skill_history_strategy: default_skill_history_strategy(),
@@ -858,6 +865,9 @@ impl AppConfig {
         if !matches!(self.prompt_compaction.tool_guidance.as_str(), "compact" | "full") {
             bail!("prompt_compaction.tool_guidance is invalid");
         }
+        if !matches!(self.gateway.max_tokens_field.as_str(), "completion" | "legacy" | "both") {
+            bail!("gateway.max_tokens_field is invalid");
+        }
 
         if self.search.backend.as_deref() == Some("tavily")
             && self
@@ -963,6 +973,8 @@ struct RawGatewayConfig {
     subagent_timeout_secs: u64,
     #[serde(default = "default_max_tokens")]
     max_tokens: usize,
+    #[serde(default = "default_max_tokens_field")]
+    max_tokens_field: String,
     #[serde(default)]
     agents: Vec<RawAgentSpec>,
     #[serde(default)]
@@ -1041,6 +1053,7 @@ impl RawAppConfig {
                     top_p: raw_llm.model_config.top_p,
                     thinking_budget: raw_llm.model_config.thinking_budget,
                     reasoning_effort: raw_llm.model_config.reasoning_effort,
+                    max_tokens_field: self.gateway.max_tokens_field.clone(),
                 };
                 if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
                     model_config.reasoning_effort = None;
@@ -1157,6 +1170,7 @@ impl RawAppConfig {
                     tool_timeout_secs: self.gateway.tool_timeout_secs,
                     subagent_timeout_secs: self.gateway.subagent_timeout_secs,
                     max_tokens: self.gateway.max_tokens,
+                    max_tokens_field: self.gateway.max_tokens_field,
                     agents: migrated_agents,
                     skill_routing_enabled: self.gateway.skill_routing_enabled,
                     skill_history_strategy: self.gateway.skill_history_strategy,

@@ -137,6 +137,7 @@ impl AgentTool {
             top_p: Some(spec.model_config.top_p),
             thinking_budget: None,
             reasoning_effort: None,
+            max_tokens_field: binding.model_config.max_tokens_field.clone(),
         };
         if let Some(m) = model_override {
             model_config.model = m.to_string();

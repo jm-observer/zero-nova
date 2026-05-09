@@ -67,4 +67,11 @@ pub struct ModelConfig {
     pub thinking_budget: Option<u32>,
     /// OpenAI: 映射为 reasoning_effort 参数 ("low"/"medium"/"high")
     pub reasoning_effort: Option<String>,
+    /// OpenAI-compatible: max token 字段策略 ("completion" | "legacy" | "both")
+    #[serde(default = "default_max_tokens_field")]
+    pub max_tokens_field: String,
+}
+
+fn default_max_tokens_field() -> String {
+    "both".to_string()
 }

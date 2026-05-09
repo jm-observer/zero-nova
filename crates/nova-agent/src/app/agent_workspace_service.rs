@@ -855,6 +855,7 @@ mod tests {
                     top_p: None,
                     thinking_budget: None,
                     reasoning_effort: None,
+                    max_tokens_field: "both".to_string(),
                 },
             },
         );

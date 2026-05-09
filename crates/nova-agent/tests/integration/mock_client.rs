@@ -124,6 +124,7 @@ impl ModelConfig {
             top_p: Some(0.9),
             thinking_budget: None,
             reasoning_effort: None,
+            max_tokens_field: "both".to_string(),
         }
     }
 }

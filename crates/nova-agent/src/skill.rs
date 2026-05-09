@@ -554,6 +554,34 @@ impl SkillRegistry {
         parts.join("\n\n")
     }
 
+    /// 仅输出技能目录摘要，不注入完整指令。
+    pub fn generate_catalog_prompt(&self) -> String {
+        if self.packages.is_empty() {
+            return String::new();
+        }
+        let lines: Vec<String> = self
+            .packages
+            .iter()
+            .map(|p| format!("- **{}** (`{}`): {}", p.display_name, p.id, p.description))
+            .collect();
+        format!(
+            "### Available Skills\n\n{}\n\nUse `/skill-<name>` to activate a skill.",
+            lines.join("\n")
+        )
+    }
+
+    /// 注入所有技能完整指令（兼容回退模式）。
+    pub fn generate_full_prompt(&self) -> String {
+        if self.packages.is_empty() {
+            return String::new();
+        }
+        self.packages
+            .iter()
+            .map(|p| format!("### Skill: {}\n\n{}", p.display_name, p.instructions))
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n")
+    }
+
     // -----------------------------------------------------------------------
     //  Plan 2 — SkillRouter 辅助方法（阶段一：纯规则匹配）
     // -----------------------------------------------------------------------
@@ -873,6 +901,61 @@ mod tests {
         let registry = SkillRegistry::new();
         let prompt = registry.generate_contextual_prompt(None);
         assert!(prompt.is_empty());
+    }
+
+    #[test]
+    fn catalog_prompt_has_no_full_instructions() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "skill-1".to_string(),
+            slug: "skill-1".to_string(),
+            display_name: "Skill One".to_string(),
+            description: "First skill".to_string(),
+            instructions: "Full instructions for skill one".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("skill-1"),
+            compat_mode: false,
+        });
+        let prompt = registry.generate_catalog_prompt();
+        assert!(prompt.contains("### Available Skills"));
+        assert!(!prompt.contains("Full instructions for skill one"));
+    }
+
+    #[test]
+    fn full_prompt_includes_all_instructions() {
+        let mut registry = SkillRegistry::new();
+        registry.packages.push(SkillPackage {
+            id: "skill-1".to_string(),
+            slug: "skill-1".to_string(),
+            display_name: "Skill One".to_string(),
+            description: "First skill".to_string(),
+            instructions: "Instr1".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("skill-1"),
+            compat_mode: false,
+        });
+        registry.packages.push(SkillPackage {
+            id: "skill-2".to_string(),
+            slug: "skill-2".to_string(),
+            display_name: "Skill Two".to_string(),
+            description: "Second skill".to_string(),
+            instructions: "Instr2".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("skill-2"),
+            compat_mode: false,
+        });
+        let prompt = registry.generate_full_prompt();
+        assert!(prompt.contains("Instr1"));
+        assert!(prompt.contains("Instr2"));
     }
 
     #[test]

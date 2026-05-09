@@ -7,7 +7,10 @@ use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
-use crate::prompt::{load_developer_project_prompt_async, load_project_context_with_config_async, PromptConfig};
+use crate::prompt::{
+    load_developer_project_prompt_async, load_project_context_with_config_async, ProjectInstructionProfile,
+    PromptConfig, SkillInjectionMode, ToolGuidanceMode,
+};
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -27,6 +30,32 @@ pub struct ConversationService<C: LlmClient> {
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
+    fn parse_project_instruction_profile(raw: &str) -> ProjectInstructionProfile {
+        match raw {
+            "analysis" => ProjectInstructionProfile::Analysis,
+            "code" => ProjectInstructionProfile::Code,
+            "design" => ProjectInstructionProfile::Design,
+            "review" => ProjectInstructionProfile::Review,
+            "full" => ProjectInstructionProfile::Full,
+            _ => ProjectInstructionProfile::Auto,
+        }
+    }
+
+    fn parse_skill_injection(raw: &str) -> SkillInjectionMode {
+        match raw {
+            "active_full" => SkillInjectionMode::ActiveFull,
+            "full" => SkillInjectionMode::Full,
+            _ => SkillInjectionMode::Catalog,
+        }
+    }
+
+    fn parse_tool_guidance(raw: &str) -> ToolGuidanceMode {
+        match raw {
+            "full" => ToolGuidanceMode::Full,
+            _ => ToolGuidanceMode::Compact,
+        }
+    }
+
     pub fn new(
         agent: AgentRuntime<C>,
         agent_registry: AgentRegistry,
@@ -286,11 +315,27 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     .clone()
                     .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
             };
+            let compaction = &self.app_config.prompt_compaction;
             let mut prompt_config =
                 PromptConfig::new(agent_descriptor.id.clone(), system_prompt_base, project_dir.clone())
                     .with_project_context_path_opt(self.agent.config.project_context_file.clone())
                     .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
-                    .with_template_vars(agent_descriptor.initial_template_vars.clone());
+                    .with_template_vars(agent_descriptor.initial_template_vars.clone())
+                    .with_project_instruction_profile(if compaction.enabled {
+                        Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
+                    } else {
+                        ProjectInstructionProfile::Full
+                    })
+                    .with_skill_injection(if compaction.enabled {
+                        Self::parse_skill_injection(compaction.skill_injection.as_str())
+                    } else {
+                        SkillInjectionMode::Full
+                    })
+                    .with_tool_guidance(if compaction.enabled {
+                        Self::parse_tool_guidance(compaction.tool_guidance.as_str())
+                    } else {
+                        ToolGuidanceMode::Full
+                    });
 
             // 如果 agent 启用了开发项目提示词，则注入文件列表
             if agent_descriptor.enable_project_developer_prompt {

@@ -94,6 +94,12 @@ pub struct PromptConfig {
     pub developer_project_prompt_content: Option<String>,
     /// Orchestrator agent catalog（Plan 1）。为空时不注入 catalog section。
     pub agent_catalog: Option<String>,
+    /// 项目规则注入 profile。
+    pub project_instruction_profile: ProjectInstructionProfile,
+    /// skill 注入策略。
+    pub skill_injection: SkillInjectionMode,
+    /// tool 提示策略。
+    pub tool_guidance: ToolGuidanceMode,
 }
 
 impl PromptConfig {
@@ -111,6 +117,9 @@ impl PromptConfig {
             developer_prompt_files: Vec::new(),
             developer_project_prompt_content: None,
             agent_catalog: None,
+            project_instruction_profile: ProjectInstructionProfile::Auto,
+            skill_injection: SkillInjectionMode::Catalog,
+            tool_guidance: ToolGuidanceMode::Compact,
         }
     }
 
@@ -169,6 +178,44 @@ impl PromptConfig {
         self.agent_catalog = Some(catalog);
         self
     }
+
+    pub fn with_project_instruction_profile(mut self, profile: ProjectInstructionProfile) -> Self {
+        self.project_instruction_profile = profile;
+        self
+    }
+
+    pub fn with_skill_injection(mut self, mode: SkillInjectionMode) -> Self {
+        self.skill_injection = mode;
+        self
+    }
+
+    pub fn with_tool_guidance(mut self, mode: ToolGuidanceMode) -> Self {
+        self.tool_guidance = mode;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectInstructionProfile {
+    Auto,
+    Analysis,
+    Code,
+    Design,
+    Review,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SkillInjectionMode {
+    Catalog,
+    ActiveFull,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolGuidanceMode {
+    Compact,
+    Full,
 }
 
 /// 模板变量正则匹配
@@ -611,6 +658,53 @@ pub fn load_developer_project_prompt(project_dir: Option<&Path>, files: &[String
     }
 }
 
+fn filter_project_instruction_by_profile(content: &str, profile: ProjectInstructionProfile) -> String {
+    if matches!(profile, ProjectInstructionProfile::Full) {
+        return content.to_string();
+    }
+    let normalized = if matches!(profile, ProjectInstructionProfile::Auto) {
+        ProjectInstructionProfile::Code
+    } else {
+        profile
+    };
+    let mut output = Vec::new();
+    let mut current_heading = String::new();
+    let mut current_lines: Vec<String> = Vec::new();
+    let flush = |heading: &str, lines: &[String], dst: &mut Vec<String>| {
+        if heading.is_empty() {
+            return;
+        }
+        let keep = match normalized {
+            ProjectInstructionProfile::Analysis => matches!(heading, "基本行为" | "代码结构"),
+            ProjectInstructionProfile::Code => {
+                matches!(heading, "基本行为" | "技术栈" | "代码结构" | "代码质量" | "修复流程")
+            }
+            ProjectInstructionProfile::Design => matches!(heading, "基本行为" | "计划与设计文档"),
+            ProjectInstructionProfile::Review => matches!(heading, "基本行为" | "代码质量"),
+            ProjectInstructionProfile::Auto | ProjectInstructionProfile::Full => false,
+        };
+        if keep {
+            dst.extend(lines.iter().cloned());
+        }
+    };
+
+    for line in content.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            flush(&current_heading, &current_lines, &mut output);
+            current_heading = heading.trim().to_string();
+            current_lines.clear();
+        }
+        current_lines.push(line.to_string());
+    }
+    flush(&current_heading, &current_lines, &mut output);
+
+    if output.is_empty() {
+        content.to_string()
+    } else {
+        output.join("\n")
+    }
+}
+
 /// 单个 agent 在 catalog 中的条目。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentCatalogEntry {
@@ -946,15 +1040,22 @@ impl SystemPromptBuilder {
         self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
     }
 
-    fn with_tool_definitions_internal(mut self, definitions: &[ToolDefinition]) -> Self {
+    fn with_tool_definitions_internal(mut self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
         let mut tool_desc = String::new();
         for def in definitions {
-            tool_desc.push_str(&format!(
-                "## {}\n\n{}\n\nInput schema:\n```json\n{}\n```\n\n---\n\n",
-                def.name,
-                def.description,
-                serde_json::to_string_pretty(&def.input_schema).unwrap_or_else(|_| "{}".to_string())
-            ));
+            match mode {
+                ToolGuidanceMode::Compact => {
+                    tool_desc.push_str(&format!("- `{}`: {}\n", def.name, def.description));
+                }
+                ToolGuidanceMode::Full => {
+                    tool_desc.push_str(&format!(
+                        "## {}\n\n{}\n\nInput schema:\n```json\n{}\n```\n\n---\n\n",
+                        def.name,
+                        def.description,
+                        serde_json::to_string_pretty(&def.input_schema).unwrap_or_else(|_| "{}".to_string())
+                    ));
+                }
+            }
         }
 
         if let Some((_, section)) = self
@@ -989,12 +1090,12 @@ impl SystemPromptBuilder {
                 input_schema: def.input_schema,
             })
             .collect();
-        self.with_tool_definitions(&definitions)
+        self.with_tool_definitions(&definitions, ToolGuidanceMode::Full)
     }
 
     /// 追加当前轮次实际可见的工具定义，确保 prompt 与 API tools 参数一致。
-    pub fn with_tool_definitions(self, definitions: &[ToolDefinition]) -> Self {
-        self.with_tool_definitions_internal(definitions)
+    pub fn with_tool_definitions(self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
+        self.with_tool_definitions_internal(definitions, mode)
     }
 
     pub fn size_report(&self, large_section_chars: usize) -> Vec<PromptSectionSize> {
@@ -1048,18 +1149,24 @@ impl SystemPromptBuilder {
         builder = builder.behavior_guards_section();
 
         // L2: Skills（按需注入）
-        let skill_prompt = skills.generate_contextual_prompt(config.active_skill.as_deref());
+        let skill_prompt = match config.skill_injection {
+            SkillInjectionMode::Catalog => skills.generate_catalog_prompt(),
+            SkillInjectionMode::ActiveFull => skills.generate_contextual_prompt(config.active_skill.as_deref()),
+            SkillInjectionMode::Full => skills.generate_full_prompt(),
+        };
         if !skill_prompt.is_empty() {
             builder = builder.skill_section(&skill_prompt);
         }
 
         // L4: 开发项目提示词（在 ProjectContext 之前）
         if let Some(content) = &config.developer_project_prompt_content {
-            builder = builder.developer_project_prompt_section(content);
+            let filtered = filter_project_instruction_by_profile(content, config.project_instruction_profile);
+            builder = builder.developer_project_prompt_section(filtered);
         } else if let Some(content) =
             load_developer_project_prompt(config.project_dir.as_deref(), &config.developer_prompt_files)
         {
-            builder = builder.developer_project_prompt_section(&content);
+            let filtered = filter_project_instruction_by_profile(&content, config.project_instruction_profile);
+            builder = builder.developer_project_prompt_section(filtered);
         }
 
         // L5: 项目上下文
@@ -1673,7 +1780,7 @@ mod tests {
 
         let prompt = SystemPromptBuilder::new()
             .tool_guidance_section("Tool usage")
-            .with_tool_definitions(&defs)
+            .with_tool_definitions(&defs, ToolGuidanceMode::Full)
             .build();
 
         assert!(prompt.contains("## Read"));
@@ -2246,5 +2353,29 @@ mod tests {
         assert_eq!(report.len(), 1);
         assert_eq!(report[0].name, "Read");
         assert!(report[0].chars > 0);
+    }
+
+    #[test]
+    fn tool_guidance_compact_does_not_include_schema() {
+        let defs = vec![ToolDefinition {
+            name: "Read".to_string(),
+            description: "Read file".to_string(),
+            input_schema: serde_json::json!({"type":"object"}),
+        }];
+        let prompt = SystemPromptBuilder::new()
+            .tool_guidance_section("tools")
+            .with_tool_definitions(&defs, ToolGuidanceMode::Compact)
+            .build();
+        assert!(prompt.contains("`Read`: Read file"));
+        assert!(!prompt.contains("Input schema"));
+    }
+
+    #[test]
+    fn project_instruction_profile_code_filters_sections() {
+        let raw = "## 基本行为\nA\n## 计划与设计文档\nB\n## 代码质量\nC";
+        let filtered = filter_project_instruction_by_profile(raw, ProjectInstructionProfile::Code);
+        assert!(filtered.contains("## 基本行为"));
+        assert!(filtered.contains("## 代码质量"));
+        assert!(!filtered.contains("## 计划与设计文档"));
     }
 }

@@ -35,6 +35,34 @@ pub struct AppConfig {
     /// 相对路径相对于项目根目录解析。
     #[serde(default)]
     pub developer_prompt_files: Vec<String>,
+    /// prompt 分层压缩配置。
+    #[serde(default)]
+    pub prompt_compaction: PromptCompactionConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptCompactionConfig {
+    #[serde(default = "default_compaction_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_project_instruction_profile")]
+    pub project_instruction_profile: String,
+    #[serde(default = "default_skill_injection")]
+    pub skill_injection: String,
+    #[serde(default = "default_tool_guidance")]
+    pub tool_guidance: String,
+}
+
+fn default_compaction_enabled() -> bool {
+    true
+}
+fn default_project_instruction_profile() -> String {
+    "auto".to_string()
+}
+fn default_skill_injection() -> String {
+    "catalog".to_string()
+}
+fn default_tool_guidance() -> String {
+    "compact".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -209,6 +237,18 @@ impl Default for AppConfig {
             config_dir: PathBuf::new(),
             config_path: None,
             developer_prompt_files: Vec::new(),
+            prompt_compaction: PromptCompactionConfig::default(),
+        }
+    }
+}
+
+impl Default for PromptCompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_compaction_enabled(),
+            project_instruction_profile: default_project_instruction_profile(),
+            skill_injection: default_skill_injection(),
+            tool_guidance: default_tool_guidance(),
         }
     }
 }
@@ -754,6 +794,21 @@ impl AppConfig {
                 bail!("developer_prompt_files[{}] cannot be empty", i);
             }
         }
+        if !matches!(
+            self.prompt_compaction.project_instruction_profile.as_str(),
+            "auto" | "analysis" | "code" | "design" | "review" | "full"
+        ) {
+            bail!("prompt_compaction.project_instruction_profile is invalid");
+        }
+        if !matches!(
+            self.prompt_compaction.skill_injection.as_str(),
+            "catalog" | "active_full" | "full"
+        ) {
+            bail!("prompt_compaction.skill_injection is invalid");
+        }
+        if !matches!(self.prompt_compaction.tool_guidance.as_str(), "compact" | "full") {
+            bail!("prompt_compaction.tool_guidance is invalid");
+        }
 
         if self.search.backend.as_deref() == Some("tavily")
             && self
@@ -790,6 +845,8 @@ struct RawAppConfig {
     pub config_path: Option<String>,
     #[serde(default)]
     pub developer_prompt_files: Vec<String>,
+    #[serde(default)]
+    pub prompt_compaction: PromptCompactionConfig,
 }
 
 fn reject_removed_defaults<'de, D>(deserializer: D) -> std::result::Result<Option<IgnoredAny>, D::Error>
@@ -1062,6 +1119,7 @@ impl RawAppConfig {
                 config_dir,
                 config_path: self.config_path,
                 developer_prompt_files: self.developer_prompt_files,
+                prompt_compaction: self.prompt_compaction,
             },
             warnings,
         )
@@ -1468,6 +1526,41 @@ llm = "local_default"
         let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, _) = raw.migrate(PathBuf::from("."));
         assert!(config.developer_prompt_files.is_empty());
+    }
+
+    #[test]
+    fn prompt_compaction_defaults_are_applied() {
+        let config = AppConfig::default();
+        assert!(config.prompt_compaction.enabled);
+        assert_eq!(config.prompt_compaction.project_instruction_profile, "auto");
+        assert_eq!(config.prompt_compaction.skill_injection, "catalog");
+        assert_eq!(config.prompt_compaction.tool_guidance, "compact");
+    }
+
+    #[test]
+    fn invalid_prompt_compaction_profile_is_rejected() {
+        let toml = r#"
+[prompt_compaction]
+project_instruction_profile = "bad"
+
+[providers.local]
+base_url = "http://localhost:8082/v1"
+
+[llms.local_default]
+provider = "local"
+model = "test-model"
+
+[[gateway.agents]]
+id = "nova"
+display_name = "Nova"
+description = "d"
+provider = "local"
+llm = "local_default"
+"#;
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let (config, _) = raw.migrate(PathBuf::from("."));
+        let error = config.validate().expect_err("config should fail validation");
+        assert!(error.to_string().contains("project_instruction_profile"));
     }
 
     #[test]

@@ -758,7 +758,8 @@ impl<C: LlmClient> AgentRuntime<C> {
     fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
         let empty = SkillRegistry::new();
         let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
-        let builder = SystemPromptBuilder::from_config(config, skills).with_tool_definitions(tool_definitions);
+        let builder = SystemPromptBuilder::from_config(config, skills)
+            .with_tool_definitions(tool_definitions, config.tool_guidance);
         self.log_prompt_diagnostics(&builder, tool_definitions);
         builder.build()
     }

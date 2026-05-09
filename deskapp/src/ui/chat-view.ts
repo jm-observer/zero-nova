@@ -1004,55 +1004,79 @@ export class ChatView {
         return false;
     }
 
-    private addMessage(message: any) {
-        if (message.role === 'system') return;
-        // 使用 state 中的消息总数减 1 作为原始索引
-        const index = this.state.messages.length - 1;
-        const html = this.renderMessage(message, index);
-        this.messagesContainer.insertAdjacentHTML('beforeend', html);
-        this.scrollToBottom();
-        this.updateMinimap();
+    private resolveToolUseId(block: any): string {
+        return block.id || block.toolUseId || block.tool_use_id || '';
     }
 
-    private renderMessage(message: any, index: number): string {
-        const isAssistant = message.role === 'assistant';
-        const content = message.content;
-        const voiceTranscriptState = message.metadata?.voiceTranscriptState as 'pending' | 'final' | undefined;
-        let contentHtml = '';
-        if (!content) {
-            contentHtml = '<span class="empty-content">...</span>';
-        } else if (Array.isArray(content)) {
-            // 处理 Phase 4 的内容块数组
-            contentHtml = content.map((block: any) => {
-                const type = block.type;
-                if (type === 'text') {
-                    const text = typeof block.text === 'string' ? block.text : (block.content || '');
-                    return renderMarkdown(text);
-                } else if (type === 'thinking') {
-                    return `<div class="thinking-block">
-                        <div class="thinking-header">${t('chat.thinking')}</div>
-                        <div class="thinking-content">${renderMarkdown(block.thinking || '')}</div>
-                    </div>`;
-                } else if (type === 'tool_use' || type === 'tool_call') {
-                    const name = block.name || block.toolName;
-                    const input = block.input || block.args;
-                    const toolUseId = block.id || block.toolUseId;
-                    return `<div class="tool-use-card collapsible collapsed" data-tool-use-id="${toolUseId}">
-                        <div class="tool-name">🛠️ ${name} <span class="collapse-icon">⌄</span></div>
-                        <pre class="tool-args">${JSON.stringify(input, null, 2)}</pre>
-                        <div class="tool-log-streamer hidden"></div>
-                    </div>`;
-                } else if (type === 'tool_result') {
+    private buildToolHtml(message: any): string {
+        if (!Array.isArray(message.content)) return '';
+        
+        // Phase 1: Collect tool_use and tool_result, build mappings
+        const toolUseMap = new Map<string, any>();
+        const resultMap = new Map<string, any>();
+        const toolUseOrder: string[] = [];
+        
+        for (const block of message.content) {
+            if (block.type === 'tool_use' || block.type === 'tool_call') {
+                const id = this.resolveToolUseId(block);
+                if (id) {
+                    toolUseMap.set(id, block);
+                    if (!toolUseOrder.includes(id)) {
+                        toolUseOrder.push(id);
+                    }
+                }
+            } else if (block.type === 'tool_result') {
+                const id = this.resolveToolUseId(block);
+                if (id) {
+                    resultMap.set(id, block);
+                }
+            }
+        }
+        
+        // Phase 2: Output tool_use in order with corresponding tool_result
+        let htmlParts: string[] = [];
+        const processedResultIds = new Set<string>();
+        
+        for (const toolUseId of toolUseOrder) {
+            const toolUseBlock = toolUseMap.get(toolUseId);
+            const resultBlock = resultMap.get(toolUseId);
+            
+            const name = toolUseBlock?.name || toolUseBlock?.toolName || '';
+            const args = toolUseBlock?.args || toolUseBlock?.input || {};
+            
+            let resultHtml = '';
+            if (resultBlock) {
+                processedResultIds.add(toolUseId);
+                resultHtml = this.buildToolResultInline(resultBlock);
+            }
+            
+            // Nested structure: tool_use contains tool_result
+            const html = `
+                <div class="tool-use-card collapsible collapsed" data-tool-use-id="${toolUseId}">
+                    <div class="tool-name">🛠️ ${name} <span class="collapse-icon">⌄</span></div>
+                    <pre class="tool-args">${JSON.stringify(args || {}, null, 2)}</pre>
+                    <div class="tool-log-streamer hidden"></div>
+                    <div class="tool-result-container" data-rel-id="${toolUseId}">
+                        ${resultHtml}
+                    </div>
+                </div>
+            `;
+            htmlParts.push(html);
+        }
+        
+        // Phase 3: Output orphaned tool_result (no matching tool_use)
+        for (const block of message.content) {
+            if (block.type === 'tool_result') {
+                const id = this.resolveToolUseId(block);
+                if (id && !processedResultIds.has(id)) {
                     const originalContent = block.content || block.result || block.output || '';
                     let displayContent = '';
                     let isErrorCode = this.hasExitCodeError(originalContent, block.isError);
                     
                     try {
                         const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
-                        
                         if (parsed && typeof parsed === 'object') {
                             if (parsed.output_summary) {
-                                // Subagent summary rendering
                                 displayContent = renderMarkdown(parsed.output_summary);
                                 
                                 if (parsed.logs && Array.isArray(parsed.logs) && parsed.logs.length > 0) {
@@ -1073,7 +1097,6 @@ export class ChatView {
                                     </div>`;
                                 }
                             } else {
-                                // Other JSON tools
                                 displayContent = `<pre class="json-result"><code>${escapeHtml(JSON.stringify(parsed, null, 2))}</code></pre>`;
                             }
                         } else {
@@ -1083,13 +1106,105 @@ export class ChatView {
                         displayContent = escapeHtml(String(originalContent));
                     }
 
-                    return `<div class="tool-result-card collapsible ${isErrorCode ? 'error' : ''}">
-                        <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
-                        <div class="tool-result-content">${displayContent}</div>
-                    </div>`;
+                    const html = `
+                        <div class="tool-result-card collapsible ${isErrorCode ? 'error' : ''}">
+                            <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
+                            <div class="tool-result-content">${displayContent}</div>
+                        </div>
+                    `;
+                    htmlParts.push(html);
                 }
-                return '';
-            }).join('');
+            }
+        }
+        
+        return htmlParts.join('');
+    }
+
+    private buildToolResultInline(block: any): string {
+        const originalContent = block.content || block.result || block.output || '';
+        let displayContent = '';
+        let isErrorCode = this.hasExitCodeError(originalContent, block.isError);
+        
+        try {
+            const parsed = typeof originalContent === 'string' ? JSON.parse(originalContent) : originalContent;
+            if (parsed && typeof parsed === 'object') {
+                if (parsed.output_summary) {
+                    displayContent = renderMarkdown(parsed.output_summary);
+                    
+                    if (parsed.logs && Array.isArray(parsed.logs) && parsed.logs.length > 0) {
+                        displayContent += `
+                            <details class="subagent-logs-detail" style="margin-top: 12px; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden;">
+                                <summary style="padding: 8px 12px; background: var(--bg-secondary); cursor: pointer; font-size: 0.85em; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                                    <span class="icon">📜</span> ${t('chat.subagent_logs')}
+                                </summary>
+                                <div style="padding: 0; background: #000; color: #fff; font-family: var(--font-code); font-size: 0.8em; max-height: 300px; overflow-y: auto;">
+                                    <pre style="margin: 0; padding: 12px; white-space: pre-wrap; line-height: 1.4;">${escapeHtml(parsed.logs.join(''))}</pre>
+                                </div>
+                            </details>`;
+                    }
+
+                    if (parsed.workspace_files && Array.isArray(parsed.workspace_files) && parsed.workspace_files.length > 0) {
+                        displayContent += `<div class="tool-result-files" style="margin-top: 10px; font-size: 0.9em; color: var(--text-secondary);">
+                            📁 ${t('chat.files_created', parsed.workspace_files.length)}: ${parsed.workspace_files.join(', ')}
+                        </div>`;
+                    }
+                } else {
+                    displayContent = `<pre class="json-result"><code>${escapeHtml(JSON.stringify(parsed, null, 2))}</code></pre>`;
+                }
+            } else {
+                displayContent = escapeHtml(String(originalContent));
+            }
+        } catch (e) {
+            displayContent = escapeHtml(String(originalContent));
+        }
+
+        return `<div class="tool-result-card collapsible ${isErrorCode ? 'error' : ''}">
+            <div class="tool-result-header">🔍 ${t('chat.tool_result')} <span class="collapse-icon">⌄</span></div>
+            <div class="tool-result-content">${displayContent}</div>
+        </div>`;
+    }
+
+    private addMessage(message: any) {
+        if (message.role === 'system') return;
+        // 使用 state 中的消息总数减 1 作为原始索引
+        const index = this.state.messages.length - 1;
+        const html = this.renderMessage(message, index);
+        this.messagesContainer.insertAdjacentHTML('beforeend', html);
+        this.scrollToBottom();
+        this.updateMinimap();
+    }
+
+    private renderMessage(message: any, index: number): string {
+        const isAssistant = message.role === 'assistant';
+        const content = message.content;
+        const voiceTranscriptState = message.metadata?.voiceTranscriptState as 'pending' | 'final' | undefined;
+        let contentHtml = '';
+        if (!content) {
+            contentHtml = '<span class="empty-content">...</span>';
+        } else if (Array.isArray(content)) {
+            // Check if content contains tool blocks that should use nested structure
+            const hasToolBlocks = content.some((block: any) => 
+                block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'tool_result'
+            );
+            
+            if (hasToolBlocks) {
+                contentHtml = this.buildToolHtml(message);
+            } else {
+                // For non-tool content, keep the original mapping approach
+                contentHtml = content.map((block: any) => {
+                    const type = block.type;
+                    if (type === 'text') {
+                        const text = typeof block.text === 'string' ? block.text : (block.content || '');
+                        return renderMarkdown(text);
+                    } else if (type === 'thinking') {
+                        return `<div class="thinking-block">
+                            <div class="thinking-header">${t('chat.thinking')}</div>
+                            <div class="thinking-content">${renderMarkdown(block.thinking || '')}</div>
+                        </div>`;
+                    }
+                    return '';
+                }).join('');
+            }
         } else {
             // 兼容旧的字符串格式
             const text = typeof content === 'string' ? content : JSON.stringify(content);
@@ -1300,6 +1415,7 @@ export class ChatView {
                     <div class="tool-name">🛠️ ${toolName} <span class="collapse-icon">⌄</span></div>
                     <pre class="tool-args">${JSON.stringify(args || {}, null, 2)}</pre>
                     <div class="tool-log-streamer hidden"></div>
+                    <div class="tool-result-container" data-rel-id="${toolUseId}"></div>
                 </div>
             `;
             markdownBody.insertAdjacentHTML('beforeend', html);

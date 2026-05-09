@@ -44,6 +44,12 @@ export class SidebarView {
             this.renderSessions();
         });
 
+        // 监听会话标题更新事件 (Plan 2)
+        this.bus.on(Events.SESSION_SUMMARY_UPDATED, () => {
+            console.log('[SidebarView] Session summary updated, rendering...');
+            this.renderSessions();
+        });
+
         this.bus.on(Events.SESSION_CREATED, () => {
             console.log('[SidebarView] Session created, rendering...');
             this.renderSessions();

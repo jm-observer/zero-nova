@@ -80,6 +80,15 @@ export class ChatView {
             this.updateSendButton();
         });
 
+        // 监听会话标题更新事件 (Plan 2)
+        this.bus.on(Events.SESSION_SUMMARY_UPDATED, (payload: { sessionId: string; title: string }) => {
+            console.log('[ChatView] Session summary updated, updating header title:', payload.sessionId, payload.title);
+            // 如果当前会话标题被更新，同步更新 header
+            if (this.state.currentSessionId === payload.sessionId) {
+                this.updateHeaderTitle();
+            }
+        });
+
         const gatewayClient = this.state.gatewayClient;
         if (gatewayClient && typeof gatewayClient.onSessionRuntimeUpdated === 'function') {
             gatewayClient.onSessionRuntimeUpdated((payload) => {

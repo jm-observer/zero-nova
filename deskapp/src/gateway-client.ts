@@ -1846,6 +1846,21 @@ export class GatewayClient {
         return () => this.removeMessageHandler(handler);
     }
 
+    /**
+     * 监听会话标题更新事件 (session.summary.updated)
+     * 用于 Plan 2 前端标题同步链路
+     */
+    onSessionSummaryUpdated(callback: (payload: { sessionId: string; title: string; updatedAt?: number; messageCount?: number; agentId?: string }) => void): () => void {
+        const handler = (msg: GatewayMessage) => {
+            if (msg.type === 'session.summary.updated' && msg.payload) {
+                const payload = msg.payload as { sessionId: string; title: string; updatedAt?: number; messageCount?: number; agentId?: string };
+                callback(payload);
+            }
+        };
+        this.addMessageHandler(handler);
+        return () => this.removeMessageHandler(handler);
+    }
+
 }
 
 // 单例实例

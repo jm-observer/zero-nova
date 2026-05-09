@@ -2,9 +2,8 @@ use nova_agent::app::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, App
 use nova_agent::message::ContentBlock;
 use nova_protocol::{
     Agent, AgentsSwitchResponse, ContentBlockDTO, ErrorPayload, GatewayMessage, MessageDTO, MessageEnvelope,
-    ProgressEvent, Session as SessionProtocol, SessionSummaryUpdatedPayload, SkillActivatedPayload, SkillExitedPayload,
-    SkillInvocationPayload, SkillRouteEvaluatedPayload, SkillSwitchedPayload, TaskStatusChangedPayload,
-    ToolUnlockedPayload, WelcomePayload,
+    ProgressEvent, Session as SessionProtocol, SkillActivatedPayload, SkillExitedPayload, SkillInvocationPayload,
+    SkillRouteEvaluatedPayload, SkillSwitchedPayload, TaskStatusChangedPayload, ToolUnlockedPayload, WelcomePayload,
 };
 
 /// 将 AppEvent 转换为 GatewayMessage。

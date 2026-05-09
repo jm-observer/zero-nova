@@ -26,6 +26,9 @@ export class ChatService {
             }
         });
 
+        // 初始化会话标题更新事件监听 (Plan 2)
+        this.state.initSessionSummaryTracking();
+
         // Listen for outgoing messages
         this.bus.on('message:send', async (payload: { text: string; skipOptimisticMessage?: boolean }) => {
             console.log('[ChatService] Outgoing message:', payload.text);
@@ -81,9 +84,10 @@ export class ChatService {
 
     private async sendMessage(text: string) {
         if (!this.state.currentSessionId) {
-             const title = text.length > 20 ? text.substring(0, 20) + '...' : text;
+             // 不再使用"首条消息即标题"的本地策略，改为创建占位标题 session
+             // 由后端统一生成标题并推送 session.summary.updated 事件
              const agentId = this.state.currentAgentId || 'default';
-             const session = await this.client.createSession({ title, agentId });
+             const session = await this.client.createSession({ agentId });
              this.state.addSession(session as Session);
              this.state.setCurrentSession(session.id);
         }

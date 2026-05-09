@@ -56,6 +56,7 @@
    SESSION_CREATED: 'session:created',     // { session: any }
    SESSION_DELETED: 'session:deleted',     // { sessionId: string }
    SESSION_UPDATED: 'session:updated',     // { sessions: any[] }
+   SESSION_SUMMARY_UPDATED: 'session:summary_updated', // { sessionId: string, title: string, updatedAt?: number, messageCount?: number, agentId?: string }
    SESSION_CREATE: 'session:create',       // { title?: string }
    SESSION_DELETE: 'session:delete',       // { id: string }
     SESSION_COPY: 'session:copy',           // { id: string, index?: number }

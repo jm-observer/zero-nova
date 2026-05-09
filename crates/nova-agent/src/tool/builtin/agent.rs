@@ -44,6 +44,13 @@ impl ProjectDirService for NoopProjectDirService {
 }
 
 impl AgentTool {
+    fn selected_agent_type(input: &Value) -> Option<&str> {
+        input["agent_selection"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| input["subagent_type"].as_str().filter(|value| !value.trim().is_empty()))
+    }
+
     pub fn new(config: AppConfig) -> Self {
         let mut agent_types = HashMap::new();
         for agent in &config.gateway.agents {
@@ -435,7 +442,7 @@ impl Tool for AgentTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'prompt'"))?;
         let description = input["description"].as_str().unwrap_or("Executing task");
-        let subagent_type = input["subagent_type"].as_str();
+        let selected_agent_type = Self::selected_agent_type(&input);
         let run_in_background = input["run_in_background"].as_bool().unwrap_or(false);
         let isolation = input["isolation"].as_str().unwrap_or("none");
         let model_override = input["model"].as_str();
@@ -448,7 +455,7 @@ impl Tool for AgentTool {
 
         log::info!(
             "[Agent] Starting {} agent: {}. Model: {:?}",
-            subagent_type.unwrap_or("default"),
+            selected_agent_type.unwrap_or("default"),
             description,
             model_override
         );
@@ -465,7 +472,7 @@ impl Tool for AgentTool {
             let response_agent_id = agent_id.clone();
             let response_stage_id = stage_id.clone();
             let prompt_owned = prompt.to_string();
-            let subagent_type_owned = subagent_type.map(ToString::to_string);
+            let selected_agent_type_owned = selected_agent_type.map(ToString::to_string);
             let model_override_owned = model_override.map(ToString::to_string);
             let description_owned = description.to_string();
             let parent_tx = ctx.event_tx.clone();
@@ -479,7 +486,7 @@ impl Tool for AgentTool {
                             "agentId": agent_id.clone(),
                             "stageId": stage_id.clone(),
                             "description": description_owned.clone(),
-                            "subagentType": subagent_type_owned.as_deref().unwrap_or("default"),
+                            "subagentType": selected_agent_type_owned.as_deref().unwrap_or("default"),
                         }),
                         log: None,
                         stream: None,
@@ -489,7 +496,7 @@ impl Tool for AgentTool {
                 let run = this
                     .run_subagent(
                         &prompt_owned,
-                        subagent_type_owned.as_deref(),
+                        selected_agent_type_owned.as_deref(),
                         model_override_owned.as_deref(),
                         Some(ctx),
                     )
@@ -551,7 +558,7 @@ impl Tool for AgentTool {
         }
 
         let (final_assistant_msg, duration_ms, run_warnings) = self
-            .run_subagent(prompt, subagent_type, model_override, context.clone())
+            .run_subagent(prompt, selected_agent_type, model_override, context.clone())
             .await?;
         warnings.extend(run_warnings);
 
@@ -575,6 +582,7 @@ mod tests {
     use super::AgentTool;
     use crate::agent_catalog::ModelConfig as AgentModelConfig;
     use crate::config::{AgentSpec, AppConfig, GatewayConfig};
+    use serde_json::json;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -649,6 +657,23 @@ mod tests {
         let (spec, warnings) = tool.resolve_agent_spec(None).unwrap();
         assert_eq!(spec.id, "nova");
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn selected_agent_type_prefers_agent_selection() {
+        let input = json!({
+            "agent_selection": "feature-developer",
+            "subagent_type": "nova"
+        });
+        assert_eq!(AgentTool::selected_agent_type(&input), Some("feature-developer"));
+    }
+
+    #[test]
+    fn selected_agent_type_falls_back_to_subagent_type() {
+        let input = json!({
+            "subagent_type": "developer"
+        });
+        assert_eq!(AgentTool::selected_agent_type(&input), Some("developer"));
     }
 
     #[tokio::test]

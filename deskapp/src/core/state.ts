@@ -136,6 +136,9 @@ export class AppState {
     /** 连续累加计数，每 3 次触发一次校正拉取 */
     private tokenAccumulationCount = new Map<string, number>();
 
+    // --- 会话标题更新 handler (Plan 2) ---
+    private sessionSummaryUpdateHandlerRef: ((msg: import('../gateway-client').GatewayMessage) => void) | null = null;
+
     // --- 模型绑定缓存 (Plan 2) ---
     modelBindingCache: Record<string, ModelBindingView[]> = {};
 
@@ -176,6 +179,58 @@ export class AppState {
             }
         };
         this.gatewayClient.addMessageHandler(this.tokenUsageHandlerRef);
+    }
+
+    /**
+     * 初始化会话标题更新事件监听 (Plan 2)
+     * 需要在 GatewayClient 连接后调用
+     */
+    initSessionSummaryTracking(): void {
+        // 停止之前的监听器
+        if (this.gatewayClient && this.sessionSummaryUpdateHandlerRef) {
+            this.gatewayClient.removeMessageHandler(this.sessionSummaryUpdateHandlerRef);
+            this.sessionSummaryUpdateHandlerRef = null;
+        }
+
+        if (!this.gatewayClient) return;
+
+        // 监听 GatewayClient 发出的 session.summary.updated 事件
+        this.sessionSummaryUpdateHandlerRef = (msg) => {
+            if (msg.type === 'session.summary.updated') {
+                const payload = msg.payload as { sessionId: string; title: string; updatedAt?: number; messageCount?: number; agentId?: string };
+                this.handleSessionSummaryUpdated(payload);
+            }
+        };
+        this.gatewayClient.addMessageHandler(this.sessionSummaryUpdateHandlerRef);
+    }
+
+    /**
+     * 处理会话标题更新事件
+     * 根据 sessionId 找到 session 并只更新返回字段，不破坏当前消息列表
+     * 若标题未变化则跳过，避免重复刷新
+     */
+    handleSessionSummaryUpdated(payload: { sessionId: string; title: string; updatedAt?: number; messageCount?: number; agentId?: string }): void {
+        const { sessionId, title, updatedAt } = payload;
+        const sessionIndex = this.sessions.findIndex(s => s.id === sessionId);
+        if (sessionIndex === -1) {
+            return;
+        }
+
+        // 若标题未变化则不发，避免重复刷新
+        const currentSession = this.sessions[sessionIndex];
+        if (currentSession.title === title) {
+            return;
+        }
+
+        // 更新 session 标题
+        const updatedSession = { ...currentSession, title, updatedAt: updatedAt ?? currentSession.updatedAt };
+        this.sessions[sessionIndex] = updatedSession;
+
+        // 通知 UI 更新
+        this.bus.emit(Events.SESSION_SUMMARY_UPDATED, payload);
+        this.bus.emit(Events.SESSION_UPDATED, { sessions: this.sessions });
+
+        console.log('[AppState] Session summary updated:', sessionId, 'title:', title);
     }
 
     /**

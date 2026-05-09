@@ -260,7 +260,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await?;
 
         let id = session.id.clone();
-        let name = session.name.clone();
+        let name = session.get_name();
         let active_agent = session
             .control
             .read()
@@ -298,7 +298,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .context("Source session not found")?;
 
         let id = session.id.clone();
-        let name = session.name.clone();
+        let name = session.get_name();
         let active_agent = session
             .control
             .read()
@@ -332,7 +332,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         };
         let session = AppSession {
             id: session.id.clone(),
-            title: Some(session.name.clone()),
+            title: Some(session.get_name()),
             agent_id: session
                 .control
                 .read()

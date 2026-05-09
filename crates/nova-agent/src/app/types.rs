@@ -128,6 +128,7 @@ pub enum AppEvent {
     },
     // --- Observability & Control (Plan 1 & 2) ---
     SessionRuntimeUpdated(Box<nova_protocol::observability::SessionRuntimeSnapshot>),
+    SessionSummaryUpdated(nova_protocol::session::SessionSummaryUpdatedPayload),
     SessionTokenUsageUpdated(nova_protocol::observability::SessionTokenUsageResponse),
     SessionToolsUpdated(nova_protocol::observability::SessionToolsResponse),
     SessionSkillBindingsUpdated(nova_protocol::observability::SessionSkillBindingsResponse),

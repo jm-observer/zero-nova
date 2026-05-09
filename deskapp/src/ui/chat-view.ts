@@ -4,6 +4,7 @@ import { AppState } from '../core/state';
 import { EventBus, Events } from '../core/event-bus';
 import { renderMarkdown } from '../markdown';
 import { escapeHtml, formatTime } from '../utils/html';
+import { playCompletionSound } from '../utils/sound';
 import { OrchestrationView } from './orchestration-view';
 import type { SessionFileTreeEntryView, SessionRuntimeSnapshot, TokenUsageView, ResourceState } from '../core/types';
 
@@ -141,6 +142,8 @@ export class ChatView {
              this.stoppingSessions.delete(payload.sessionId);
              if (payload.sessionId === this.state.currentSessionId) {
                  console.log('[ChatView] Chat complete, resetting streaming state');
+                 // 播放完成提示音
+                 playCompletionSound();
                  this.streamingMessageEl = null;
                  this.streamingContent = '';
                  this.updateSendButton();

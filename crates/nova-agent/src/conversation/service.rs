@@ -1,5 +1,5 @@
 use super::cache::SessionCache;
-use super::control::ControlState;
+use super::control::{ControlState, TitleSource, TitleState, TitleStatus};
 use super::repository::SqliteSessionRepository;
 use super::session::{Session, SessionSummary};
 use crate::message::{ContentBlock, Message, Role};
@@ -17,6 +17,19 @@ use uuid::Uuid;
 
 type SessionLoadResult = Option<Arc<Session>>;
 type LoadingWaiters = HashMap<String, Vec<oneshot::Sender<SessionLoadResult>>>;
+
+// 标题生成常量
+/// 首次尝试触发标题生成的最小用户消息数
+pub const TITLE_MIN_USER_MESSAGES_FIRST_ATTEMPT: usize = 2;
+/// 第二次尝试触发标题生成的最小用户消息数
+pub const TITLE_MIN_USER_MESSAGES_SECOND_ATTEMPT: usize = 3;
+/// 最大尝试次数
+pub const TITLE_MAX_ATTEMPTS: u8 = 2;
+/// 最小总字符数（所有用户文本消息的字符总和）
+pub const TITLE_MIN_TOTAL_CHARS: usize = 24;
+
+/// 默认会话标题
+const DEFAULT_SESSION_TITLE: &str = "未命名会话";
 
 #[derive(Clone)]
 pub struct SessionService {
@@ -63,8 +76,7 @@ impl SessionService {
         inherited_project_dir: Option<PathBuf>,
     ) -> Result<Arc<Session>> {
         let id = Uuid::new_v4().to_string();
-        let length = id.len().min(8);
-        let session_name = name.unwrap_or_else(|| format!("Session {}", &id[..length]));
+        let session_name = name.unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string());
         let now = Utc::now().timestamp_millis();
 
         let mut initial_history = Vec::new();
@@ -81,12 +93,13 @@ impl SessionService {
         let session = Arc::new(Session {
             control: std::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
             id: id.clone(),
-            name: session_name,
+            name: RwLock::new(session_name),
             history: RwLock::new(initial_history),
             created_at: now,
             updated_at: AtomicI64::new(now),
             chat_lock: Mutex::new(()),
             cancellation_token: RwLock::new(None),
+            title_state: RwLock::new(TitleState::new_default()),
         });
 
         self.persist_full_session(&session).await?;
@@ -161,12 +174,13 @@ impl SessionService {
                 Arc::new(Session {
                     control: std::sync::RwLock::new(runtime_control),
                     id,
-                    name: title,
+                    name: RwLock::new(title),
                     history: RwLock::new(history),
                     created_at,
                     updated_at: AtomicI64::new(updated_at),
                     chat_lock: Mutex::new(()),
                     cancellation_token: RwLock::new(None),
+                    title_state: RwLock::new(TitleState::new_default()),
                 })
             },
         ))
@@ -205,10 +219,14 @@ impl SessionService {
             session.touch_updated_at();
         }
 
+        let is_user = role == Role::User;
         self.repository
             .save_message(session_id, &message_id, role, content, persisted_metadata, now)
             .await?;
         self.persist_session_control(&session).await?;
+        if is_user {
+            self.maybe_schedule_title_generation(session).await?;
+        }
 
         Ok(())
     }
@@ -225,7 +243,7 @@ impl SessionService {
         list.into_iter()
             .map(|session| SessionSummary {
                 id: session.id.clone(),
-                name: session.name.clone(),
+                name: session.get_name(),
                 agent_id: session
                     .control
                     .read()
@@ -283,12 +301,13 @@ impl SessionService {
         let session = Arc::new(Session {
             control: std::sync::RwLock::new(new_control),
             id: new_id.clone(),
-            name: format!("{} (Copy)", source.name),
+            name: RwLock::new(format!("{} (Copy)", source.get_name())),
             history: RwLock::new(new_history),
             created_at: now,
             updated_at: AtomicI64::new(now),
             chat_lock: Mutex::new(()),
             cancellation_token: RwLock::new(None),
+            title_state: RwLock::new(TitleState::new_default()),
         });
 
         self.persist_full_session(&session).await?;
@@ -430,7 +449,7 @@ impl SessionService {
         self.repository
             .save_session(
                 &session.id,
-                &session.name,
+                &session.get_name(),
                 &runtime_control.active_agent,
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
@@ -463,7 +482,7 @@ impl SessionService {
         self.repository
             .save_session(
                 &session.id,
-                &session.name,
+                &session.get_name(),
                 &runtime_control.active_agent,
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
@@ -483,6 +502,99 @@ impl SessionService {
         self.repository
             .update_session_runtime_control(session_id, &runtime_control, updated_at)
             .await
+    }
+}
+
+impl SessionService {
+    async fn maybe_schedule_title_generation(&self, session: Arc<Session>) -> Result<()> {
+        let (can_schedule, user_messages_count, user_texts) = {
+            let mut title_state = session
+                .title_state
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let history = session.history.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+            if title_state.source != TitleSource::Default
+                || title_state.status == TitleStatus::Pending
+                || title_state.attempt_count >= TITLE_MAX_ATTEMPTS
+            {
+                return Ok(());
+            }
+
+            let user_texts: Vec<String> = history
+                .iter()
+                .filter(|m| m.role == Role::User)
+                .flat_map(|m| m.content.iter())
+                .filter_map(|block| match block {
+                    ContentBlock::Text { text } => Some(text.trim()),
+                    _ => None,
+                })
+                .filter(|text| !text.is_empty())
+                .map(ToOwned::to_owned)
+                .collect();
+            let user_messages_count = user_texts.len();
+            let total_chars = user_texts.iter().map(|text| text.chars().count()).sum::<usize>();
+            let min_messages = if title_state.attempt_count == 0 {
+                TITLE_MIN_USER_MESSAGES_FIRST_ATTEMPT
+            } else {
+                TITLE_MIN_USER_MESSAGES_SECOND_ATTEMPT
+            };
+            if user_messages_count < min_messages || total_chars < TITLE_MIN_TOTAL_CHARS {
+                return Ok(());
+            }
+
+            title_state.set_pending(user_messages_count);
+            (true, user_messages_count, user_texts)
+        };
+
+        if !can_schedule {
+            return Ok(());
+        }
+        self.persist_runtime_control(&session.id, &session).await?;
+
+        let this = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = this
+                .run_title_generation(session.clone(), user_messages_count, user_texts)
+                .await
+            {
+                log::error!(
+                    "Session title generation task failed: session_id={}, err={}",
+                    session.id,
+                    err
+                );
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn run_title_generation(
+        &self,
+        session: Arc<Session>,
+        user_message_count: usize,
+        user_texts: Vec<String>,
+    ) -> Result<()> {
+        let generated =
+            generate_title_from_user_texts(&user_texts).context("Failed to generate session title from user texts")?;
+        let normalized = normalize_generated_title(&generated);
+
+        {
+            let mut title_state = session
+                .title_state
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if normalized.is_empty() {
+                title_state.set_failed("generated title is empty after normalization".to_string());
+            } else {
+                title_state.set_succeeded();
+                title_state.based_on_user_message_count = user_message_count;
+                session.set_name(normalized);
+            }
+        }
+
+        self.persist_session_control(&session).await?;
+        Ok(())
     }
 }
 
@@ -797,6 +909,134 @@ mod tests {
         assert_eq!(trace.bound_message_id, assistant.id);
         Ok(())
     }
+
+    #[tokio::test]
+    async fn default_title_is_used_when_create_name_missing() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let session = service
+            .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+            .await?;
+        assert_eq!(session.get_name(), super::DEFAULT_SESSION_TITLE);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn title_generation_starts_after_second_user_message_with_enough_chars() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let session = service
+            .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+            .await?;
+
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "我想做一个桌面端任务调度工具".to_string(),
+                }],
+                None,
+            )
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        {
+            let title_state = session
+                .title_state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_eq!(title_state.attempt_count, 0);
+        }
+
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "要支持重试队列并且按项目分类展示".to_string(),
+                }],
+                None,
+            )
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        {
+            let title_state = session
+                .title_state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_eq!(title_state.status, crate::conversation::control::TitleStatus::Succeeded);
+            assert_eq!(title_state.source, crate::conversation::control::TitleSource::Ai);
+            assert_eq!(title_state.attempt_count, 1);
+        }
+        assert_ne!(session.get_name(), super::DEFAULT_SESSION_TITLE);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn title_generation_waits_for_third_message_when_chars_not_enough() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let session = service
+            .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+            .await?;
+
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "短句".to_string(),
+                }],
+                None,
+            )
+            .await?;
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "再短".to_string(),
+                }],
+                None,
+            )
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        {
+            let title_state = session
+                .title_state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_eq!(title_state.attempt_count, 0);
+        }
+
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "第三条补充足够语义信息用于触发标题自动生成".to_string(),
+                }],
+                None,
+            )
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        {
+            let title_state = session
+                .title_state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert_eq!(title_state.attempt_count, 1);
+            assert_eq!(title_state.status, crate::conversation::control::TitleStatus::Succeeded);
+        }
+        Ok(())
+    }
 }
 
 async fn normalize_project_dir(path: &Path) -> PathBuf {
@@ -836,6 +1076,36 @@ fn sync_last_turn_prompt_preview(
         serde_json::Value::String(prompt_base_override.to_string()),
     );
     true
+}
+
+fn generate_title_from_user_texts(user_texts: &[String]) -> Result<String> {
+    let joined = user_texts.join(" ");
+    if joined.trim().is_empty() {
+        anyhow::bail!("user texts are empty");
+    }
+    Ok(joined)
+}
+
+fn normalize_generated_title(raw: &str) -> String {
+    let single_line = raw
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim();
+    let mut result = String::with_capacity(single_line.len());
+    for ch in single_line.chars() {
+        if ch == '\r' || ch == '\n' {
+            continue;
+        }
+        result.push(ch);
+        if result.chars().count() >= 40 {
+            break;
+        }
+    }
+    result
 }
 
 #[async_trait::async_trait]

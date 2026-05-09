@@ -57,6 +57,17 @@ pub struct Session {
     pub message_count: usize,
 }
 
+/// 会话标题更新推送事件 payload（Plan 2）
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummaryUpdatedPayload {
+    pub session_id: String,
+    pub title: Option<String>,
+    pub updated_at: i64,
+    pub message_count: usize,
+    pub agent_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDTO {

@@ -3,7 +3,7 @@ use crate::{
     PushCenter,
 };
 use channel_core::ResponseSink;
-use log::{debug, warn};
+use log::{trace, warn};
 use nova_agent::app::AgentApplication;
 use nova_protocol::{GatewayMessage, MessageEnvelope};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub async fn dispatch(
         }
     };
 
-    debug!(
+    trace!(
         "[INBOUND] dispatch: msg_id={}, envelope_type={}",
         msg_id,
         std::any::type_name_of_val(&msg.envelope)

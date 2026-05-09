@@ -1,6 +1,7 @@
-# ── 开发项目提示词 ──────────────────────────────────────────────
+﻿# ── 开发项目提示词 ──────────────────────────────────────────────
 developer_prompt_files = [
-  "AGENTS.md",
+  "AI.md"
+#  "AGENTS.md",
   #  "DEVELOPER.md",
   #  ".nova/developer-prompt.md",
 ]
@@ -56,6 +57,7 @@ max_iterations = 120
 tool_timeout_secs = 3600
 subagent_timeout_secs = 300
 max_tokens = 4096
+max_tokens_field = "completion"
 skill_routing_enabled = true
 skill_history_strategy = "global"
 use_turn_context = true
@@ -84,11 +86,41 @@ prompt_file = "agent-nova.md"
 [[gateway.agents]]
 id = "developer"
 display_name = "Developer"
-description = "开发任务子代理"
+description = "开发任务通用子代理"
 aliases = ["开发", "coder"]
 provider = "spark-8000"
 llm = "qwen3-6-4.6"
 prompt_file = "agent-developer.md"
+enable_project_developer_prompt = true
+
+[[gateway.agents]]
+id = "feature-developer"
+display_name = "Feature Developer"
+description = "开发新功能子代理"
+aliases = ["新功能", "功能开发", "feature", "feature-dev"]
+provider = "spark-8000"
+llm = "qwen3-6-4.6"
+prompt_file = "agent-feature-developer.md"
+enable_project_developer_prompt = true
+
+[[gateway.agents]]
+id = "bugfix-developer"
+display_name = "Bugfix Developer"
+description = "修复 Bug 子代理"
+aliases = ["修复Bug", "修Bug", "bugfix", "fix"]
+provider = "spark-8000"
+llm = "qwen3-6-4.6"
+prompt_file = "agent-bugfix-developer.md"
+enable_project_developer_prompt = true
+
+[[gateway.agents]]
+id = "detailed-design"
+display_name = "Detailed Design"
+description = "详细设计文档子代理"
+aliases = ["详细设计", "设计", "design"]
+provider = "spark-8000"
+llm = "qwen3-6-4.6"
+prompt_file = "agent-detailed-design.md"
 enable_project_developer_prompt = true
 
 # ── 桌面端远程连接 ──────────────────────────────────────────────

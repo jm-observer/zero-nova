@@ -5,7 +5,7 @@ use crate::message::Message;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use super::control::ControlState;
+use super::control::{ControlState, TitleState};
 
 /// Session represents a single conversation turn with its own lock.
 ///
@@ -16,15 +16,30 @@ use super::control::ControlState;
 pub struct Session {
     pub control: RwLock<ControlState>,
     pub id: String,
-    pub name: String,
+    pub name: RwLock<String>,
     pub history: RwLock<Vec<Message>>,
     pub created_at: i64,
     pub updated_at: AtomicI64,
     pub chat_lock: Mutex<()>,
     pub cancellation_token: RwLock<Option<CancellationToken>>,
+    /// 标题生成状态（内存中维护，不直接持久化到 SQLite）。
+    /// 解释 `name` 是默认值还是 AI 生成结果。
+    pub title_state: RwLock<TitleState>,
 }
 
 impl Session {
+    pub fn get_name(&self) -> String {
+        self.name
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    pub fn set_name(&self, name: String) {
+        let mut current = self.name.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *current = name;
+    }
+
     pub fn get_history(&self) -> Vec<Message> {
         self.history
             .read()

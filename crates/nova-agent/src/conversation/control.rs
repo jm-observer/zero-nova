@@ -1,6 +1,84 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 标题来源标识
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleSource {
+    #[default]
+    Default,
+    Ai,
+    Manual,
+}
+
+/// 标题生成状态
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleStatus {
+    #[default]
+    Idle,
+    Pending,
+    Succeeded,
+    Failed,
+}
+
+/// 会话标题生成状态。
+/// 用于解释 `Session.name` 是默认值还是 AI 生成结果，
+/// 并记录生成过程中的重试次数、错误信息等。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TitleState {
+    /// 标题来源：default / ai / manual
+    #[serde(default)]
+    pub source: TitleSource,
+    /// 当前生成状态
+    #[serde(default)]
+    pub status: TitleStatus,
+    /// 已尝试次数
+    #[serde(default)]
+    pub attempt_count: u8,
+    /// 最后一次尝试时间（毫秒时间戳）
+    #[serde(default)]
+    pub last_attempt_at: i64,
+    /// 最后一次成功时间（毫秒时间戳）
+    #[serde(default)]
+    pub last_success_at: Option<i64>,
+    /// 最后一次失败的错误信息
+    #[serde(default)]
+    pub last_error: Option<String>,
+    /// 基于多少条用户消息触发（用于日志和调试）
+    #[serde(default)]
+    pub based_on_user_message_count: usize,
+}
+
+impl TitleState {
+    pub fn new_default() -> Self {
+        Self::default()
+    }
+
+    pub fn set_pending(&mut self, user_message_count: usize) {
+        self.status = TitleStatus::Pending;
+        self.attempt_count += 1;
+        self.last_attempt_at = chrono::Utc::now().timestamp_millis();
+        self.based_on_user_message_count = user_message_count;
+    }
+
+    pub fn set_succeeded(&mut self) {
+        self.status = TitleStatus::Succeeded;
+        self.source = TitleSource::Ai;
+        self.last_success_at = Some(chrono::Utc::now().timestamp_millis());
+        self.last_error = None;
+    }
+
+    pub fn set_failed(&mut self, error: String) {
+        self.status = TitleStatus::Failed;
+        self.last_error = Some(error);
+    }
+
+    pub fn should_retry(&self) -> bool {
+        self.status == TitleStatus::Failed && self.attempt_count < crate::conversation::service::TITLE_MAX_ATTEMPTS
+    }
+}
+
 /// Represents the stable control state attached to a Session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlState {
@@ -19,6 +97,10 @@ pub struct ControlState {
     pub system_prompt_state: SystemPromptState,
     #[serde(default)]
     pub token_counters: SessionTokenCounters,
+    /// 会话标题生成状态（不持久化到 SQLite，仅内存状态）。
+    /// 解释 `Session.name` 是默认值还是 AI 结果。
+    #[serde(default)]
+    pub title_state: TitleState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,6 +167,7 @@ impl ControlState {
             system_prompt_base_override: None,
             system_prompt_state: SystemPromptState::default(),
             token_counters: SessionTokenCounters::default(),
+            title_state: TitleState::default(),
         }
     }
 }

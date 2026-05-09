@@ -221,12 +221,17 @@ pub fn build_request(
                 request.max_tokens = Some(config.max_tokens);
             }
         }
-        _ => {
+        "both" => {
+            // 显式配置为 "both" 时同时设置两个字段（兼容模式）
             request.max_completion_tokens = Some(config.max_tokens);
             #[allow(deprecated)]
             {
                 request.max_tokens = Some(config.max_tokens);
             }
+        }
+        _ => {
+            // 默认使用 max_completion_tokens（现代 OpenAI-compatible 服务的最佳实践）
+            request.max_completion_tokens = Some(config.max_tokens);
         }
     }
 

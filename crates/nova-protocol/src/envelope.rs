@@ -7,7 +7,7 @@ use crate::chat::{
 use crate::observability as obs;
 use crate::session::{
     SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload, SessionsListResponse,
-    SessionsMessagesResponse, SuccessResponse,
+    SessionsMessagesResponse, SuccessResponse, SessionSummaryUpdatedPayload,
 };
 use crate::system::{ErrorPayload, WelcomePayload};
 use crate::voice::{
@@ -158,6 +158,8 @@ pub enum MessageEnvelope {
     SessionRuntimeResponse(obs::SessionRuntimeSnapshot),
     #[serde(rename = "session.runtime.updated")]
     SessionRuntimeUpdated(obs::SessionRuntimeSnapshot),
+    #[serde(rename = "session.summary.updated")]
+    SessionSummaryUpdated(SessionSummaryUpdatedPayload),
     #[serde(rename = "session.prompt.preview")]
     SessionPromptPreview(obs::PromptPreviewRequest),
     #[serde(rename = "session.prompt.preview.response")]

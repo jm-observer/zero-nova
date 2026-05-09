@@ -65,7 +65,7 @@ fn default_tool_guidance() -> String {
     "compact".to_string()
 }
 fn default_max_tokens_field() -> String {
-    "both".to_string()
+    "completion".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

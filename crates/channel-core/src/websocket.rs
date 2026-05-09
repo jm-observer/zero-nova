@@ -1,6 +1,6 @@
 use crate::{ChannelHandler, ResponseSink};
 use futures_util::{SinkExt, StreamExt};
-use log::{debug, error, info, trace, warn};
+use log::{error, info, trace, warn};
 use serde::{de::DeserializeOwned, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -177,11 +177,11 @@ async fn handle_text_message<H, Req, Resp>(
 {
     match serde_json::from_str::<Req>(text) {
         Ok(req) => {
-            debug!(
-                "[INBOUND] Received request from peer: {} (type={})",
-                peer_id,
-                text.chars().take(200).collect::<String>()
-            );
+            // debug!(
+            //     "[INBOUND] Received request from peer: {} (type={})",
+            //     peer_id,
+            //     text.chars().take(200).collect::<String>()
+            // );
             let handler_clone = handler.clone();
             let peer_id_clone = peer_id.to_string();
             let sink_clone = response_sink.clone();

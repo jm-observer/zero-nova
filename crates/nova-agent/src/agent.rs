@@ -1008,7 +1008,7 @@ mod tests {
                     top_p: None,
                     thinking_budget: None,
                     reasoning_effort: None,
-                    max_tokens_field: "both".to_string(),
+                    max_tokens_field: "completion".to_string(),
                 },
                 tool_timeout: Duration::from_secs(1),
                 max_tokens: 128,

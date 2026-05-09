@@ -640,8 +640,11 @@ export class ChatView {
             const entry = this.pickerFilteredEntries[i];
             const activeClass = i === this.pickerActiveIndex ? 'active' : '';
             const typeClass = entry.isDir ? 'dir' : 'file';
+            const selectBtn = entry.isDir
+                ? `<button class="project-picker-item-select" data-index="${i}" data-dir="1">📌</button>`
+                : '';
             items.push(
-                `<button class="project-picker-item ${typeClass} ${activeClass}" data-index="${i}">${escapeHtml(entry.name)}</button>`
+                `<button class="project-picker-item ${typeClass} ${activeClass}" data-index="${i}">${escapeHtml(entry.name)}</button>${selectBtn}`
             );
         }
         const empty = !this.pickerLoading && items.length === 0
@@ -664,6 +667,21 @@ export class ChatView {
                     return;
                 }
                 void this.selectProjectPickerEntry(this.pickerFilteredEntries[idx]);
+            });
+        });
+
+        // 选择文件夹按钮点击处理
+        this.projectPickerEl.querySelectorAll('.project-picker-item-select').forEach((el) => {
+            el.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const idx = Number((el as HTMLElement).getAttribute('data-index') ?? '-1');
+                if (idx < 0 || idx >= this.pickerFilteredEntries.length) {
+                    return;
+                }
+                const entry = this.pickerFilteredEntries[idx];
+                if (entry && entry.isDir) {
+                    void this.selectProjectPickerFolder(entry);
+                }
             });
         });
 
@@ -773,6 +791,17 @@ export class ChatView {
             await this.loadProjectEntries(entry.relativePath);
             return;
         }
+        const cursor = this.messageInput.selectionStart ?? this.messageInput.value.length;
+        const before = this.messageInput.value.slice(0, this.pickerTokenStart);
+        const after = this.messageInput.value.slice(cursor);
+        this.messageInput.value = `${before}@${entry.relativePath} ${after}`;
+        const nextCursor = (before + `@${entry.relativePath} `).length;
+        this.messageInput.setSelectionRange(nextCursor, nextCursor);
+        this.hideProjectPicker();
+        this.messageInput.focus();
+    }
+
+    private selectProjectPickerFolder(entry: ProjectDirEntry) {
         const cursor = this.messageInput.selectionStart ?? this.messageInput.value.length;
         const before = this.messageInput.value.slice(0, this.pickerTokenStart);
         const after = this.messageInput.value.slice(cursor);

@@ -9,11 +9,11 @@ developer_prompt_files = [
 # 按实际环境替换以下占位符；密钥建议通过环境变量注入，避免明文提交
 [providers.spark-12340]
 # api_key = ""
-base_url = "http://192.168.0.68:85/v1"
+base_url = "http://192.168.0.68:8085/v1"
 
-[providers.spark-00]
+[providers.spark-8000]
 # api_key = "<CLOUD_PROVIDER_API_KEY>"
-base_url = "http://192.168.0.68:82/v1"
+base_url = "http://192.168.0.68:8082/v1"
 
 # ── 模型调用参数 ────────────────────────────────────────────────
 [llms.gemma]
@@ -24,7 +24,7 @@ max_tokens = 8192
 temperature = 0.5
 
 [llms."qwen3-6-4.6"]
-provider = "spark-00"
+provider = "spark-8000"
 model = "Huihui-Qwen3.6-35B-A3B-Claude"
 max_tokens = 8192
 temperature = 0.5
@@ -51,7 +51,7 @@ sandbox = false
 # ── 网关 ───────────────────────────────────────────────────────
 [gateway]
 host = "127.0.0.1"
-port = 181
+port = 18801
 max_iterations = 120
 tool_timeout_secs = 3600
 subagent_timeout_secs = 300
@@ -62,7 +62,7 @@ use_turn_context = true
 
 [gateway.trimmer]
 enabled = true
-context_window = 1200
+context_window = 128000
 output_reserve = 8192
 min_recent_messages = 10
 
@@ -86,7 +86,7 @@ id = "developer"
 display_name = "Developer"
 description = "开发任务子代理"
 aliases = ["开发", "coder"]
-provider = "spark-00"
+provider = "spark-8000"
 llm = "qwen3-6-4.6"
 prompt_file = "agent-developer.md"
 enable_project_developer_prompt = true
@@ -95,7 +95,7 @@ enable_project_developer_prompt = true
 [remote]
 enabled = true
 host = "127.0.0.1"
-port = 181
+port = 18801
 
 # ── Sidecar 启动 ───────────────────────────────────────────────
 [sidecar]

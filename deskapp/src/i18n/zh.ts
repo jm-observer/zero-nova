@@ -181,6 +181,7 @@ const zh: Record<string, string> = {
     'chat.project_copy_path': '复制路径',
     'chat.project_open_dir': '在文件管理器中打开',
     'chat.project_refresh': '刷新',
+    'chat.project_select_folder': '选择文件夹',
 
     // ========================
     // Settings - Tabs

@@ -1547,6 +1547,26 @@
 .project-picker-item.active {
   background: var(--color-bg-tertiary);
 }
+.project-picker-item-select {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+.project-picker-item-select:hover {
+  opacity: 1;
+}
+.project-picker-item {
+  position: relative;
+}
 .project-picker-empty {
   color: var(--color-text-secondary);
   font-size: 12px;

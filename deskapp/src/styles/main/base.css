@@ -1,5 +1,5 @@
-/* OpenFlux 主样�?- 三栏布局 */
-/* ========== 启动 Loading 遮罩�?========== */
+/* OpenFlux 主样?- 三栏布局 */
+/* ========== 启动 Loading 遮罩?========== */
 .app-loading-overlay {
   position: fixed;
   inset: 0;
@@ -137,7 +137,7 @@
   --progress-panel-width: 280px;
   --title-bar-height: 40px;
 }
-/* ========== 浅色主题（暖沙色�?========== */
+/* ========== 浅色主题（暖沙色?========== */
 [data-theme="light"] {
   --color-primary: #a0845c;
   --color-primary-hover: #8b7249;
@@ -433,7 +433,7 @@ body {
   flex-direction: column;
   height: 100vh;
 }
-/* ========== 标题�?========== */
+/* ========== 标题?========== */
 .title-bar {
   display: flex;
   justify-content: space-between;
@@ -502,7 +502,7 @@ body {
     opacity: 0.5;
   }
 }
-/* 标题栏按�?*/
+/* 标题栏按?*/
 .title-bar-btn {
   width: 36px;
   height: 36px;
@@ -514,7 +514,7 @@ body {
   outline: none;
   box-shadow: none;
 }
-/* 浏览器启动按钮状态反�?*/
+/* 浏览器启动按钮状态反?*/
 #browser-launch-btn.loading {
   animation: btn-spin 1s linear infinite;
   opacity: 0.6;
@@ -576,7 +576,7 @@ body {
   color: white;
 }
 /* macOS 平台适配 */
-/* macOS: 标题栏左侧预留空间给原生红绿灯（titleBarStyle: overlay�?*/
+/* macOS: 标题栏左侧预留空间给原生红绿灯（titleBarStyle: overlay?*/
 body.platform-macos .title-bar-left {
   padding-left: 70px;
 }
@@ -584,9 +584,9 @@ body.platform-macos .title-bar-left {
 body.platform-macos .window-controls {
   display: none;
 }
-/* macOS: 标题栏右侧补�?padding（移除窗口按钮后的空间平衡） */
+/* macOS: 标题栏右侧补?padding（移除窗口按钮后的空间平衡） */
 body.platform-macos .title-bar {
   padding-right: var(--spacing-md);
-  /* macOS: 禁用 CSS drag region，改�?JS startDragging() 避免 WKWebView 拦截冲突 */
+  /* macOS: 禁用 CSS drag region，改?JS startDragging() 避免 WKWebView 拦截冲突 */
   -webkit-app-region: no-drag;
 }

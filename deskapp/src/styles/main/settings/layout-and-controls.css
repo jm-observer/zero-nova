@@ -1,4 +1,4 @@
-/* ========== 设置视图（中部工作区�?========== */
+/* ========== 设置视图（中部工作区?========== */
 .settings-view {
   position: absolute;
   inset: 0;
@@ -31,7 +31,7 @@
   font-weight: 600;
   color: var(--color-text);
 }
-/* ========== 工作模式选择�?========== */
+/* ========== 工作模式选择?========== */
 .working-mode-selector {
   margin-bottom: var(--spacing-md);
 }
@@ -93,8 +93,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 被远程管理的配置区域覆盖�?*/
-/* 设置 Tab 切换�?*/
+/* 被远程管理的配置区域覆盖?*/
+/* 设置 Tab 切换?*/
 .settings-tabs {
   display: flex;
   gap: 2px;
@@ -123,7 +123,7 @@
   color: var(--color-text);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
-/* Tab 内容区：�?.settings-body 统一布局，通过 .active 控制显隐 */
+/* Tab 内容区：?.settings-body 统一布局，通过 .active 控制显隐 */
 .settings-body {
   flex-direction: column;
   gap: var(--spacing-sm);

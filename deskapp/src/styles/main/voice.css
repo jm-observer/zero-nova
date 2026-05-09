@@ -29,7 +29,7 @@
   color: var(--color-primary);
   box-shadow: none;
 }
-/* ========== 语音对话全屏覆盖�?========== */
+/* ========== 语音对话全屏覆盖?========== */
 .voice-overlay {
   position: fixed;
   top: 0;
@@ -68,7 +68,7 @@
   padding: 24px 32px 40px;
   z-index: 1;
 }
-/* 顶部�?*/
+/* 顶部?*/
 .voice-overlay-header {
   display: flex;
   align-items: center;
@@ -140,7 +140,7 @@
   top: -40%;
   left: -40%;
 }
-/* 核心�?*/
+/* 核心?*/
 .voice-ripple-core {
   width: 100px;
   height: 100px;
@@ -154,13 +154,13 @@
   transition: all 0.3s ease;
   z-index: 1;
 }
-/* 状态：等待中（idle�?*/
+/* 状态：等待中（idle?*/
 .voice-overlay[data-state="idle"] .voice-ripple-core {
   color: var(--color-text-secondary);
   border-color: rgba(99, 102, 241, 0.3);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
 }
-/* 状态：录音中（recording�?*/
+/* 状态：录音中（recording?*/
 .voice-overlay[data-state="recording"] .voice-ripple-core {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.5);
@@ -188,7 +188,7 @@
     opacity: 0;
   }
 }
-/* 状态：识别中（processing�?*/
+/* 状态：识别中（processing?*/
 .voice-overlay[data-state="processing"] .voice-ripple-core {
   color: var(--color-warning);
   border-color: rgba(250, 173, 20, 0.4);
@@ -204,7 +204,7 @@
     transform: scale(1.05);
   }
 }
-/* 状态：思�?回复中（answering�?*/
+/* 状态：思?回复中（answering?*/
 .voice-overlay[data-state="answering"] .voice-ripple-core {
   color: var(--color-primary);
   border-color: rgba(99, 102, 241, 0.5);
@@ -245,7 +245,7 @@
     opacity: 0.4;
   }
 }
-/* 状态：朗读中（speaking�?*/
+/* 状态：朗读中（speaking?*/
 .voice-overlay[data-state="speaking"] .voice-ripple-core {
   color: #10b981;
   border-color: rgba(16, 185, 129, 0.5);
@@ -274,7 +274,7 @@
     opacity: 0.08;
   }
 }
-/* 状态文�?*/
+/* 状态文?*/
 .voice-status-text {
   font-size: 15px;
   color: var(--color-text-secondary);
@@ -339,7 +339,7 @@
 .voice-main-btn:active {
   transform: scale(0.95);
 }
-/* 录音�?�?按钮变红 */
+/* 录音??按钮变红 */
 .voice-overlay[data-state="recording"] .voice-main-btn {
   border-color: #ef4444;
   background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.25));
@@ -365,7 +365,7 @@
 .voice-secondary-btn.hidden {
   display: none;
 }
-/* 嵌入模型重建进度�?*/
+/* 嵌入模型重建进度?*/
 .embedding-progress {
   margin-top: var(--spacing-md);
   padding: var(--spacing-sm);

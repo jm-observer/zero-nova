@@ -1,5 +1,5 @@
 /* ========== 语音功能样式 ========== */
-/* 麦克风按�?*/
+/* 麦克风按?*/
 .mic-btn {
   width: 36px;
   height: 36px;
@@ -29,7 +29,7 @@
   border-color: var(--color-border);
   color: var(--color-text-secondary);
 }
-/* 录音中状�?*/
+/* 录音中状?*/
 .mic-btn.recording {
   color: #ef4444;
   border-color: #ef4444;
@@ -115,13 +115,13 @@
     transform: rotate(360deg);
   }
 }
-/* message-time 调整：支持内联播放按�?*/
+/* message-time 调整：支持内联播放按?*/
 .message.assistant .message-time {
   display: flex;
   align-items: center;
   gap: 2px;
 }
-/* 设置面板：模型配置分组卡�?*/
+/* 设置面板：模型配置分组卡?*/
 .settings-model-group {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -174,7 +174,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-/* 设置面板：分区标�?*/
+/* 设置面板：分区标?*/
 .settings-section-title {
   font-size: 0.7rem;
   font-weight: 600;
@@ -185,7 +185,7 @@
   border-top: 1px solid var(--color-border);
   margin-top: 8px;
 }
-/* 语音不可用提�?*/
+/* 语音不可用提?*/
 .voice-unavailable-notice {
   display: flex;
   align-items: center;
@@ -205,7 +205,7 @@
 .voice-unavailable-notice span {
   color: var(--color-text-secondary);
 }
-/* 设置面板：下拉选择�?*/
+/* 设置面板：下拉选择?*/
 .settings-select {
   width: 100%;
   padding: 8px 12px;
@@ -251,7 +251,7 @@
   color: var(--color-text-secondary);
   opacity: 0.6;
 }
-/* 智能体角色设�?textarea */
+/* 智能体角色设?textarea */
 .agent-prompt-textarea {
   margin-top: 8px;
   min-height: 160px;

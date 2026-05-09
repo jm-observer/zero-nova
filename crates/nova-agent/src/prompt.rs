@@ -540,7 +540,14 @@ fn load_single_project_context(path: &Path) -> Option<String> {
 /// 5. 文件读取失败则记录 `warn!` 并继续
 /// 6. 命中多个文件时按顺序拼接
 pub async fn load_developer_project_prompt_async(project_dir: Option<&Path>, files: &[String]) -> Option<String> {
-    let project_dir = project_dir?;
+    let Some(project_dir) = project_dir else {
+        log::info!("Skip loading developer project prompt: session project_dir is not set");
+        return None;
+    };
+    if files.is_empty() {
+        log::info!("Skip loading developer project prompt: developer_prompt_files is empty");
+        return None;
+    }
     let mut parts = Vec::new();
 
     for file_name in files {

@@ -295,6 +295,17 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             // 如果 agent 启用了开发项目提示词，则注入文件列表
             if agent_descriptor.enable_project_developer_prompt {
                 let files = self.app_config.developer_prompt_files.clone();
+                let project_dir_display = project_dir
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "(not set)".to_string());
+                log::info!(
+                    "Developer project prompt enabled for agent '{}': session_id={}, project_dir={}, configured_files={}",
+                    agent_descriptor.id,
+                    session_id,
+                    project_dir_display,
+                    files.len()
+                );
                 prompt_config = prompt_config.with_developer_prompt_files(files.clone());
 
                 // 会话执行期加载开发项目提示词内容（Plan 3）
@@ -303,6 +314,13 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                     let file_count = content.matches("### Source:").count();
                     log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
                     prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
+                } else {
+                    log::info!(
+                        "Developer project prompt not loaded for session {} (project_dir={}, configured_files={})",
+                        session_id,
+                        project_dir_display,
+                        files.len()
+                    );
                 }
             }
 

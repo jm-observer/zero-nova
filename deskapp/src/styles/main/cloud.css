@@ -163,8 +163,8 @@
 .openflux-login-modal-footer .primary-btn {
   min-width: 80px;
 }
-/* ---- 侧边�?Chat / Agent 切换 ---- */
-/* ---- Agent List 未登录提�?---- */
+/* ---- 侧边?Chat / Agent 切换 ---- */
+/* ---- Agent List 未登录提?---- */
 .agent-login-icon {
   color: var(--color-text-secondary);
   opacity: 0.5;
@@ -190,7 +190,7 @@
 .agent-login-btn:hover {
   opacity: 0.85;
 }
-/* ---- 侧边�?Agent 卡片 ---- */
+/* ---- 侧边?Agent 卡片 ---- */
 .sidebar-agent-item {
   display: flex;
   align-items: center;
@@ -331,7 +331,7 @@
 .local-agent-card:hover .agent-card-actions {
   display: flex;
 }
-/* 云端 Agent 分组分隔�?*/
+/* 云端 Agent 分组分隔?*/
 .agent-group-divider {
   display: flex;
   align-items: center;
@@ -374,7 +374,7 @@
   color: var(--color-error, #ef4444) !important;
 }
 /* Agent Color Swatches */
-/* ========== Agent 图标选择�?========== */
+/* ========== Agent 图标选择?========== */
 .agent-icon-picker {
   display: flex;
   flex-direction: column;
@@ -476,7 +476,7 @@
   margin: var(--spacing-sm) var(--spacing-md);
   opacity: 0.5;
 }
-/* ---- Agent 编辑视图（中间窗口，复用 settings 风格�?---- */
+/* ---- Agent 编辑视图（中间窗口，复用 settings 风格?---- */
 .agent-edit-view {
   position: absolute;
   inset: 0;
@@ -557,7 +557,7 @@
 .router-status-dot.disconnected {
   background: var(--color-text-secondary, #666);
 }
-/* Router 会话�?- 与普通会话结构一致，无需额外样式 */
+/* Router 会话?- 与普通会话结构一致，无需额外样式 */
 /* Router 消息 Meta */
 .router-msg-meta {
   display: flex;
@@ -618,7 +618,7 @@
 .toggle-switch input:checked+.toggle-slider::before {
   transform: translateX(18px);
 }
-/* �?Router 会话激活时，强制隐藏输入区�?*/
+/* ?Router 会话激活时，强制隐藏输入区?*/
 body.router-active .input-area {
   display: none !important;
 }
@@ -889,7 +889,7 @@ body.router-active .input-area {
   text-align: center;
   margin-top: 6px;
 }
-/* 按钮容器相对定位，给弹窗做锚�?*/
+/* 按钮容器相对定位，给弹窗做锚?*/
 .qr-bind-topbar-wrap {
   position: relative;
   display: flex;

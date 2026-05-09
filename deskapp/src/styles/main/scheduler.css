@@ -1,4 +1,4 @@
-/* ========== 调度器视图（中部区域�?========== */
+/* ========== 调度器视图（中部区域?========== */
 .scheduler-view {
   position: absolute;
   inset: 0;
@@ -56,19 +56,19 @@
   margin: auto 0;
   padding: var(--spacing-md) 0;
 }
-/* 详情模式：取消居中，顶部�?40px */
+/* 详情模式：取消居中，顶部?40px */
 .scheduler-tasks-wrapper.detail-mode .scheduler-tasks {
   margin: 0;
   padding-top: 40px;
 }
-/* 卡片中的倒计�?*/
+/* 卡片中的倒计?*/
 .scheduler-task-countdown {
   font-variant-numeric: tabular-nums;
   font-size: 0.6875rem;
   color: var(--color-primary);
   opacity: 0.85;
 }
-/* 空状�?*/
+/* 空状?*/
 .scheduler-empty {
   display: flex;
   flex-direction: column;
@@ -140,7 +140,7 @@
   flex-shrink: 0;
   opacity: 0.6;
 }
-/* 状态徽章（通用�?*/
+/* 状态徽章（通用?*/
 .scheduler-task-status-badge {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -165,7 +165,7 @@
   background: rgba(239, 68, 68, 0.15);
   color: var(--color-error);
 }
-/* --- 内联详情（选中卡片下方展开�?--- */
+/* --- 内联详情（选中卡片下方展开?--- */
 .scheduler-inline-detail {
   width: 100%;
   max-width: 600px;
@@ -384,7 +384,7 @@
   flex-direction: column;
   gap: 12px;
 }
-/* 消息�?*/
+/* 消息?*/
 .run-chat-msg {
   display: flex;
   align-items: flex-start;
@@ -447,7 +447,7 @@
 .run-chat-text {
   white-space: pre-wrap;
 }
-/* 时间元信�?*/
+/* 时间元信?*/
 .run-chat-meta {
   font-size: 0.6875rem;
   color: var(--color-text-secondary);
@@ -455,7 +455,7 @@
   margin-top: 6px;
   text-align: right;
 }
-/* 任务卡片最后执行结果图�?*/
+/* 任务卡片最后执行结果图?*/
 .scheduler-task-last-result {
   font-size: 0.75rem;
   margin-left: 6px;

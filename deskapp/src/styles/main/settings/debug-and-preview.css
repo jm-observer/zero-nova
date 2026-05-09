@@ -13,7 +13,7 @@
 .debug-panel.hidden {
   display: none;
 }
-/* 拖拽调整高度的手�?*/
+/* 拖拽调整高度的手?*/
 .debug-resize-handle {
   height: 4px;
   cursor: ns-resize;
@@ -114,7 +114,7 @@
   text-overflow: ellipsis;
 }
 /* ========== 文件预览弹窗 ========== */
-/* ========== 浮动预览面板（多实例�?========== */
+/* ========== 浮动预览面板（多实例?========== */
 .floating-preview-panel {
   position: fixed;
   width: 55vw;
@@ -206,7 +206,7 @@
 [data-theme="light"] .fp-name {
   color: #333;
 }
-/* ========== �?Modal 预览（保留兼容） ========== */
+/* ========== ?Modal 预览（保留兼容） ========== */
 .file-preview-modal-content {
   width: 70vw;
   max-width: 900px;
@@ -328,7 +328,7 @@
   object-fit: contain;
   border-radius: 4px;
 }
-/* 不支持类型提�?*/
+/* 不支持类型提?*/
 .file-preview-unsupported {
   display: flex;
   flex-direction: column;

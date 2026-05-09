@@ -63,6 +63,29 @@ describe('GatewayClient contract guards', () => {
   });
 
 
+  it('重连后恢复最后活跃会话订阅', () => {
+    const client = new GatewayClient('ws://localhost:3000');
+    const send = vi.fn();
+
+    (client as unknown as { ws: { readyState: number; send: typeof send } }).ws = {
+      readyState: WebSocket.OPEN,
+      send,
+    };
+
+    client.request('sessions.messages', { sessionId: 'session-1' }, 0);
+    client.request('session.runtime', { sessionId: 'session-2' }, 0);
+    send.mockClear();
+
+    (client as unknown as { restoreSubscriptionsAfterReconnect: () => void }).restoreSubscriptionsAfterReconnect();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(send.mock.calls[0][0])).toMatchObject({
+      type: 'sessions.messages',
+      payload: { sessionId: 'session-2' },
+    });
+  });
+
+
   it('getAgentInspect ?????????????', async () => {
     const client = new GatewayClient('ws://localhost:3000');
 

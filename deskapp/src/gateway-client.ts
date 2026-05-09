@@ -45,7 +45,6 @@ export type {
 
 
 /**
- * WebSocket 瀹㈡埛绔皝瑁? * 鐢ㄤ簬娓叉煋杩涚▼杩炴帴 Gateway Server
  */
 
 export interface GatewayMessage {
@@ -247,8 +246,7 @@ export class GatewayRequestError extends Error {
     }
 }
 
-/**
- * Gateway WebSocket 瀹㈡埛绔? */
+/** */
 export class GatewayClient {
 
     private normalizeAgentRuntimeSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
@@ -281,6 +279,7 @@ export class GatewayClient {
     private reconnectDelay = 1000;
     private shouldReconnect = true;
     private debugLogSubscribed = false;
+    private activeSessionSubscriptionId: string | null = null;
 
     private encodeAudioBase64(audio: ArrayBuffer): string {
         let binary = '';
@@ -544,7 +543,7 @@ export class GatewayClient {
         const capability = typeof errorPayload.capability === 'string' ? errorPayload.capability : undefined;
         const message = typeof errorPayload.message === 'string' && errorPayload.message
             ? errorPayload.message
-            : '璇锋眰澶辫触';
+            : '请求失败';
 
         return new GatewayRequestError(message, {
             kind: code === 'capability_not_supported' ? 'unsupported' : 'request_failed',
@@ -559,7 +558,6 @@ export class GatewayClient {
     }
 
     /**
-     * 杩炴帴鍒?Gateway
      */
     async connect(): Promise<void> {
         return new Promise((resolve, reject) => {
@@ -589,18 +587,15 @@ export class GatewayClient {
                 this.ws.onerror = (error) => {
                     console.error('[GatewayClient] Connection error:', error);
                     if (this.reconnectAttempts === 0) {
-                        // 棣栨杩炴帴澶辫触鎵?reject
-                        reject(new Error('WebSocket 杩炴帴澶辫触'));
+                        reject(new Error('WebSocket 连接失败'));
                     }
                 };
 
-                // 绛夊緟 welcome 娑堟伅
                 const welcomeHandler = (msg: GatewayMessage) => {
                     if (msg.type === 'welcome') {
                         this.removeMessageHandler(welcomeHandler);
                         const payload = msg.payload as { requireAuth?: boolean; setupRequired?: boolean };
 
-                        // 淇濆瓨棣栨杩愯鏍囧織
                         if (payload.setupRequired) {
                         (this as unknown as { _setupRequired: boolean })._setupRequired = true;
                     }
@@ -628,7 +623,6 @@ export class GatewayClient {
     }
 
     /**
-     * 璁よ瘉
      */
     private async authenticate(): Promise<void> {
         return new Promise((resolve, reject) => {
@@ -639,7 +633,7 @@ export class GatewayClient {
                     resolve();
                 } else if (msg.type === 'auth.failed') {
                     this.removeMessageHandler(authHandler);
-                    reject(new Error('璁よ瘉澶辫触'));
+                    reject(new Error('认证失败'));
                 }
             };
             this.addMessageHandler(authHandler);
@@ -671,7 +665,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鏂紑杩炴帴
      */
     disconnect(): void {
         this.shouldReconnect = false;
@@ -681,8 +674,7 @@ export class GatewayClient {
         }
     }
 
-    /**
-     * 閫氱煡杩炴帴鐘舵€佸彉鍖?     */
+    /** */
     private notifyConnectionChange(status: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed'): void {
         this.connectionHandlers.forEach(handler => handler(status));
     }
@@ -695,10 +687,15 @@ export class GatewayClient {
             console.log('[GatewayClient] Re-subscribing debug log stream');
             this.send({ type: 'debug.subscribe' });
         }
+        if (this.activeSessionSubscriptionId) {
+            const sessionId = this.activeSessionSubscriptionId;
+            void this.request('sessions.messages', { sessionId }).catch((error) => {
+                console.warn('[GatewayClient] Failed to restore session subscription:', sessionId, error);
+            });
+        }
     }
 
-    /**
-     * 鐩戝惉杩炴帴鐘舵€佸彉鍖?     */
+    /** */
     onConnectionChange(handler: ConnectionHandler): () => void {
         this.connectionHandlers.push(handler);
         return () => {
@@ -709,14 +706,12 @@ export class GatewayClient {
         };
     }
 
-    /**
-     * 鏄惁宸茶繛鎺?     */
+    /** */
     isConnected(): boolean {
         return this.ws?.readyState === WebSocket.OPEN && this.authenticated;
     }
 
-    /**
-     * 鍙戦€佹秷鎭?     */
+    /** */
     private send(message: GatewayMessage): void {
         this.assertOutboundMessage(message.type, message.payload);
         if (this.ws?.readyState === WebSocket.OPEN) {
@@ -747,6 +742,21 @@ export class GatewayClient {
             `[GatewayClient] Gateway warning${requestInfo} id=${messageId} code=${errorCode} type=${message.type}: ${errorMessage}`,
             message.payload,
         );
+    }
+
+    private trackSessionSubscription(type: string, payload: unknown): void {
+        if (!this.isSessionSubscriptionRequest(type) || !payload || typeof payload !== 'object') {
+            return;
+        }
+
+        const sessionId = (payload as Record<string, unknown>).sessionId;
+        if (typeof sessionId === 'string' && sessionId.length > 0) {
+            this.activeSessionSubscriptionId = sessionId;
+        }
+    }
+
+    private isSessionSubscriptionRequest(type: string): boolean {
+        return type === 'chat' || type.startsWith('session.') || type === 'sessions.messages';
     }
 
     /**
@@ -875,7 +885,6 @@ export class GatewayClient {
     }
 
     /**
-     * 澶勭悊 Gateway 鍙戞潵鐨勫鎴风 MCP 宸ュ叿璋冪敤璇锋眰
      */
     private async handleClientMcpCall(message: GatewayMessage): Promise<void> {
         const { tool, args } = message.payload as { tool: string; args: Record<string, unknown> };
@@ -900,7 +909,6 @@ export class GatewayClient {
     }
 
     /**
-     * 灏嗗鎴风鏈満 MCP 宸ュ叿娉ㄥ唽鍒?Gateway
      */
     registerClientMcpTools(tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>): void {
         if (!this.isConnected()) {
@@ -915,7 +923,6 @@ export class GatewayClient {
     }
 
     /**
-     * 閫氱煡 Gateway 绉婚櫎瀹㈡埛绔?MCP 宸ュ叿
      */
     unregisterClientMcpTools(): void {
         if (!this.isConnected()) return;
@@ -926,7 +933,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鐩戝惉杩涘害浜嬩欢
      */
     onProgress(handler: ProgressHandler): () => void {
         this.progressHandlers.push(handler);
@@ -939,7 +945,6 @@ export class GatewayClient {
     }
     
     /**
-     * 鐩戝惉鑱婂ぉ鎰忓悜璇嗗埆浜嬩欢
      */
     onChatIntent(handler: ChatIntentHandler): () => void {
         this.chatIntentHandlers.push(handler);
@@ -958,6 +963,7 @@ export class GatewayClient {
     public request<T>(type: string, payload?: unknown, timeout: number = 120000): Promise<T> {
         return new Promise((resolve, reject) => {
             const id = crypto.randomUUID();
+            this.trackSessionSubscription(type, payload);
             this.pendingRequests.set(id, {
                 requestType: type,
                 resolve: resolve as (value: unknown) => void,
@@ -977,8 +983,7 @@ export class GatewayClient {
         });
     }
 
-    /**
-     * 鍙戦€佽亰澶╂秷鎭紙鏀寔闄勪欢銆佷簯绔?Agent锛?     * 涓嶈瓒呮椂锛欰gent 澶氭鎵ц鍙兘鑰楁椂寰堥暱锛岃繘搴﹂€氳繃 chat.progress 瀹炴椂鎺ㄩ€?     */
+    /** */
     async chat(
         input: string,
         sessionId?: string,
@@ -1044,15 +1049,13 @@ export class GatewayClient {
         return this.decodeAudioBase64(response.audioBase64);
     }
 
-    /**
-     * 鍋滄姝ｅ湪鎵ц鐨勪换鍔?     */
+    /** */
     stopTask(sessionId: string): void {
         console.log('[GatewayClient] Stopping task:', sessionId);
         this.send({ type: 'chat.stop', payload: { sessionId } });
     }
 
     /**
-     * 鑾峰彇浼氳瘽鍒楄〃
      */
     async getSessions(): Promise<Session[]> {
         console.log('[GatewayClient] getSessions request');
@@ -1062,7 +1065,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇浼氳瘽娑堟伅
      */
     async getMessages(sessionId: string): Promise<unknown[]> {
         console.log('[GatewayClient] getMessages request:', sessionId);
@@ -1072,7 +1074,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇浼氳瘽鏃ュ織
      */
     async getLogs(sessionId: string): Promise<unknown[]> {
         const result = await this.request<{ logs: unknown[] }>('sessions.logs', { sessionId });
@@ -1080,7 +1081,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鍒涘缓浼氳瘽
      */
     async createSession(options: { title?: string; agentId?: string; cloudChatroomId?: number; cloudAgentName?: string }): Promise<Session> {
         const result = await this.request<{ session: Session }>('sessions.create', options);
@@ -1088,14 +1088,12 @@ export class GatewayClient {
     }
 
     /**
-     * 鍒犻櫎浼氳瘽
      */
     async deleteSession(sessionId: string): Promise<void> {
         await this.request<{ success: boolean }>('sessions.delete', { sessionId });
     }
 
     /**
-     * 澶嶅埗浼氳瘽
      */
     async copySession(sessionId: string, index?: number): Promise<Session> {
         const result = await this.request<{ session: Session }>('sessions.copy', { sessionId, index });
@@ -1106,7 +1104,6 @@ export class GatewayClient {
     // Agent 绠＄悊 API
     // ========================
 
-    /** 鑾峰彇鎵€鏈夌敤鎴?Agent 鍒楄〃 */
     async getAgents(): Promise<Array<{ id: string; name: string; description?: string; icon?: string; color?: string; default?: boolean; systemPrompt?: string; createdAt: number; updatedAt: number }>> {
         const result = await this.request<{ agents: Array<{ id: string; name: string; description?: string; icon?: string; color?: string; default?: boolean; systemPrompt?: string; createdAt: number; updatedAt: number }> }>('agents.list');
         return result.agents || [];
@@ -1130,19 +1127,16 @@ export class GatewayClient {
         return result.success;
     }
 
-    /** 鍒囨崲 Agent锛堣繑鍥?Agent 淇℃伅 + 浼氳瘽鍘嗗彶锛?*/
     async switchAgent(agentId: string): Promise<{ agent: Record<string, unknown>; messages: unknown[] }> {
         return this.request<{ agent: Record<string, unknown>; messages: unknown[] }>('agents.switch', { agentId });
     }
 
-    /** 娓呴櫎 Agent 鍘嗗彶娑堟伅 */
     async clearAgentHistory(agentId: string): Promise<boolean> {
         const result = await this.request<{ success: boolean }>('agents.history.clear', { agentId });
         return result.success;
     }
 
     /**
-     * 鐩戝惉 NexusAI 璁よ瘉杩囨湡浜嬩欢锛圓tlas 妯″紡 token 澶辨晥鏃惰Е鍙戯級
      */
     onAuthExpired(handler: (message: string) => void): () => void {
         const messageHandler = (msg: GatewayMessage) => {
@@ -1156,7 +1150,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鐩戝惉浼氳瘽鏇存柊浜嬩欢锛堝畾鏃朵换鍔℃墽琛岀粨鏋滃綊闆嗗埌浼氳瘽鏃惰Е鍙戯級
      */
     onSessionUpdated(handler: (sessionId: string) => void): () => void {
         const messageHandler = (msg: GatewayMessage) => {
@@ -1169,8 +1162,7 @@ export class GatewayClient {
         return () => this.removeMessageHandler(messageHandler);
     }
 
-    /**
-     * 鐩戝惉鍗忎綔瀹屾垚浜嬩欢锛圓gent 闂村崗浣滅粨鏋滈€氱煡锛?     */
+    /** */
     onCollaborationResult(handler: (event: {
         sessionId: string;
         agentId: string;
@@ -1206,36 +1198,31 @@ export class GatewayClient {
     // ========================
 
     /**
-     * 鑾峰彇璁板繂缁熻淇℃伅
      */
     async memoryStats(): Promise<{ enabled: boolean; totalCount?: number; dbSizeBytes?: number; vectorDim?: number; embeddingModel?: string }> {
         return this.request('memory.stats');
     }
 
     /**
-     * 鍒嗛〉鍒楀嚭璁板繂
      */
     async memoryList(page: number = 1, pageSize: number = 20): Promise<{ items: any[]; total: number; page: number; pageSize: number }> {
         return this.request('memory.list', { page, pageSize });
     }
 
     /**
-     * 鎼滅储璁板繂
      */
     async memorySearch(query: string, limit: number = 10): Promise<{ items: any[] }> {
         return this.request('memory.search', { query, limit });
     }
 
     /**
-     * 鍒犻櫎鍗曟潯璁板繂
      */
     async memoryDelete(id: string): Promise<boolean> {
         const result = await this.request<{ success: boolean }>('memory.delete', { id });
         return result.success;
     }
 
-    /**
-     * 娓呯┖鎵€鏈夎蹇?     */
+    /** */
     async memoryClear(): Promise<boolean> {
         const result = await this.request<{ success: boolean }>('memory.clear');
         return result.success;
@@ -1246,14 +1233,12 @@ export class GatewayClient {
     // ========================
 
     /**
-     * 鑾峰彇钂搁缁熻淇℃伅
      */
     async distillationStats(): Promise<any> {
         return this.request('distillation.stats');
     }
 
-    /**
-     * 鑾峰彇鍗＄墖鍏崇郴鍥炬暟鎹?     */
+    /** */
     async distillationGraph(): Promise<{ cards: any[]; relations: any[]; topics: any[] }> {
         return this.request('distillation.graph');
     }
@@ -1266,14 +1251,12 @@ export class GatewayClient {
     }
 
     /**
-     * 鎵嬪姩瑙﹀彂钂搁
      */
     async distillationTrigger(): Promise<{ success: boolean; message?: string }> {
         return this.request('distillation.trigger');
     }
 
-    /**
-     * 鑾峰彇鍗＄墖鍒楄〃锛堟敮鎸佸眰绾х瓫閫夊拰鍒嗛〉锛?     */
+    /** */
     async distillationCards(layer?: string, limit = 100, offset = 0): Promise<{ cards: any[]; total: number }> {
         return this.request('distillation.cards', { layer, limit, offset });
     }
@@ -1290,14 +1273,12 @@ export class GatewayClient {
     // ========================
 
     /**
-     * 鑾峰彇褰撳墠璁剧疆
      */
     async getSettings(): Promise<{ outputPath: string; defaultOutputPath: string }> {
         return this.request('settings.get');
     }
 
     /**
-     * 鏇存柊璁剧疆锛堜紶 null 閲嶇疆涓洪粯璁ゅ€硷級
      */
     async updateSettings(settings: { outputPath?: string | null }): Promise<{ outputPath: string }> {
         return this.request('settings.update', settings);
@@ -1307,8 +1288,7 @@ export class GatewayClient {
     // Server Config API
     // ========================
 
-    /**
-     * 鑾峰彇鏈嶅姟绔厤缃?     */
+    /** */
     async getServerConfig(): Promise<ServerConfigView> {
         return this.request('config.get');
     }
@@ -1324,7 +1304,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鎻愪氦棣栨鍚姩璁剧疆
      */
     async setupComplete(config: {
         provider: string;
@@ -1354,7 +1333,6 @@ export class GatewayClient {
     // ========================
 
     /**
-     * 璁㈤槄 debug 鏃ュ織
      */
     subscribeDebugLog(): void {
         this.debugLogSubscribed = true;
@@ -1362,7 +1340,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鍙栨秷璁㈤槄 debug 鏃ュ織
      */
     unsubscribeDebugLog(): void {
         this.debugLogSubscribed = false;
@@ -1370,7 +1347,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鐩戝惉 debug 鏃ュ織浜嬩欢
      */
     onDebugLog(handler: (entry: DebugLogEntry) => void): () => void {
         const messageHandler = (msg: GatewayMessage) => {
@@ -1383,7 +1359,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鐩戝惉璁板繂绱㈠紩閲嶅缓杩涘害
      */
     onRebuildProgress(handler: (progress: number) => void): () => void {
         const messageHandler = (msg: GatewayMessage) => {
@@ -1396,12 +1371,9 @@ export class GatewayClient {
         return () => this.removeMessageHandler(messageHandler);
     }
     // ========================
-    // Evolution API (鑷垜杩涘寲)
     // ========================
 
-    /**
-     * 鐩戝惉宸ュ叿鍒涘缓纭璇锋眰
-     * Gateway 鍦?Agent 鍒涘缓鏂板伐鍏锋椂鎺ㄩ€侊紝鍓嶇寮瑰嚭纭瀵硅瘽妗?     */
+    /** */
     onEvolutionConfirm(handler: (request: EvolutionConfirmRequest) => void): () => void {
         const messageHandler = (msg: GatewayMessage) => {
             if (msg.type === 'evolution.confirm') {
@@ -1413,7 +1385,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鍝嶅簲宸ュ叿纭璇锋眰
      */
     respondEvolutionConfirm(requestId: string, approved: boolean): void {
         this.send({
@@ -1423,7 +1394,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇杩涘寲鏁版嵁缁熻
      */
     async getEvolutionStats(): Promise<{
         schemaVersion: number;
@@ -1432,20 +1402,17 @@ export class GatewayClient {
         return this.request('evolution.stats');
     }
 
-    /**
-     * 鑾峰彇宸插畨瑁呮妧鑳藉垪琛?     */
+    /** */
     async getInstalledSkills(): Promise<{ skills: Array<{ slug: string; source: string; installedAt: string }> }> {
         return this.request('evolution.skills.list');
     }
 
-    /**
-     * 鍗歌浇鎶€鑳?     */
+    /** */
     async uninstallSkill(slug: string): Promise<{ success: boolean }> {
         return this.request('evolution.skills.uninstall', { slug });
     }
 
-    /**
-     * 鑾峰彇鑷畾涔夊伐鍏峰垪琛?     */
+    /** */
     async getCustomTools(): Promise<{ tools: Array<{ name: string; description: string; scriptType: string; confirmed: boolean; validatorResult: string; createdAt: string }> }> {
         return this.request('evolution.tools.list');
     }
@@ -1456,32 +1423,27 @@ export class GatewayClient {
         return this.request('evolution.tools.delete', { name });
     }
 
-    /**
-     * 鎺ュ彈閿婚€犲缓璁?     */
+    /** */
     async acceptForgeSuggestion(suggestion: { id: string; title: string; content: string; category: string; reasoning: string }): Promise<{ success: boolean }> {
         return this.request('evolution.forge.accept', suggestion);
     }
 
-    /**
-     * 蹇界暐閿婚€犲缓璁?     */
+    /** */
     async dismissForgeSuggestion(): Promise<{ success: boolean }> {
         return this.request('evolution.forge.dismiss');
     }
 
-    /**
-     * 鑾峰彇宸查敾閫犳妧鑳藉垪琛?     */
+    /** */
     async getForgedSkills(): Promise<{ skills: Array<{ id: string; title: string; category: string; reasoning: string; createdAt: string }> }> {
         return this.request('evolution.forged.list');
     }
 
-    /**
-     * 鍒犻櫎閿婚€犳妧鑳?     */
+    /** */
     async deleteForgedSkill(id: string): Promise<{ success: boolean }> {
         return this.request('evolution.forged.delete', { id });
     }
 
-    /**
-     * 鐩戝惉閿婚€犲缓璁簨浠?     */
+    /** */
     onForgeSuggestion(callback: (suggestion: { id: string; title: string; content: string; category: string; reasoning: string }) => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
             if (msg.type === 'evolution.forge.suggest' && msg.payload) {
@@ -1491,7 +1453,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鐩戝惉鎶€鑳藉垪琛ㄥ彉鏇翠簨浠讹紙瀹夎/鍗歌浇鏃惰嚜鍔ㄥ箍鎾級
      */
     onSkillsUpdated(callback: () => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
@@ -1506,7 +1467,6 @@ export class GatewayClient {
     // ========================
 
     /**
-     * 鐩戝惉宸ュ叿瑙ｉ攣浜嬩欢
      */
     onToolUnlocked(callback: (event: ToolUnlockedEvent) => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
@@ -1516,8 +1476,7 @@ export class GatewayClient {
         });
     }
 
-    /**
-     * 鐩戝惉鎶€鑳芥縺娲讳簨浠?     */
+    /** */
     onSkillActivated(callback: (event: SkillActivatedEvent) => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
             if (msg.type === 'skill_activated' && msg.payload) {
@@ -1526,8 +1485,7 @@ export class GatewayClient {
         });
     }
 
-    /**
-     * 鐩戝惉鎶€鑳藉垏鎹簨浠?     */
+    /** */
     onSkillSwitched(callback: (event: SkillSwitchedEvent) => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
             if (msg.type === 'skill_switched' && msg.payload) {
@@ -1536,8 +1494,7 @@ export class GatewayClient {
         });
     }
 
-    /**
-     * 鐩戝惉鎶€鑳介€€鍑轰簨浠?     */
+    /** */
     onSkillExited(callback: (event: SkillExitedEvent) => void): void {
         this.addMessageHandler((msg: GatewayMessage) => {
             if (msg.type === 'skill_exited' && msg.payload) {
@@ -1546,8 +1503,7 @@ export class GatewayClient {
         });
     }
 
-    /**
-     * 鑾峰彇褰撳墠浼氳瘽鐨勬妧鑳界粦瀹氬垪琛?     */
+    /** */
     async getSessionSkillBindings(sessionId?: string): Promise<SkillBindingView[]> {
         const result = await this.request<{ skills?: unknown[]; bindings?: unknown[] }>('session.skill.bindings', { sessionId });
         const rawBindings = result.bindings || result.skills || [];
@@ -1577,15 +1533,13 @@ export class GatewayClient {
         return 'runtime';
     }
 
-    /**
-     * 鑾峰彇 Agent 鐨勮繍琛屾€佸ぇ灏忓啓锛堝惈 Skill/Tool 淇℃伅锛?     */
+    /** */
     async getAgentInspect(payload: AgentInspectRequest): Promise<AgentRuntimeSnapshot> {
         const snapshot = await this.request<AgentRuntimeSnapshot>('agent.inspect', payload);
         return this.normalizeAgentRuntimeSnapshot(snapshot);
     }
 
     /**
-     * 鑾峰彇浼氳瘽鐨?Token 浣跨敤缁熻
      */
     async getSessionTokenUsage(sessionId: string): Promise<TokenUsageView> {
         const result = await this.request<TokenUsageView | { totalUsage?: TokenUsageView; tokenUsage?: TokenUsageView }>('sessions.token_usage', { sessionId });
@@ -1628,7 +1582,7 @@ export class GatewayClient {
 
     onSessionTokenUsage(callback: (payload: Record<string, unknown>) => void): () => void {
         const handler = (msg: GatewayMessage) => {
-            if (msg.type === 'session.token.usage' && msg.payload) {
+            if ((msg.type === 'session.token.usage.updated' || msg.type === 'session.token.usage') && msg.payload) {
                 callback(msg.payload as Record<string, unknown>);
             }
         };
@@ -1670,15 +1624,13 @@ export class GatewayClient {
     // Session Runtime API (Plan 2)
     // ========================
 
-    /**
-     * 鑾峰彇浼氳瘽鐨勮繍琛屾椂蹇収锛堝惈妯″瀷缁戝畾鍜?token 绱锛?     */
+    /** */
     async getSessionRuntime(sessionId: string): Promise<SessionRuntimeSnapshot> {
         const payload = await this.request<RawSessionRuntimeSnapshot>('session.runtime', { sessionId });
         return this.normalizeSessionRuntimeSnapshot(payload);
     }
 
-    /**
-     * 鑾峰彇浼氳瘽杩愯鎬佸揩鐓у垪琛紙鐢ㄤ簬浼氳瘽閫夋嫨鍣ㄤ腑鏄剧ず妯″瀷淇℃伅锛?     */
+    /** */
     async getAllSessionRuntimes(): Promise<SessionRuntimeSnapshot[]> {
         const result = await this.request<{ sessions: RawSessionRuntimeSnapshot[] }>('session.runtimes');
         return (result.sessions || []).map((entry) => this.normalizeSessionRuntimeSnapshot(entry));
@@ -1697,7 +1649,6 @@ export class GatewayClient {
     // ========================
 
     /**
-     * 鑾峰彇浼氳瘽鐨?Prompt 棰勮瑙嗗浘
      */
     async getSessionPromptPreview(sessionId: string): Promise<PromptPreviewView> {
         return this.request<PromptPreviewView>('session.prompt.preview', { sessionId });
@@ -1708,7 +1659,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇浼氳瘽褰撳墠鍙敤宸ュ叿蹇収
      */
     async getSessionTools(sessionId: string): Promise<ToolDescriptorView[]> {
         const result = await this.request<{ tools: ToolDescriptorView[] }>('session.tools.list', { sessionId });
@@ -1716,15 +1666,13 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇浼氳瘽璁板繂鍛戒腑缁撴灉
      */
     async getSessionMemoryHits(sessionId: string, turnId?: string): Promise<MemoryHitView[]> {
         const result = await this.request<{ hits: MemoryHitView[] }>('session.memory.hits', { sessionId, turnId });
         return result.hits || [];
     }
 
-    /**
-     * 璁剧疆浼氳瘽绾фā鍨嬭鐩?     */
+    /** */
     async setSessionModelOverride(sessionId: string, overrides: {
         orchestration?: { provider: string; model: string };
         execution?: { provider: string; model: string };
@@ -1733,15 +1681,13 @@ export class GatewayClient {
         return this.normalizeSessionRuntimeSnapshot(payload);
     }
 
-    /**
-     * 閲嶇疆浼氳瘽绾фā鍨嬭鐩?     */
+    /** */
     async resetSessionModelOverride(sessionId: string): Promise<SessionRuntimeSnapshot> {
         const payload = await this.request<RawSessionRuntimeSnapshot>('session.model.override', { sessionId, reset: true });
         return this.normalizeSessionRuntimeSnapshot(payload);
     }
 
     /**
-     * 鑾峰彇浼氳瘽鎵ц鍘嗗彶鍒楄〃
      */
     async getSessionRuns(sessionId: string, page = 1, pageSize = 20): Promise<{ runs: RunSummaryView[]; total: number }> {
         const result = await this.request<{ runs?: RawRunRecord[]; total?: number }>('session.runs', { sessionId, page, pageSize });
@@ -1752,15 +1698,13 @@ export class GatewayClient {
         };
     }
 
-    /**
-     * 鑾峰彇鏌愭鎵ц鐨勮缁嗘楠や俊鎭?     */
+    /** */
     async getRunDetail(runId: string): Promise<RunDetailView> {
         const result = await this.request<RawRunRecord>('run.detail', { runId });
         return this.normalizeRunDetail(result);
     }
 
     /**
-     * 鎺у埗鏌愭鎵ц
      */
     async controlRun(runId: string, action: 'stop' | 'resume_waiting' | 'pause' | 'resume' | 'retry'): Promise<{ success: boolean; run?: RunSummaryView }> {
         const result = await this.request<{ success: boolean; run?: RawRunRecord }>('run.control', { runId, action });
@@ -1771,7 +1715,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇浼氳瘽绾?artifact 鍒楄〃锛屽彲鎸?run 杩囨护
      */
     async getSessionArtifacts(sessionId: string, runId?: string): Promise<SessionArtifactView[]> {
         const result = await this.request<{ artifacts?: SessionArtifactView[]; items?: SessionArtifactView[] }>('session.artifacts', { sessionId, runId });
@@ -1779,7 +1722,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇寰呯‘璁ょ殑鏉冮檺璇锋眰鍒楄〃
      */
     async getPendingPermissions(sessionId?: string): Promise<PermissionRequestView[]> {
         const result = await this.request<{ requests: PermissionRequestView[] }>('permission.pending', { sessionId });
@@ -1787,7 +1729,6 @@ export class GatewayClient {
     }
 
     /**
-     * 鍝嶅簲鏉冮檺纭璇锋眰
      */
     async respondPermission(
         requestId: string,
@@ -1799,21 +1740,18 @@ export class GatewayClient {
     }
 
     /**
-     * 鑾峰彇瀹¤鏃ュ織
      */
     async getAuditLogs(sessionId?: string, type?: string, page = 1, pageSize = 20): Promise<{ logs: AuditLogView[]; total: number }> {
         return this.request('audit.logs', { sessionId, type, page, pageSize });
     }
 
     /**
-     * 鑾峰彇褰撳墠浼氳瘽璇婃柇鎽樿
      */
     async getDiagnosticsCurrent(sessionId?: string): Promise<{ issues: DiagnosticIssueView[] }> {
         return this.request('diagnostics.current', { sessionId });
     }
 
-    /**
-     * 鑾峰彇宸ヤ綔鍖烘仮澶嶄俊鎭?     */
+    /** */
     async getWorkspaceRestore(payload: WorkspaceRestoreRequest = {}): Promise<WorkspaceRestoreView> {
         return this.request('workspace.restore', payload);
     }
@@ -1903,14 +1841,12 @@ export class GatewayClient {
 // 单例实例
 let gatewayClient: GatewayClient | null = null;
 
-/**
- * 鑾峰彇鎴栧垱寤?Gateway 瀹㈡埛绔? */
+/** */
 export function getGatewayClient(): GatewayClient | null {
     return gatewayClient;
 }
 
-/**
- * 鍒濆鍖?Gateway 瀹㈡埛绔? */
+/** */
 export async function initGatewayClient(url: string, token?: string): Promise<GatewayClient> {
     if (gatewayClient) {
         gatewayClient.disconnect();
@@ -1919,6 +1855,7 @@ export async function initGatewayClient(url: string, token?: string): Promise<Ga
     await gatewayClient.connect();
     return gatewayClient;
 }
+
 
 
 

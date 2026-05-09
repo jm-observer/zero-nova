@@ -315,11 +315,9 @@ export class AgentConsoleView {
         const artifactsPanel = document.querySelector('.artifacts-panel');
         if (artifactsPanel) {
             if (consoleVisible) {
-                // 记录 artifacts-panel 打开前的状态，以便关闭 Console 时恢复
                 this.artifactsPanelWasOpen = !artifactsPanel.classList.contains('collapsed');
                 artifactsPanel.classList.add('collapsed');
             } else {
-                // 恢复 artifacts-panel 到 Console 打开之前的状态
                 if (this.artifactsPanelWasOpen) {
                     artifactsPanel.classList.remove('collapsed');
                 }
@@ -1748,7 +1746,7 @@ export class AgentConsoleView {
         if (target.tab) {
             this.state.setConsoleTab(target.tab);
 
-            // 延迟定位到具体条目（等待 DOM 更���）
+            // 延迟定位到具体条目（等待 DOM 更）
             if (target.itemId) {
                 requestAnimationFrame(() => {
                     const el = this.container?.querySelector(`[data-item-id="${target.itemId}"]`);

@@ -5,7 +5,7 @@ import { EventBus, Events } from '../core/event-bus';
 import { renderMarkdown } from '../markdown';
 import { escapeHtml, formatTime } from '../utils/html';
 import { OrchestrationView } from './orchestration-view';
-import type { SessionFileTreeEntryView, SessionRuntimeSnapshot } from '../core/types';
+import type { SessionFileTreeEntryView, SessionRuntimeSnapshot, TokenUsageView, ResourceState } from '../core/types';
 
 type ProjectDirEntry = SessionFileTreeEntryView;
 
@@ -43,6 +43,9 @@ export class ChatView {
     // 流式状态机：以会话为粒度的流式输出追踪
     private streamingSessions = new Set<string>();
     private stoppingSessions = new Set<string>();
+
+    // 本次消息的 token 使用量（用于在聊天窗口额外展示）
+    private thisTurnTokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
 
     constructor(private state: AppState, private bus: EventBus) {
         this.messagesContainer = document.getElementById('messages') as HTMLElement;
@@ -112,6 +115,21 @@ export class ChatView {
                  if (!this.streamingSessions.has(payload.sessionId)) {
                      this.streamingSessions.add(payload.sessionId);
                      this.updateSendButton();
+                     // 首次收到 token 时，记录本次消息开始前的 session 累计 token
+                     const sessionUsage = this.state.getSessionResourceState(payload.sessionId, 'tokenUsage');
+                     const prevData = (sessionUsage as ResourceState<TokenUsageView> | undefined)?.data;
+                     if (prevData) {
+                         this.thisTurnTokenUsage = {
+                             inputTokens: 0,
+                             outputTokens: 0,
+                             totalTokens: 0,
+                         };
+                         // 存储快照用于后续计算增量
+                         (this as any)._thisTurnSnapshot = {
+                             inputTokens: prevData.inputTokens ?? 0,
+                             outputTokens: prevData.outputTokens ?? 0,
+                         };
+                     }
                  }
                  this.appendToken(payload.token);
              }
@@ -128,6 +146,8 @@ export class ChatView {
                  this.updateSendButton();
                  this.invalidateSessionFileTreeCache(payload.sessionId);
                  this.clearRuntimeStatusText();
+                 // 重置本次请求的 token 使用量
+                 this.thisTurnTokenUsage = null;
              }
         });
 
@@ -1042,6 +1062,19 @@ export class ChatView {
         const hasRequestBody = !!trace && traceBound && trace.requestBody !== undefined && trace.requestBody !== null;
         const hasResponseBody = !!trace && traceBound && trace.responseBody !== undefined && trace.responseBody !== null;
         const tokenUsage = message.tokenUsage;
+        // 获取 session 级别的 token 累计值
+        const sessionTokenUsage = this.state.getSessionResourceState(this.state.currentSessionId || '', 'tokenUsage');
+        const sessionUsageData = (sessionTokenUsage as ResourceState<TokenUsageView> | undefined)?.data;
+        const sessionInputTokens = sessionUsageData?.inputTokens ?? 0;
+        const sessionOutputTokens = sessionUsageData?.outputTokens ?? 0;
+        const sessionTotalTokens = sessionInputTokens + sessionOutputTokens;
+        
+        // 计算本次请求的 token 增量
+        const thisTurnSnapshot = (this as any)._thisTurnSnapshot as { inputTokens?: number; outputTokens?: number } | undefined;
+        const thisTurnInputDelta = thisTurnSnapshot?.inputTokens != null ? sessionInputTokens - thisTurnSnapshot.inputTokens : 0;
+        const thisTurnOutputDelta = thisTurnSnapshot?.outputTokens != null ? sessionOutputTokens - thisTurnSnapshot.outputTokens : 0;
+        const thisTurnTotalDelta = thisTurnInputDelta + thisTurnOutputDelta;
+
         const traceActionsHtml = isAssistant
             ? `<div class="message-trace-actions">
                 <button
@@ -1059,7 +1092,11 @@ export class ChatView {
             </div>`
             : '';
         const tokenUsageHtml = isAssistant && tokenUsage
-            ? `<div class="message-token-usage">Tokens: prompt ${this.formatTokenCountInK(tokenUsage.inputTokens)} · completion ${this.formatTokenCountInK(tokenUsage.outputTokens)} · total ${this.formatTokenCountInK(tokenUsage.totalTokens)}</div>`
+            ? `<div class="message-token-usage">
+                Tokens: prompt ${this.formatTokenCountInK(tokenUsage.inputTokens)} · completion ${this.formatTokenCountInK(tokenUsage.outputTokens)} · total ${this.formatTokenCountInK(tokenUsage.totalTokens)}
+                ${thisTurnTotalDelta > 0 ? `<span class="this-turn-token-usage"> (this turn: prompt ${this.formatTokenCountInK(thisTurnInputDelta)} · completion ${this.formatTokenCountInK(thisTurnOutputDelta)} · total ${this.formatTokenCountInK(thisTurnTotalDelta)})</span>` : ''}
+                ${sessionUsageData ? `<span class="session-token-usage"> (session: prompt ${this.formatTokenCountInK(sessionInputTokens)} · completion ${this.formatTokenCountInK(sessionOutputTokens)} · total ${this.formatTokenCountInK(sessionTotalTokens)})</span>` : ''}
+            </div>`
             : '';
 
         return `

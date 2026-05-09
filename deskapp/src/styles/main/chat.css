@@ -1,4 +1,4 @@
-/* ========== 中间工作�?========== */
+/* ========== 中间工作?========== */
 .workspace {
   flex: 1;
   display: flex;
@@ -11,7 +11,7 @@
 .messages {
   flex: 1;
   overflow-y: auto;
-  /* 动�?padding：窗口宽时自动增大左�?padding 使内容区约束�?810px，与输入框视觉对�?*/
+  /* 动?padding：窗口宽时自动增大左?padding 使内容区约束?810px，与输入框视觉对?*/
   padding: var(--spacing-lg) max(var(--spacing-xl), calc(50% - 405px));
   display: flex;
   flex-direction: column;
@@ -107,6 +107,16 @@
   font-size: 12px;
   color: var(--color-text-secondary);
   opacity: 0.85;
+}
+.session-token-usage {
+  margin-left: 8px;
+  color: var(--color-text-tertiary);
+  opacity: 0.75;
+}
+.this-turn-token-usage {
+  margin-left: 8px;
+  color: var(--color-text-tertiary);
+  opacity: 0.75;
 }
 .message-time {
   font-size: 0.75rem;
@@ -213,7 +223,7 @@
   font-family: 'Consolas', 'Monaco', 'Source Code Pro', monospace;
   font-size: 0.85em;
 }
-/* 代码块容�?*/
+/* 代码块容?*/
 .code-block-wrapper {
   margin: 0.8em 0;
   border-radius: var(--radius-md);
@@ -295,7 +305,7 @@
 .markdown-body tbody tr:hover {
   background: rgba(99, 102, 241, 0.04);
 }
-/* 分割�?*/
+/* 分割?*/
 .markdown-body hr {
   margin: 1.2em 0;
   border: none;
@@ -307,7 +317,7 @@
   border-radius: var(--radius-md);
   margin: 0.5em 0;
 }
-/* 粗体和斜�?*/
+/* 粗体和斜?*/
 .markdown-body strong {
   font-weight: 600;
   color: var(--color-text);
@@ -316,7 +326,7 @@
   font-style: italic;
   color: var(--color-text-secondary);
 }
-/* 删除�?*/
+/* 删除?*/
 .markdown-body del {
   color: var(--color-text-secondary);
   opacity: 0.6;
@@ -442,7 +452,7 @@
     transform: rotate(360deg);
   }
 }
-/* ========== Typing 指示�?- 三点跳动效果 ========== */
+/* ========== Typing 指示?- 三点跳动效果 ========== */
 .typing-container {
   display: flex;
   align-items: center;
@@ -483,7 +493,7 @@
     opacity: 1;
   }
 }
-/* 进度卡片中的思考内容样�?*/
+/* 进度卡片中的思考内容样?*/
 .progress-item.thinking .progress-text {
     font-style: italic;
     color: var(--color-text-secondary);
@@ -598,16 +608,16 @@
 .message.streaming .message-bubble {
   position: relative;
 }
-/* 流式阶段�?markdown-body 样式调整 */
+/* 流式阶段?markdown-body 样式调整 */
 .message.streaming .markdown-body {
   display: block;
 }
-/* 光标�?markdown 元素内部时保持行内显�?*/
+/* 光标?markdown 元素内部时保持行内显?*/
 .message.streaming .markdown-body .streaming-cursor {
   display: inline-block;
   vertical-align: middle;
 }
-/* ========== 右侧成果物面�?========== */
+/* ========== 右侧成果物面?========== */
 .artifacts-panel {
   width: var(--progress-panel-width);
   background: var(--color-bg-secondary);
@@ -698,7 +708,7 @@
   margin-left: 6px;
   opacity: 0.7;
 }
-/* 成果物时间标�?*/
+/* 成果物时间标?*/
 .artifact-time {
   font-size: 0.625rem;
   color: var(--color-text-secondary);
@@ -706,7 +716,7 @@
   opacity: 0.6;
   font-weight: 400;
 }
-/* 成果物日期分�?*/
+/* 成果物日期分?*/
 .artifact-date-group {
   margin-bottom: 4px;
 }
@@ -727,7 +737,7 @@
   background: var(--color-border);
   opacity: 0.6;
 }
-/* 今天的子分组（最�?小时 / 3小时 / 更早�?*/
+/* 今天的子分组（最?小时 / 3小时 / 更早?*/
 .artifact-sub-group {
   margin: 2px 0 2px 4px;
 }
@@ -870,7 +880,7 @@
     word-break: break-all;
     max-height: 60vh;
 }
-/* 滚动条美�?*/
+/* 滚动条美?*/
 #tool-detail-content::-webkit-scrollbar {
     width: 6px;
 }
@@ -912,7 +922,7 @@
   height: 44px;
   border-radius: 50%;
   position: relative;
-  /* 纯黑深渊中心 �?暗灰边缘 �?透明 */
+  /* 纯黑深渊中心 ?暗灰边缘 ?透明 */
   background: radial-gradient(circle at center,
       #000 0%,
       #0a0a0f 20%,
@@ -927,7 +937,7 @@
     inset 0 0 8px 3px rgba(0, 0, 0, 0.95);
   animation: blackhole-typing-glow 3s ease-in-out infinite;
 }
-/* 外层吸积�?—�?暗灰旋涡 */
+/* 外层吸积?—?暗灰旋涡 */
 .fire-blackhole-typing::before {
   content: '';
   position: absolute;
@@ -943,7 +953,7 @@
   border-left-color: rgba(140, 145, 175, 0.25);
   animation: blackhole-typing-ring 2.5s linear infinite;
 }
-/* 内层光环 —�?更暗更快的反向旋�?*/
+/* 内层光环 —?更暗更快的反向旋?*/
 .fire-blackhole-typing::after {
   content: '';
   position: absolute;
@@ -1018,11 +1028,11 @@
   overflow-y: auto;
   background: rgba(30, 41, 59, 0.3);
 }
-/* 折叠状态隐�?body */
+/* 折叠状态隐?body */
 .progress-card.collapsed .progress-card-body {
   display: none;
 }
-/* 运行过程�?*/
+/* 运行过程?*/
 .progress-item {
   display: flex;
   align-items: flex-start;
@@ -1033,7 +1043,7 @@
   color: var(--color-text-tertiary);
   border-left: 1px solid rgba(100, 116, 139, 0.25);
   margin-bottom: 2px;
-  /* 入场动画：从底部滑入并渐�?*/
+  /* 入场动画：从底部滑入并渐?*/
   animation: credits-slide-in 0.4s ease-out both;
 }
 /* 字幕滚动入场动画 */
@@ -1065,11 +1075,11 @@
   color: var(--color-text-tertiary);
   opacity: 0.85;
 }
-/* 工具执行结果摘要（第二行�?*/
+/* 工具执行结果摘要（第二行?*/
 .progress-detail {
   width: 100%;
   padding-left: 18px;
-  /* �?icon+gap 对齐 */
+  /* ?icon+gap 对齐 */
   font-size: 0.65rem;
   line-height: 1.3;
   color: rgba(148, 163, 184, 0.6);
@@ -1078,8 +1088,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* ========== 黑洞/白洞动态效�?========== */
-/* 黑洞效果 - 用于工具执行和思�?*/
+/* ========== 黑洞/白洞动态效?========== */
+/* 黑洞效果 - 用于工具执行和思?*/
 .cosmic-hole {
   position: relative;
   width: 20px;
@@ -1223,12 +1233,12 @@
     transform: rotate(-360deg);
   }
 }
-/* 进度卡片标题中的动态图�?*/
+/* 进度卡片标题中的动态图?*/
 .progress-card-icon .cosmic-hole {
   display: inline-block;
   vertical-align: middle;
 }
-/* 文档预览�?*/
+/* 文档预览?*/
 .document-preview {
   border-top: 1px solid var(--color-border);
   display: flex;
@@ -1356,7 +1366,7 @@
   gap: var(--spacing-md);
   justify-content: flex-end;
 }
-/* ========== 滚动�?========== */
+/* ========== 滚动?========== */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -1370,7 +1380,7 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-secondary);
 }
-/* ========== Gemini 风格悬浮输入�?========== */
+/* ========== Gemini 风格悬浮输入?========== */
 .input-area {
   position: relative;
   padding: var(--spacing-md) var(--spacing-xl);
@@ -1552,14 +1562,14 @@
     0 6px 30px rgba(99, 102, 241, 0.25),
     0 4px 15px rgba(0, 0, 0, 0.15);
 }
-/* 输入行：textarea + 发送按�?*/
+/* 输入行：textarea + 发送按?*/
 .input-row {
   display: flex;
   align-items: flex-end;
   gap: var(--spacing-sm);
   width: 100%;
 }
-/* ======== 附件预览�?======== */
+/* ======== 附件预览?======== */
 .attachment-preview {
   display: flex;
   flex-wrap: wrap;
@@ -1618,7 +1628,7 @@
 .attachment-icon.icon-text {
   background: #6b7280;
 }
-/* 图片缩略�?*/
+/* 图片缩略?*/
 .attachment-thumb {
   width: 36px;
   height: 36px;
@@ -1629,7 +1639,7 @@
 .attachment-item.has-thumb {
   padding: 3px 10px 3px 3px;
 }
-/* 文件�?*/
+/* 文件?*/
 .attachment-name {
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -1826,7 +1836,7 @@
   cursor: not-allowed;
   background: #e04040;
 }
-/* 输入区附加按钮（如工具、附件等�?*/
+/* 输入区附加按钮（如工具、附件等?*/
 .input-actions {
   display: flex;
   align-items: center;
@@ -1858,12 +1868,12 @@
 .sidebar.collapsed .sidebar-nav {
   padding-left: 0;
 }
-/* 定时任务按钮激活�?*/
+/* 定时任务按钮激活?*/
 .sidebar-action.active {
   color: var(--color-primary);
   background: rgba(99, 102, 241, 0.1);
 }
-/* 小图标按�?*/
+/* 小图标按?*/
 .icon-btn-sm {
   width: 22px;
   height: 22px;

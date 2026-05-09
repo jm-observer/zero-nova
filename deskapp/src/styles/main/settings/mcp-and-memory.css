@@ -584,7 +584,7 @@
   color: var(--color-text-secondary);
   margin-top: 2px;
 }
-/* 调度器状�?*/
+/* 调度器状?*/
 .distill-scheduler-status {
   display: flex;
   align-items: center;
@@ -649,7 +649,7 @@
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
-/* Toggle 开�?*/
+/* Toggle 开?*/
 .distill-toggle {
   position: relative;
   display: inline-block;
@@ -686,7 +686,7 @@
 .distill-toggle input:checked+.distill-toggle-slider::before {
   transform: translateX(16px);
 }
-/* 时间和数字输�?*/
+/* 时间和数字输?*/
 .distill-time-range {
   display: flex;
   align-items: center;
@@ -935,7 +935,7 @@
   color: var(--color-primary);
   border-radius: 8px;
 }
-/* 空状�?*/
+/* 空状?*/
 .distill-cards-empty {
   padding: 40px 20px;
   text-align: center;

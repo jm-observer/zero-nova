@@ -25,3 +25,4 @@ describe('ModalsView', () => {
     expect(document.getElementById('tool-detail-close')).not.toBeNull();
   });
 });
+

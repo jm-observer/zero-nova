@@ -96,3 +96,4 @@ export const SETTINGS_TEMPLATE_GENERAL_TAB = `
             </div>
             <!-- 模型设置 Tab -->
 `;
+

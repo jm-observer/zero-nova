@@ -42,3 +42,4 @@ describe('VoiceOverlayView', () => {
     expect(retry?.classList.contains('hidden')).toBe(false);
   });
 });
+

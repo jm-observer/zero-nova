@@ -115,3 +115,4 @@ export function initErrorBoundary(): ErrorBoundary {
 export function getErrorBoundary(): ErrorBoundary | null {
     return errorBoundary;
 }
+

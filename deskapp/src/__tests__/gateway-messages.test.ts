@@ -137,3 +137,4 @@ describe('trackConsecError', () => {
     expect(trackConsecError(errorHandler)).toBe(true);
   });
 });
+

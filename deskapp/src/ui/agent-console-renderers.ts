@@ -434,3 +434,4 @@ export function hasSessionOverride(
 ): boolean {
     return orchestrationDetail?.source === 'session_override' || executionDetail?.source === 'session_override';
 }
+

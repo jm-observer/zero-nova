@@ -160,3 +160,4 @@ export async function restoreSessionProgress(
 
     console.log('[SessionRestore] Finished restoring session progress', { sessionId });
 }
+

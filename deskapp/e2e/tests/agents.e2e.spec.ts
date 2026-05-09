@@ -39,3 +39,4 @@ test.describe('Agent switching', () => {
     await expect(page.locator('#agent-modal')).toBeVisible();
   });
 });
+

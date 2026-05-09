@@ -21,3 +21,4 @@ describe('AppState voice helpers', () => {
     expect(state.messages[0].metadata?.voiceTranscriptState).toBe('final');
   });
 });
+

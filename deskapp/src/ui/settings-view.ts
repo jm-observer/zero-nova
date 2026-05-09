@@ -224,3 +224,4 @@ export class SettingsView {
         return el ? el.value : '';
     }
 }
+

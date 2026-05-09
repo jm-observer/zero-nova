@@ -109,3 +109,4 @@ describe('frontend edge cases', () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 });
+

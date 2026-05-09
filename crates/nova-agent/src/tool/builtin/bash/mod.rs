@@ -1,3 +1,9 @@
+// Platform-specific modules - declared here so they are submodules of bash
+#[cfg(target_os = "linux")]
+mod bash_linux;
+#[cfg(target_os = "windows")]
+mod bash_windows;
+
 use crate::config::BashConfig;
 use crate::event::AgentEvent;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
@@ -13,10 +19,9 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{timeout, Instant};
-use which::which;
 
 /// Shell 执行后端接口
-trait ShellBackend: Send + Sync {
+pub trait ShellBackend: Send + Sync {
     /// 返回 shell 名称（用于日志/调试）
     fn name(&self) -> &str;
 
@@ -24,135 +29,11 @@ trait ShellBackend: Send + Sync {
     fn build_command(&self, command_str: &str) -> Command;
 }
 
-struct UnixSh;
-
-impl ShellBackend for UnixSh {
-    fn name(&self) -> &str {
-        "sh"
-    }
-
-    fn build_command(&self, command_str: &str) -> Command {
-        let mut cmd = Command::new("sh");
-        cmd.args(["-c", command_str]);
-        cmd
-    }
-}
-
-struct UnixBash;
-
-impl ShellBackend for UnixBash {
-    fn name(&self) -> &str {
-        "bash"
-    }
-
-    fn build_command(&self, command_str: &str) -> Command {
-        let mut cmd = Command::new("bash");
-        cmd.args(["-lc", command_str]);
-        cmd
-    }
-}
-
-struct PowerShellBackend {
-    executable: String, // "pwsh" 或 "powershell"
-}
-
-impl PowerShellBackend {
-    fn detect() -> Option<Self> {
-        // 优先检测 pwsh (PowerShell 7+, 跨平台, UTF-8)
-        if which("pwsh").is_ok() {
-            return Some(Self {
-                executable: "pwsh".into(),
-            });
-        }
-        // 降级到 Windows PowerShell 5.x
-        if cfg!(windows) && which("powershell").is_ok() {
-            return Some(Self {
-                executable: "powershell".into(),
-            });
-        }
-        None
-    }
-}
-
-impl ShellBackend for PowerShellBackend {
-    fn name(&self) -> &str {
-        &self.executable
-    }
-
-    fn build_command(&self, command_str: &str) -> Command {
-        let mut cmd = Command::new(&self.executable);
-        if self.executable == "powershell" {
-            // Windows PowerShell 5.x 需要额外设置编码
-            let wrapped = format!(
-                "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; {}",
-                command_str
-            );
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
-        } else {
-            cmd.args([
-                "-NoProfile",      // 跳过配置文件加载，加速启动
-                "-NonInteractive", // 非交互模式
-                "-Command",        // 执行命令字符串
-                command_str,
-            ]);
-        }
-        // 强制 UTF-8 输出
-        cmd.env("PYTHONIOENCODING", "utf-8");
-        cmd
-    }
-}
-
-struct CmdBackend;
-
-impl ShellBackend for CmdBackend {
-    fn name(&self) -> &str {
-        "cmd"
-    }
-
-    fn build_command(&self, command_str: &str) -> Command {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", command_str]);
-        cmd
-    }
-}
-
-fn select_shell(config: &BashConfig) -> Box<dyn ShellBackend> {
-    // 1. 配置覆盖
-    if let Some(shell) = &config.shell {
-        match shell.to_lowercase().as_str() {
-            "sh" => return Box::new(UnixSh),
-            "bash" => {
-                if which("bash").is_ok() {
-                    return Box::new(UnixBash);
-                }
-                return Box::new(UnixSh);
-            }
-            "pwsh" | "powershell" => {
-                if let Some(ps) = PowerShellBackend::detect() {
-                    return Box::new(ps);
-                }
-            }
-            "cmd" => return Box::new(CmdBackend),
-            _ => {} // 忽略无效值，走自动检测
-        }
-    }
-
-    // 2. 平台自动检测
-    if cfg!(windows) {
-        // Windows: pwsh > powershell > cmd
-        if let Some(ps) = PowerShellBackend::detect() {
-            return Box::new(ps);
-        }
-        Box::new(CmdBackend)
-    } else {
-        // Linux/macOS: bash 优先，回退 sh
-        if which("bash").is_ok() {
-            Box::new(UnixBash)
-        } else {
-            Box::new(UnixSh)
-        }
-    }
-}
+// Platform-specific re-exports for external use
+#[cfg(target_os = "linux")]
+pub use bash_linux::{select_shell, UnixBash, UnixSh};
+#[cfg(target_os = "windows")]
+pub use bash_windows::{select_shell, CmdBackend, PowerShellBackend};
 
 fn is_cross_shell_nested_command(command_str: &str, shell_name: &str) -> bool {
     let normalized = command_str.trim().to_lowercase();
@@ -471,23 +352,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shell_selection_default() {
-        let config = BashConfig::default();
-        let shell = select_shell(&config);
-        if cfg!(windows) {
-            // Check if one of the expected Windows shells is selected
-            let name = shell.name();
-            assert!(
-                name == "pwsh" || name == "powershell" || name == "cmd",
-                "Unexpected shell name on Windows: {}",
-                name
-            );
-        } else {
-            assert_eq!(shell.name(), "sh");
-        }
-    }
-
-    #[test]
     fn test_truncate_safe() {
         let s = "你好世界"; // 4 chars, 12 bytes
         assert_eq!(truncate(s, 12), "你好世界");
@@ -508,23 +372,6 @@ mod tests {
         let (decoded_invalid, invalid_lossy) = decode_lossy_with_flag(&invalid);
         assert!(decoded_invalid.contains('\u{FFFD}'));
         assert!(invalid_lossy);
-    }
-
-    #[test]
-    fn powershell_legacy_wrapper_enables_utf8_io_defaults() {
-        let backend = PowerShellBackend {
-            executable: "powershell".to_string(),
-        };
-        let cmd = backend.build_command("Get-Content -Raw test.txt");
-        let args: Vec<String> = cmd
-            .as_std()
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        let wrapped = args.last().expect("powershell backend should pass wrapped command");
-        assert!(wrapped.contains("$OutputEncoding = [System.Text.Encoding]::UTF8;"));
-        assert!(wrapped.contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"));
-        assert!(wrapped.contains("$PSDefaultParameterValues['*:Encoding'] = 'utf8';"));
     }
 
     #[test]

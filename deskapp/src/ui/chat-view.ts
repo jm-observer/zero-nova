@@ -1429,3 +1429,4 @@ export class ChatView {
         }
     }
 }
+

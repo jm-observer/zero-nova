@@ -194,3 +194,4 @@ export const SETTINGS_TEMPLATE_MEMORY_TAB = `
               </div>
             </div>
 `;
+

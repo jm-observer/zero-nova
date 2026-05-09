@@ -117,3 +117,4 @@ describe('ChatService', () => {
         expect(setMessagesSpy).not.toHaveBeenCalled();
     });
 });
+

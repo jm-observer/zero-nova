@@ -83,3 +83,4 @@ export function applyI18nToDOM(): void {
         el.innerHTML = t(key);
     });
 }
+

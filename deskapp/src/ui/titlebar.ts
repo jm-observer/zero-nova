@@ -218,3 +218,4 @@ export class TitleBarView {
         if (textEl) textEl.textContent = text;
     }
 }
+

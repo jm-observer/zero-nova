@@ -269,9 +269,7 @@ impl EnvironmentSnapshot {
 
         let platform = std::env::consts::OS.to_string();
 
-        let shell = std::env::var("SHELL")
-            .or_else(|_| std::env::var("COMSPEC"))
-            .unwrap_or_else(|_| "unknown".to_string());
+        let shell = detect_shell_command();
 
         let git_branch = if let Some(project_dir_path) = project_dir_path {
             Self::run_git(project_dir_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await
@@ -366,6 +364,73 @@ impl EnvironmentSnapshot {
         }
 
         lines.join("\n")
+    }
+}
+
+fn normalize_shell_command(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let lowered = trimmed.to_lowercase();
+    if lowered.contains("pwsh") {
+        return Some("pwsh".to_string());
+    }
+    if lowered.contains("powershell") {
+        return Some("powershell".to_string());
+    }
+    if lowered.contains("cmd.exe") || lowered.ends_with("cmd") {
+        return Some("cmd".to_string());
+    }
+    if lowered.contains("bash") {
+        return Some("bash".to_string());
+    }
+    if lowered.contains("zsh") {
+        return Some("zsh".to_string());
+    }
+    if lowered.contains("fish") {
+        return Some("fish".to_string());
+    }
+    if lowered.contains("sh") {
+        return Some("sh".to_string());
+    }
+
+    let stem = std::path::Path::new(trimmed)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(trimmed)
+        .to_lowercase();
+
+    if stem.is_empty() {
+        None
+    } else {
+        Some(stem)
+    }
+}
+
+fn detect_shell_command() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if which::which("pwsh").is_ok() {
+            return "pwsh".to_string();
+        }
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            if let Some(normalized) = normalize_shell_command(&comspec) {
+                return normalized;
+            }
+        }
+        "cmd".to_string()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(shell) = std::env::var("SHELL") {
+            if let Some(normalized) = normalize_shell_command(&shell) {
+                return normalized;
+            }
+        }
+        "sh".to_string()
     }
 }
 
@@ -2082,5 +2147,20 @@ mod tests {
     fn developer_prompt_section_heading() {
         let section = SectionName::DeveloperProjectPrompt;
         assert_eq!(section.heading(), "Developer Project Instructions");
+    }
+
+    #[test]
+    fn normalize_shell_command_extracts_command_name() {
+        assert_eq!(
+            normalize_shell_command(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            Some("pwsh".to_string())
+        );
+        assert_eq!(
+            normalize_shell_command(r"C:\Windows\System32\cmd.exe /c"),
+            Some("cmd".to_string())
+        );
+        assert_eq!(normalize_shell_command("/usr/bin/bash -lc"), Some("bash".to_string()));
+        assert_eq!(normalize_shell_command(""), None);
+        assert_eq!(normalize_shell_command("   "), None);
     }
 }

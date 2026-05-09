@@ -100,3 +100,4 @@ describe('AgentConsoleView prompt reload sync', () => {
         expect(notifications.some(item => item.type === 'error')).toBe(true);
     });
 });
+

@@ -305,3 +305,4 @@ export function destroyTypingHole(): void {
         typingHoleInstance = null;
     }
 }
+

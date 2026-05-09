@@ -1,4 +1,4 @@
-﻿import {
+import {
   ProtocolErrorHandler,
   type ValidationHint,
   validateEnvelope,
@@ -117,3 +117,4 @@ export function trackConsecError(errorHandler: ProtocolErrorHandler): boolean {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+

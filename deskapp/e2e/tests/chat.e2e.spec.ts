@@ -55,3 +55,4 @@ test.describe('Chat functionality', () => {
     await expect(page.locator('.project-picker')).toContainText('当前会话未设置项目目录');
   });
 });
+

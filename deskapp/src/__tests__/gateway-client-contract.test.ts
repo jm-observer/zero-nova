@@ -138,3 +138,4 @@ describe('GatewayClient contract guards', () => {
   });
 
 });
+

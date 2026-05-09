@@ -49,3 +49,4 @@ test.describe('Session management', () => {
     expect(await sessionList.locator('.session-item').count()).toBeGreaterThanOrEqual(0);
   });
 });
+

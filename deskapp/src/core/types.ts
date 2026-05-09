@@ -798,3 +798,4 @@ export interface ModelBindingDetailView extends ModelBindingView {
     inheritedFrom?: string;
     editableScopes: Array<'global' | 'agent' | 'session_override'>;
 }
+

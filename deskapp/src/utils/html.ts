@@ -33,3 +33,4 @@ export function formatTime(timestamp: number): string {
     
     return `${d.getMonth() + 1}/${d.getDate()} ${timeStr}`;
 }
+

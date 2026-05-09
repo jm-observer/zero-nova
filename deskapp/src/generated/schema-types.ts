@@ -32,3 +32,4 @@ export type WelcomePayload = { requireAuth: boolean; setupRequired?: boolean; };
 export type WorkspaceRestoreRequest = { userId?: string | null; };
 
 export type WorkspaceRestoreResponse = { activeTab: string; agentId?: string | null; consoleVisible: boolean; restorableRunState: string; selectedArtifactId?: string | null; selectedDiagnosticId?: string | null; selectedPermissionRequestId?: string | null; selectedRunId?: string | null; sessionId?: string | null; updatedAt: number; };
+

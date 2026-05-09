@@ -167,3 +167,4 @@ describe('ChatView http trace copy', () => {
         expect(toastSpy).toHaveBeenCalledWith({ message: t('chat.copy_body_failed') });
     });
 });
+

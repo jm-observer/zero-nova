@@ -174,3 +174,4 @@ export const AGENT_CONSOLE_TEMPLATE = `
   </footer>
 </div>
 `;
+

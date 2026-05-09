@@ -221,3 +221,4 @@ export class ModalsView {
         return div.innerHTML;
     }
 }
+

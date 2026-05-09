@@ -190,3 +190,4 @@ export class ChatService {
         return nextMessages;
     }
 }
+

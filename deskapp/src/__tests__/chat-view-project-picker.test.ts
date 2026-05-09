@@ -251,3 +251,4 @@ describe('ChatView @ project picker', () => {
         expect(menuPath.textContent).toContain('/second/project');
     });
 });
+

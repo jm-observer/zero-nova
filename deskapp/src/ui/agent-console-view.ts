@@ -1804,3 +1804,4 @@ export class AgentConsoleView {
         return state.error ?? t('common.load_failed');
     }
 }
+

@@ -26,3 +26,4 @@ export const SETTINGS_TEMPLATE_HEADER = `
             </div>
             <!-- 通用设置 Tab -->
 `;
+

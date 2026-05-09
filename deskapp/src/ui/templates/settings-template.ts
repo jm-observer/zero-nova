@@ -11,3 +11,4 @@ export const SETTINGS_TEMPLATE = [
     SETTINGS_TEMPLATE_TOOLS_TAB.replace(/^\r?\n/, ''),
     SETTINGS_TEMPLATE_MEMORY_TAB.replace(/^\r?\n/, ''),
 ].join('');
+

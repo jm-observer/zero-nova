@@ -41,3 +41,4 @@ describe('resolveSessionMessages', () => {
         expect(result).toEqual(loadedMessages);
     });
 });
+

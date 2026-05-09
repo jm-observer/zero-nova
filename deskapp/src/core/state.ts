@@ -767,3 +767,4 @@ export class AppState {
         return this.setErrorResource<T>(fallbackMessage);
     }
 }
+

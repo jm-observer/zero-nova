@@ -146,3 +146,4 @@ export function renderMemoryHitsHtml(hits: MemoryHitView[], approximate: boolean
                 .join('')}
         `;
 }
+

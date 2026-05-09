@@ -173,3 +173,4 @@ describe('TitleBarView status priority', () => {
         expect(text.textContent).toBe('status.gateway_connected_provider_healthy');
     });
 });
+

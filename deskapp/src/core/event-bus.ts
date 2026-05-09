@@ -92,3 +92,4 @@
    CONSOLE_MEMORY_UPDATED: 'console:memory_updated',
    SETTINGS_NAVIGATE: 'settings:navigate',
  } as const;
+

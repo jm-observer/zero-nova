@@ -1,12 +1,12 @@
+use anyhow::Result;
+use async_trait::async_trait;
 use nova_agent::agent::{AgentConfig, AgentRuntime};
 use nova_agent::event::AgentEvent;
-use nova_agent::loop_guard::LoopGuardConfig;
+use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::message::Message;
 use nova_agent::prompt::TrimmerConfig;
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use nova_agent::tool::ToolRegistry;
-use anyhow::Result;
-use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -21,18 +21,27 @@ impl LlmClient for StalledClient {
         _tools: &[nova_agent::provider::types::ToolDefinition],
         _config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
-        struct StalledReceiver { step: usize }
+        struct StalledReceiver {
+            step: usize,
+        }
         #[async_trait]
         impl StreamReceiver for StalledReceiver {
             async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>> {
                 self.step += 1;
                 match self.step {
-                    1 => Ok(Some(ProviderStreamEvent::TextDelta("I am stuck in a loop".to_string()))),
-                    2 => Ok(Some(ProviderStreamEvent::MessageComplete {
+                    1 => Ok(Some(ProviderStreamEvent::ToolUseStart {
+                        id: "stalled_call".to_string(),
+                        name: "Read".to_string(),
+                    })),
+                    2 => Ok(Some(ProviderStreamEvent::ToolUseInputDelta(
+                        "{\"file_path\":\"a.txt\"}".to_string(),
+                    ))),
+                    3 => Ok(Some(ProviderStreamEvent::ToolUseEnd)),
+                    4 => Ok(Some(ProviderStreamEvent::MessageComplete {
                         usage: Default::default(),
                         stop_reason: None,
                     })),
-                    _ => Ok(None)
+                    _ => Ok(None),
                 }
             }
         }
@@ -41,7 +50,7 @@ impl LlmClient for StalledClient {
 }
 
 struct DuplicateToolClient {
-    call_count: Arc<AtomicUsize>
+    call_count: Arc<AtomicUsize>,
 }
 
 #[async_trait]
@@ -53,7 +62,10 @@ impl LlmClient for DuplicateToolClient {
         _config: &ModelConfig,
     ) -> Result<Box<dyn StreamReceiver>> {
         let count = self.call_count.fetch_add(1, Ordering::SeqCst);
-        struct ToolReceiver { step: usize, id: String }
+        struct ToolReceiver {
+            step: usize,
+            id: String,
+        }
         #[async_trait]
         impl StreamReceiver for ToolReceiver {
             async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>> {
@@ -61,23 +73,91 @@ impl LlmClient for DuplicateToolClient {
                 match self.step {
                     1 => Ok(Some(ProviderStreamEvent::ToolUseStart {
                         id: self.id.clone(),
-                        name: "Read".to_string()
+                        name: "Read".to_string(),
                     })),
-                    2 => Ok(Some(ProviderStreamEvent::ToolUseInputDelta("{\"file_path\":\"a.txt\"}".to_string()))),
+                    2 => Ok(Some(ProviderStreamEvent::ToolUseInputDelta(
+                        "{\"file_path\":\"a.txt\"}".to_string(),
+                    ))),
                     3 => Ok(Some(ProviderStreamEvent::ToolUseEnd)),
                     4 => Ok(Some(ProviderStreamEvent::MessageComplete {
                         usage: Default::default(),
                         stop_reason: None,
                     })),
-                    _ => Ok(None)
+                    _ => Ok(None),
                 }
             }
         }
-        Ok(Box::new(ToolReceiver { step: 0, id: format!("call_{}", count) }))
+        Ok(Box::new(ToolReceiver {
+            step: 0,
+            id: format!("call_{}", count),
+        }))
+    }
+}
+
+struct DuplicateThenRecoverClient {
+    call_count: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl LlmClient for DuplicateThenRecoverClient {
+    async fn stream(
+        &self,
+        _messages: &[Message],
+        _tools: &[nova_agent::provider::types::ToolDefinition],
+        _config: &ModelConfig,
+    ) -> Result<Box<dyn StreamReceiver>> {
+        let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+        struct Receiver {
+            step: usize,
+            count: usize,
+        }
+        #[async_trait]
+        impl StreamReceiver for Receiver {
+            async fn next_event(&mut self) -> Result<Option<ProviderStreamEvent>> {
+                self.step += 1;
+                if self.count >= 3 {
+                    return match self.step {
+                        1 => Ok(Some(ProviderStreamEvent::TextDelta(
+                            "Recovered after guard feedback".to_string(),
+                        ))),
+                        2 => Ok(Some(ProviderStreamEvent::MessageComplete {
+                            usage: Default::default(),
+                            stop_reason: None,
+                        })),
+                        _ => Ok(None),
+                    };
+                }
+
+                match self.step {
+                    1 => Ok(Some(ProviderStreamEvent::ToolUseStart {
+                        id: format!("recover_call_{}", self.count),
+                        name: "Read".to_string(),
+                    })),
+                    2 => Ok(Some(ProviderStreamEvent::ToolUseInputDelta(
+                        "{\"file_path\":\"a.txt\"}".to_string(),
+                    ))),
+                    3 => Ok(Some(ProviderStreamEvent::ToolUseEnd)),
+                    4 => Ok(Some(ProviderStreamEvent::MessageComplete {
+                        usage: Default::default(),
+                        stop_reason: None,
+                    })),
+                    _ => Ok(None),
+                }
+            }
+        }
+        Ok(Box::new(Receiver { step: 0, count }))
     }
 }
 
 fn build_runtime<C: LlmClient>(client: C, max_iterations: usize) -> AgentRuntime<C> {
+    build_runtime_with_loop_guard(client, max_iterations, LoopGuardConfig::default())
+}
+
+fn build_runtime_with_loop_guard<C: LlmClient>(
+    client: C,
+    max_iterations: usize,
+    loop_guard: LoopGuardConfig,
+) -> AgentRuntime<C> {
     let config = AgentConfig {
         max_iterations,
         model_config: ModelConfig {
@@ -97,24 +177,31 @@ fn build_runtime<C: LlmClient>(client: C, max_iterations: usize) -> AgentRuntime
         prompts_dir: std::path::PathBuf::from(""),
         project_context_file: None,
         initial_env_snapshot: None,
-        loop_guard: LoopGuardConfig::default(),
+        loop_guard,
     };
     AgentRuntime::new(client, ToolRegistry::new(), config)
 }
 
 #[tokio::test]
 async fn test_stalled_iteration_aborts_turn() {
-    let runtime = build_runtime(StalledClient, 10);
+    let tools = ToolRegistry::new();
+    tools.register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)));
+    let mut runtime = build_runtime_with_loop_guard(
+        StalledClient,
+        10,
+        LoopGuardConfig {
+            max_consecutive_duplicate_tool_calls: 100,
+            duplicate_read_mode: DuplicateReadMode::WarnOnly,
+            ..LoopGuardConfig::default()
+        },
+    );
+    runtime.set_tools(tools);
     let (tx, mut rx) = mpsc::channel(100);
-    
-    let _res = runtime.run_turn(
-        &[],
-        "hello",
-        "session_1",
-        None,
-        tx,
-        None
-    ).await.unwrap();
+
+    let _res = runtime
+        .run_turn(&[], "hello", "session_1", None, tx, None)
+        .await
+        .unwrap();
 
     let mut hit_stall = false;
     while let Some(ev) = rx.recv().await {
@@ -129,21 +216,22 @@ async fn test_stalled_iteration_aborts_turn() {
 
 #[tokio::test]
 async fn test_duplicate_tool_call_rejected() {
-    let mut tools = ToolRegistry::new();
+    let tools = ToolRegistry::new();
     tools.register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)));
-    
-    let mut runtime = build_runtime(DuplicateToolClient { call_count: Arc::new(AtomicUsize::new(0)) }, 5);
+
+    let mut runtime = build_runtime(
+        DuplicateToolClient {
+            call_count: Arc::new(AtomicUsize::new(0)),
+        },
+        5,
+    );
     runtime.set_tools(tools);
     let (tx, mut rx) = mpsc::channel(100);
-    
-    let _res = runtime.run_turn(
-        &[],
-        "hello",
-        "session_1",
-        None,
-        tx,
-        None
-    ).await.unwrap();
+
+    let _res = runtime
+        .run_turn(&[], "hello", "session_1", None, tx, None)
+        .await
+        .unwrap();
 
     let mut hit_warning = false;
     let mut hit_reject = false;
@@ -158,4 +246,51 @@ async fn test_duplicate_tool_call_rejected() {
     }
     assert!(hit_warning);
     assert!(hit_reject);
+}
+
+#[tokio::test]
+async fn duplicate_tool_rejection_is_fed_back_before_stall_abort() {
+    let tools = ToolRegistry::new();
+    tools.register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)));
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let mut runtime = build_runtime(
+        DuplicateThenRecoverClient {
+            call_count: call_count.clone(),
+        },
+        6,
+    );
+    runtime.set_tools(tools);
+    let (tx, mut rx) = mpsc::channel(100);
+
+    let res = runtime
+        .run_turn(&[], "hello", "session_1", None, tx, None)
+        .await
+        .unwrap();
+
+    let mut hit_reject = false;
+    let mut hit_stall = false;
+    while let Some(ev) = rx.recv().await {
+        if let AgentEvent::LoopGuardTriggered { reason_code, .. } = ev {
+            if reason_code == "duplicate_tool_call_rejected" {
+                hit_reject = true;
+            } else if reason_code == "stalled_iteration_abort" {
+                hit_stall = true;
+            }
+        }
+    }
+
+    let final_text = res
+        .messages
+        .iter()
+        .flat_map(|message| message.content.iter())
+        .find_map(|block| match block {
+            nova_agent::message::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        });
+
+    assert!(hit_reject);
+    assert!(!hit_stall);
+    assert_eq!(final_text, Some("Recovered after guard feedback"));
+    assert_eq!(call_count.load(Ordering::SeqCst), 4);
 }

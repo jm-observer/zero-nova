@@ -71,6 +71,19 @@ pub struct AgentConfig {
     pub loop_guard: LoopGuardConfig,
 }
 
+fn has_loop_guard_rejection(blocks: &[ContentBlock]) -> bool {
+    blocks.iter().any(|block| {
+        matches!(
+            block,
+            ContentBlock::ToolResult {
+                output,
+                is_error: true,
+                ..
+            } if output.starts_with("System Guard:")
+        )
+    })
+}
+
 impl<C: LlmClient> AgentRuntime<C> {
     /// Creates a new `AgentRuntime` instance.
     pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
@@ -601,30 +614,6 @@ impl<C: LlmClient> AgentRuntime<C> {
             all_messages.push(assistant_msg.clone());
             turn_messages.push(assistant_msg);
 
-            let assistant_fp = assistant_fingerprint_from_blocks(all_messages.last().map_or(&[], |m| &m.content));
-            let signatures = parsed_tool_calls
-                .iter()
-                .map(|(_, name, input)| build_tool_call_signature(name, input))
-                .collect::<Vec<_>>();
-            let calls_hash = tool_calls_hash(&signatures);
-            if loop_guard_state.detect_stalled_iteration(assistant_fp, calls_hash) {
-                let _ = event_tx
-                    .send(AgentEvent::LoopGuardTriggered {
-                        reason: "stalled_iteration_abort".to_string(),
-                        tool: None,
-                        session_id: session_id.to_string(),
-                        canonical_target: None,
-                        duplicate_count: loop_guard_state.duplicate_count(),
-                        stalled_iteration_count: loop_guard_state.stalled_count(),
-                        decision: "reject".to_string(),
-                        reason_code: "stalled_iteration_abort".to_string(),
-                        signature_hash: Some(calls_hash),
-                    })
-                    .await;
-                completed_naturally = true;
-                break;
-            }
-
             if last_stop_reason == Some(StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
                     true
@@ -653,6 +642,12 @@ impl<C: LlmClient> AgentRuntime<C> {
                 break;
             }
 
+            let assistant_fp = assistant_fingerprint_from_blocks(all_messages.last().map_or(&[], |m| &m.content));
+            let signatures = parsed_tool_calls
+                .iter()
+                .map(|(_, name, input)| build_tool_call_signature(name, input))
+                .collect::<Vec<_>>();
+            let calls_hash = tool_calls_hash(&signatures);
             let current_environment = if let Some(env) = &shared_environment {
                 Some(env.read().await.clone())
             } else {
@@ -671,8 +666,27 @@ impl<C: LlmClient> AgentRuntime<C> {
                 .await?;
 
             let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
+            let has_guard_rejection = has_loop_guard_rejection(&tool_res_msg.content);
             all_messages.push(tool_res_msg.clone());
             turn_messages.push(tool_res_msg);
+
+            if !has_guard_rejection && loop_guard_state.detect_stalled_iteration(assistant_fp, calls_hash) {
+                let _ = event_tx
+                    .send(AgentEvent::LoopGuardTriggered {
+                        reason: "stalled_iteration_abort".to_string(),
+                        tool: None,
+                        session_id: session_id.to_string(),
+                        canonical_target: None,
+                        duplicate_count: loop_guard_state.duplicate_count(),
+                        stalled_iteration_count: loop_guard_state.stalled_count(),
+                        decision: "reject".to_string(),
+                        reason_code: "stalled_iteration_abort".to_string(),
+                        signature_hash: Some(calls_hash),
+                    })
+                    .await;
+                completed_naturally = true;
+                break;
+            }
         }
 
         if !completed_naturally {

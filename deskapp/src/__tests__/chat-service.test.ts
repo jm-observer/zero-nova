@@ -116,5 +116,61 @@ describe('ChatService', () => {
         expect(client.getMessages).toHaveBeenCalledWith('session-1');
         expect(setMessagesSpy).not.toHaveBeenCalled();
     });
+
+    it('keeps streaming after loop guard warning progress', () => {
+        const bus = new EventBus();
+        const state = new AppState(bus);
+        const listeners: { progress?: (event: any) => void } = {};
+        const client = {
+            onProgress: vi.fn((handler: (event: any) => void) => {
+                listeners.progress = handler;
+            }),
+            onChatIntent: vi.fn(),
+            addMessageHandler: vi.fn(),
+        } as any;
+        const service = new ChatService(state, bus, client);
+        const systemLogs: any[] = [];
+        const errors: any[] = [];
+
+        bus.on('system:log', payload => systemLogs.push(payload));
+        bus.on('chat:error', payload => errors.push(payload));
+
+        service.init();
+        listeners.progress?.({
+            type: 'iteration_limit',
+            sessionId: 'session-1',
+            iteration: 3,
+            log: 'loop_guard_triggered session_id=session-1 reason=duplicate_tool_call_warning decision=warn',
+        });
+
+        expect(systemLogs).toHaveLength(1);
+        expect(errors).toHaveLength(0);
+    });
+
+    it('emits chat error for terminal iteration limit', () => {
+        const bus = new EventBus();
+        const state = new AppState(bus);
+        const listeners: { progress?: (event: any) => void } = {};
+        const client = {
+            onProgress: vi.fn((handler: (event: any) => void) => {
+                listeners.progress = handler;
+            }),
+            onChatIntent: vi.fn(),
+            addMessageHandler: vi.fn(),
+        } as any;
+        const service = new ChatService(state, bus, client);
+        const errors: any[] = [];
+
+        bus.on('chat:error', payload => errors.push(payload));
+
+        service.init();
+        listeners.progress?.({
+            type: 'iteration_limit',
+            sessionId: 'session-1',
+            iteration: 30,
+        });
+
+        expect(errors).toEqual([{ type: 'iteration_limit', sessionId: 'session-1', iteration: 30 }]);
+    });
 });
 

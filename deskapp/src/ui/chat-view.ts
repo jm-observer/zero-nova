@@ -640,11 +640,8 @@ export class ChatView {
             const entry = this.pickerFilteredEntries[i];
             const activeClass = i === this.pickerActiveIndex ? 'active' : '';
             const typeClass = entry.isDir ? 'dir' : 'file';
-            const selectBtn = entry.isDir
-                ? `<button class="project-picker-item-select" data-index="${i}" data-dir="1">📌</button>`
-                : '';
             items.push(
-                `<button class="project-picker-item ${typeClass} ${activeClass}" data-index="${i}">${escapeHtml(entry.name)}</button>${selectBtn}`
+                `<button class="project-picker-item ${typeClass} ${activeClass}" data-index="${i}">${escapeHtml(entry.name)}</button>`
             );
         }
         const empty = !this.pickerLoading && items.length === 0
@@ -667,21 +664,6 @@ export class ChatView {
                     return;
                 }
                 void this.selectProjectPickerEntry(this.pickerFilteredEntries[idx]);
-            });
-        });
-
-        // 选择文件夹按钮点击处理
-        this.projectPickerEl.querySelectorAll('.project-picker-item-select').forEach((el) => {
-            el.addEventListener('click', (event) => {
-                event.stopPropagation();
-                const idx = Number((el as HTMLElement).getAttribute('data-index') ?? '-1');
-                if (idx < 0 || idx >= this.pickerFilteredEntries.length) {
-                    return;
-                }
-                const entry = this.pickerFilteredEntries[idx];
-                if (entry && entry.isDir) {
-                    void this.selectProjectPickerFolder(entry);
-                }
             });
         });
 
@@ -736,13 +718,40 @@ export class ChatView {
             return;
         }
         const projectDir = this.readProjectDirFromRuntimePayload(payload);
-        const changed = this.applySessionProjectDir(sessionId, projectDir);
+        console.info('[ChatView] session.runtime.updated received:', {
+            sessionId,
+            currentSessionId: this.state.currentSessionId,
+            projectDir,
+        });
+        const changed = this.updateProjectDirRuntimeState(sessionId, projectDir, payload);
         if (sessionId === this.state.currentSessionId) {
             if (changed && this.pickerVisible) {
                 void this.loadProjectEntries(this.pickerCurrentPath);
             }
             this.renderProjectMenu();
+            console.info('[ChatView] Project menu rendered from runtime update:', {
+                sessionId,
+                projectDir,
+                buttonTextAfterRender: this.projectMenuBtn?.textContent,
+            });
         }
+    }
+
+    private updateProjectDirRuntimeState(
+        sessionId: string,
+        projectDir: string | null | undefined,
+        payload?: Record<string, unknown>
+    ): boolean {
+        const changed = this.applySessionProjectDir(sessionId, projectDir);
+        const runtimeState = this.state.getSessionResourceState(sessionId, 'runtime') as { data?: SessionRuntimeSnapshot } | undefined;
+        const runtime = {
+            ...(runtimeState?.data ?? {}),
+            ...((payload ?? {}) as Partial<SessionRuntimeSnapshot>),
+            sessionId,
+            projectDir: projectDir ?? runtimeState?.data?.projectDir ?? null,
+        } as SessionRuntimeSnapshot;
+        this.state.updateSessionResourceState(sessionId, 'runtime', this.state.setLoadedResource(runtime));
+        return changed;
     }
 
     private applySessionProjectDir(sessionId: string, projectDir: string | null | undefined): boolean {
@@ -842,7 +851,11 @@ export class ChatView {
             e.preventDefault();
             const target = this.pickerFilteredEntries[this.pickerActiveIndex];
             if (target) {
-                void this.selectProjectPickerEntry(target);
+                if (e.shiftKey && target.isDir) {
+                    this.selectProjectPickerFolder(target);
+                } else {
+                    void this.selectProjectPickerEntry(target);
+                }
             }
             return true;
         }
@@ -1284,6 +1297,7 @@ export class ChatView {
 
     private handleToolResult(event: any) {
         const { toolUseId, result, isError } = event;
+        this.handleProjectManagerResult(event);
         
         // 我们需要找到对应的 tool-use-card 并在其后插入结果，或者直接在 streaming message 中寻找
         if (!this.streamingMessageEl) return;
@@ -1325,6 +1339,59 @@ export class ChatView {
         }
     }
 
+    private handleProjectManagerResult(event: any) {
+        const toolName = typeof event.toolName === 'string' ? event.toolName : event.tool;
+        if (toolName !== 'ProjectManager' || event.isError) {
+            return;
+        }
+
+        const projectDir = this.readProjectDirFromToolResult(event.result);
+        console.info('[ChatView] ProjectManager result received:', {
+            sessionId: event.sessionId,
+            currentSessionId: this.state.currentSessionId,
+            projectDir,
+            hasGatewayClient: Boolean(this.state.gatewayClient),
+        });
+
+        if (event.sessionId !== this.state.currentSessionId) {
+            return;
+        }
+
+        if (projectDir) {
+            this.updateProjectDirFromExternalResult(event.sessionId, projectDir);
+            return;
+        }
+
+        void this.refreshProjectMenuState();
+    }
+
+    private readProjectDirFromToolResult(result: unknown): string | null {
+        if (typeof result !== 'string') {
+            return null;
+        }
+        const match = result.match(/Project directory changed to:\s*(.+)/i);
+        return match?.[1]?.trim() || null;
+    }
+
+    private updateProjectDirFromExternalResult(sessionId: string, projectDir: string) {
+        const changed = this.updateProjectDirRuntimeState(sessionId, projectDir);
+        console.info('[ChatView] Project menu state applied:', {
+            sessionId,
+            projectDir,
+            changed,
+            buttonTextBeforeRender: this.projectMenuBtn?.textContent,
+        });
+        if (changed && this.pickerVisible) {
+            void this.loadProjectEntries(this.pickerCurrentPath);
+        }
+        this.renderProjectMenu();
+        console.info('[ChatView] Project menu rendered:', {
+            sessionId,
+            projectDir,
+            buttonTextAfterRender: this.projectMenuBtn?.textContent,
+        });
+    }
+
     private handleSystemLog(event: any) {
         const { log } = event;
         // 过滤常见的 Agent 迭代反馈，避免干扰用户视线
@@ -1340,8 +1407,14 @@ export class ChatView {
                 </div>
             </div>
         `;
-        
-        this.messagesContainer.insertAdjacentHTML('beforeend', html);
+        const streamingMessage = this.streamingMessageEl?.parentElement === this.messagesContainer
+            ? this.streamingMessageEl
+            : null;
+        if (streamingMessage) {
+            streamingMessage.insertAdjacentHTML('beforebegin', html);
+        } else {
+            this.messagesContainer.insertAdjacentHTML('beforeend', html);
+        }
         this.scrollToBottom();
     }
 

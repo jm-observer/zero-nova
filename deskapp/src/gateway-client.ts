@@ -783,8 +783,18 @@ export class GatewayClient {
                 if (!event.toolName && event.tool) event.toolName = event.tool;
 
                 const eventRecord = event as unknown as Record<string, unknown>;
+                if (typeof eventRecord.tool_name === 'string' && !event.toolName) {
+                    event.toolName = eventRecord.tool_name;
+                    event.tool = eventRecord.tool_name;
+                }
+                if (typeof eventRecord.session_id === 'string' && !event.sessionId) {
+                    event.sessionId = eventRecord.session_id;
+                }
                 if (event.toolUseId && !eventRecord.tool_use_id) {
                     eventRecord.tool_use_id = event.toolUseId;
+                }
+                if (typeof eventRecord.tool_use_id === 'string' && !event.toolUseId) {
+                    event.toolUseId = eventRecord.tool_use_id;
                 }
                 
                 this.progressHandlers.forEach(handler => handler(event));
@@ -1855,7 +1865,6 @@ export async function initGatewayClient(url: string, token?: string): Promise<Ga
     await gatewayClient.connect();
     return gatewayClient;
 }
-
 
 
 

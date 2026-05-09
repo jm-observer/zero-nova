@@ -125,11 +125,16 @@ export class ChatService {
         } else if (event.type === 'tool_log') {
             this.bus.emit('tool:log', event);
         } else if (event.type === 'iteration_limit') {
-            this.bus.emit('chat:error', {
-                type: 'iteration_limit',
-                sessionId: event.sessionId,
-                iteration: event.iteration
-            });
+            const log = typeof event.log === 'string' ? event.log : '';
+            if (this.isLoopGuardWarning(log)) {
+                this.bus.emit('system:log', event);
+            } else {
+                this.bus.emit('chat:error', {
+                    type: 'iteration_limit',
+                    sessionId: event.sessionId,
+                    iteration: event.iteration
+                });
+            }
         } else if (event.type === 'iteration') {
             this.bus.emit('chat:iteration', event);
         } else if (event.type === 'system_log') {
@@ -171,6 +176,10 @@ export class ChatService {
             cacheCreationInputTokens: typeof record.cacheCreationInputTokens === 'number' ? record.cacheCreationInputTokens : undefined,
             cacheReadInputTokens: typeof record.cacheReadInputTokens === 'number' ? record.cacheReadInputTokens : undefined,
         };
+    }
+
+    private isLoopGuardWarning(log: string): boolean {
+        return log.includes('loop_guard_triggered') && log.includes('decision=warn');
     }
 
     private attachUsageToLastAssistantMessage(messages: any[], usage: MessageTokenUsage): any[] {

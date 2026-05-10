@@ -625,7 +625,7 @@ pub async fn load_developer_project_prompt_async(project_dir: Option<&Path>, fil
     }
 }
 
-/// 同步从项目根目录加载开发项目提示词。
+/// 同步从项目根目录加载开发项目提示词（仅用于非 async 兼容场景）。
 pub fn load_developer_project_prompt(project_dir: Option<&Path>, files: &[String]) -> Option<String> {
     let project_dir = project_dir?;
     let mut parts = Vec::new();
@@ -1205,6 +1205,76 @@ impl SystemPromptBuilder {
         builder
     }
 
+    /// 异步版本：用于 async 主链路，避免触发同步文件 I/O。
+    pub async fn from_config_async(config: &PromptConfig, skills: &SkillRegistry) -> Self {
+        let mut builder = Self::new();
+
+        let rendered_prompt = if config.template_vars.is_empty() {
+            config.agent_prompt.clone()
+        } else {
+            TemplateContext::render(&config.agent_prompt, &config.template_vars)
+        };
+        if !rendered_prompt.is_empty() {
+            builder = builder.base_section(&rendered_prompt);
+        }
+
+        builder = builder.behavior_guards_section();
+
+        let skill_prompt = match config.skill_injection {
+            SkillInjectionMode::Catalog => skills.generate_catalog_prompt(),
+            SkillInjectionMode::ActiveFull => skills.generate_contextual_prompt(config.active_skill.as_deref()),
+            SkillInjectionMode::Full => skills.generate_full_prompt(),
+        };
+        if !skill_prompt.is_empty() {
+            builder = builder.skill_section(&skill_prompt);
+        }
+
+        if let Some(content) = &config.developer_project_prompt_content {
+            let filtered = filter_project_instruction_by_profile(content, config.project_instruction_profile);
+            builder = builder.developer_project_prompt_section(filtered);
+        } else if let Some(content) =
+            load_developer_project_prompt_async(config.project_dir.as_deref(), &config.developer_prompt_files).await
+        {
+            let filtered = filter_project_instruction_by_profile(&content, config.project_instruction_profile);
+            builder = builder.developer_project_prompt_section(filtered);
+        }
+
+        if let Some(content) = &config.project_context_content {
+            builder = builder.project_context_section(content);
+        } else if let Some(content) = load_project_context_with_config_async(
+            config.project_dir.as_deref(),
+            config.project_context_path.as_deref(),
+        )
+        .await
+        {
+            builder = builder.project_context_section(&content);
+        }
+
+        if let Some(env) = &config.environment {
+            builder = builder.environment_snapshot(env);
+        }
+
+        if let Some(ref catalog) = config.agent_catalog {
+            if !catalog.is_empty() {
+                builder = builder.agent_catalog_section(catalog);
+            }
+        }
+
+        if let Some(stage) = config.template_vars.get(template_vars::WORKFLOW_STAGE) {
+            if stage != "idle" {
+                if let Some(path) = &config.workflow_prompt_path {
+                    if let Ok(workflow_prompts) = WorkflowStagePrompts::load_from_file_async(path).await {
+                        if let Some(prompt) = workflow_prompts.render(stage, &config.template_vars) {
+                            builder = builder.workflow_section(prompt);
+                        }
+                    }
+                }
+            }
+        }
+
+        builder
+    }
+
     /// 构建最终 prompt 字符串，按 section 顺序拼接，跳过空值 section。
     ///
     /// 每个 section 输出为 `## heading\n\ncontent` 格式，用 `\n\n---\n\n` 分隔。
@@ -1641,6 +1711,16 @@ impl WorkflowStagePrompts {
     /// 当前实现仅提取 fenced code block 内的内容，围栏外说明文本会被忽略。
     pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
+        Self::parse_workflow_stage_content(&content)
+    }
+
+    /// 异步版本：用于 async 主链路，避免阻塞 runtime worker。
+    pub async fn load_from_file_async(path: &Path) -> anyhow::Result<Self> {
+        let content = tokio::fs::read_to_string(path).await?;
+        Self::parse_workflow_stage_content(&content)
+    }
+
+    fn parse_workflow_stage_content(content: &str) -> anyhow::Result<Self> {
         let mut stages = HashMap::new();
         let mut current_stage: Option<String> = None;
         let mut current_content = String::new();
@@ -2124,6 +2204,26 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[tokio::test]
+    async fn workflow_stage_prompts_loads_code_blocks_only_async() {
+        let dir = create_temp_dir("workflow-prompts-async");
+        let file = dir.join("workflow-stages.md");
+        fs::write(
+            &file,
+            "## analyze\noutside\n```md\ninside {{topic}}\n```\n## idle\n```md\nidle prompt\n```",
+        )
+        .unwrap();
+
+        let prompts = WorkflowStagePrompts::load_from_file_async(&file).await.unwrap();
+        let mut vars = HashMap::new();
+        vars.insert("topic".to_string(), "prompt".to_string());
+
+        assert_eq!(prompts.render("analyze", &vars).as_deref(), Some("inside prompt"));
+        assert_eq!(prompts.get("idle"), Some("idle prompt"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn from_config_includes_workflow_section_when_stage_active() {
         let dir = create_temp_dir("workflow-section");
@@ -2139,6 +2239,27 @@ mod tests {
         let skills = SkillRegistry::new();
 
         let prompt = SystemPromptBuilder::from_config(&config, &skills).build();
+        assert!(prompt.contains("## Workflow State"));
+        assert!(prompt.contains("Draft plan"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn from_config_async_includes_workflow_section_when_stage_active() {
+        let dir = create_temp_dir("workflow-section-async");
+        let workflow_file = dir.join("workflow-stages.md");
+        fs::write(&workflow_file, "## draft\n```md\nDraft {{topic}}\n```").unwrap();
+
+        let mut vars = HashMap::new();
+        vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "draft".to_string());
+        vars.insert(template_vars::TOPIC.to_string(), "plan".to_string());
+        let config = PromptConfig::new("agent", "base", Some(dir.clone()))
+            .with_template_vars(vars)
+            .with_workflow_prompt_path(workflow_file);
+        let skills = SkillRegistry::new();
+
+        let prompt = SystemPromptBuilder::from_config_async(&config, &skills).await.build();
         assert!(prompt.contains("## Workflow State"));
         assert!(prompt.contains("Draft plan"));
 
@@ -2184,6 +2305,20 @@ mod tests {
         fs::write(dir.join("AGENTS.md"), "Agent instructions").unwrap();
 
         let content = load_developer_project_prompt(Some(&dir), &["AGENTS.md".to_string()]).unwrap();
+        assert!(content.contains("### Source: AGENTS.md"));
+        assert!(content.contains("Agent instructions"));
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn load_developer_project_prompt_single_file_async() {
+        let dir = create_temp_dir("dev-prompt-single-async");
+        fs::write(dir.join("AGENTS.md"), "Agent instructions").unwrap();
+
+        let content = load_developer_project_prompt_async(Some(&dir), &["AGENTS.md".to_string()])
+            .await
+            .unwrap();
         assert!(content.contains("### Source: AGENTS.md"));
         assert!(content.contains("Agent instructions"));
 
@@ -2281,6 +2416,24 @@ mod tests {
             dev_pos < ctx_pos,
             "DeveloperProjectPrompt should come before ProjectContext"
         );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn from_config_async_developer_prompt_before_project_context() {
+        let dir = create_temp_dir("dev-prompt-order-async");
+        fs::write(dir.join("AGENTS.md"), "Agent instructions").unwrap();
+        fs::write(dir.join("PROJECT.md"), "Project context").unwrap();
+
+        let config = PromptConfig::new("agent", "base", Some(dir.clone()))
+            .with_developer_prompt_files(vec!["AGENTS.md".to_string()]);
+        let skills = SkillRegistry::new();
+
+        let prompt = SystemPromptBuilder::from_config_async(&config, &skills).await.build();
+        let dev_pos = prompt.find("## Developer Project Instructions").unwrap();
+        let ctx_pos = prompt.find("## Project Context").unwrap();
+        assert!(dev_pos < ctx_pos);
 
         fs::remove_dir_all(dir).unwrap();
     }

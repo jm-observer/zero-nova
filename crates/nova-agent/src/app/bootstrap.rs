@@ -136,7 +136,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             prompt_config = prompt_config.with_developer_prompt_files(files);
         }
 
-        let full_system_prompt = SystemPromptBuilder::from_config(&prompt_config, &skill_registry).build();
+        let full_system_prompt = SystemPromptBuilder::from_config_async(&prompt_config, &skill_registry)
+            .await
+            .build();
 
         agents.push(AgentDescriptor {
             id: agent.id.clone(),

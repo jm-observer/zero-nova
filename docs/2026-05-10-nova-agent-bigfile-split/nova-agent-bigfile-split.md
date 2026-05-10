@@ -2,7 +2,7 @@
 
 ## 时间
 - 创建日期：2026-05-10
-- 最后更新：2026-05-10
+- 最后更新：2026-05-10（Plan 5 完成）
 
 ## 项目现状
 `crates/nova-agent` 存在多处超大文件，已超过项目约定的单文件 500 行建议上限，当前前 12 个大文件如下：
@@ -34,10 +34,10 @@
 | Plan | 描述 | 依赖 | 执行顺序 | 状态 |
 |---|---|---|---|---|
 | Plan 1 | 现状盘点与优先级分层（高优先范围冻结） | 无 | 1 | 已完成 |
-| Plan 2 | `prompt.rs` 与 `config.rs` 拆分设计（规则与配置核心） | Plan 1 | 2 | 待开始 |
-| Plan 3 | `conversation/*` 与 `app/*` 拆分设计（服务与存储边界） | Plan 1 | 3 | 待开始 |
-| Plan 4 | `agent.rs`、`skill.rs`、`tool.rs` 拆分设计（运行时与工具域） | Plan 1 | 4 | 待开始 |
-| Plan 5 | 渐进实施策略、验证矩阵与回滚预案 | Plan 2, Plan 3, Plan 4 | 5 | 待开始 |
+| Plan 2 | `prompt.rs` 与 `config.rs` 拆分设计（规则与配置核心） | Plan 1 | 2 | 已完成 |
+| Plan 3 | `conversation/*` 与 `app/*` 拆分设计（服务与存储边界） | Plan 1 | 3 | 已完成 |
+| Plan 4 | `agent.rs`、`skill.rs`、`tool.rs` 拆分设计（运行时与工具域） | Plan 1 | 4 | 已完成 |
+| Plan 5 | 渐进实施策略、验证矩阵与回滚预案 | Plan 2, Plan 3, Plan 4 | 5 | 已完成 |
 
 执行策略：
 - 先冻结高优先文件清单与拆分粒度，再按“配置/提示词 -> 会话与应用层 -> 运行时与工具层”推进。
@@ -47,4 +47,16 @@
 - 风险 1：拆分时可见性收紧可能引发循环依赖，需要提前设计 `mod` 边界与 re-export 规则。
 - 风险 2：拆分引发路径变更，测试/快照/工具读取逻辑可能受影响，需要补充路径相关回归。
 - 风险 3：一次性改动范围过大可能导致冲突与排障困难，必须坚持小批次迁移。
-- 待定项：`prompt.rs` 是否先按“构建流程”拆分，还是先按“数据结构与模板资源”拆分，需要在 Plan 2 落定。
+- 待定项：无（Plan 2-Plan 5 已完成并形成实施节奏与验证口径）。
+
+## 最终行数对比（高优先拆分路径）
+| 拆分路径 | 拆分前 | 当前入口文件 |
+|---|---:|---:|
+| `prompt` | `src/prompt.rs` 2381 行 | `src/prompt/mod.rs` 2101 行 |
+| `config` | `src/config.rs` 1755 行 | `src/config/mod.rs` 183 行 |
+| `conversation service` | `src/conversation/service.rs` 1912 行 | `src/conversation/service/mod.rs` 1657 行 |
+| `conversation repository` | `src/conversation/repository.rs` 973 行 | `src/conversation/repository/mod.rs` 902 行 |
+| `agent` | `src/agent.rs` 1102 行 | `src/agent/runtime.rs` 1022 行 |
+| `skill` | `src/skill.rs` 1010 行 | `src/skill/registry.rs` 912 行 |
+| `tool` | `src/tool.rs` 837 行 | `src/tool/registry.rs` 619 行 |
+| `app agent_workspace_service` | `src/app/agent_workspace_service.rs` 905 行 | `src/app/agent_workspace_service.rs` 830 行 |

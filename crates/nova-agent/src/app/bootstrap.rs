@@ -32,7 +32,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
 
     let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
-    if let Err(err) = skill_registry.load_from_dir(&skill_dir) {
+    if let Err(err) = skill_registry.load_from_dir_async(&skill_dir).await {
         log::warn!("Failed to load skills from {:?}: {}", skill_dir, err);
     }
     let skill_registry = Arc::new(skill_registry);

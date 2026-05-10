@@ -236,6 +236,16 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// 异步加载技能目录，适用于 async 上下文。
+    pub async fn load_from_dir_async<P: AsRef<Path>>(&mut self, dir: P) -> Result<()> {
+        let dir = dir.as_ref();
+        if !dir.exists() || !dir.is_dir() {
+            return Ok(());
+        }
+        Self::scan_dir_recursive_async(dir, self).await?;
+        Ok(())
+    }
+
     /// 递归扫描目录。
     fn scan_dir_recursive(dir: &Path, registry: &mut SkillRegistry) -> Result<()> {
         let entries = std::fs::read_dir(dir)?;
@@ -256,6 +266,31 @@ impl SkillRegistry {
                 let skill_md = path.join("SKILL.md");
                 if skill_md.exists() {
                     registry.load_single_skill(&path)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 异步递归扫描目录（使用显式栈避免 async 递归）。
+    async fn scan_dir_recursive_async(dir: &Path, registry: &mut SkillRegistry) -> Result<()> {
+        let mut dirs = vec![dir.to_path_buf()];
+        while let Some(current_dir) = dirs.pop() {
+            let mut entries = tokio::fs::read_dir(&current_dir).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if path.is_dir() {
+                    let skill_md = path.join("SKILL.md");
+                    let skill_toml = path.join("skill.toml");
+                    if skill_md.exists() || skill_toml.exists() {
+                        registry.load_single_skill_async(&path).await?;
+                    }
+                    dirs.push(path);
+                } else {
+                    let skill_md = path.join("SKILL.md");
+                    if skill_md.exists() {
+                        registry.load_single_skill_async(&path).await?;
+                    }
                 }
             }
         }
@@ -304,9 +339,104 @@ impl SkillRegistry {
         }
     }
 
+    /// 异步加载单个目录中的技能。
+    pub async fn load_single_skill_async<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        let path = path.as_ref();
+
+        let skill_toml_path = path.join("skill.toml");
+        if skill_toml_path.exists() {
+            match self.parse_skill_toml_async(&skill_toml_path).await {
+                Ok(pkg) => {
+                    log::info!("Loaded SkillPackage: {} (via skill.toml) from {:?}", pkg.slug, path);
+                    self.packages.push(pkg);
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to parse skill.toml at {:?}, falling back to SKILL.md: {}",
+                        path,
+                        e
+                    );
+                }
+            }
+        }
+
+        let skill_md = path.join("SKILL.md");
+        if skill_md.exists() {
+            match self.parse_skill_file_async(&skill_md).await {
+                Ok(skill) => {
+                    let pkg = self.to_skill_package(&skill);
+                    log::info!("Loaded skill: {} from {:?}", skill.name, path);
+                    self.skills.push(skill);
+                    self.packages.push(pkg);
+                    Ok(())
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to parse skill at {:?}: {}", path, e)),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     /// 从 SKILL.md 解析为旧 Skill 结构。
     fn parse_skill_file(&self, path: &Path) -> Result<Skill> {
         let content = std::fs::read_to_string(path)?;
+        let parts: Vec<&str> = content.split("---").collect();
+
+        if parts.len() < 3 {
+            return Ok(Skill {
+                name: path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+                description: String::new(),
+                body: content,
+                path: path.parent().unwrap().to_path_buf(),
+                compat_mode: true,
+            });
+        }
+
+        let frontmatter = parts[1];
+        let body = parts[2..].join("---");
+
+        let mut name = String::new();
+        let mut description = String::new();
+
+        for line in frontmatter.lines() {
+            let line = line.trim();
+            if let Some(stripped) = line.strip_prefix("name:") {
+                name = stripped.trim().trim_matches('"').to_string();
+            } else if let Some(stripped) = line.strip_prefix("description:") {
+                description = stripped.trim().trim_matches('"').to_string();
+            }
+        }
+
+        let fallback_name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let is_compat = name.is_empty();
+        Ok(Skill {
+            name: if name.is_empty() { fallback_name.clone() } else { name },
+            description,
+            body: body.trim().to_string(),
+            path: path.parent().unwrap().to_path_buf(),
+            compat_mode: is_compat,
+        })
+    }
+
+    /// 异步读取 SKILL.md 并解析为旧 Skill 结构。
+    async fn parse_skill_file_async(&self, path: &Path) -> Result<Skill> {
+        let content = tokio::fs::read_to_string(path).await?;
+        self.parse_skill_content(path, content)
+    }
+
+    fn parse_skill_content(&self, path: &Path, content: String) -> Result<Skill> {
         let parts: Vec<&str> = content.split("---").collect();
 
         if parts.len() < 3 {
@@ -383,6 +513,103 @@ impl SkillRegistry {
     /// 从 skill.toml 解析为 SkillPackage。
     fn parse_skill_toml(&self, path: &Path) -> Result<SkillPackage> {
         let content = std::fs::read_to_string(path)?;
+        let toml: toml::Value = toml::from_str(&content)?;
+
+        let slug = toml
+            .get("slug")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| toml.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .unwrap_or_else(|| {
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
+
+        let display_name = toml
+            .get("display_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&slug)
+            .to_string();
+
+        let description = toml
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let instructions = toml
+            .get("instructions")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let tool_policy = match toml
+            .get("tool_policy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("inherit_all")
+        {
+            "inherit_all" | "" => ToolPolicy::InheritAll,
+            "allow_list" => {
+                let list: Vec<String> = toml
+                    .get("tool_policy")
+                    .and_then(|t| t.get("allow_list"))
+                    .and_then(|l| l.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+                ToolPolicy::AllowList(list)
+            }
+            "allow_list_with_deferred" => {
+                let list: Vec<String> = toml
+                    .get("tool_policy")
+                    .and_then(|t| t.get("allow_list"))
+                    .and_then(|l| l.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+                ToolPolicy::AllowListWithDeferred(list)
+            }
+            _ => ToolPolicy::InheritAll,
+        };
+
+        let sticky = toml.get("sticky").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let aliases: Vec<String>;
+        if let Some(arr) = toml.get("aliases").and_then(|v| v.as_array()) {
+            aliases = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+        } else {
+            aliases = vec![];
+        }
+
+        let examples: Vec<String>;
+        if let Some(arr) = toml.get("examples").and_then(|v| v.as_array()) {
+            examples = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+        } else {
+            examples = vec![];
+        }
+
+        Ok(SkillPackage {
+            id: slug.clone(),
+            slug: slug.clone(),
+            display_name,
+            description,
+            instructions,
+            tool_policy,
+            sticky,
+            aliases,
+            examples,
+            source_path: path.to_path_buf(),
+            compat_mode: false,
+        })
+    }
+
+    /// 异步读取 skill.toml 并解析为 SkillPackage。
+    async fn parse_skill_toml_async(&self, path: &Path) -> Result<SkillPackage> {
+        let content = tokio::fs::read_to_string(path).await?;
+        self.parse_skill_toml_content(path, content)
+    }
+
+    fn parse_skill_toml_content(&self, path: &Path, content: String) -> Result<SkillPackage> {
         let toml: toml::Value = toml::from_str(&content)?;
 
         let slug = toml
@@ -717,6 +944,7 @@ impl SkillRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn policy_source_defaults_to_default() {
@@ -1006,5 +1234,45 @@ mod tests {
             registry.match_skill_by_input("/multi-agent 执行这个任务"),
             Some("orchestrator".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn load_from_dir_async_loads_toml_and_markdown_skills() {
+        let root = tempdir().unwrap();
+        let skill_a = root.path().join("a");
+        let skill_b = root.path().join("nested").join("b");
+        tokio::fs::create_dir_all(&skill_a).await.unwrap();
+        tokio::fs::create_dir_all(&skill_b).await.unwrap();
+
+        tokio::fs::write(
+            skill_a.join("skill.toml"),
+            r#"
+slug = "skill-a"
+display_name = "Skill A"
+description = "desc a"
+instructions = "do a"
+"#,
+        )
+        .await
+        .unwrap();
+
+        tokio::fs::write(
+            skill_b.join("SKILL.md"),
+            r#"---
+name: "Skill B"
+description: "desc b"
+---
+do b
+"#,
+        )
+        .await
+        .unwrap();
+
+        let mut registry = SkillRegistry::new();
+        registry.load_from_dir_async(root.path()).await.unwrap();
+
+        assert_eq!(registry.packages.len(), 2);
+        assert!(registry.find_by_slug("skill-a").is_some());
+        assert!(registry.find_by_name("Skill B").is_some());
     }
 }

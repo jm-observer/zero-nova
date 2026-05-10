@@ -173,7 +173,11 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         agent_registry.register(agent);
     }
 
-    let client = OpenAiCompatClient::from_registry(config.providers.clone(), root_binding.provider_id.clone());
+    let client = OpenAiCompatClient::from_registry_with_context_headers_enabled(
+        config.providers.clone(),
+        root_binding.provider_id.clone(),
+        config.outbound_context_headers.enabled,
+    );
     let mut agent = AgentRuntime::new(client, tools, agent_config);
     agent.task_store = Some(task_store);
     agent.skill_registry = Some(skill_registry);

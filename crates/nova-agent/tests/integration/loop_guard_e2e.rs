@@ -5,6 +5,7 @@ use nova_agent::event::AgentEvent;
 use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::message::Message;
 use nova_agent::prompt::TrimmerConfig;
+use nova_agent::provider::types::ProviderRequestContext;
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use nova_agent::tool::ToolRegistry;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,6 +21,7 @@ impl LlmClient for StalledClient {
         _messages: &[Message],
         _tools: &[nova_agent::provider::types::ToolDefinition],
         _config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         struct StalledReceiver {
             step: usize,
@@ -60,6 +62,7 @@ impl LlmClient for DuplicateToolClient {
         _messages: &[Message],
         _tools: &[nova_agent::provider::types::ToolDefinition],
         _config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         let count = self.call_count.fetch_add(1, Ordering::SeqCst);
         struct ToolReceiver {
@@ -105,6 +108,7 @@ impl LlmClient for DuplicateThenRecoverClient {
         _messages: &[Message],
         _tools: &[nova_agent::provider::types::ToolDefinition],
         _config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         let count = self.call_count.fetch_add(1, Ordering::SeqCst);
         struct Receiver {
@@ -213,7 +217,7 @@ async fn test_stalled_iteration_aborts_turn() {
     let (tx, mut rx) = mpsc::channel(100);
 
     let _res = runtime
-        .run_turn(&[], "hello", "session_1", None, tx, None)
+        .run_turn(&[], "hello", "session_1", None, None, tx, None)
         .await
         .unwrap();
 
@@ -243,7 +247,7 @@ async fn test_duplicate_tool_call_rejected() {
     let (tx, mut rx) = mpsc::channel(100);
 
     let _res = runtime
-        .run_turn(&[], "hello", "session_1", None, tx, None)
+        .run_turn(&[], "hello", "session_1", None, None, tx, None)
         .await
         .unwrap();
 
@@ -278,7 +282,7 @@ async fn duplicate_tool_rejection_is_fed_back_before_stall_abort() {
     let (tx, mut rx) = mpsc::channel(100);
 
     let res = runtime
-        .run_turn(&[], "hello", "session_1", None, tx, None)
+        .run_turn(&[], "hello", "session_1", None, None, tx, None)
         .await
         .unwrap();
 

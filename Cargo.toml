@@ -42,6 +42,7 @@ regex = "1"
 tempfile = "3"
 async-openai = { version = "0.36.1", default-features = false, features = ["chat-completion"] }
 tokio-stream = "0.1"
+wiremock = "0.6"
 
 # Internal crates
 nova-agent = { path = "crates/nova-agent" }

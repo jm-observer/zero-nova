@@ -121,7 +121,11 @@ impl AgentTool {
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
         let binding = self.config.resolve_agent_binding(spec)?;
-        let client = OpenAiCompatClient::from_registry(self.config.providers.clone(), binding.provider_id.clone());
+        let client = OpenAiCompatClient::from_registry_with_context_headers_enabled(
+            self.config.providers.clone(),
+            binding.provider_id.clone(),
+            self.config.outbound_context_headers.enabled,
+        );
         let sub_registry = ToolRegistry::new();
         if let Some(ctx) = &context {
             if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
@@ -327,7 +331,7 @@ impl AgentTool {
             chrono::Utc::now().timestamp_millis(),
         );
         let result = runtime
-            .run_turn_with_context(turn_ctx, user_message, &session_id, Some(environment), tx, None)
+            .run_turn_with_context(turn_ctx, user_message, &session_id, None, Some(environment), tx, None)
             .await?;
         if let Some(handle) = forwarding_handle {
             handle.await?;

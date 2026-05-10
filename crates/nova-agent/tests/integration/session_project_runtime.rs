@@ -6,7 +6,7 @@ use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, Sqli
 use nova_agent::message::ContentBlock;
 use nova_agent::prompt::TrimmerConfig;
 use nova_agent::agent::{PromptDiagnosticsConfig, ToolResultCompactionConfig};
-use nova_agent::provider::types::{StopReason, ToolDefinition, Usage};
+use nova_agent::provider::types::{ProviderRequestContext, StopReason, ToolDefinition, Usage};
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use nova_agent::prompt::PromptConfig;
 use nova_agent::loop_guard::LoopGuardConfig;
@@ -62,6 +62,7 @@ impl LlmClient for RelativeReadClient {
         _messages: &[nova_agent::message::Message],
         _tools: &[ToolDefinition],
         _config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         let count = self.call_count.fetch_add(1, Ordering::SeqCst);
         let events = if count == 0 {
@@ -390,6 +391,7 @@ impl LlmClient for NoopClient {
         _messages: &[nova_agent::message::Message],
         _tools: &[ToolDefinition],
         _config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         Ok(Box::new(SequenceReceiver {
             events: vec![ProviderStreamEvent::MessageComplete {

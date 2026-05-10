@@ -1,4 +1,5 @@
 /// 模拟 LLM 客户端用于集成测试
+use nova_agent::provider::types::ProviderRequestContext;
 use nova_agent::provider::types::ToolDefinition;
 use nova_agent::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::Result;
@@ -45,6 +46,7 @@ impl LlmClient for MockClient {
         _messages: &[nova_agent::message::Message],
         _tools: &[ToolDefinition],
         _config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         let mut events = Vec::new();
 
@@ -79,7 +81,7 @@ mod tests {
     #[tokio::test]
     async fn mock_stream_returns_text_delta() {
         let client = MockClient::new("Hello world", false);
-        let stream = client.stream(&[], &[], &ModelConfig::default()).await.unwrap();
+        let stream = client.stream(&[], &[], &ModelConfig::default(), &Default::default()).await.unwrap();
 
         let mut stream = stream;
         if let Some(event) = stream.next_event().await.unwrap() {
@@ -95,7 +97,7 @@ mod tests {
     #[tokio::test]
     async fn mock_stream_returns_tool_use_start() {
         let client = MockClient::new("", true);
-        let stream = client.stream(&[], &[], &ModelConfig::default()).await.unwrap();
+        let stream = client.stream(&[], &[], &ModelConfig::default(), &Default::default()).await.unwrap();
 
         let mut stream = stream;
         // Skip first TextDelta (empty string)

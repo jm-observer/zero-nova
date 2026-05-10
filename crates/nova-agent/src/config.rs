@@ -38,6 +38,9 @@ pub struct AppConfig {
     /// prompt 分层压缩配置。
     #[serde(default)]
     pub prompt_compaction: PromptCompactionConfig,
+    /// 出站请求 Header 注入配置。
+    #[serde(default)]
+    pub outbound_context_headers: OutboundContextHeaderConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -66,6 +69,16 @@ fn default_tool_guidance() -> String {
 }
 fn default_max_tokens_field() -> String {
     "completion".to_string()
+}
+
+fn default_context_headers_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct OutboundContextHeaderConfig {
+    #[serde(default = "default_context_headers_enabled")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -242,6 +255,7 @@ impl Default for AppConfig {
             config_path: None,
             developer_prompt_files: Vec::new(),
             prompt_compaction: PromptCompactionConfig::default(),
+            outbound_context_headers: OutboundContextHeaderConfig::default(),
         }
     }
 }
@@ -906,6 +920,8 @@ struct RawAppConfig {
     pub developer_prompt_files: Vec<String>,
     #[serde(default)]
     pub prompt_compaction: PromptCompactionConfig,
+    #[serde(default)]
+    pub outbound_context_headers: OutboundContextHeaderConfig,
 }
 
 fn reject_removed_defaults<'de, D>(deserializer: D) -> std::result::Result<Option<IgnoredAny>, D::Error>
@@ -1186,6 +1202,7 @@ impl RawAppConfig {
                 config_path: self.config_path,
                 developer_prompt_files: self.developer_prompt_files,
                 prompt_compaction: self.prompt_compaction,
+                outbound_context_headers: self.outbound_context_headers,
             },
             warnings,
         )

@@ -144,7 +144,11 @@ async fn main() -> Result<()> {
     let root_binding = config.resolve_agent_binding(root_agent)?;
 
     log::info!("Starting Nova CLI with : {:?}", config);
-    let client = OpenAiCompatClient::from_registry(config.providers.clone(), root_binding.provider_id.clone());
+    let client = OpenAiCompatClient::from_registry_with_context_headers_enabled(
+        config.providers.clone(),
+        root_binding.provider_id.clone(),
+        config.outbound_context_headers.enabled,
+    );
 
     let env_snapshot = {
         let mut snapshot = EnvironmentSnapshot::collect(&config.config_dir, Some(&config.config_dir)).await;
@@ -370,6 +374,7 @@ async fn run_repl(
                         &history,
                         input,
                         "cli-repl",
+                        None,
                         agent.config.initial_env_snapshot.clone(),
                         tx.clone(),
                         None,
@@ -435,6 +440,7 @@ async fn run_oneshot(
             &history,
             user_input,
             "cli-oneshot",
+            None,
             agent.config.initial_env_snapshot.clone(),
             tx,
             None,

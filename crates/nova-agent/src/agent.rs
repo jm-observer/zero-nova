@@ -302,6 +302,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         history: &[Message],
         user_input: &str,
         session_id: &str,
+        agent_id: Option<&str>,
         environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
@@ -310,6 +311,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             history,
             user_input,
             session_id,
+            agent_id,
             environment,
             event_tx,
             cancellation_token,
@@ -318,11 +320,13 @@ impl<C: LlmClient> AgentRuntime<C> {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_turn_with_model_config(
         &self,
         history: &[Message],
         user_input: &str,
         session_id: &str,
+        agent_id: Option<&str>,
         environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
@@ -342,6 +346,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             &tool_definitions,
             self.config.max_iterations,
             session_id,
+            agent_id,
             environment,
             event_tx,
             cancellation_token,
@@ -417,6 +422,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         ctx: TurnContext,
         message: Message,
         session_id: &str,
+        agent_id: Option<&str>,
         environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
@@ -425,6 +431,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             ctx,
             message,
             session_id,
+            agent_id,
             environment,
             event_tx,
             cancellation_token,
@@ -433,11 +440,13 @@ impl<C: LlmClient> AgentRuntime<C> {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_turn_with_context_and_model_config(
         &self,
         ctx: TurnContext,
         message: Message,
         session_id: &str,
+        agent_id: Option<&str>,
         environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
@@ -483,6 +492,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             &ctx.tool_definitions,
             ctx.iteration_budget,
             session_id,
+            agent_id,
             environment,
             event_tx,
             cancellation_token,
@@ -498,6 +508,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         tool_definitions: &[ToolDefinition],
         iteration_budget: usize,
         session_id: &str,
+        agent_id: Option<&str>,
         environment: Option<EnvironmentSnapshot>,
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
@@ -538,7 +549,14 @@ impl<C: LlmClient> AgentRuntime<C> {
                     &all_messages,
                     tool_definitions,
                     model_config,
-                    &ProviderRequestContext::default(),
+                    &ProviderRequestContext {
+                        session_id: if session_id.trim().is_empty() {
+                            None
+                        } else {
+                            Some(session_id.to_string())
+                        },
+                        agent_id: agent_id.map(|id| id.to_string()),
+                    },
                 )
                 .await
             {
@@ -981,7 +999,7 @@ mod tests {
     use crate::loop_guard::LoopGuardConfig;
     use crate::message::Message;
     use crate::prompt::TrimmerConfig;
-    use crate::provider::types::ToolDefinition;
+    use crate::provider::types::{ProviderRequestContext, ToolDefinition};
     use crate::provider::{LlmClient, ModelConfig, StreamReceiver};
     use crate::tool::ToolRegistry;
     use anyhow::Result;
@@ -998,6 +1016,7 @@ mod tests {
             _messages: &[Message],
             _tools: &[ToolDefinition],
             _config: &ModelConfig,
+            _request_context: &ProviderRequestContext,
         ) -> Result<Box<dyn StreamReceiver>> {
             unreachable!("not used in compaction unit tests")
         }

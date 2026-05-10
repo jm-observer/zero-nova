@@ -21,6 +21,7 @@ pub trait LlmClient: Send + Sync {
         messages: &[Message],
         tools: &[ToolDefinition],
         config: &ModelConfig,
+        request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>>;
 }
 

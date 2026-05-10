@@ -1,6 +1,7 @@
 use crate::config::ProviderConfig;
 use crate::message::{ContentBlock, Message, Role};
 use crate::provider::sse::SseParser;
+use crate::provider::types::ProviderRequestContext;
 use crate::provider::types::{
     InputContentBlock, InputMessage, MessageRequest, StreamEvent, ThinkingConfig, ThinkingMode, ToolDefinition,
 };
@@ -45,6 +46,7 @@ impl LlmClient for AnthropicClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         // Build request body
         let mut input_messages = Vec::new();

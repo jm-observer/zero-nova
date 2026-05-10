@@ -8,7 +8,7 @@ use crate::prompt::{
     ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, PromptSectionSize, SideChannelInjector,
     SystemPromptBuilder, ToolSize, TrimmerConfig, TurnContext,
 };
-use crate::provider::types::{StopReason, ToolDefinition, Usage};
+use crate::provider::types::{ProviderRequestContext, StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent};
 use crate::skill::{CapabilityPolicy, SkillRegistry, ToolPolicy};
 use crate::tool::builtin::task::TaskStore;
@@ -532,7 +532,16 @@ impl<C: LlmClient> AgentRuntime<C> {
                 })
                 .await;
 
-            let mut receiver = match self.client.stream(&all_messages, tool_definitions, model_config).await {
+            let mut receiver = match self
+                .client
+                .stream(
+                    &all_messages,
+                    tool_definitions,
+                    model_config,
+                    &ProviderRequestContext::default(),
+                )
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => {
                     let err_msg = format!("Failed to start stream: {}", e);

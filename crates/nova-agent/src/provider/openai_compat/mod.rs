@@ -4,6 +4,7 @@ use crate::config::ProviderConfig;
 use crate::message::Message;
 use crate::provider::openai_compat::conv::{build_request, map_finish_reason, map_usage};
 use crate::provider::sse::{RawSseEvent, SseParser};
+use crate::provider::types::ProviderRequestContext;
 use crate::provider::types::{StopReason, ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 use anyhow::{anyhow, Result};
@@ -73,6 +74,7 @@ impl LlmClient for OpenAiCompatClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         config: &ModelConfig,
+        _request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         let request = build_request(messages, tools, config);
         let (api_key, base_url) = self.resolve_endpoint(config)?;

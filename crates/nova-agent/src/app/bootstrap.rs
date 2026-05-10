@@ -28,7 +28,7 @@ pub struct BootstrapOptions {
 }
 
 pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplication>> {
-    warn_unused_gateway_sections(&config)?;
+    warn_unused_gateway_sections(&config).await?;
 
     let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
@@ -249,9 +249,9 @@ async fn load_agent_prompt(agent: &crate::config::AgentSpec, config: &AppConfig)
     }
 }
 
-fn warn_unused_gateway_sections(config: &AppConfig) -> Result<()> {
+async fn warn_unused_gateway_sections(config: &AppConfig) -> Result<()> {
     let config_path = config.config_path();
-    let content = std::fs::read_to_string(&config_path).ok();
+    let content = tokio::fs::read_to_string(&config_path).await.ok();
     if let Some(content) = content {
         let legacy_sections = [
             "[gateway.router]",

@@ -17,6 +17,7 @@ use crate::tool::builtin::register_builtin_tools;
 use crate::tool::builtin::task::TaskStore;
 use crate::tool::ToolRegistry;
 use anyhow::{bail, Context, Result};
+use arc_swap::ArcSwap;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -195,6 +196,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     }
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
+    let config_snapshot_cache = Arc::new(ArcSwap::from_pointee(
+        serde_json::to_value(&config).context("Failed to serialize config")?,
+    ));
     let config_path = config.config_path();
 
     let conversation_service =
@@ -207,6 +211,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         conversation_service,
         workspace_service,
         config_arc,
+        config_snapshot_cache,
         config_path,
     )))
 }

@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
+use crate::tool::{DeferredResolveOutcome, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use serde_json::{json, Value};
 
@@ -27,11 +27,11 @@ pub async fn execute(registry: &ToolRegistry, input: Value) -> Result<ToolOutput
     let max_results = input["max_results"].as_u64().unwrap_or(5) as usize;
 
     let content = if let Some(raw_selection) = query.strip_prefix("select:") {
-        handle_selection(registry, raw_selection)
+        handle_selection(registry, raw_selection).await
     } else if let Some(raw_selection) = query.strip_prefix("load:") {
-        handle_category_selection(registry, raw_selection)
+        handle_category_selection(registry, raw_selection).await
     } else {
-        handle_search(registry, query, max_results)
+        handle_search(registry, query, max_results).await
     };
 
     Ok(ToolOutput {
@@ -41,7 +41,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value) -> Result<ToolOutput
 }
 
 /// 使用 `select:category:CategoryName` 语法加载指定类别的工具。
-fn handle_category_selection(registry: &ToolRegistry, category: &str) -> String {
+async fn handle_category_selection(registry: &ToolRegistry, category: &str) -> String {
     use crate::tool::DeferredToolCategory;
 
     let category = match category.to_lowercase().as_str() {
@@ -54,14 +54,17 @@ fn handle_category_selection(registry: &ToolRegistry, category: &str) -> String 
         }
     };
 
-    registry.load_deferred_by_category(&category, true);
-    format!("Loaded all tools for category: {}", category)
+    let outcome = registry.load_deferred_by_category_async(&category, true).await;
+    format!(
+        "Category '{}' load summary: requested={}, loaded={}, already_loaded={}, not_found={}, failed={}",
+        category, outcome.requested, outcome.loaded, outcome.already_loaded, outcome.not_found, outcome.failed
+    )
 }
 
-fn handle_selection(registry: &ToolRegistry, raw_selection: &str) -> String {
+async fn handle_selection(registry: &ToolRegistry, raw_selection: &str) -> String {
     // Check if it's select:category:CategoryName
     if let Some(category_part) = raw_selection.strip_prefix("category:") {
-        return handle_category_selection(registry, category_part);
+        return handle_category_selection(registry, category_part).await;
     }
 
     let names: Vec<&str> = raw_selection
@@ -76,21 +79,25 @@ fn handle_selection(registry: &ToolRegistry, raw_selection: &str) -> String {
 
     let mut results = Vec::with_capacity(names.len());
     for name in names {
-        if registry.resolve_deferred(name) {
-            results.push(format!("Loaded tool: {}", name));
-        } else if registry.has_loaded_tool(name) {
-            results.push(format!("Tool '{}' is already loaded.", name));
-        } else {
-            results.push(format!("Tool '{}' not found.", name));
+        match registry.resolve_deferred_async(name).await {
+            DeferredResolveOutcome::Loaded => results.push(format!("Loaded tool: {}", name)),
+            DeferredResolveOutcome::AlreadyLoaded => {
+                results.push(format!("Tool '{}' is already loaded.", name));
+            }
+            DeferredResolveOutcome::NotFound => results.push(format!("Tool '{}' not found.", name)),
+            DeferredResolveOutcome::FactoryFailed { message } => {
+                results.push(format!("Tool '{}' failed to load: {}", name, message));
+            }
         }
     }
     results.join("\n")
 }
 
-fn handle_search(registry: &ToolRegistry, query: &str, max_results: usize) -> String {
+async fn handle_search(registry: &ToolRegistry, query: &str, max_results: usize) -> String {
     let query_lower = query.to_lowercase();
     let matches: Vec<String> = registry
-        .deferred_definitions()
+        .deferred_definitions_async()
+        .await
         .into_iter()
         .filter(|definition| {
             definition.name.to_lowercase().contains(&query_lower)

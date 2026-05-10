@@ -10,7 +10,7 @@ pub async fn handle_config_get(
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
-    match app.config_snapshot() {
+    match app.config_snapshot().await {
         Ok(config) => {
             let _ = outbound_tx
                 .send_async(GatewayMessage::new(

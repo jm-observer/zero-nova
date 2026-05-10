@@ -5,6 +5,7 @@ use crate::config::AppConfig;
 use crate::message::Role;
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -32,7 +33,7 @@ pub trait AgentApplication: Send + Sync {
     fn list_agents(&self) -> Vec<AppAgent>;
     fn get_agent(&self, agent_id: &str) -> Option<AppAgent>;
 
-    fn config_snapshot(&self) -> Result<Value>;
+    async fn config_snapshot(&self) -> Result<Value>;
     async fn update_config(&self, payload: Value) -> Result<()>;
 
     async fn on_connect(&self) -> Result<Vec<AppEvent>>;
@@ -121,6 +122,7 @@ pub struct AgentApplicationImpl<C: LlmClient> {
     conversation_service: ConversationService<C>,
     workspace_service: super::agent_workspace_service::AgentWorkspaceService,
     config: Arc<RwLock<AppConfig>>,
+    config_snapshot_cache: Arc<ArcSwap<Value>>,
     config_path: PathBuf,
     // voice_service: VoiceService,
 }
@@ -130,6 +132,7 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         conversation_service: ConversationService<C>,
         workspace_service: super::agent_workspace_service::AgentWorkspaceService,
         config: Arc<RwLock<AppConfig>>,
+        config_snapshot_cache: Arc<ArcSwap<Value>>,
         config_path: PathBuf,
         // voice_service: VoiceService,
     ) -> Self {
@@ -137,9 +140,14 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
             conversation_service,
             workspace_service,
             config,
+            config_snapshot_cache,
             config_path,
             // voice_service,
         }
+    }
+
+    fn serialize_config_snapshot(config: &AppConfig) -> Result<Value> {
+        serde_json::to_value(config).context("Failed to serialize config")
     }
 }
 
@@ -380,21 +388,24 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             })
     }
 
-    fn config_snapshot(&self) -> Result<Value> {
-        let config = self.config.blocking_read();
-        serde_json::to_value(&*config).context("Failed to serialize config")
+    async fn config_snapshot(&self) -> Result<Value> {
+        Ok(self.config_snapshot_cache.load().as_ref().clone())
     }
 
     async fn update_config(&self, payload: Value) -> Result<()> {
         let new_config =
             serde_json::from_value::<AppConfig>(payload).context("Failed to parse config update payload")?;
         let config_str = toml::to_string(&new_config).context("Failed to serialize updated config")?;
+        let snapshot_value = Self::serialize_config_snapshot(&new_config)?;
         tokio::fs::write(&self.config_path, config_str)
             .await
             .with_context(|| format!("Failed to save config to {:?}", self.config_path))?;
 
-        let mut config = self.config.write().await;
-        *config = new_config;
+        {
+            let mut config = self.config.write().await;
+            *config = new_config;
+        }
+        self.config_snapshot_cache.store(Arc::new(snapshot_value));
         Ok(())
     }
 
@@ -590,7 +601,13 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 #[cfg(test)]
 mod tests {
     use super::should_emit_skill_bindings_updated;
+    use super::AgentApplicationImpl;
+    use crate::config::AppConfig;
+    use arc_swap::ArcSwap;
     use nova_protocol::observability::SkillBindingSnapshot;
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[test]
     fn emits_event_when_skill_bindings_changed() {
@@ -634,5 +651,29 @@ mod tests {
         }];
 
         assert!(!should_emit_skill_bindings_updated(&before, &after));
+    }
+
+    #[test]
+    fn serialize_config_snapshot_matches_direct_serialization() {
+        let mut config = AppConfig::new(PathBuf::from("."));
+        config.voice.enabled = false;
+
+        let snapshot =
+            AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::serialize_config_snapshot(
+                &config,
+            )
+            .unwrap();
+
+        assert_eq!(snapshot, serde_json::to_value(&config).unwrap());
+    }
+
+    #[test]
+    fn atomic_snapshot_cache_returns_latest_value() {
+        let cache = ArcSwap::from_pointee(json!({ "version": 1 }));
+        assert_eq!(cache.load().as_ref(), &json!({ "version": 1 }));
+
+        cache.store(Arc::new(json!({ "version": 2 })));
+
+        assert_eq!(cache.load().as_ref(), &json!({ "version": 2 }));
     }
 }

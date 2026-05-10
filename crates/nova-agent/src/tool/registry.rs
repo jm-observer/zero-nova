@@ -323,10 +323,11 @@ impl ToolRegistry {
         false
     }
 
-    /// 鑾峰彇褰撳墠杞鐨勫伐鍏疯鍥撅紙TurnToolView锛夈€?    ///
-    /// 瀵?LLM 鍙鐨勫伐鍏峰寘鎷細
-    /// - 宸插姞杞界殑 loaded 宸ュ叿
-    /// - 鏍规嵁 capability_policy 杩囨护鍚庣殑 deferred 宸ュ叿
+    /// 获取当前轮次的工具视图（`TurnToolView`）。
+    ///
+    /// 对 LLM 可见的工具包括：
+    /// - 已加载的 `loaded` 工具
+    /// - 根据 capability policy 过滤后的 `deferred` 工具
     pub fn get_turn_view(
         &self,
         tool_search_enabled: bool,
@@ -350,7 +351,7 @@ impl ToolRegistry {
             .lock_deferred()
             .iter()
             .filter(|entry| {
-                // 濡傛灉 task_tools_enabled=false锛岃繃婊ゆ帀 Task 绫诲埆鐨?deferred 宸ュ叿
+                // 如果 task_tools_enabled=false，则过滤掉 Task 类别的 deferred 工具。
                 if !task_tools_enabled && matches!(entry.category, DeferredToolCategory::Task) {
                     return false;
                 }
@@ -360,7 +361,7 @@ impl ToolRegistry {
             .collect();
 
         if tool_search_enabled {
-            // 娣诲姞 ToolSearch 鏈韩浣滀负 deferred 鍏ュ彛
+            // 将 ToolSearch 本身作为 deferred 入口添加进来。
             let search_entry = DeferredToolEntry {
                 name: builtin::tool_search::TOOL_NAME.to_string(),
                 description: "Search deferred tools and load their schemas on demand.".to_string(),
@@ -391,7 +392,7 @@ impl ToolRegistry {
         self.lock_deferred()
             .iter()
             .filter(|entry| {
-                // 鏍规嵁 policy 涓殑 deferred_tools 鍜岀櫧鍚嶅崟杩囨护
+                // 根据 policy 中的 deferred_tools 白名单进行过滤。
                 if policy.deferred_tools.is_empty() {
                     return true;
                 }

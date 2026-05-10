@@ -1,8 +1,8 @@
 use crate::event::AgentEvent;
-use crate::path_resolver::{resolve_path_ref, PathResolveError};
 use crate::prompt::EnvironmentSnapshot;
 use crate::provider::types::ToolDefinition as ProviderToolDefinition;
 use crate::skill::{CapabilityPolicy, SkillRegistry};
+use crate::tool::{builtin, read_cache};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -12,13 +12,7 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use serde_json::Value;
-use std::path::{Path, PathBuf};
-
-const NO_PROJECT_RELATIVE_PATH_ERROR: &str =
-    "Current session has no project directory. Set a project before using relative paths.";
-
-pub mod builtin;
-pub mod read_cache;
+use std::path::PathBuf;
 
 /// Context for tool execution, providing access to event channels and other runtime info.
 #[derive(Clone)]
@@ -113,7 +107,6 @@ pub struct DeferredToolEntry {
     pub category: DeferredToolCategory,
 }
 
-/// 延迟工具类别（用于 ToolSearch 过滤）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DeferredToolCategory {
     Task,
@@ -144,7 +137,6 @@ impl DeferredToolEntry {
     }
 }
 
-/// 延迟工具的完整表示（包含类别和匹配原因）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeferredToolRepresentation {
     pub name: String,
@@ -153,7 +145,6 @@ pub struct DeferredToolRepresentation {
     pub category: DeferredToolCategory,
 }
 
-/// TurnToolView 表示当前轮次对 LLM 可见的工具视图。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnToolView {
     pub loaded: Vec<ProviderToolDefinition>,
@@ -163,7 +154,6 @@ pub struct TurnToolView {
     pub task_tools_enabled: bool,
 }
 
-/// 子代理工具子集描述。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tiny {
     pub agent_id: String,
@@ -172,7 +162,6 @@ pub struct Tiny {
 }
 
 impl TurnToolView {
-    /// 根据 agent 规格计算子代理的工具子集。
     pub fn get_agent_tool_subset(&self, policy: &CapabilityPolicy) -> Tiny {
         let allowed_tools: Vec<String> =
             if policy.tool_search_enabled || policy.skill_tool_enabled || policy.task_tools_enabled {
@@ -327,11 +316,10 @@ impl ToolRegistry {
         false
     }
 
-    /// 获取当前轮次的工具视图（TurnToolView）。
-    ///
-    /// 对 LLM 可见的工具包括：
-    /// - 已加载的 loaded 工具
-    /// - 根据 capability_policy 过滤后的 deferred 工具
+    /// 鑾峰彇褰撳墠杞鐨勫伐鍏疯鍥撅紙TurnToolView锛夈€?    ///
+    /// 瀵?LLM 鍙鐨勫伐鍏峰寘鎷細
+    /// - 宸插姞杞界殑 loaded 宸ュ叿
+    /// - 鏍规嵁 capability_policy 杩囨护鍚庣殑 deferred 宸ュ叿
     pub fn get_turn_view(
         &self,
         tool_search_enabled: bool,
@@ -355,7 +343,7 @@ impl ToolRegistry {
             .lock_deferred()
             .iter()
             .filter(|entry| {
-                // 如果 task_tools_enabled=false，过滤掉 Task 类别的 deferred 工具
+                // 濡傛灉 task_tools_enabled=false锛岃繃婊ゆ帀 Task 绫诲埆鐨?deferred 宸ュ叿
                 if !task_tools_enabled && matches!(entry.category, DeferredToolCategory::Task) {
                     return false;
                 }
@@ -365,7 +353,7 @@ impl ToolRegistry {
             .collect();
 
         if tool_search_enabled {
-            // 添加 ToolSearch 本身作为 deferred 入口
+            // 娣诲姞 ToolSearch 鏈韩浣滀负 deferred 鍏ュ彛
             let search_entry = DeferredToolEntry {
                 name: builtin::tool_search::TOOL_NAME.to_string(),
                 description: "Search deferred tools and load their schemas on demand.".to_string(),
@@ -392,12 +380,11 @@ impl ToolRegistry {
         }
     }
 
-    /// 根据 capability_policy 过滤 deferred 工具列表。
     pub fn filter_deferred_by_policy(&self, policy: &CapabilityPolicy) -> Vec<DeferredToolRepresentation> {
         self.lock_deferred()
             .iter()
             .filter(|entry| {
-                // 根据 policy 中的 deferred_tools 和白名单过滤
+                // 鏍规嵁 policy 涓殑 deferred_tools 鍜岀櫧鍚嶅崟杩囨护
                 if policy.deferred_tools.is_empty() {
                     return true;
                 }
@@ -407,7 +394,6 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// 获取指定类别的 deferred 工具（用于 ToolSearch 类别过滤）。
     pub fn deferred_tools_by_category(&self, category: &DeferredToolCategory) -> Vec<DeferredToolRepresentation> {
         self.lock_deferred()
             .iter()
@@ -416,7 +402,6 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// 根据类别设置动态加载 deferred 工具。
     pub fn load_deferred_by_category(&self, category: &DeferredToolCategory, enabled: bool) {
         if !enabled {
             return;
@@ -454,7 +439,9 @@ impl ToolRegistry {
         };
 
         if matches!(canonical_name, "Read" | "Write" | "Edit") {
-            if let Err(error_output) = preprocess_file_tool_input(canonical_name, &mut input, context.as_ref()) {
+            if let Err(error_output) =
+                crate::tool::path_preprocess::preprocess_file_tool_input(canonical_name, &mut input, context.as_ref())
+            {
                 return Ok(error_output);
             }
         }
@@ -467,7 +454,11 @@ impl ToolRegistry {
 
         if let Some(tool) = tool {
             let definition = tool.definition();
-            if let Err(error_output) = validate_input_against_schema(canonical_name, &input, &definition.input_schema) {
+            if let Err(error_output) = crate::tool::schema_validation::validate_input_against_schema(
+                canonical_name,
+                &input,
+                &definition.input_schema,
+            ) {
                 return Ok(error_output);
             }
             return tool.execute(input, context).await;
@@ -478,150 +469,6 @@ impl ToolRegistry {
             is_error: true,
         })
     }
-}
-
-fn preprocess_file_tool_input(
-    tool_name: &str,
-    input: &mut Value,
-    context: Option<&ToolContext>,
-) -> Result<(), ToolOutput> {
-    let raw_path = input
-        .get("file_path")
-        .and_then(Value::as_str)
-        .or_else(|| input.get("path").and_then(Value::as_str))
-        .ok_or_else(|| ToolOutput {
-            content: "Missing 'file_path'".to_string(),
-            is_error: true,
-        })?;
-
-    let Some(ctx) = context else {
-        return Ok(());
-    };
-    let Some(env) = ctx.environment.as_ref() else {
-        return Ok(());
-    };
-
-    let raw_path = Path::new(raw_path);
-    if raw_path.is_absolute() {
-        let require_exists = !matches!(tool_name, "Write");
-        let resolved = resolve_path_ref(
-            raw_path.to_string_lossy().as_ref(),
-            Path::new("."),
-            None,
-            require_exists,
-        )
-        .map_err(|err| ToolOutput {
-            content: format_path_resolve_error(tool_name, &err),
-            is_error: true,
-        })?;
-        input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
-        return Ok(());
-    }
-
-    let Some(project_dir) = env.project_dir.as_deref() else {
-        return Err(ToolOutput {
-            content: NO_PROJECT_RELATIVE_PATH_ERROR.to_string(),
-            is_error: true,
-        });
-    };
-
-    let project_dir = Path::new(project_dir);
-    let allowed_root = project_dir;
-
-    let require_exists = !matches!(tool_name, "Write");
-    let resolved = resolve_path_ref(
-        raw_path.to_string_lossy().as_ref(),
-        project_dir,
-        Some(allowed_root),
-        require_exists,
-    )
-    .map_err(|err| ToolOutput {
-        content: format_path_resolve_error(tool_name, &err),
-        is_error: true,
-    })?;
-
-    input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
-    Ok(())
-}
-
-fn format_path_resolve_error(tool_name: &str, err: &PathResolveError) -> String {
-    match err {
-        PathResolveError::InvalidPathSyntax { .. } => {
-            format!("{} path resolution failed: {}", tool_name, err)
-        }
-        PathResolveError::PathNotFound { .. } => {
-            format!("{} path resolution failed: {}", tool_name, err)
-        }
-        PathResolveError::PathAccessDenied { .. } => {
-            format!("{} path resolution failed: {}", tool_name, err)
-        }
-    }
-}
-
-fn validate_input_against_schema(tool_name: &str, input: &Value, schema: &Value) -> Result<(), ToolOutput> {
-    let Some(input_obj) = input.as_object() else {
-        return Err(ToolOutput {
-            content: format!("Invalid arguments for '{}': input must be a JSON object", tool_name),
-            is_error: true,
-        });
-    };
-
-    let schema_props = schema.get("properties").and_then(Value::as_object);
-    let schema_required = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .map(|required| required.iter().filter_map(Value::as_str).collect::<HashSet<_>>())
-        .unwrap_or_default();
-
-    if let Some(props) = schema_props {
-        for key in input_obj.keys() {
-            if !props.contains_key(key) {
-                return Err(ToolOutput {
-                    content: format!("Invalid arguments for '{}': unknown field '{}'", tool_name, key),
-                    is_error: true,
-                });
-            }
-        }
-
-        for required in &schema_required {
-            if !input_obj.contains_key(*required) {
-                return Err(ToolOutput {
-                    content: format!(
-                        "Invalid arguments for '{}': missing required field '{}'",
-                        tool_name, required
-                    ),
-                    is_error: true,
-                });
-            }
-        }
-
-        for (key, value) in input_obj {
-            if let Some(prop_schema) = props.get(key) {
-                if let Some(expected_type) = prop_schema.get("type").and_then(Value::as_str) {
-                    let type_ok = match expected_type {
-                        "string" => value.is_string(),
-                        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-                        "number" => value.is_number(),
-                        "boolean" => value.is_boolean(),
-                        "object" => value.is_object(),
-                        "array" => value.is_array(),
-                        _ => true,
-                    };
-                    if !type_ok {
-                        return Err(ToolOutput {
-                            content: format!(
-                                "Invalid arguments for '{}': field '{}' must be type '{}'",
-                                tool_name, key, expected_type
-                            ),
-                            is_error: true,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Provides a default empty `ToolRegistry`.
@@ -832,6 +679,9 @@ mod tests {
             .unwrap();
 
         assert!(output.is_error);
-        assert_eq!(output.content, super::NO_PROJECT_RELATIVE_PATH_ERROR);
+        assert_eq!(
+            output.content,
+            crate::tool::path_preprocess::NO_PROJECT_RELATIVE_PATH_ERROR
+        );
     }
 }

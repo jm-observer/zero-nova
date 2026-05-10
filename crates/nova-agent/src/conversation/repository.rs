@@ -1,5 +1,6 @@
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
+use log::warn;
 use serde_json::Value;
 use sqlx::Row;
 
@@ -202,7 +203,15 @@ impl SqliteSessionRepository {
             let agent_id: String = row.get("agent_id");
             let runtime_control_json: Option<String> = row.get("runtime_control");
             let runtime_control = if let Some(json) = runtime_control_json {
-                serde_json::from_str(&json).unwrap_or_else(|_| super::control::ControlState::new(&agent_id))
+                serde_json::from_str(&json).unwrap_or_else(|e| {
+                    warn!(
+                        "Failed to decode runtime_control for session '{}': {} (agent: {})",
+                        row.get::<String, _>("id"),
+                        e,
+                        agent_id
+                    );
+                    super::control::ControlState::new(&agent_id)
+                })
             } else {
                 super::control::ControlState::new(&agent_id)
             };
@@ -458,7 +467,8 @@ impl SqliteSessionRepository {
     // --- Plan 2: Diagnostics & Audit ---
 
     pub async fn create_audit_log(&self, log: &super::model::AuditLogRecord) -> Result<()> {
-        let details_json = serde_json::to_string(&log.details).unwrap();
+        let details_json = serde_json::to_string(&log.details)
+            .with_context(|| format!("Failed to serialize audit_log.details for '{}'", log.action))?;
         sqlx::query("INSERT INTO audit_logs (session_id, run_id, action, details, created_at) VALUES (?, ?, ?, ?, ?)")
             .bind(&log.session_id)
             .bind(&log.run_id)
@@ -471,7 +481,14 @@ impl SqliteSessionRepository {
     }
 
     pub async fn create_diagnostic_issue(&self, issue: &super::model::DiagnosticIssue) -> Result<()> {
-        let details_json = issue.details.as_ref().map(|v| serde_json::to_string(v).unwrap());
+        let details_json = issue
+            .details
+            .as_ref()
+            .map(|v| {
+                serde_json::to_string(v)
+                    .with_context(|| format!("Failed to serialize diagnostic.details for '{}'", issue.id))
+            })
+            .transpose()?;
         sqlx::query("INSERT INTO diagnostic_issues (id, session_id, severity, message, details, created_at) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(&issue.id)
             .bind(&issue.session_id)
@@ -495,7 +512,12 @@ impl SqliteSessionRepository {
     // --- Plan 2: Workspace Restore ---
 
     pub async fn save_workspace_restore_state(&self, state: &super::model::WorkspaceRestoreState) -> Result<()> {
-        let snapshot_json = serde_json::to_string(&state.snapshot).unwrap();
+        let snapshot_json = serde_json::to_string(&state.snapshot).with_context(|| {
+            format!(
+                "Failed to serialize workspace_restore snapshot for session '{}'",
+                state.session_id
+            )
+        })?;
         sqlx::query("INSERT INTO workspace_restore_state (session_id, snapshot, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET snapshot=excluded.snapshot, updated_at=excluded.updated_at")
             .bind(&state.session_id)
             .bind(snapshot_json)
@@ -582,12 +604,21 @@ impl SqliteSessionRepository {
         let mut logs = Vec::new();
         for row in rows {
             let details_json: String = row.get("details");
+            let details: serde_json::Value = serde_json::from_str(&details_json).unwrap_or_else(|e| {
+                warn!(
+                    "Failed to decode audit log details for '{:?}' (session '{}', action '{}'): {e} — using null",
+                    row.get::<String, _>("id"),
+                    row.get::<String, _>("session_id"),
+                    row.get::<String, _>("action")
+                );
+                serde_json::Value::Null
+            });
             logs.push(super::model::AuditLogRecord {
                 id: row.get("id"),
                 session_id: row.get("session_id"),
                 run_id: row.get("run_id"),
                 action: row.get("action"),
-                details: serde_json::from_str(&details_json).unwrap_or(serde_json::Value::Null),
+                details,
                 created_at: row.get("created_at"),
             });
         }
@@ -727,15 +758,22 @@ fn parse_usage(raw: Option<String>) -> Result<Option<serde_json::Value>> {
 
 fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
     let agent_id: String = row.get("agent_id");
+    let session_id: String = row.get("id");
     let runtime_control_json: Option<String> = row.get("runtime_control");
     let runtime_control = if let Some(json) = runtime_control_json {
-        serde_json::from_str(&json).unwrap_or_else(|_| super::control::ControlState::new(&agent_id))
+        serde_json::from_str(&json).unwrap_or_else(|e| {
+            warn!(
+                "Failed to decode runtime_control for session '{}': {e} (agent: {})",
+                session_id, agent_id
+            );
+            super::control::ControlState::new(&agent_id)
+        })
     } else {
         super::control::ControlState::new(&agent_id)
     };
 
     Ok((
-        row.get("id"),
+        session_id,
         row.get("title"),
         agent_id,
         row.get("created_at"),

@@ -452,6 +452,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         cancellation_token: Option<CancellationToken>,
         model_config: &ModelConfig,
     ) -> Result<TurnResult> {
+        // 尝试直接移动所有权；失败则 clone 是预期行为（性能优化，语义等价）。
         let mut all_messages = Arc::try_unwrap(ctx.history)
             .unwrap_or_else(|h| (*h).clone())
             .into_iter()
@@ -678,9 +679,11 @@ impl<C: LlmClient> AgentRuntime<C> {
             if last_stop_reason == Some(StopReason::MaxTokens) {
                 let is_truncated = if parsed_tool_calls.is_empty() {
                     true
-                } else {
-                    let (_, _, last_val) = parsed_tool_calls.last().unwrap();
+                } else if let Some((_, _, last_val)) = parsed_tool_calls.last() {
                     last_val.get("__error").is_some()
+                } else {
+                    // 理论不应到达但可达场景：保守视作截断并触发 continuation
+                    true
                 };
 
                 if is_truncated {

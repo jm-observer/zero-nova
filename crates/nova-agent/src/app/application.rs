@@ -156,13 +156,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .ok()
             .map(|response| response.skills)
             .unwrap_or_default();
-        let before_title = self
-            .conversation_service
-            .sessions
-            .get(session_id)
-            .await?
-            .map(|session| session.get_name())
-            .unwrap_or_default();
+        let before_title = if let Some(session) = self.conversation_service.sessions.get(session_id).await? {
+            session.get_name().await
+        } else {
+            String::new()
+        };
         let (agent_event_tx, mut agent_event_rx) = mpsc::channel(100);
 
         let sender_clone = sender.clone();
@@ -195,23 +193,14 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             }
         }
         if let Some(session) = self.conversation_service.sessions.get(session_id).await? {
-            let after_title = session.get_name();
+            let after_title = session.get_name().await;
             if after_title != before_title {
                 let payload = nova_protocol::session::SessionSummaryUpdatedPayload {
                     session_id: session.id.clone(),
                     title: Some(after_title),
                     updated_at: session.updated_at.load(Ordering::SeqCst),
-                    message_count: session
-                        .history
-                        .read()
-                        .map_err(|_| anyhow!("Session history lock poisoned"))?
-                        .len(),
-                    agent_id: session
-                        .control
-                        .read()
-                        .map_err(|_| anyhow!("Session control lock poisoned"))?
-                        .active_agent
-                        .clone(),
+                    message_count: session.history.read().await.len(),
+                    agent_id: session.control.read().await.active_agent.clone(),
                     version: "1.0".to_string(),
                 };
                 if let Err(err) = sender.send(AppEvent::SessionSummaryUpdated(payload)).await {
@@ -249,7 +238,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await?
             .context("Session not found")?;
 
-        let messages = session.get_internal_messages();
+        let messages = session.get_internal_messages().await;
         let mut app_messages = Vec::with_capacity(messages.len());
         for m in messages {
             app_messages.push(AppMessage {
@@ -281,7 +270,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .find_latest_session_by_agent(&agent_id)
             .await?
             .and_then(|session| {
-                let control = session.control.read().ok()?;
+                let control = session.control.try_read().ok()?;
                 control.project_dir.clone()
             });
 
@@ -292,20 +281,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await?;
 
         let id = session.id.clone();
-        let name = session.get_name();
-        let active_agent = session
-            .control
-            .read()
-            .map_err(|_| anyhow!("Session control lock poisoned"))?
-            .active_agent
-            .clone();
+        let name = session.get_name().await;
+        let active_agent = session.control.read().await.active_agent.clone();
         let created_at = session.created_at;
         let updated_at = session.updated_at.load(Ordering::SeqCst);
-        let message_count = session
-            .history
-            .read()
-            .map_err(|_| anyhow!("Session history lock poisoned"))?
-            .len();
+        let message_count = session.history.read().await.len();
 
         Ok(AppSession {
             id,
@@ -330,20 +310,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .context("Source session not found")?;
 
         let id = session.id.clone();
-        let name = session.get_name();
-        let active_agent = session
-            .control
-            .read()
-            .map_err(|_| anyhow!("Session control lock poisoned"))?
-            .active_agent
-            .clone();
+        let name = session.get_name().await;
+        let active_agent = session.control.read().await.active_agent.clone();
         let created_at = session.created_at;
         let updated_at = session.updated_at.load(Ordering::SeqCst);
-        let message_count = session
-            .history
-            .read()
-            .map_err(|_| anyhow!("Session history lock poisoned"))?
-            .len();
+        let message_count = session.history.read().await.len();
 
         Ok(AppSession {
             id,
@@ -364,20 +335,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         };
         let session = AppSession {
             id: session.id.clone(),
-            title: Some(session.get_name()),
-            agent_id: session
-                .control
-                .read()
-                .map_err(|_| anyhow!("Session control lock poisoned"))?
-                .active_agent
-                .clone(),
+            title: Some(session.get_name().await),
+            agent_id: session.control.read().await.active_agent.clone(),
             created_at: session.created_at,
             updated_at: session.updated_at.load(Ordering::SeqCst),
-            message_count: session
-                .history
-                .read()
-                .map_err(|_| anyhow!("Session history lock poisoned"))?
-                .len(),
+            message_count: session.history.read().await.len(),
         };
 
         Ok(AppAgentSwitch { agent, session })

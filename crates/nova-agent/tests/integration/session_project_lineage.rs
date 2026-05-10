@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
+use tokio::task::JoinSet;
 
 #[tokio::test]
 async fn create_for_agent_inherits_latest_project_dir_from_same_agent_only() {
@@ -48,7 +49,7 @@ async fn create_for_agent_inherits_latest_project_dir_from_same_agent_only() {
         .await
         .expect("query latest agent-a session")
         .and_then(|session| {
-            let control = session.control.read().ok()?;
+            let control = session.control.try_read().ok()?;
             control.project_dir.clone()
         });
     let created = service
@@ -61,7 +62,7 @@ async fn create_for_agent_inherits_latest_project_dir_from_same_agent_only() {
         .await
         .expect("create inherited session");
 
-    let created_control = created.control.read().expect("read created control");
+    let created_control = created.control.read().await;
     assert_eq!(created_control.project_dir, Some(expected_project_a));
     assert_eq!(created_control.active_agent, "agent-a");
 }
@@ -117,9 +118,125 @@ async fn switch_agent_creates_new_session_when_target_agent_has_no_history() {
         .expect("switch agent should create session");
 
     assert_eq!(agent.id, "agent-c");
-    let control = created.control.read().expect("read created session control");
+    let control = created.control.read().await;
     assert_eq!(control.active_agent, "agent-c");
     assert_eq!(control.project_dir, None);
+}
+
+#[tokio::test]
+async fn concurrent_reads_with_interleaved_writes_keep_project_dir_consistent() {
+    let data_dir = tempdir().expect("create data tempdir");
+    let manager = SqliteManager::new(data_dir.path()).await.expect("create sqlite manager");
+    let repository = SqliteSessionRepository::new(manager.pool.clone());
+    let sessions = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let session = sessions
+        .create(Some("rw-contention".to_string()), "agent-a".to_string(), String::new())
+        .await
+        .expect("create session");
+
+    let project_a = tempdir().expect("create project a");
+    let project_b = tempdir().expect("create project b");
+    let expected_a = tokio::fs::canonicalize(project_a.path())
+        .await
+        .unwrap_or_else(|_| project_a.path().to_path_buf());
+    let expected_b = tokio::fs::canonicalize(project_b.path())
+        .await
+        .unwrap_or_else(|_| project_b.path().to_path_buf());
+
+    let mut reads = JoinSet::new();
+    for _ in 0..24 {
+        let sessions_clone = sessions.clone();
+        let session_id = session.id.clone();
+        let expected_a_clone = expected_a.clone();
+        let expected_b_clone = expected_b.clone();
+        reads.spawn(async move {
+            for _ in 0..20 {
+                let value = sessions_clone
+                    .get_project_dir(&session_id)
+                    .await
+                    .expect("read project dir");
+                if let Some(path) = value {
+                    assert!(path == expected_a_clone || path == expected_b_clone);
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+    }
+
+    sessions
+        .set_project_dir(&session.id, project_a.path())
+        .await
+        .expect("set project a");
+    tokio::time::sleep(Duration::from_millis(2)).await;
+    sessions
+        .set_project_dir(&session.id, project_b.path())
+        .await
+        .expect("set project b");
+
+    while let Some(result) = reads.join_next().await {
+        result.expect("reader task should pass");
+    }
+
+    let final_project = sessions
+        .get_project_dir(&session.id)
+        .await
+        .expect("read final project dir");
+    assert_eq!(final_project, Some(expected_b));
+}
+
+#[tokio::test]
+async fn latest_session_lookup_remains_isolated_between_agents() {
+    let data_dir = tempdir().expect("create data tempdir");
+    let manager = SqliteManager::new(data_dir.path()).await.expect("create sqlite manager");
+    let repository = SqliteSessionRepository::new(manager.pool.clone());
+    let sessions = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    for idx in 0..6 {
+        let a = sessions
+            .create(
+                Some(format!("agent-a-{}", idx)),
+                "agent-a".to_string(),
+                String::new(),
+            )
+            .await
+            .expect("create session for agent-a");
+        let a_dir = tempdir().expect("create agent-a project dir");
+        sessions
+            .set_project_dir(&a.id, a_dir.path())
+            .await
+            .expect("set project for agent-a");
+
+        let b = sessions
+            .create(
+                Some(format!("agent-b-{}", idx)),
+                "agent-b".to_string(),
+                String::new(),
+            )
+            .await
+            .expect("create session for agent-b");
+        let b_dir = tempdir().expect("create agent-b project dir");
+        sessions
+            .set_project_dir(&b.id, b_dir.path())
+            .await
+            .expect("set project for agent-b");
+    }
+
+    let latest_a = sessions
+        .find_latest_session_by_agent("agent-a")
+        .await
+        .expect("find latest agent-a")
+        .expect("latest agent-a exists");
+    let latest_b = sessions
+        .find_latest_session_by_agent("agent-b")
+        .await
+        .expect("find latest agent-b")
+        .expect("latest agent-b exists");
+
+    let control_a = latest_a.control.read().await;
+    let control_b = latest_b.control.read().await;
+    assert_eq!(control_a.active_agent, "agent-a");
+    assert_eq!(control_b.active_agent, "agent-b");
+    assert_ne!(control_a.project_dir, control_b.project_dir);
 }
 
 fn build_conversation_service(
@@ -193,3 +310,4 @@ fn agent_descriptor(id: &str) -> AgentDescriptor {
         llm_id: "gpt_oss_primary".to_string(),
     }
 }
+

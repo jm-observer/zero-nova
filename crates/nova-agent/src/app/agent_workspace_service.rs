@@ -31,7 +31,7 @@ impl AgentWorkspaceService {
 
     pub async fn inspect_agent(&self, agent_id: &str, session_id: &str) -> Result<AgentInspectResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
-        let control = session.control.read().unwrap();
+        let control = session.control.read().await;
         let config = self
             .config
             .read()
@@ -85,7 +85,7 @@ impl AgentWorkspaceService {
 
     pub async fn get_session_runtime(&self, session_id: &str) -> Result<SessionRuntimeSnapshot> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
-        let control = session.control.read().unwrap();
+        let control = session.control.read().await;
 
         Ok(RuntimeSnapshotAssembler::assemble_session_runtime(session_id, &control))
     }
@@ -105,7 +105,7 @@ impl AgentWorkspaceService {
     pub async fn reload_session_system_prompt(&self, session_id: &str) -> Result<SessionSystemPromptReloadResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let agent_id = {
-            let control = session.control.read().unwrap();
+            let control = session.control.read().await;
             control.active_agent.clone()
         };
         let agent_descriptor = self
@@ -142,7 +142,7 @@ impl AgentWorkspaceService {
         if agent_spec.enable_project_developer_prompt {
             prompt_config = prompt_config.with_developer_prompt_files(reloaded_config.developer_prompt_files.clone());
             let project_dir = {
-                let control = session.control.read().unwrap();
+                let control = session.control.read().await;
                 control.project_dir.clone()
             };
             let dev_prompt_content =
@@ -207,7 +207,7 @@ impl AgentWorkspaceService {
     ) -> Result<SessionFileTreeResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let project_dir = {
-            let control = session.control.read().unwrap();
+            let control = session.control.read().await;
             control
                 .project_dir
                 .clone()
@@ -229,7 +229,7 @@ impl AgentWorkspaceService {
 
     pub async fn list_session_skill_bindings(&self, session_id: &str) -> Result<SessionSkillBindingsResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
-        let control = session.control.read().unwrap();
+        let control = session.control.read().await;
         let skills = deserialize_skill_bindings(&control.skill_bindings);
         let resp = SessionSkillBindingsResponse {
             skills,
@@ -261,7 +261,7 @@ impl AgentWorkspaceService {
     ) -> Result<SessionRuntimeSnapshot> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let active_agent = {
-            let control = session.control.read().unwrap();
+            let control = session.control.read().await;
             control.active_agent.clone()
         };
         let config = self
@@ -297,7 +297,7 @@ impl AgentWorkspaceService {
             .override_model(session_id, orchestration, execution)
             .await?;
 
-        let control = session.control.read().unwrap();
+        let control = session.control.read().await;
         Ok(RuntimeSnapshotAssembler::assemble_session_runtime(session_id, &control))
     }
 
@@ -425,7 +425,7 @@ impl AgentWorkspaceService {
                 // can be looked up from the run record.
                 if let Ok(Some(run)) = repo.get_run(run_id).await {
                     if let Ok(Some(session)) = self.sessions.get(&run.session_id).await {
-                        if let Some(token) = session.take_cancellation_token() {
+                        if let Some(token) = session.take_cancellation_token().await {
                             token.cancel();
                         }
                     }

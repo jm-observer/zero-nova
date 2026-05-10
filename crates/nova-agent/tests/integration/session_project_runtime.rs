@@ -130,7 +130,7 @@ async fn turn_prompt_shows_project_not_set_and_skips_project_context() {
         .expect("run turn");
 
     let loaded = sessions.get(&session.id).await.expect("load session").expect("session exists");
-    let control = loaded.control.read().expect("read control");
+    let control = loaded.control.read().await;
     let prompt_preview = control
         .last_turn_snapshot
         .as_ref()
@@ -358,7 +358,7 @@ async fn inherited_project_dir_is_used_by_prompt_and_relative_tool_execution() {
         .await
         .expect("load inherited session")
         .expect("session exists");
-    let control = loaded.control.read().expect("read control");
+    let control = loaded.control.read().await;
     let prompt_preview = control
         .last_turn_snapshot
         .as_ref()
@@ -510,3 +510,4 @@ fn tool_context_with_session(session_id: &str, project_dir: Option<String>) -> T
         cancellation_token: None,
     }
 }
+

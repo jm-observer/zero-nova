@@ -1,6 +1,7 @@
 use super::session::Session;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub struct SessionCache {
     sessions: RwLock<HashMap<String, Arc<Session>>>,
@@ -19,23 +20,23 @@ impl SessionCache {
         }
     }
 
-    pub fn get(&self, id: &str) -> Option<Arc<Session>> {
-        let sessions = self.sessions.read().unwrap();
+    pub async fn get(&self, id: &str) -> Option<Arc<Session>> {
+        let sessions = self.sessions.read().await;
         sessions.get(id).cloned()
     }
 
-    pub fn insert(&self, id: String, session: Arc<Session>) {
-        let mut sessions = self.sessions.write().unwrap();
+    pub async fn insert(&self, id: String, session: Arc<Session>) {
+        let mut sessions = self.sessions.write().await;
         sessions.insert(id, session);
     }
 
-    pub fn remove(&self, id: &str) -> Option<Arc<Session>> {
-        let mut sessions = self.sessions.write().unwrap();
+    pub async fn remove(&self, id: &str) -> Option<Arc<Session>> {
+        let mut sessions = self.sessions.write().await;
         sessions.remove(id)
     }
 
-    pub fn list(&self) -> Vec<Arc<Session>> {
-        let sessions = self.sessions.read().unwrap();
+    pub async fn list(&self) -> Vec<Arc<Session>> {
+        let sessions = self.sessions.read().await;
         sessions.values().cloned().collect()
     }
 }

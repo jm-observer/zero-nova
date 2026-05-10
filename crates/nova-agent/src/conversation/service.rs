@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 use tokio::sync::{oneshot, Mutex};
 use tokio::time::{timeout, Duration};
 use uuid::Uuid;
@@ -71,7 +71,7 @@ impl SessionService {
         let rows = self.repository.list_sessions().await?;
         for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control) in rows {
             if let Some(session) = self.load_session_from_db(&id).await? {
-                self.cache.insert(id, session);
+                self.cache.insert(id, session).await;
             }
         }
         Ok(())
@@ -105,7 +105,7 @@ impl SessionService {
         }
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
+            control: tokio::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
             id: id.clone(),
             name: RwLock::new(session_name),
             history: RwLock::new(initial_history),
@@ -117,7 +117,7 @@ impl SessionService {
         });
 
         self.persist_full_session(&session).await?;
-        self.cache.insert(id, session.clone());
+        self.cache.insert(id, session.clone()).await;
         Ok(session)
     }
 
@@ -133,13 +133,13 @@ impl SessionService {
 
     /// 获取会话 (Read-Through with concurrency protection).
     pub async fn get(&self, id: &str) -> Result<Option<Arc<Session>>> {
-        if let Some(session) = self.cache.get(id) {
+        if let Some(session) = self.cache.get(id).await {
             return Ok(Some(session));
         }
 
         let mut receiver = None;
         let is_loader = {
-            let mut loading = self.loading.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut loading = self.loading.write().await;
             if let Some(waiters) = loading.get_mut(id) {
                 let (tx, rx) = oneshot::channel();
                 waiters.push(tx);
@@ -156,7 +156,7 @@ impl SessionService {
                 match rx.await {
                     Ok(session) => return Ok(session),
                     Err(_) => {
-                        if let Some(session) = self.cache.get(id) {
+                        if let Some(session) = self.cache.get(id).await {
                             return Ok(Some(session));
                         }
                     }
@@ -167,11 +167,11 @@ impl SessionService {
 
         let load_result = self.load_session_from_db(id).await?;
         if let Some(session) = load_result.as_ref() {
-            self.cache.insert(id.to_string(), session.clone());
+            self.cache.insert(id.to_string(), session.clone()).await;
         }
 
         let waiters = {
-            let mut loading = self.loading.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut loading = self.loading.write().await;
             loading.remove(id).unwrap_or_default()
         };
         for waiter in waiters {
@@ -187,7 +187,7 @@ impl SessionService {
             |(id, title, _agent_id, created_at, updated_at, runtime_control, history)| {
                 let title_state = runtime_control.title_state.clone();
                 Arc::new(Session {
-                    control: std::sync::RwLock::new(runtime_control),
+                    control: tokio::sync::RwLock::new(runtime_control),
                     id,
                     name: RwLock::new(title),
                     history: RwLock::new(history),
@@ -223,7 +223,7 @@ impl SessionService {
         let persisted_metadata = parsed_metadata.as_ref().map(serde_json::to_value).transpose()?;
 
         {
-            let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut history = session.history.write().await;
             history.push(Message {
                 id: message_id.clone(),
                 role: role.clone(),
@@ -247,7 +247,7 @@ impl SessionService {
     }
 
     pub async fn list_sorted(&self) -> Vec<SessionSummary> {
-        let mut list = self.cache.list();
+        let mut list = self.cache.list().await;
 
         list.sort_by(|a, b| {
             b.updated_at
@@ -255,25 +255,21 @@ impl SessionService {
                 .cmp(&a.updated_at.load(Ordering::SeqCst))
         });
 
-        list.into_iter()
-            .map(|session| SessionSummary {
+        let mut summaries = Vec::with_capacity(list.len());
+        for session in list {
+            let name = session.get_name().await;
+            let agent_id = session.control.read().await.active_agent.clone();
+            let message_count = session.history.read().await.len();
+            summaries.push(SessionSummary {
                 id: session.id.clone(),
-                name: session.get_name(),
-                agent_id: session
-                    .control
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .active_agent
-                    .clone(),
+                name,
+                agent_id,
                 created_at: session.created_at,
                 updated_at: session.updated_at.load(Ordering::SeqCst),
-                message_count: session
-                    .history
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .len(),
-            })
-            .collect()
+                message_count,
+            });
+        }
+        summaries
     }
 
     pub async fn touch_session(&self, session_id: &str) -> Result<Arc<Session>> {
@@ -286,13 +282,13 @@ impl SessionService {
 
     pub async fn delete(&self, id: &str) -> Result<bool> {
         self.repository.delete_session(id).await?;
-        Ok(self.cache.remove(id).is_some())
+        Ok(self.cache.remove(id).await.is_some())
     }
 
     pub async fn copy_session(&self, source_id: &str, truncate_index: Option<usize>) -> Result<Option<Arc<Session>>> {
         let source = self.get(source_id).await?.context("Source session not found")?;
 
-        let history = source.get_history();
+        let history = source.get_history().await;
         let new_history = if let Some(idx) = truncate_index {
             if idx < history.len() {
                 history[..=idx].to_vec()
@@ -306,7 +302,7 @@ impl SessionService {
         let new_id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
         let new_control = {
-            let source_control = source.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let source_control = source.control.read().await;
             let agent_id = source_control.active_agent.clone();
             let mut new_control = ControlState::new_with_project_dir(&agent_id, source_control.project_dir.clone());
             new_control.model_override = source_control.model_override.clone();
@@ -314,9 +310,9 @@ impl SessionService {
         };
 
         let session = Arc::new(Session {
-            control: std::sync::RwLock::new(new_control),
+            control: tokio::sync::RwLock::new(new_control),
             id: new_id.clone(),
-            name: RwLock::new(format!("{} (Copy)", source.get_name())),
+            name: RwLock::new(format!("{} (Copy)", source.get_name().await)),
             history: RwLock::new(new_history),
             created_at: now,
             updated_at: AtomicI64::new(now),
@@ -326,7 +322,7 @@ impl SessionService {
         });
 
         self.persist_full_session(&session).await?;
-        self.cache.insert(new_id, session.clone());
+        self.cache.insert(new_id, session.clone()).await;
         Ok(Some(session))
     }
 
@@ -339,7 +335,7 @@ impl SessionService {
         let session = self.get(session_id).await?.context("Session not found")?;
 
         {
-            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut control = session.control.write().await;
             control.model_override.orchestration = orchestration;
             control.model_override.execution = execution;
             control.model_override.updated_at = Utc::now().timestamp_millis();
@@ -359,7 +355,7 @@ impl SessionService {
         let session = self.get(session_id).await?.context("Session not found")?;
         let updated_at = Utc::now().timestamp_millis();
         let (version_before, changed, prompt_preview_synced) = {
-            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut control = session.control.write().await;
             let before = control.system_prompt_state.version.clone();
             let changed = before != prompt_version;
             control.system_prompt_base_override = Some(prompt_base_override.clone());
@@ -372,7 +368,7 @@ impl SessionService {
         };
 
         {
-            let mut history = session.history.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut history = session.history.write().await;
             if let Some(first) = history.first_mut() {
                 if first.role == Role::System {
                     first.content = vec![ContentBlock::Text {
@@ -402,7 +398,7 @@ impl SessionService {
         let session = self.get(session_id).await?.context("Session not found")?;
 
         {
-            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut control = session.control.write().await;
             if let Some(snapshot) = snapshot {
                 control.last_turn_snapshot = Some(snapshot);
             }
@@ -432,7 +428,7 @@ impl SessionService {
 
     pub async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>> {
         let session = self.get(session_id).await?.context("Session not found")?;
-        let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let control = session.control.read().await;
         Ok(control.project_dir.clone())
     }
 
@@ -441,7 +437,7 @@ impl SessionService {
         let normalized = normalize_project_dir(project_dir).await;
 
         {
-            let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut control = session.control.write().await;
             control.project_dir = Some(normalized.clone());
         }
 
@@ -457,14 +453,14 @@ impl SessionService {
 
     async fn persist_full_session(&self, session: &Arc<Session>) -> Result<()> {
         let runtime_control = {
-            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let control = session.control.read().await;
             control.clone()
         };
 
         self.repository
             .save_session(
                 &session.id,
-                &session.get_name(),
+                &session.get_name().await,
                 &runtime_control.active_agent,
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
@@ -472,7 +468,7 @@ impl SessionService {
             )
             .await?;
 
-        for msg in session.get_history() {
+        for msg in session.get_history().await {
             self.repository
                 .save_message(
                     &session.id,
@@ -489,16 +485,16 @@ impl SessionService {
     }
 
     async fn persist_session_control(&self, session: &Arc<Session>) -> Result<()> {
-        sync_title_state_into_control(session);
+        sync_title_state_into_control(session).await;
         let runtime_control = {
-            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let control = session.control.read().await;
             control.clone()
         };
 
         self.repository
             .save_session(
                 &session.id,
-                &session.get_name(),
+                &session.get_name().await,
                 &runtime_control.active_agent,
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
@@ -508,9 +504,9 @@ impl SessionService {
     }
 
     async fn persist_runtime_control(&self, session_id: &str, session: &Arc<Session>) -> Result<()> {
-        sync_title_state_into_control(session);
+        sync_title_state_into_control(session).await;
         let runtime_control = {
-            let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let control = session.control.read().await;
             control.clone()
         };
         let updated_at = Utc::now().timestamp_millis();
@@ -522,24 +518,17 @@ impl SessionService {
     }
 }
 
-fn sync_title_state_into_control(session: &Arc<Session>) {
-    let title_state = session
-        .title_state
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clone();
-    let mut control = session.control.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+async fn sync_title_state_into_control(session: &Arc<Session>) {
+    let title_state = session.title_state.read().await.clone();
+    let mut control = session.control.write().await;
     control.title_state = title_state;
 }
 
 impl SessionService {
     async fn maybe_schedule_title_generation(&self, session: Arc<Session>) -> Result<()> {
         let (can_schedule, user_messages_count, user_texts) = {
-            let mut title_state = session
-                .title_state
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let history = session.history.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut title_state = session.title_state.write().await;
+            let history = session.history.read().await;
 
             if title_state.source != TitleSource::Default
                 || title_state.status == TitleStatus::Pending
@@ -618,10 +607,7 @@ impl SessionService {
         let mut should_update_title = false;
         let mut normalized = String::new();
         {
-            let mut title_state = session
-                .title_state
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut title_state = session.title_state.write().await;
             match generated {
                 Ok(title) => {
                     normalized = normalize_generated_title(&title);
@@ -644,7 +630,7 @@ impl SessionService {
         }
 
         if should_update_title {
-            session.set_name(normalized);
+            session.set_name(normalized).await;
         }
 
         self.persist_session_control(&session).await?;
@@ -791,7 +777,7 @@ mod tests {
             .create(Some("s".to_string()), "agent-1".to_string(), String::new())
             .await?;
 
-        let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let control = session.control.read().await;
         assert_eq!(control.project_dir, None);
         Ok(())
     }
@@ -813,7 +799,7 @@ mod tests {
             )
             .await?;
 
-        let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let control = session.control.read().await;
         assert_eq!(control.project_dir, Some(inherited));
         assert_eq!(control.active_agent, "agent-1");
         assert_eq!(control.skill_bindings.len(), 0);
@@ -878,7 +864,7 @@ mod tests {
 
         let rebuilt = SessionService::new(Arc::new(SessionCache::new()), repository);
         let loaded = rebuilt.get(&session.id).await?.expect("session should exist");
-        let control = loaded.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let control = loaded.control.read().await;
         assert_eq!(control.skill_bindings.len(), 1);
         assert_eq!(control.skill_bindings[0]["skill_id"], "skill-a");
         Ok(())
@@ -935,7 +921,7 @@ mod tests {
         right.await??;
 
         let loaded = service.get(&session.id).await?.expect("session should exist");
-        let control = loaded.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let control = loaded.control.read().await;
         assert_eq!(control.skill_bindings.len(), 2);
         let mut ids = control
             .skill_bindings
@@ -981,7 +967,7 @@ mod tests {
 
         let rebuilt = SessionService::new(Arc::new(SessionCache::new()), repository);
         let loaded = rebuilt.get(&session.id).await?.expect("session should exist");
-        let history = loaded.get_history();
+        let history = loaded.get_history().await;
         let assistant = history
             .iter()
             .find(|message| message.role == crate::message::Role::Assistant)
@@ -1004,7 +990,7 @@ mod tests {
         let session = service
             .create_for_agent(None, "agent-1".to_string(), String::new(), None)
             .await?;
-        assert_eq!(session.get_name(), super::DEFAULT_SESSION_TITLE);
+        assert_eq!(session.get_name().await, super::DEFAULT_SESSION_TITLE);
         Ok(())
     }
 
@@ -1030,10 +1016,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             assert_eq!(title_state.attempt_count, 0);
         }
 
@@ -1050,15 +1033,12 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             assert_eq!(title_state.status, crate::conversation::control::TitleStatus::Succeeded);
             assert_eq!(title_state.source, crate::conversation::control::TitleSource::Ai);
             assert_eq!(title_state.attempt_count, 1);
         }
-        assert_ne!(session.get_name(), super::DEFAULT_SESSION_TITLE);
+        assert_ne!(session.get_name().await, super::DEFAULT_SESSION_TITLE);
         Ok(())
     }
 
@@ -1094,10 +1074,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             assert_eq!(title_state.attempt_count, 0);
         }
 
@@ -1113,10 +1090,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             assert_eq!(title_state.attempt_count, 1);
             assert_eq!(title_state.status, crate::conversation::control::TitleStatus::Succeeded);
         }
@@ -1161,10 +1135,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         assert_eq!(title_state.status, TitleStatus::Failed);
         assert_eq!(title_state.attempt_count, 1);
         assert!(title_state
@@ -1218,10 +1189,7 @@ mod tests {
         ))
         .await;
 
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         assert_eq!(title_state.status, TitleStatus::Failed);
         assert!(title_state
             .last_error
@@ -1326,10 +1294,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         assert_eq!(title_state.attempt_count, 0);
         assert_eq!(title_state.status, TitleStatus::Idle);
         Ok(())
@@ -1367,10 +1332,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         assert_eq!(title_state.attempt_count, 0);
         Ok(())
     }
@@ -1409,10 +1371,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             assert_eq!(title_state.status, TitleStatus::Succeeded);
         }
 
@@ -1430,10 +1389,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             assert_eq!(title_state.status, TitleStatus::Succeeded);
             assert_eq!(title_state.attempt_count, 1);
         }
@@ -1506,10 +1462,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         // Should only have one attempt, not two
         assert_eq!(title_state.attempt_count, 1);
         assert_eq!(title_state.status, TitleStatus::Succeeded);
@@ -1551,11 +1504,8 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
-        let original_title = session.get_name();
-        let _original_title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let original_title = session.get_name().await;
+        let _original_title_state = session.title_state.read().await;
 
         // Simulate service rebuild by creating a new service with the same repository
         let rebuilt_repo = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
@@ -1567,10 +1517,7 @@ mod tests {
             .await?
             .expect("session should exist after rebuild");
 
-        let loaded_title_state = loaded_session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let loaded_title_state = loaded_session.title_state.read().await;
 
         // Title state should persist after rebuild
         assert_eq!(loaded_title_state.status, TitleStatus::Succeeded);
@@ -1580,7 +1527,7 @@ mod tests {
         assert!(loaded_title_state.attempt_count > 0);
 
         // Title name should also be preserved
-        assert_eq!(loaded_session.get_name(), original_title);
+        assert_eq!(loaded_session.get_name().await, original_title);
         Ok(())
     }
 
@@ -1617,10 +1564,7 @@ mod tests {
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         assert_eq!(title_state.status, TitleStatus::Succeeded);
         assert_eq!(title_state.attempt_count, 1);
 
@@ -1649,10 +1593,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-        let loaded_title_state = loaded_session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let loaded_title_state = loaded_session.title_state.read().await;
         // Should still have only 1 attempt - no regeneration
         assert_eq!(loaded_title_state.attempt_count, 1);
         assert_eq!(loaded_title_state.status, TitleStatus::Succeeded);
@@ -1699,10 +1640,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
 
             // After failure, status should NOT be Pending
             assert_ne!(title_state.status, TitleStatus::Pending);
@@ -1729,10 +1667,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
 
         {
-            let title_state = session
-                .title_state
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let title_state = session.title_state.read().await;
             // After retry, should still be Failed (not Pending)
             assert_ne!(title_state.status, TitleStatus::Pending);
             assert_eq!(title_state.attempt_count, 2);
@@ -1755,13 +1690,13 @@ mod tests {
 
         // Track how many times the title changes by monitoring title_state
         let title_change_count = Arc::new(Mutex::new(0));
-        let last_title = Arc::new(Mutex::new(session.get_name()));
+        let last_title = Arc::new(Mutex::new(session.get_name().await));
 
         // Helper to check if title changed
         let title_change_count_clone = title_change_count.clone();
         let last_title_clone = last_title.clone();
-        let mut check_title_change = move || {
-            let current_title = session_clone.get_name();
+        let check_title_change = || async {
+            let current_title = session_clone.get_name().await;
             let mut last = last_title_clone.lock().unwrap();
             if current_title != *last {
                 *title_change_count_clone.lock().unwrap() += 1;
@@ -1780,7 +1715,7 @@ mod tests {
                 None,
             )
             .await?;
-        check_title_change();
+        check_title_change().await;
         assert_eq!(*title_change_count.lock().unwrap(), 0);
 
         // Second message - title should be generated and changed
@@ -1795,7 +1730,7 @@ mod tests {
             )
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(40)).await;
-        check_title_change();
+        check_title_change().await;
         assert_eq!(*title_change_count.lock().unwrap(), 1);
 
         // Third message - no title change (title already set)
@@ -1810,7 +1745,7 @@ mod tests {
             )
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        check_title_change();
+        check_title_change().await;
         assert_eq!(*title_change_count.lock().unwrap(), 1);
 
         // Fourth message - no title change
@@ -1825,14 +1760,11 @@ mod tests {
             )
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        check_title_change();
+        check_title_change().await;
         assert_eq!(*title_change_count.lock().unwrap(), 1);
 
         // Verify title state is consistent
-        let title_state = session
-            .title_state
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let title_state = session.title_state.read().await;
         assert_eq!(title_state.status, TitleStatus::Succeeded);
         assert_eq!(title_state.source, TitleSource::Ai);
         Ok(())

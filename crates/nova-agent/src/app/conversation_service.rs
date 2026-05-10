@@ -70,12 +70,12 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         }
     }
 
-    fn resolve_run_models(
+    async fn resolve_run_models(
         &self,
         session: &crate::conversation::session::Session,
         agent_descriptor: &AgentDescriptor,
     ) -> Result<(Option<ModelRef>, Option<ModelRef>, crate::config::ResolvedAgentBinding)> {
-        let control = session.control.read().unwrap();
+        let control = session.control.read().await;
         let base_binding = self
             .app_config
             .resolve_agent_binding_by_id(agent_descriptor.id.as_str())?;
@@ -106,7 +106,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
 
     pub async fn stop_turn(&self, session_id: &str) -> Result<()> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
-        if let Some(token) = session.take_cancellation_token() {
+        if let Some(token) = session.take_cancellation_token().await {
             token.cancel();
         }
         Ok(())
@@ -155,14 +155,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let now = Utc::now().timestamp_millis();
 
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
-        let agent_id = session.get_active_agent();
+        let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
         let (orchestration_model, execution_model, base_binding) =
-            self.resolve_run_models(&session, &agent_descriptor)?;
+            self.resolve_run_models(&session, &agent_descriptor).await?;
 
         // Phase 2: Create Run record
         self.sessions
@@ -271,13 +271,13 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .await?;
 
         let token = CancellationToken::new();
-        session.set_cancellation_token(token.clone());
+        session.set_cancellation_token(token.clone()).await;
 
-        let history = session.get_history();
+        let history = session.get_history().await;
         let history_for_turn: Arc<Vec<Message>> = Arc::new(history[..history.len() - 1].to_vec());
 
         // 获取当前活跃 agent
-        let agent_id = session.get_active_agent();
+        let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry
             .get(&agent_id)
@@ -309,7 +309,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
 
             // 新路径：prepare_turn + run_turn_with_context
             let system_prompt_base = {
-                let control = session.control.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let control = session.control.read().await;
                 control
                     .system_prompt_base_override
                     .clone()
@@ -387,23 +387,30 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 &turn_ctx,
             );
             // We use Value for storage to avoid deep coupling
+            let prompt_preview_value = snapshot
+                .prompt_preview
+                .as_ref()
+                .map(serde_json::to_value)
+                .transpose()
+                .context("failed to serialize prompt preview for snapshot")?;
+            let tools: Vec<serde_json::Value> = snapshot
+                .tools
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .context("failed to serialize tools for snapshot")?;
+            let skills: Vec<serde_json::Value> = snapshot
+                .skills
+                .iter()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .context("failed to serialize skills for snapshot")?;
             let snapshot_internal = LastTurnSnapshot {
                 turn_id: snapshot.turn_id.clone(),
                 prepared_at: snapshot.prepared_at,
-                prompt_preview: snapshot
-                    .prompt_preview
-                    .as_ref()
-                    .map(|p| serde_json::to_value(p).unwrap()),
-                tools: snapshot
-                    .tools
-                    .iter()
-                    .map(|t| serde_json::to_value(t).unwrap())
-                    .collect(),
-                skills: snapshot
-                    .skills
-                    .iter()
-                    .map(|s| serde_json::to_value(s).unwrap())
-                    .collect(),
+                prompt_preview: prompt_preview_value,
+                tools,
+                skills,
                 memory_hits: None,
                 usage: None,
             };
@@ -528,7 +535,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .update_run_status(&run_id, "success", Utc::now().timestamp_millis())
                 .await?;
 
-            session.clear_cancellation_token();
+            session.clear_cancellation_token().await;
             session.touch_updated_at();
             Ok(turn_result)
         } else {
@@ -626,7 +633,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .update_run_status(&run_id, "success", Utc::now().timestamp_millis())
                 .await?;
 
-            session.clear_cancellation_token();
+            session.clear_cancellation_token().await;
             session.touch_updated_at();
             Ok(turn_result)
         }

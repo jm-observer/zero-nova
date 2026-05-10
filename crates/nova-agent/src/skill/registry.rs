@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tokio::runtime::Handle;
 
 // ---------------------------------------------------------------------------
 //  SkillPackage — Plan 1 统一技能包模型
@@ -248,7 +249,7 @@ impl SkillRegistry {
 
     /// 递归扫描目录。
     fn scan_dir_recursive(dir: &Path, registry: &mut SkillRegistry) -> Result<()> {
-        let entries = std::fs::read_dir(dir)?;
+        let entries = read_dir_runtime_aware(dir)?;
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
@@ -380,7 +381,7 @@ impl SkillRegistry {
 
     /// 从 SKILL.md 解析为旧 Skill 结构。
     fn parse_skill_file(&self, path: &Path) -> Result<Skill> {
-        let content = std::fs::read_to_string(path)?;
+        let content = read_to_string_runtime_aware(path)?;
         let parts: Vec<&str> = content.split("---").collect();
 
         if parts.len() < 3 {
@@ -512,7 +513,7 @@ impl SkillRegistry {
 
     /// 从 skill.toml 解析为 SkillPackage。
     fn parse_skill_toml(&self, path: &Path) -> Result<SkillPackage> {
-        let content = std::fs::read_to_string(path)?;
+        let content = read_to_string_runtime_aware(path)?;
         let toml: toml::Value = toml::from_str(&content)?;
 
         let slug = toml
@@ -938,6 +939,25 @@ impl SkillRegistry {
         tools.sort();
         tools.dedup();
         tools
+    }
+}
+
+fn read_to_string_runtime_aware(path: &Path) -> std::io::Result<String> {
+    if let Ok(handle) = Handle::try_current() {
+        // 在 Tokio 运行时内避免同步文件读取直接阻塞请求线程。
+        tokio::task::block_in_place(|| handle.block_on(tokio::fs::read_to_string(path)))
+    } else {
+        std::fs::read_to_string(path)
+    }
+}
+
+fn read_dir_runtime_aware(path: &Path) -> std::io::Result<std::fs::ReadDir> {
+    if let Ok(handle) = Handle::try_current() {
+        // 目录遍历在运行时内使用 block_in_place，减少对异步 worker 的阻塞。
+        let _ = handle;
+        tokio::task::block_in_place(|| std::fs::read_dir(path))
+    } else {
+        std::fs::read_dir(path)
     }
 }
 

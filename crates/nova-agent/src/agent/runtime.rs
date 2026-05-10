@@ -27,6 +27,8 @@ use tokio::sync::mpsc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+mod guards;
+use guards::has_loop_guard_rejection;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TurnResult {
@@ -102,19 +104,6 @@ struct MessageSize {
     has_large_tool_result: bool,
     is_empty_assistant: bool,
     is_large: bool,
-}
-
-fn has_loop_guard_rejection(blocks: &[ContentBlock]) -> bool {
-    blocks.iter().any(|block| {
-        matches!(
-            block,
-            ContentBlock::ToolResult {
-                output,
-                is_error: true,
-                ..
-            } if output.starts_with("System Guard:")
-        )
-    })
 }
 
 impl<C: LlmClient> AgentRuntime<C> {

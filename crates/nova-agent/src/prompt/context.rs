@@ -8,6 +8,7 @@
 use crate::message::{ContentBlock, Message};
 use super::templates::{PROJECT_CONTEXT_FILES, MAX_PROJECT_CONTEXT_CHARS};
 use std::path::{Path, PathBuf};
+use tokio::runtime::Handle;
 
 // ---------------------------------------------------------------------------
 //  环境快照 — EnvironmentSnapshot
@@ -295,7 +296,7 @@ pub fn load_project_context_with_config(project_dir: Option<&Path>, configured_p
 }
 
 fn load_single_project_context(path: &Path) -> Option<String> {
-    match std::fs::read_to_string(path) {
+    match read_to_string_runtime_aware(path) {
         Ok(content) if !content.trim().is_empty() => {
             log::info!("Loaded project context from {:?} ({} chars)", path, content.len());
             if content.len() > MAX_PROJECT_CONTEXT_CHARS {
@@ -374,7 +375,7 @@ pub fn load_developer_project_prompt(project_dir: Option<&Path>, files: &[String
 
     for file_name in files {
         let path = project_dir.join(file_name);
-        match std::fs::read_to_string(&path) {
+        match read_to_string_runtime_aware(&path) {
             Ok(content) if !content.trim().is_empty() => {
                 log::info!(
                     "Loaded developer project prompt from {:?} ({} chars)",
@@ -397,5 +398,14 @@ pub fn load_developer_project_prompt(project_dir: Option<&Path>, files: &[String
         None
     } else {
         Some(parts.join("\n\n---\n\n"))
+    }
+}
+
+fn read_to_string_runtime_aware(path: &Path) -> std::io::Result<String> {
+    if let Ok(handle) = Handle::try_current() {
+        // 在 Tokio 运行时内，使用 block_in_place 让调度器可迁移其它任务，避免热路径直接阻塞。
+        tokio::task::block_in_place(|| handle.block_on(tokio::fs::read_to_string(path)))
+    } else {
+        std::fs::read_to_string(path)
     }
 }

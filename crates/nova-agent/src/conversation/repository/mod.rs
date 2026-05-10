@@ -1,3 +1,6 @@
+pub mod message_repo;
+pub mod session_repo;
+
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use log::warn;
@@ -253,17 +256,7 @@ impl SqliteSessionRepository {
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM messages WHERE session_id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM sessions WHERE id = ?")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
-        Ok(())
+        crate::conversation::storage::sqlite_tx::delete_session_with_messages(&self.pool, id).await
     }
 
     // --- Plan 2: Runs & Steps ---

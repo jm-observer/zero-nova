@@ -1,3 +1,7 @@
+pub mod commands;
+pub mod events;
+pub mod queries;
+
 use super::cache::SessionCache;
 use super::control::{ControlState, TitleSource, TitleState, TitleStatus};
 use super::repository::SqliteSessionRepository;

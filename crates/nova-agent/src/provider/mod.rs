@@ -1,5 +1,5 @@
 use crate::message::Message;
-use crate::provider::types::{ToolDefinition, Usage};
+use crate::provider::types::{ProviderRequestContext, ToolDefinition, Usage};
 use serde_json::Value;
 
 pub mod anthropic;

@@ -1,5 +1,28 @@
 use serde::{Deserialize, Serialize};
 
+/// 轻量级请求上下文，用于 Provider 出站 HTTP 请求时透传 session_id 与 agent_id。
+#[derive(Debug, Clone, Default)]
+pub struct ProviderRequestContext {
+    pub session_id: Option<String>,
+    pub agent_id: Option<String>,
+}
+
+impl ProviderRequestContext {
+    /// 校验 session_id 字段，空白字符串视为无效。
+    ///
+    /// 采用"宽松 + 非空"策略：仅做 trim 检查，特殊字符透传。
+    pub fn validate_session_id(s: &str) -> bool {
+        let trimmed = s.trim();
+        !trimmed.is_empty()
+    }
+
+    /// 校验 agent_id 字段，空白字符串视为无效。
+    pub fn validate_agent_id(s: &str) -> bool {
+        let trimmed = s.trim();
+        !trimmed.is_empty()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageRequest {
     pub model: String,

@@ -14,6 +14,9 @@ use log::{debug, trace};
 use reqwest::{header, Client};
 use std::collections::{HashMap, VecDeque};
 
+const HEADER_SESSION_ID: &str = "x-session-id";
+const HEADER_AGENT_ID: &str = "x-agent-id";
+
 /// Client for interacting with OpenAI-compatible APIs using async-openai SDK.
 pub struct OpenAiCompatClient {
     endpoint: OpenAiCompatEndpoint,
@@ -65,6 +68,31 @@ impl OpenAiCompatClient {
             }
         }
     }
+
+    /// 根据 `ProviderRequestContext` 构建需要注入的额外 Header。
+    ///
+    /// 规则：
+    /// - 仅当字段 `trim` 后非空时才注入
+    /// - 不注入 `null`、空串、仅空白值
+    fn build_request_headers(&self, request_context: &ProviderRequestContext) -> Vec<(String, String)> {
+        let mut headers = Vec::new();
+
+        if let Some(ref session_id) = request_context.session_id {
+            let trimmed = session_id.trim();
+            if !trimmed.is_empty() {
+                headers.push((HEADER_SESSION_ID.to_string(), trimmed.to_string()));
+            }
+        }
+
+        if let Some(ref agent_id) = request_context.agent_id {
+            let trimmed = agent_id.trim();
+            if !trimmed.is_empty() {
+                headers.push((HEADER_AGENT_ID.to_string(), trimmed.to_string()));
+            }
+        }
+
+        headers
+    }
 }
 
 #[async_trait]
@@ -74,7 +102,7 @@ impl LlmClient for OpenAiCompatClient {
         messages: &[Message],
         tools: &[ToolDefinition],
         config: &ModelConfig,
-        _request_context: &ProviderRequestContext,
+        request_context: &ProviderRequestContext,
     ) -> Result<Box<dyn StreamReceiver>> {
         let request = build_request(messages, tools, config);
         let (api_key, base_url) = self.resolve_endpoint(config)?;
@@ -102,13 +130,29 @@ impl LlmClient for OpenAiCompatClient {
             );
         }
 
+        // 构建请求 Header 并注入 x-session-id / x-agent-id
+        let extra_headers = self.build_request_headers(request_context);
+        let session_injected = extra_headers.iter().any(|(k, _)| k == HEADER_SESSION_ID);
+        let agent_injected = extra_headers.iter().any(|(k, _)| k == HEADER_AGENT_ID);
+        debug!(
+            "[OUTBOUND] LLM request headers: session_id={}, agent_id={}",
+            session_injected, agent_injected
+        );
+
         let url = format!("{}/chat/completions", base);
-        let response = self
+        let mut request_builder = self
             .http
             .post(url)
             .header(header::CONTENT_TYPE, "application/json")
             .bearer_auth(api_key)
-            .json(&request_body)
+            .json(&request_body);
+
+        // 逐条注入额外 Header
+        for (key, value) in extra_headers {
+            request_builder = request_builder.header(key, value);
+        }
+
+        let response = request_builder
             .send()
             .await
             .map_err(|e| anyhow!("Failed to create chat stream: {}", e))?

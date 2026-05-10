@@ -19,9 +19,9 @@ use crate::tool::ToolRegistry;
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 pub struct BootstrapOptions {
     pub bind_addr: SocketAddr,

@@ -6,8 +6,9 @@ use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, Sqli
 use nova_agent::AgentRegistry;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tempfile::tempdir;
+use tokio::sync::RwLock;
 
 fn build_registry() -> AgentRegistry {
     AgentRegistry::new(AgentDescriptor {

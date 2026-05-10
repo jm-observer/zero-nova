@@ -197,19 +197,26 @@ impl ToolRegistry {
         }
     }
 
-    /// Acquires the tools lock using `try_lock` to avoid blocking the async runtime.
-    /// The tool registry is a short-lived hot path; collision is rare (<1ms hold time).
+    /// Acquires the tools lock.
+    /// On contention we yield and retry, avoiding panic under burst concurrency.
     fn lock_tools(&self) -> tokio::sync::MutexGuard<'_, Vec<Arc<dyn Tool>>> {
-        self.tools
-            .try_lock()
-            .expect("Tool registry tools lock should not be contended")
+        loop {
+            if let Ok(guard) = self.tools.try_lock() {
+                return guard;
+            }
+            std::thread::yield_now();
+        }
     }
 
-    /// Acquires the deferred lock using `try_lock` for the same reason as `lock_tools`.
+    /// Acquires the deferred lock.
+    /// On contention we yield and retry, avoiding panic under burst concurrency.
     fn lock_deferred(&self) -> tokio::sync::MutexGuard<'_, Vec<DeferredToolEntry>> {
-        self.deferred
-            .try_lock()
-            .expect("Tool registry deferred lock should not be contended")
+        loop {
+            if let Ok(guard) = self.deferred.try_lock() {
+                return guard;
+            }
+            std::thread::yield_now();
+        }
     }
 
     /// Registers a single tool.

@@ -4,14 +4,13 @@ use crate::agent::TurnResult;
 use crate::config::AppConfig;
 use crate::message::Role;
 use crate::provider::LlmClient;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::sync::RwLock;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 
 #[async_trait]
 pub trait AgentApplication: Send + Sync {
@@ -380,10 +379,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     fn config_snapshot(&self) -> Result<Value> {
-        let config = self
-            .config
-            .read()
-            .map_err(|_| anyhow!("Application config lock poisoned"))?;
+        let config = self.config.blocking_read();
         serde_json::to_value(&*config).context("Failed to serialize config")
     }
 
@@ -395,10 +391,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await
             .with_context(|| format!("Failed to save config to {:?}", self.config_path))?;
 
-        let mut config = self
-            .config
-            .write()
-            .map_err(|_| anyhow!("Application config lock poisoned"))?;
+        let mut config = self.config.write().await;
         *config = new_config;
         Ok(())
     }
@@ -548,19 +541,12 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse> {
-        let config = self
-            .config
-            .read()
-            .map_err(|_| anyhow!("Application config lock poisoned"))?
-            .clone();
+        let config = self.config.read().await.clone();
         crate::provider::health::collect_provider_health(&config).await
     }
 
     async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {
-        let config = self
-            .config
-            .read()
-            .map_err(|_| anyhow!("Application config lock poisoned"))?;
+        let config = self.config.read().await;
         Ok(nova_protocol::voice::VoiceCapabilitiesResponse {
             stt: nova_protocol::voice::VoiceCapabilityStatus {
                 enabled: config.voice.enabled,

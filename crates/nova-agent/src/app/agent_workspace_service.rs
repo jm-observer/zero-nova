@@ -11,8 +11,9 @@ use nova_protocol::observability::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::fs;
+use tokio::sync::RwLock;
 
 pub struct AgentWorkspaceService {
     pub agent_registry: AgentRegistry,
@@ -32,11 +33,7 @@ impl AgentWorkspaceService {
     pub async fn inspect_agent(&self, agent_id: &str, session_id: &str) -> Result<AgentInspectResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().await;
-        let config = self
-            .config
-            .read()
-            .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
-            .clone();
+        let config = self.config.read().await.clone();
         let base_binding = config.resolve_agent_binding_by_id(agent_id)?;
 
         let default_model = nova_protocol::ModelRef {
@@ -114,11 +111,7 @@ impl AgentWorkspaceService {
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
 
-        let app_config_snapshot = self
-            .config
-            .read()
-            .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
-            .clone();
+        let app_config_snapshot = self.config.read().await.clone();
         let reloaded_config = AppConfig::load_from_file(
             app_config_snapshot.config_path(),
             app_config_snapshot.config_dir.clone(),
@@ -266,11 +259,7 @@ impl AgentWorkspaceService {
             let control = session.control.read().await;
             control.active_agent.clone()
         };
-        let config = self
-            .config
-            .read()
-            .map_err(|_| anyhow::anyhow!("Application config lock poisoned"))?
-            .clone();
+        let config = self.config.read().await.clone();
         let base_binding = config.resolve_agent_binding_by_id(active_agent.as_str())?;
         let orchestration = req
             .orchestration
@@ -779,8 +768,9 @@ mod tests {
     use nova_protocol::observability::SessionFileTreeEntry;
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
     use tempfile::tempdir;
+    use tokio::sync::RwLock;
 
     #[test]
     fn session_skill_bindings_reading_does_not_depend_on_last_turn() {

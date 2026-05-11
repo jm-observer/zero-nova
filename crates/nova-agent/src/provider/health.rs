@@ -6,7 +6,6 @@ use reqwest::{header, Client, StatusCode};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 
-const PROVIDER_HEALTH_TIMEOUT_SECS: u64 = 5;
 const PROVIDER_HEALTH_DEGRADED_MS: u64 = 1_500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,10 +60,7 @@ pub async fn collect_provider_health(config: &AppConfig) -> Result<ProviderHealt
 }
 
 async fn probe_provider_by_url(base_url: &str, api_key: &str, provider_kind: ProviderKind) -> HealthProbeResult {
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(PROVIDER_HEALTH_TIMEOUT_SECS))
-        .build()
-    {
+    let client = match crate::network::build_health_client() {
         Ok(client) => client,
         Err(error) => {
             return HealthProbeResult::unreachable(format!("Failed to build HTTP client: {error}"));

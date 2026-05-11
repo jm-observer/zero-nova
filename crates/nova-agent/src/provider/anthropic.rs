@@ -20,8 +20,12 @@ pub struct AnthropicClient {
 impl AnthropicClient {
     /// Constructs an `AnthropicClient` using the provided configuration.
     pub fn from_config(config: &ProviderConfig) -> Self {
+        Self::from_config_with_http_client(config, Client::new())
+    }
+
+    pub fn from_config_with_http_client(config: &ProviderConfig, http: Client) -> Self {
         Self {
-            http: Client::new(),
+            http,
             api_key: config.api_key.clone(),
             base_url: config.base_url.clone(),
         }
@@ -29,8 +33,12 @@ impl AnthropicClient {
 
     /// Constructs a new `AnthropicClient` with the provided API key and base URL.
     pub fn new(api_key: String, base_url: String) -> Self {
+        Self::with_http_client(api_key, base_url, Client::new())
+    }
+
+    pub fn with_http_client(api_key: String, base_url: String, http: Client) -> Self {
         Self {
-            http: Client::new(),
+            http,
             api_key,
             base_url,
         }

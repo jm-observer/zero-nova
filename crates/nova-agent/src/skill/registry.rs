@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tokio::runtime::Handle;
 
 // ---------------------------------------------------------------------------
 //  SkillPackage — Plan 1 统一技能包模型
@@ -942,23 +941,16 @@ impl SkillRegistry {
     }
 }
 
+/// 启动期/测试同步读取辅助。
+/// 运行时热路径应优先使用 async discovery API（load_from_dir_async）。
 fn read_to_string_runtime_aware(path: &Path) -> std::io::Result<String> {
-    if let Ok(handle) = Handle::try_current() {
-        // 在 Tokio 运行时内避免同步文件读取直接阻塞请求线程。
-        tokio::task::block_in_place(|| handle.block_on(tokio::fs::read_to_string(path)))
-    } else {
-        std::fs::read_to_string(path)
-    }
+    std::fs::read_to_string(path)
 }
 
+/// 启动期/测试同步目录遍历辅助。
+/// 运行时热路径应优先使用 async discovery API（load_from_dir_async）。
 fn read_dir_runtime_aware(path: &Path) -> std::io::Result<std::fs::ReadDir> {
-    if let Ok(handle) = Handle::try_current() {
-        // 目录遍历在运行时内使用 block_in_place，减少对异步 worker 的阻塞。
-        let _ = handle;
-        tokio::task::block_in_place(|| std::fs::read_dir(path))
-    } else {
-        std::fs::read_dir(path)
-    }
+    std::fs::read_dir(path)
 }
 
 #[cfg(test)]

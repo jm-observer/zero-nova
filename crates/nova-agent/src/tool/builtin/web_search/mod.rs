@@ -24,8 +24,10 @@ pub struct WebSearchTool {
 impl WebSearchTool {
     /// Creates a `WebSearchTool` from configuration.
     pub fn new(config: &SearchConfig) -> Self {
-        let client = Client::new();
+        Self::with_client(config, Client::new())
+    }
 
+    pub fn with_client(config: &SearchConfig, client: Client) -> Self {
         // 1. 优先处理显式指定的后端
         if let Some(backend) = &config.backend {
             match backend.to_lowercase().as_str() {

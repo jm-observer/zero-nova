@@ -12,6 +12,7 @@ pub mod web_search;
 pub mod write;
 
 use crate::config::AppConfig;
+use crate::network::HttpClients;
 use crate::skill::SkillRegistry;
 use crate::tool::{ProjectDirService, ToolRegistry};
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub fn register_builtin_tools(
     skill_registry: Arc<SkillRegistry>,
     tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
+    http_clients: &HttpClients,
 ) {
     if is_tool_enabled(tool_whitelist, "Bash") {
         registry.register(Box::new(bash::BashTool::new(&config.tool.bash)));
@@ -42,10 +44,13 @@ pub fn register_builtin_tools(
         registry.register(Box::new(agent::AgentTool::new(config.clone())));
     }
     if is_tool_enabled(tool_whitelist, "WebSearch") {
-        registry.register(Box::new(web_search::WebSearchTool::new(&config.search)));
+        registry.register(Box::new(web_search::WebSearchTool::with_client(
+            &config.search,
+            http_clients.web.clone(),
+        )));
     }
     if is_tool_enabled(tool_whitelist, "WebFetch") {
-        registry.register(Box::new(web_fetch::WebFetchTool::new()));
+        registry.register(Box::new(web_fetch::WebFetchTool::with_client(http_clients.web.clone())));
     }
     if is_tool_enabled(tool_whitelist, "ProjectManager") {
         registry.register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)));
@@ -143,6 +148,7 @@ fn legacy_tool_names(tool_name: &str) -> &'static [&'static str] {
 mod tests {
     use super::register_builtin_tools;
     use crate::config::AppConfig;
+    use crate::network::HttpClients;
     use crate::skill::SkillRegistry;
     use crate::tool::{ToolRegistry, UnavailableProjectDirService};
     use std::sync::Arc;
@@ -158,6 +164,7 @@ mod tests {
             Arc::new(SkillRegistry::new()),
             None,
             Arc::new(UnavailableProjectDirService::new("unavailable")),
+            &HttpClients::new().expect("http clients should build"),
         );
 
         assert!(!registry.has_loaded_tool("OrchestrateTask"));
@@ -174,6 +181,7 @@ mod tests {
             Arc::new(SkillRegistry::new()),
             Some(&whitelist),
             Arc::new(UnavailableProjectDirService::new("unavailable")),
+            &HttpClients::new().expect("http clients should build"),
         );
 
         assert!(registry.has_loaded_tool("OrchestrateTask"));

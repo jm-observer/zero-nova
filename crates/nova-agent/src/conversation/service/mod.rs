@@ -72,12 +72,39 @@ impl SessionService {
         self.repository.clone()
     }
 
-    /// 从数据库加载所有会话到内存 (仅启动阶段使用)
+    /// 启动阶段仅加载会话索引（不加载消息历史）。
+    pub async fn load_session_index(&self) -> Result<()> {
+        let rows = self.repository.list_sessions().await?;
+        for (id, title, agent_id, created_at, updated_at, runtime_control) in rows {
+            let title_state = runtime_control.title_state.clone();
+            let session = Arc::new(Session {
+                control: tokio::sync::RwLock::new(runtime_control),
+                id: id.clone(),
+                name: RwLock::new(title),
+                history: RwLock::new(Vec::new()),
+                created_at,
+                updated_at: AtomicI64::new(updated_at),
+                chat_lock: Mutex::new(()),
+                cancellation_token: RwLock::new(None),
+                title_state: RwLock::new(title_state),
+            });
+            {
+                let mut control = session.control.write().await;
+                if control.active_agent.is_empty() {
+                    control.active_agent = agent_id;
+                }
+            }
+            self.cache.insert_indexed(id, session).await;
+        }
+        Ok(())
+    }
+
+    /// 从数据库加载所有会话到内存（完整 history，测试/迁移辅助）。
     pub async fn load_all(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
         for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control) in rows {
             if let Some(session) = self.load_session_from_db(&id).await? {
-                self.cache.insert(id, session).await;
+                self.cache.insert_loaded(id, session).await;
             }
         }
         Ok(())
@@ -123,7 +150,7 @@ impl SessionService {
         });
 
         self.persist_full_session(&session).await?;
-        self.cache.insert(id, session.clone()).await;
+        self.cache.insert_loaded(id, session.clone()).await;
         Ok(session)
     }
 
@@ -137,10 +164,56 @@ impl SessionService {
         self.get(&session_id).await
     }
 
-    /// 获取会话 (Read-Through with concurrency protection).
+    /// 获取会话元数据（可能未加载 history）。
     pub async fn get(&self, id: &str) -> Result<Option<Arc<Session>>> {
         if let Some(session) = self.cache.get(id).await {
             return Ok(Some(session));
+        }
+
+        let loaded = self.repository.load_session_meta(id).await?;
+        let Some((id, title, agent_id, created_at, updated_at, runtime_control)) = loaded else {
+            return Ok(None);
+        };
+
+        let title_state = runtime_control.title_state.clone();
+        let session = Arc::new(Session {
+            control: tokio::sync::RwLock::new(runtime_control),
+            id: id.clone(),
+            name: RwLock::new(title),
+            history: RwLock::new(Vec::new()),
+            created_at,
+            updated_at: AtomicI64::new(updated_at),
+            chat_lock: Mutex::new(()),
+            cancellation_token: RwLock::new(None),
+            title_state: RwLock::new(title_state),
+        });
+        {
+            let mut control = session.control.write().await;
+            if control.active_agent.is_empty() {
+                control.active_agent = agent_id;
+            }
+        }
+        self.cache.insert_indexed(id, session.clone()).await;
+        Ok(Some(session))
+    }
+
+    /// 获取会话并确保历史消息已加载（同 session 并发去重）。
+    pub async fn get_with_history(&self, id: &str) -> Result<Option<Arc<Session>>> {
+        self.ensure_session_history_loaded(id).await
+    }
+
+    pub async fn ensure_session_history_loaded(&self, id: &str) -> Result<Option<Arc<Session>>> {
+        if self.cache.is_history_loaded(id).await {
+            return Ok(self.cache.get(id).await);
+        }
+
+        if self.cache.get(id).await.is_none() {
+            if self.get(id).await?.is_none() {
+                return Ok(None);
+            }
+            if self.cache.is_history_loaded(id).await {
+                return Ok(self.cache.get(id).await);
+            }
         }
 
         let mut receiver = None;
@@ -162,18 +235,18 @@ impl SessionService {
                 match rx.await {
                     Ok(session) => return Ok(session),
                     Err(_) => {
-                        if let Some(session) = self.cache.get(id).await {
-                            return Ok(Some(session));
+                        if self.cache.is_history_loaded(id).await {
+                            return Ok(self.cache.get(id).await);
                         }
                     }
                 }
             }
-            return Ok(None);
+            return Ok(self.cache.get(id).await);
         }
 
         let load_result = self.load_session_from_db(id).await?;
         if let Some(session) = load_result.as_ref() {
-            self.cache.insert(id.to_string(), session.clone()).await;
+            self.cache.replace_with_loaded(id.to_string(), session.clone()).await;
         }
 
         let waiters = {
@@ -214,7 +287,10 @@ impl SessionService {
         content: Vec<ContentBlock>,
         metadata: Option<Value>,
     ) -> Result<()> {
-        let session = self.get(session_id).await?.context("Session not found")?;
+        let session = self
+            .ensure_session_history_loaded(session_id)
+            .await?
+            .context("Session not found")?;
         let now = Utc::now().timestamp_millis();
         let message_id = Uuid::new_v4().to_string();
         let mut parsed_metadata = metadata
@@ -253,19 +329,25 @@ impl SessionService {
     }
 
     pub async fn list_sorted(&self) -> Vec<SessionSummary> {
-        let mut list = self.cache.list().await;
+        let mut entries = self.cache.list_entries().await;
 
-        list.sort_by(|a, b| {
-            b.updated_at
+        entries.sort_by(|a, b| {
+            b.session
+                .updated_at
                 .load(Ordering::SeqCst)
-                .cmp(&a.updated_at.load(Ordering::SeqCst))
+                .cmp(&a.session.updated_at.load(Ordering::SeqCst))
         });
 
-        let mut summaries = Vec::with_capacity(list.len());
-        for session in list {
+        let mut summaries = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let session = entry.session;
             let name = session.get_name().await;
             let agent_id = session.control.read().await.active_agent.clone();
-            let message_count = session.history.read().await.len();
+            let message_count = if entry.history_loaded {
+                session.history.read().await.len()
+            } else {
+                0
+            };
             summaries.push(SessionSummary {
                 id: session.id.clone(),
                 name,
@@ -292,7 +374,10 @@ impl SessionService {
     }
 
     pub async fn copy_session(&self, source_id: &str, truncate_index: Option<usize>) -> Result<Option<Arc<Session>>> {
-        let source = self.get(source_id).await?.context("Source session not found")?;
+        let source = self
+            .ensure_session_history_loaded(source_id)
+            .await?
+            .context("Source session not found")?;
 
         let history = source.get_history().await;
         let new_history = if let Some(idx) = truncate_index {
@@ -328,7 +413,7 @@ impl SessionService {
         });
 
         self.persist_full_session(&session).await?;
-        self.cache.insert(new_id, session.clone()).await;
+        self.cache.insert_loaded(new_id, session.clone()).await;
         Ok(Some(session))
     }
 
@@ -358,7 +443,10 @@ impl SessionService {
         prompt_version: String,
         source_revision: String,
     ) -> Result<(String, String, bool, i64)> {
-        let session = self.get(session_id).await?.context("Session not found")?;
+        let session = self
+            .ensure_session_history_loaded(session_id)
+            .await?
+            .context("Session not found")?;
         let updated_at = Utc::now().timestamp_millis();
         let (version_before, changed, prompt_preview_synced) = {
             let mut control = session.control.write().await;
@@ -457,6 +545,7 @@ impl SessionService {
         Ok(normalized)
     }
 
+    /// 持久化完整会话快照（用于 create/copy/rebuild 等路径，非常规热写入路径）。
     async fn persist_full_session(&self, session: &Arc<Session>) -> Result<()> {
         let runtime_control = {
             let control = session.control.read().await;
@@ -972,7 +1061,10 @@ mod tests {
             .await?;
 
         let rebuilt = SessionService::new(Arc::new(SessionCache::new()), repository);
-        let loaded = rebuilt.get(&session.id).await?.expect("session should exist");
+        let loaded = rebuilt
+            .get_with_history(&session.id)
+            .await?
+            .expect("session should exist");
         let history = loaded.get_history().await;
         let assistant = history
             .iter()
@@ -1538,6 +1630,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_session_index_only_loads_metadata_until_history_requested() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let session = service
+            .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+            .await?;
+
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "hello indexed world".to_string(),
+                }],
+                None,
+            )
+            .await?;
+
+        let rebuilt_repo = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let rebuilt_service = SessionService::new(Arc::new(SessionCache::new()), rebuilt_repo);
+        rebuilt_service.load_session_index().await?;
+
+        let indexed = rebuilt_service.get(&session.id).await?.expect("session should exist");
+        assert!(indexed.history.read().await.is_empty());
+
+        let loaded = rebuilt_service
+            .ensure_session_history_loaded(&session.id)
+            .await?
+            .expect("session should load history");
+        assert!(loaded.history.read().await.len() >= 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn ensure_session_history_loaded_deduplicates_concurrent_cold_loads() -> Result<()> {
+        let dir = tempdir()?;
+        let manager = SqliteManager::new(dir.path()).await?;
+        let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+        let session = service
+            .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+            .await?;
+
+        service
+            .append_message(
+                &session.id,
+                crate::message::Role::User,
+                vec![crate::message::ContentBlock::Text {
+                    text: "cold load one".to_string(),
+                }],
+                None,
+            )
+            .await?;
+
+        let rebuilt_repo = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+        let rebuilt_service = SessionService::new(Arc::new(SessionCache::new()), rebuilt_repo);
+        rebuilt_service.load_session_index().await?;
+
+        let indexed = rebuilt_service.get(&session.id).await?.expect("session should exist");
+        assert!(indexed.history.read().await.is_empty());
+
+        let service_a = rebuilt_service.clone();
+        let service_b = rebuilt_service.clone();
+        let id_a = session.id.clone();
+        let id_b = session.id.clone();
+
+        let a = tokio::spawn(async move { service_a.ensure_session_history_loaded(&id_a).await });
+        let b = tokio::spawn(async move { service_b.ensure_session_history_loaded(&id_b).await });
+
+        let loaded_a = a.await??.expect("session should load");
+        let loaded_b = b.await??.expect("session should load");
+
+        assert!(loaded_a.history.read().await.len() >= 1);
+        assert!(loaded_b.history.read().await.len() >= 1);
+        assert!(rebuilt_service.cache.is_history_loaded(&session.id).await);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn title_is_not_regenerated_after_success_and_reload() -> Result<()> {
         let dir = tempdir()?;
         let manager = SqliteManager::new(dir.path()).await?;
@@ -1578,10 +1751,10 @@ mod tests {
         let rebuilt_repo = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
         let rebuilt_service = SessionService::new(Arc::new(SessionCache::new()), rebuilt_repo);
 
-        // Load all sessions (simulating startup)
-        rebuilt_service.load_all().await?;
+        // Load session index only (simulating startup)
+        rebuilt_service.load_session_index().await?;
 
-        // Get the loaded session
+        // Get the indexed session
         let loaded_session = rebuilt_service.get(&session.id).await?.expect("session should exist");
 
         // Send a new message after reload - title should NOT be regenerated

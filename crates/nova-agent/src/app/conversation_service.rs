@@ -154,7 +154,11 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let run_id = turn_id.clone(); // Use turn_id as run_id for simplicity
         let now = Utc::now().timestamp_millis();
 
-        let session = self.sessions.get(session_id).await?.context("Session not found")?;
+        let session = self
+            .sessions
+            .get_with_history(session_id)
+            .await?
+            .context("Session not found")?;
         let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry

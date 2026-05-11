@@ -7,6 +7,7 @@ use crate::conversation::repository::SqliteSessionRepository;
 use crate::conversation::sqlite_manager::SqliteManager;
 use crate::conversation::{SessionCache, SessionService};
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
+use crate::network::HttpClients;
 use crate::prompt::{
     build_agent_catalog_section, EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector,
     SystemPromptBuilder, TrimmerConfig,
@@ -49,7 +50,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);
     let session_cache = Arc::new(SessionCache::new());
     let session_service = SessionService::new(session_cache, repository);
-    session_service.load_all().await?;
+    session_service.load_session_index().await?;
+
+    let http_clients = HttpClients::new()?;
 
     let tools = ToolRegistry::new();
     register_builtin_tools(
@@ -59,6 +62,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         skill_registry.clone(),
         None,
         Arc::new(session_service.clone()),
+        &http_clients,
     );
 
     let agent_config = AgentConfig {
@@ -176,9 +180,10 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         agent_registry.register(agent);
     }
 
-    let client = OpenAiCompatClient::from_registry_with_context_headers_enabled(
+    let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
         config.providers.clone(),
         root_binding.provider_id.clone(),
+        http_clients.provider.clone(),
         config.outbound_context_headers.enabled,
     );
     let mut agent = AgentRuntime::new(client, tools, agent_config);

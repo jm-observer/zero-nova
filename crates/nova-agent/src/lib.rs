@@ -9,6 +9,7 @@ pub mod event;
 pub mod loop_guard;
 pub mod mcp;
 pub mod message;
+pub mod network;
 pub mod orchestrator;
 pub mod path_resolver;
 pub mod prompt;

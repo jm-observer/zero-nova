@@ -14,8 +14,12 @@ pub struct OpenAiCompatSttProvider {
 
 impl OpenAiCompatSttProvider {
     pub fn new(api_key: String, base_url: String, model: String) -> Self {
+        Self::with_http_client(api_key, base_url, model, Client::new())
+    }
+
+    pub fn with_http_client(api_key: String, base_url: String, model: String, http: Client) -> Self {
         Self {
-            http: Client::new(),
+            http,
             api_key,
             base_url,
             model,
@@ -71,8 +75,18 @@ pub struct OpenAiCompatTtsProvider {
 
 impl OpenAiCompatTtsProvider {
     pub fn new(api_key: String, base_url: String, model: String, default_voice: String) -> Self {
+        Self::with_http_client(api_key, base_url, model, default_voice, Client::new())
+    }
+
+    pub fn with_http_client(
+        api_key: String,
+        base_url: String,
+        model: String,
+        default_voice: String,
+        http: Client,
+    ) -> Self {
         Self {
-            http: Client::new(),
+            http,
             api_key,
             base_url,
             model,

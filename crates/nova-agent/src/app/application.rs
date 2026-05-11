@@ -149,6 +149,28 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
     fn serialize_config_snapshot(config: &AppConfig) -> Result<Value> {
         serde_json::to_value(config).context("Failed to serialize config")
     }
+
+    async fn apply_config_update(
+        config: &RwLock<AppConfig>,
+        config_snapshot_cache: &ArcSwap<Value>,
+        config_path: &PathBuf,
+        payload: Value,
+    ) -> Result<()> {
+        let new_config =
+            serde_json::from_value::<AppConfig>(payload).context("Failed to parse config update payload")?;
+        let config_str = toml::to_string(&new_config).context("Failed to serialize updated config")?;
+        let snapshot_value = Self::serialize_config_snapshot(&new_config)?;
+        tokio::fs::write(config_path, config_str)
+            .await
+            .with_context(|| format!("Failed to save config to {:?}", config_path))?;
+
+        {
+            let mut config_guard = config.write().await;
+            *config_guard = new_config;
+        }
+        config_snapshot_cache.store(Arc::new(snapshot_value));
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -243,7 +265,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         let session = self
             .conversation_service
             .sessions
-            .get(session_id)
+            .get_with_history(session_id)
             .await?
             .context("Session not found")?;
 
@@ -393,20 +415,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn update_config(&self, payload: Value) -> Result<()> {
-        let new_config =
-            serde_json::from_value::<AppConfig>(payload).context("Failed to parse config update payload")?;
-        let config_str = toml::to_string(&new_config).context("Failed to serialize updated config")?;
-        let snapshot_value = Self::serialize_config_snapshot(&new_config)?;
-        tokio::fs::write(&self.config_path, config_str)
-            .await
-            .with_context(|| format!("Failed to save config to {:?}", self.config_path))?;
-
-        {
-            let mut config = self.config.write().await;
-            *config = new_config;
-        }
-        self.config_snapshot_cache.store(Arc::new(snapshot_value));
-        Ok(())
+        Self::apply_config_update(&self.config, &self.config_snapshot_cache, &self.config_path, payload).await
     }
 
     async fn on_connect(&self) -> Result<Vec<AppEvent>> {
@@ -608,6 +617,10 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::RwLock;
+
+    const UPDATE_TIMEOUT: Duration = Duration::from_secs(3);
 
     #[test]
     fn emits_event_when_skill_bindings_changed() {
@@ -675,5 +688,112 @@ mod tests {
         cache.store(Arc::new(json!({ "version": 2 })));
 
         assert_eq!(cache.load().as_ref(), &json!({ "version": 2 }));
+    }
+
+    #[tokio::test]
+    async fn update_config_returns_parse_error_for_invalid_payload() {
+        let config = Arc::new(RwLock::new(AppConfig::new(PathBuf::from("."))));
+        let cache = ArcSwap::from_pointee(json!({ "seed": true }));
+        let path = PathBuf::from("target/test-data/plan3-parse-error.toml");
+
+        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::apply_config_update(
+            &config,
+            &cache,
+            &path,
+            json!({ "providers": 1 }),
+        )
+        .await;
+
+        let error = result.expect_err("invalid payload should fail");
+        assert!(error.to_string().contains("Failed to parse config update payload"));
+    }
+
+    #[tokio::test]
+    async fn update_config_keeps_state_when_write_fails() {
+        let mut initial = AppConfig::new(PathBuf::from("."));
+        initial.voice.enabled = true;
+        let initial_snapshot = serde_json::to_value(&initial).unwrap();
+        let config = Arc::new(RwLock::new(initial.clone()));
+        let cache = ArcSwap::from_pointee(initial_snapshot.clone());
+
+        let invalid_path = PathBuf::from("NUL/config.toml");
+        let mut target = initial.clone();
+        target.voice.enabled = false;
+        let payload = serde_json::to_value(&target).unwrap();
+
+        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::apply_config_update(
+            &config,
+            &cache,
+            &invalid_path,
+            payload,
+        )
+        .await;
+        assert!(result.is_err());
+
+        let after_config = config.read().await.clone();
+        assert_eq!(after_config.voice.enabled, initial.voice.enabled);
+        assert_eq!(cache.load().as_ref(), &initial_snapshot);
+    }
+
+    #[tokio::test]
+    async fn update_config_and_snapshot_are_consistent_under_concurrency() {
+        let base = AppConfig::new(PathBuf::from("."));
+        let base_snapshot = serde_json::to_value(&base).unwrap();
+        let config = Arc::new(RwLock::new(base));
+        let cache = Arc::new(ArcSwap::from_pointee(base_snapshot));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.toml");
+
+        let mut target_config = config.read().await.clone();
+        target_config.voice.enabled = false;
+        let update_payload = serde_json::to_value(&target_config).unwrap();
+
+        let writer_config = Arc::clone(&config);
+        let writer_cache = Arc::clone(&cache);
+        let writer_path = config_path.clone();
+        let writer = tokio::spawn(async move {
+            tokio::time::timeout(
+                UPDATE_TIMEOUT,
+                AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::apply_config_update(
+                    &writer_config,
+                    &writer_cache,
+                    &writer_path,
+                    update_payload,
+                ),
+            )
+            .await
+            .expect("update timeout")
+            .expect("update must succeed");
+        });
+
+        let reader_cache = Arc::clone(&cache);
+        let reader = tokio::spawn(async move {
+            tokio::time::timeout(UPDATE_TIMEOUT, async move {
+                for _ in 0..64 {
+                    let snapshot = reader_cache.load();
+                    let voice = snapshot
+                        .get("voice")
+                        .and_then(|v| v.get("enabled"))
+                        .and_then(|v| v.as_bool())
+                        .expect("voice.enabled should exist");
+                    assert!(voice || !voice);
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("read timeout");
+        });
+
+        writer.await.unwrap();
+        reader.await.unwrap();
+
+        let final_voice = config.read().await.voice.enabled;
+        let final_snapshot_voice = cache
+            .load()
+            .get("voice")
+            .and_then(|v| v.get("enabled"))
+            .and_then(|v| v.as_bool())
+            .unwrap();
+        assert_eq!(final_voice, final_snapshot_voice);
     }
 }

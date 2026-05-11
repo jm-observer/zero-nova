@@ -112,6 +112,17 @@ impl SqliteSessionRepository {
         Ok(())
     }
 
+    pub async fn load_session_meta(&self, id: &str) -> Result<Option<SessionRow>> {
+        let row = sqlx::query(
+            "SELECT id, title, agent_id, created_at, updated_at, runtime_control FROM sessions WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_session_row).transpose()
+    }
+
     pub async fn load_session(
         &self,
         id: &str,

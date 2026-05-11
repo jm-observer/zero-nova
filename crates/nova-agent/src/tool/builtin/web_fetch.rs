@@ -1,7 +1,6 @@
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use log::warn;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
@@ -14,25 +13,21 @@ pub struct WebFetchTool {
 /// Implementation of methods for `WebFetchTool`.
 impl WebFetchTool {
     /// Creates a new `WebFetchTool` with a configured HTTP client.
-    pub fn new() -> Self {
-        Self {
-            client: Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::limited(5))
-                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-                .build()
-                .unwrap_or_else(|e| {
-                    warn!("Failed to build HTTP client with custom settings: {e}, falling back to default");
-                    Client::new()
-                }),
-        }
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            client: crate::network::build_web_client()?,
+        })
+    }
+
+    pub fn with_client(client: Client) -> Self {
+        Self { client }
     }
 }
 
 /// Provides a default constructor for `WebFetchTool`.
 impl Default for WebFetchTool {
     fn default() -> Self {
-        Self::new()
+        Self::with_client(Client::new())
     }
 }
 
@@ -73,10 +68,9 @@ impl Tool for WebFetchTool {
         let html_content = resp.text().await?;
         let document = Html::parse_document(&html_content);
 
-        let selector = match Selector::parse(selector_str) {
-            Ok(s) => s,
-            Err(_) => Selector::parse("body").unwrap(),
-        };
+        let selector = Selector::parse(selector_str)
+            .or_else(|_| Selector::parse("body"))
+            .map_err(|e| anyhow!("Invalid selector: {e}"))?;
 
         let mut text_output = String::new();
         for element in document.select(&selector) {

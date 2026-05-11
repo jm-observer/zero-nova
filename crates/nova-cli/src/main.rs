@@ -12,6 +12,7 @@ use nova_agent::event::AgentEvent;
 use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::mcp::client::McpClient;
 use nova_agent::message::{ContentBlock, Message, Role};
+use nova_agent::network::HttpClients;
 use nova_agent::prompt::{EnvironmentSnapshot, SystemPromptBuilder, TrimmerConfig};
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::provider::LlmClient;
@@ -176,6 +177,7 @@ async fn main() -> Result<()> {
     let task_store = Arc::new(Mutex::new(TaskStore::new()));
 
     let tools = ToolRegistry::new();
+    let http_clients = HttpClients::new()?;
     register_builtin_tools(
         &tools,
         &config,
@@ -185,6 +187,7 @@ async fn main() -> Result<()> {
         Arc::new(UnavailableProjectDirService::new(
             "ProjectManager is unavailable in CLI mode",
         )),
+        &http_clients,
     );
 
     let prompt_builder = SystemPromptBuilder::new();

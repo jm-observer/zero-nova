@@ -39,29 +39,50 @@ enum OpenAiCompatEndpoint {
 impl OpenAiCompatClient {
     /// Constructs a new `OpenAiCompatClient` with the provided API key and base URL.
     pub fn new(api_key: String, base_url: String) -> Self {
+        Self::with_http_client(api_key, base_url, Client::new())
+    }
+
+    pub fn with_http_client(api_key: String, base_url: String, http: Client) -> Self {
         Self {
             endpoint: OpenAiCompatEndpoint::Fixed { api_key, base_url },
-            http: Client::new(),
+            http,
             context_headers_enabled: true,
         }
     }
 
     /// Constructs a new `OpenAiCompatClient` with the provided API key, base URL, and context headers flag.
     pub fn new_with_context_headers_enabled(api_key: String, base_url: String, enabled: bool) -> Self {
+        Self::with_http_client_and_context_headers_enabled(api_key, base_url, Client::new(), enabled)
+    }
+
+    pub fn with_http_client_and_context_headers_enabled(
+        api_key: String,
+        base_url: String,
+        http: Client,
+        enabled: bool,
+    ) -> Self {
         Self {
             endpoint: OpenAiCompatEndpoint::Fixed { api_key, base_url },
-            http: Client::new(),
+            http,
             context_headers_enabled: enabled,
         }
     }
 
     pub fn from_registry(providers: HashMap<String, ProviderConfig>, default_provider: String) -> Self {
+        Self::from_registry_with_http_client(providers, default_provider, Client::new())
+    }
+
+    pub fn from_registry_with_http_client(
+        providers: HashMap<String, ProviderConfig>,
+        default_provider: String,
+        http: Client,
+    ) -> Self {
         Self {
             endpoint: OpenAiCompatEndpoint::Registry {
                 providers,
                 default_provider,
             },
-            http: Client::new(),
+            http,
             context_headers_enabled: true,
         }
     }
@@ -72,12 +93,26 @@ impl OpenAiCompatClient {
         default_provider: String,
         enabled: bool,
     ) -> Self {
+        Self::from_registry_with_http_client_and_context_headers_enabled(
+            providers,
+            default_provider,
+            Client::new(),
+            enabled,
+        )
+    }
+
+    pub fn from_registry_with_http_client_and_context_headers_enabled(
+        providers: HashMap<String, ProviderConfig>,
+        default_provider: String,
+        http: Client,
+        enabled: bool,
+    ) -> Self {
         Self {
             endpoint: OpenAiCompatEndpoint::Registry {
                 providers,
                 default_provider,
             },
-            http: Client::new(),
+            http,
             context_headers_enabled: enabled,
         }
     }

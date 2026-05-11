@@ -3,6 +3,7 @@ use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::message::{ContentBlock, Message, Role};
+use crate::network::HttpClients;
 use crate::prompt::TrimmerConfig;
 use crate::prompt::{
     load_developer_project_prompt_async, load_project_context_with_config_async, template_vars, PromptConfig,
@@ -121,14 +122,16 @@ impl AgentTool {
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
         let binding = self.config.resolve_agent_binding(spec)?;
-        let client = OpenAiCompatClient::from_registry_with_context_headers_enabled(
+        let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
             self.config.providers.clone(),
             binding.provider_id.clone(),
+            crate::network::build_provider_client()?,
             self.config.outbound_context_headers.enabled,
         );
         let sub_registry = ToolRegistry::new();
         if let Some(ctx) = &context {
             if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
+                let http_clients = HttpClients::new()?;
                 register_builtin_tools(
                     &sub_registry,
                     &self.config,
@@ -136,6 +139,7 @@ impl AgentTool {
                     skill_registry.clone(),
                     spec.tool_whitelist.as_deref(),
                     Arc::new(NoopProjectDirService),
+                    &http_clients,
                 );
             }
         }

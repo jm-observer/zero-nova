@@ -1,22 +1,17 @@
 use crate::event::AgentEvent;
-use crate::loop_guard::{
-    assistant_fingerprint_from_blocks, build_tool_call_signature, tool_calls_hash, LoopGuardConfig, LoopGuardDecision,
-    LoopGuardState,
-};
+use crate::loop_guard::LoopGuardConfig;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, PromptSectionSize, SideChannelInjector,
-    SystemPromptBuilder, ToolSize, TrimmerConfig, TurnContext,
+    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, SideChannelInjector, SystemPromptBuilder,
+    TrimmerConfig, TurnContext,
 };
-use crate::provider::types::{ProviderRequestContext, StopReason, ToolDefinition, Usage};
-use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent};
+use crate::provider::types::{ToolDefinition, Usage};
+use crate::provider::{LlmClient, ModelConfig};
 use crate::skill::{CapabilityPolicy, SkillRegistry, ToolPolicy};
-use crate::tool::builtin::task::TaskStore;
-use crate::tool::read_cache::TurnReadState;
+use crate::tool::builtin::task::TaskStoreHandle;
+use crate::tool::Tool;
 pub use crate::tool::ToolRegistry;
-use crate::tool::{Tool, ToolContext};
 use anyhow::Result;
-use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde::Serialize;
 use serde_json::{self, Value};
 use std::collections::HashSet;
@@ -24,11 +19,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::{Mutex, RwLock};
-use tokio::time::timeout;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+mod diagnostics;
 mod guards;
-use guards::has_loop_guard_rejection;
+mod tool_exec;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TurnResult {
@@ -43,8 +38,10 @@ pub struct AgentRuntime<C: LlmClient> {
     client: C,
     tools: ToolRegistry,
     pub config: AgentConfig,
-    pub task_store: Option<Arc<Mutex<TaskStore>>>,
+    pub task_store: Option<TaskStoreHandle>,
     pub skill_registry: Option<Arc<SkillRegistry>>,
+    /// Session-level state: files that have been read across turns, used for Write pre-read enforcement.
+    /// This is intentionally separate from per-turn duplicate-read convergence state.
     pub read_files: Arc<Mutex<HashSet<String>>>,
     /// 侧信道注入器（Phase 3 新增）
     pub side_channel_injector: Option<SideChannelInjector>,
@@ -94,18 +91,6 @@ pub struct ToolResultCompactionConfig {
     pub disable_for_tools: HashSet<String>,
 }
 
-#[derive(Debug, Clone)]
-struct MessageSize {
-    index: usize,
-    role: Role,
-    chars: usize,
-    tool_calls: usize,
-    tool_result_chars: usize,
-    has_large_tool_result: bool,
-    is_empty_assistant: bool,
-    is_large: bool,
-}
-
 impl<C: LlmClient> AgentRuntime<C> {
     /// Creates a new `AgentRuntime` instance.
     pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
@@ -138,151 +123,6 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// 设置侧信道注入器。
     pub fn set_side_channel_injector(&mut self, injector: SideChannelInjector) {
         self.side_channel_injector = Some(injector);
-    }
-
-    /// 执行一组工具调用并返回格式化结果。
-    ///
-    /// 这是 `run_turn()` 和 `run_turn_with_context()` 共享的工具执行逻辑。
-    async fn execute_tool_calls(
-        &self,
-        parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
-        loop_guard_state: &mut LoopGuardState,
-        turn_read_state: Arc<RwLock<TurnReadState>>,
-        session_id: &str,
-        environment: Option<EnvironmentSnapshot>,
-        shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
-        event_tx: &mpsc::Sender<AgentEvent>,
-    ) -> Result<Vec<ContentBlock>> {
-        let mut tool_results_fut = FuturesUnordered::new();
-        let mut indexed_results = Vec::new();
-
-        for (call_idx, (id, name, input_val)) in parsed_tool_calls.into_iter().enumerate() {
-            let signature = build_tool_call_signature(&name, &input_val);
-            let signature_hash = signature.input_hash;
-            let decision = loop_guard_state.evaluate_tool_call(signature.clone());
-            match decision {
-                LoopGuardDecision::Allow => {}
-                LoopGuardDecision::AllowWithWarning { message } => {
-                    let _ = event_tx
-                        .send(AgentEvent::LoopGuardTriggered {
-                            reason: "duplicate_tool_call_warning".to_string(),
-                            tool: Some(name.clone()),
-                            session_id: session_id.to_string(),
-                            canonical_target: signature.canonical_primary_target.clone(),
-                            duplicate_count: loop_guard_state.duplicate_count(),
-                            stalled_iteration_count: loop_guard_state.stalled_count(),
-                            decision: "warn".to_string(),
-                            reason_code: "duplicate_tool_call_warning".to_string(),
-                            signature_hash: Some(signature_hash),
-                        })
-                        .await;
-                    let _ = event_tx.send(AgentEvent::SystemLog(message)).await;
-                }
-                LoopGuardDecision::Reject { message, reason_code } => {
-                    let _ = event_tx
-                        .send(AgentEvent::LoopGuardTriggered {
-                            reason: reason_code.clone(),
-                            tool: Some(name.clone()),
-                            session_id: session_id.to_string(),
-                            canonical_target: signature.canonical_primary_target.clone(),
-                            duplicate_count: loop_guard_state.duplicate_count(),
-                            stalled_iteration_count: loop_guard_state.stalled_count(),
-                            decision: "reject".to_string(),
-                            reason_code,
-                            signature_hash: Some(signature_hash),
-                        })
-                        .await;
-                    indexed_results.push((
-                        call_idx,
-                        ContentBlock::ToolResult {
-                            tool_use_id: id,
-                            output: message,
-                            is_error: true,
-                        },
-                    ));
-                    continue;
-                }
-            }
-            let tool_registry = &self.tools;
-            let tx = event_tx.clone();
-            let tool_timeout_duration = self.config.tool_timeout;
-            let session_id = session_id.to_string();
-            let environment = environment.clone();
-            let task_store = self.task_store.clone();
-            let skill_registry = self.skill_registry.clone();
-            let read_files = self.read_files.clone();
-            let turn_read_state = turn_read_state.clone();
-            let shared_environment = shared_environment.clone();
-
-            tool_results_fut.push(async move {
-                let _ = tx
-                    .send(AgentEvent::ToolStart {
-                        id: id.clone(),
-                        name: name.clone(),
-                        input: input_val.clone(),
-                    })
-                    .await;
-
-                let result = timeout(
-                    tool_timeout_duration,
-                    tool_registry.execute(
-                        &name,
-                        input_val,
-                        Some(ToolContext {
-                            event_tx: tx.clone(),
-                            tool_use_id: id.clone(),
-                            session_id,
-                            task_store,
-                            skill_registry,
-                            read_files,
-                            turn_read_state: Some(turn_read_state.clone()),
-                            environment,
-                            shared_environment,
-                            cancellation_token: None,
-                        }),
-                    ),
-                )
-                .await;
-
-                let (content, is_error) = match result {
-                    Ok(Ok(out)) => (out.content, out.is_error),
-                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true),
-                    Err(_) => ("Tool execution timed out".to_string(), true),
-                };
-                let content = if let (Some(injector), Some(skill_registry)) =
-                    (self.side_channel_injector.as_ref(), self.skill_registry.as_ref())
-                {
-                    injector.inject_into_tool_result(&content, skill_registry.as_ref())
-                } else {
-                    content
-                };
-
-                let _ = tx
-                    .send(AgentEvent::ToolEnd {
-                        id: id.clone(),
-                        name: name.clone(),
-                        output: content.clone(),
-                        is_error,
-                    })
-                    .await;
-
-                (
-                    call_idx,
-                    ContentBlock::ToolResult {
-                        tool_use_id: id,
-                        output: self.compact_tool_output(&name, is_error, &content),
-                        is_error,
-                    },
-                )
-            });
-        }
-
-        while let Some(res) = tool_results_fut.next().await {
-            indexed_results.push(res);
-        }
-        indexed_results.sort_by_key(|&(idx, _)| idx);
-
-        Ok(indexed_results.into_iter().map(|(_, b)| b).collect())
     }
 
     /// Executes a single turn of the agent, handling LLM streaming and tool execution.
@@ -491,279 +331,6 @@ impl<C: LlmClient> AgentRuntime<C> {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn execute_turn_loop(
-        &self,
-        mut all_messages: Vec<Message>,
-        tool_definitions: &[ToolDefinition],
-        iteration_budget: usize,
-        session_id: &str,
-        agent_id: Option<&str>,
-        environment: Option<EnvironmentSnapshot>,
-        event_tx: mpsc::Sender<AgentEvent>,
-        cancellation_token: Option<CancellationToken>,
-        model_config: &ModelConfig,
-    ) -> Result<TurnResult> {
-        let mut loop_guard_state = LoopGuardState::new(self.config.loop_guard.clone());
-        let turn_read_state = Arc::new(RwLock::new(TurnReadState::default()));
-
-        let mut turn_messages = Vec::new();
-        let mut cumulative_usage = Usage::default();
-        let mut completed_naturally = false;
-        let mut final_provider_request_body: Option<Value> = None;
-        let mut final_provider_response_body: Option<Value> = None;
-        let shared_environment = environment.clone().map(|env| Arc::new(RwLock::new(env)));
-
-        for iteration in 0..iteration_budget {
-            if let Some(ref token) = cancellation_token {
-                if token.is_cancelled() {
-                    return Ok(TurnResult {
-                        messages: turn_messages,
-                        usage: cumulative_usage,
-                        provider_request_body: final_provider_request_body,
-                        provider_response_body: final_provider_response_body,
-                    });
-                }
-            }
-
-            let _ = event_tx
-                .send(AgentEvent::Iteration {
-                    current: iteration + 1,
-                    total: iteration_budget,
-                })
-                .await;
-
-            let mut receiver = match self
-                .client
-                .stream(
-                    &all_messages,
-                    tool_definitions,
-                    model_config,
-                    &ProviderRequestContext {
-                        session_id: if session_id.trim().is_empty() {
-                            None
-                        } else {
-                            Some(session_id.to_string())
-                        },
-                        agent_id: agent_id.map(|id| id.to_string()),
-                    },
-                )
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    let err_msg = format!("Failed to start stream: {}", e);
-                    log::error!("{}", err_msg);
-                    let _ = event_tx.send(AgentEvent::SystemLog(err_msg)).await;
-                    return Err(e);
-                }
-            };
-
-            let mut current_text = String::new();
-            let mut current_thinking = String::new();
-            let mut tool_calls: Vec<(String, String, String)> = Vec::new();
-            let mut iter_usage = Usage::default();
-            let mut last_stop_reason: Option<StopReason> = None;
-
-            while let Some(event) = receiver
-                .next_event()
-                .await
-                .inspect_err(|e| log::error!("Error receiving event: {}", e))?
-            {
-                if let Some(ref token) = cancellation_token {
-                    if token.is_cancelled() {
-                        return Ok(TurnResult {
-                            messages: turn_messages,
-                            usage: cumulative_usage,
-                            provider_request_body: final_provider_request_body,
-                            provider_response_body: final_provider_response_body,
-                        });
-                    }
-                }
-
-                match event {
-                    ProviderStreamEvent::ThinkingDelta(delta) => {
-                        current_thinking.push_str(&delta);
-                        let _ = event_tx.send(AgentEvent::ThinkingDelta(delta)).await;
-                    }
-                    ProviderStreamEvent::TextDelta(delta) => {
-                        current_text.push_str(&delta);
-                        let _ = event_tx.send(AgentEvent::TextDelta(delta)).await;
-                    }
-                    ProviderStreamEvent::ToolUseStart { id, name } => {
-                        tool_calls.push((id, name, String::new()));
-                    }
-                    ProviderStreamEvent::ToolUseInputDelta(delta) => {
-                        if let Some(last) = tool_calls.last_mut() {
-                            last.2.push_str(&delta);
-                        }
-                    }
-                    ProviderStreamEvent::MessageComplete { usage, stop_reason } => {
-                        iter_usage = usage;
-                        last_stop_reason = stop_reason;
-                    }
-                    _ => {}
-                }
-            }
-            final_provider_request_body = receiver.request_body();
-            final_provider_response_body = receiver.response_body();
-
-            cumulative_usage.input_tokens += iter_usage.input_tokens;
-            cumulative_usage.output_tokens += iter_usage.output_tokens;
-            cumulative_usage.cache_creation_input_tokens = match (
-                cumulative_usage.cache_creation_input_tokens,
-                iter_usage.cache_creation_input_tokens,
-            ) {
-                (Some(a), Some(b)) => Some(a + b),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            };
-            cumulative_usage.cache_read_input_tokens = match (
-                cumulative_usage.cache_read_input_tokens,
-                iter_usage.cache_read_input_tokens,
-            ) {
-                (Some(a), Some(b)) => Some(a + b),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            };
-
-            let mut current_blocks = Vec::new();
-            if !current_thinking.is_empty() {
-                current_blocks.push(ContentBlock::Thinking {
-                    thinking: current_thinking,
-                });
-            }
-            if !current_text.is_empty() {
-                current_blocks.push(ContentBlock::Text { text: current_text });
-            }
-
-            let parsed_tool_calls: Vec<(String, String, serde_json::Value)> = tool_calls
-                .into_iter()
-                .map(|(id, name, input_json)| {
-                    let input_val: serde_json::Value = match serde_json::from_str(&input_json) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            log::warn!("Failed to parse tool input JSON: {}. Content: {}", e, input_json);
-                            serde_json::json!({ "__error": format!("Invalid JSON: {}", e) })
-                        }
-                    };
-                    (id, name, input_val)
-                })
-                .collect();
-
-            for (id, name, input_val) in &parsed_tool_calls {
-                current_blocks.push(ContentBlock::ToolUse {
-                    id: id.clone(),
-                    name: name.clone(),
-                    input: input_val.clone(),
-                });
-            }
-
-            let assistant_msg = Message::new(Role::Assistant, current_blocks, chrono::Utc::now().timestamp_millis());
-            all_messages.push(assistant_msg.clone());
-            turn_messages.push(assistant_msg);
-
-            if last_stop_reason == Some(StopReason::MaxTokens) {
-                let is_truncated = if parsed_tool_calls.is_empty() {
-                    true
-                } else if let Some((_, _, last_val)) = parsed_tool_calls.last() {
-                    last_val.get("__error").is_some()
-                } else {
-                    // 理论不应到达但可达场景：保守视作截断并触发 continuation
-                    true
-                };
-
-                if is_truncated {
-                    all_messages.push(Message::new(
-                        Role::User,
-                        vec![ContentBlock::Text {
-                            text: "Please continue your last tool call or response.".to_string(),
-                        }],
-                        chrono::Utc::now().timestamp_millis(),
-                    ));
-                    continue;
-                }
-            }
-
-            if parsed_tool_calls.is_empty() {
-                completed_naturally = true;
-                let _ = event_tx
-                    .send(AgentEvent::TextDelta("".to_string())) // 保持流式事件边界一致。
-                    .await;
-                break;
-            }
-
-            let assistant_fp = assistant_fingerprint_from_blocks(all_messages.last().map_or(&[], |m| &m.content));
-            let signatures = parsed_tool_calls
-                .iter()
-                .map(|(_, name, input)| build_tool_call_signature(name, input))
-                .collect::<Vec<_>>();
-            let calls_hash = tool_calls_hash(&signatures);
-            let current_environment = if let Some(env) = &shared_environment {
-                Some(env.read().await.clone())
-            } else {
-                environment.clone()
-            };
-            let tool_result_blocks = self
-                .execute_tool_calls(
-                    parsed_tool_calls,
-                    &mut loop_guard_state,
-                    turn_read_state.clone(),
-                    session_id,
-                    current_environment,
-                    shared_environment.clone(),
-                    &event_tx,
-                )
-                .await?;
-
-            let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());
-            let has_guard_rejection = has_loop_guard_rejection(&tool_res_msg.content);
-            all_messages.push(tool_res_msg.clone());
-            turn_messages.push(tool_res_msg);
-
-            if !has_guard_rejection && loop_guard_state.detect_stalled_iteration(assistant_fp, calls_hash) {
-                let _ = event_tx
-                    .send(AgentEvent::LoopGuardTriggered {
-                        reason: "stalled_iteration_abort".to_string(),
-                        tool: None,
-                        session_id: session_id.to_string(),
-                        canonical_target: None,
-                        duplicate_count: loop_guard_state.duplicate_count(),
-                        stalled_iteration_count: loop_guard_state.stalled_count(),
-                        decision: "reject".to_string(),
-                        reason_code: "stalled_iteration_abort".to_string(),
-                        signature_hash: Some(calls_hash),
-                    })
-                    .await;
-                completed_naturally = true;
-                break;
-            }
-        }
-
-        if !completed_naturally {
-            let _ = event_tx
-                .send(AgentEvent::IterationLimitReached {
-                    iterations: iteration_budget,
-                })
-                .await;
-            let _ = event_tx
-                .send(AgentEvent::TurnComplete {
-                    new_messages: turn_messages.clone(),
-                    usage: cumulative_usage.clone(),
-                })
-                .await;
-        }
-
-        Ok(TurnResult {
-            messages: turn_messages,
-            usage: cumulative_usage,
-            provider_request_body: final_provider_request_body,
-            provider_response_body: final_provider_response_body,
-        })
-    }
-
     /// 决定 active skill 路由（阶段一：规则路由）。
     fn decide_active_skill(&self, input: &str, _current_history: &[Message]) -> Result<Option<ActiveSkillState>> {
         if let Some(ref sr) = self.skill_registry {
@@ -851,137 +418,6 @@ impl<C: LlmClient> AgentRuntime<C> {
         }
 
         Ok(Arc::new(result.messages))
-    }
-
-    fn log_prompt_diagnostics(&self, builder: &SystemPromptBuilder, tool_definitions: &[ToolDefinition]) {
-        let cfg = &self.config.prompt_diagnostics;
-        if !cfg.enabled {
-            return;
-        }
-        let section_reports = builder.size_report(cfg.large_section_chars);
-        let tool_reports = SystemPromptBuilder::tool_size_report(tool_definitions);
-        let tools_chars = tool_reports.iter().map(|r| r.chars).sum::<usize>();
-        let system_chars = section_reports.iter().map(|r| r.chars).sum::<usize>();
-        log::info!("Prompt size summary: system={}, tools={}", system_chars, tools_chars);
-
-        for PromptSectionSize {
-            name, chars, is_large, ..
-        } in &section_reports
-        {
-            if *is_large {
-                log::warn!("Large section: {:?} chars={}", name, chars);
-            }
-        }
-        for ToolSize { name, chars } in &tool_reports {
-            log::debug!("Tool schema size: {} chars={}", name, chars);
-        }
-    }
-
-    fn log_history_diagnostics(&self, history: &[Message]) {
-        let cfg = &self.config.prompt_diagnostics;
-        if !cfg.enabled {
-            return;
-        }
-        let reports = history
-            .iter()
-            .enumerate()
-            .map(|(index, message)| self.build_message_size(index, message))
-            .collect::<Vec<_>>();
-        let history_chars = reports.iter().map(|r| r.chars).sum::<usize>();
-        log::info!(
-            "History size summary: total_chars={}, messages={}",
-            history_chars,
-            reports.len()
-        );
-        for report in reports {
-            log::debug!(
-                "History message: index={} role={:?} chars={} tool_calls={} tool_result_chars={}",
-                report.index,
-                report.role,
-                report.chars,
-                report.tool_calls,
-                report.tool_result_chars
-            );
-            if report.is_large {
-                log::warn!(
-                    "Large message: index={} role={:?} chars={}",
-                    report.index,
-                    report.role,
-                    report.chars
-                );
-            }
-            if report.has_large_tool_result {
-                log::warn!(
-                    "Large tool result message: index={} role={:?} tool_result_chars={}",
-                    report.index,
-                    report.role,
-                    report.tool_result_chars
-                );
-            }
-            if report.is_empty_assistant {
-                log::warn!("Empty assistant message: index={}", report.index);
-            }
-        }
-    }
-
-    fn build_message_size(&self, index: usize, message: &Message) -> MessageSize {
-        let cfg = &self.config.prompt_diagnostics;
-        let mut chars = 0usize;
-        let mut tool_calls = 0usize;
-        let mut tool_result_chars = 0usize;
-        for block in &message.content {
-            match block {
-                ContentBlock::Text { text } => chars += text.chars().count(),
-                ContentBlock::Thinking { thinking } => chars += thinking.chars().count(),
-                ContentBlock::ToolUse { .. } => {
-                    tool_calls += 1;
-                }
-                ContentBlock::ToolResult { output, .. } => {
-                    let c = output.chars().count();
-                    chars += c;
-                    tool_result_chars += c;
-                }
-            }
-        }
-        let is_empty_assistant = matches!(message.role, Role::Assistant) && chars == 0 && tool_calls == 0;
-        MessageSize {
-            index,
-            role: message.role.clone(),
-            chars,
-            tool_calls,
-            tool_result_chars,
-            has_large_tool_result: tool_result_chars > cfg.large_tool_result_chars,
-            is_empty_assistant,
-            is_large: chars > cfg.large_message_chars,
-        }
-    }
-
-    fn compact_tool_output(&self, tool_name: &str, is_error: bool, output: &str) -> String {
-        let cfg = &self.config.tool_result_compaction;
-        if !cfg.enabled || cfg.disable_for_tools.contains(&tool_name.to_ascii_lowercase()) {
-            return output.to_string();
-        }
-
-        let total_chars = output.chars().count();
-        if total_chars <= cfg.max_chars {
-            return output.to_string();
-        }
-
-        let head = output.chars().take(cfg.head_chars).collect::<String>();
-        let tail = output
-            .chars()
-            .skip(total_chars.saturating_sub(cfg.tail_chars))
-            .collect::<String>();
-        let total_lines = output.lines().count();
-
-        format!(
-            "[Tool output compacted]\nTool: {tool_name}\nIs error: {is_error}\nOriginal chars: {total_chars}\nOriginal lines: {total_lines}\nKept head chars: {}\nKept tail chars: {}\nReason: output exceeded {} chars\n\n--- head ---\n{}\n\n--- tail ---\n{}\n\n[Full output omitted from model context. Re-run a narrower command or read a specific range if needed.]",
-            head.chars().count(),
-            tail.chars().count(),
-            cfg.max_chars,
-            head,
-            tail
-        )
     }
 }
 

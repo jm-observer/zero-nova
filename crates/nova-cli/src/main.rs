@@ -17,7 +17,7 @@ use nova_agent::prompt::{EnvironmentSnapshot, SystemPromptBuilder, TrimmerConfig
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::provider::LlmClient;
 use nova_agent::skill::SkillRegistry;
-use nova_agent::tool::builtin::task::TaskStore;
+use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
 use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry, UnavailableProjectDirService};
 use rustyline::history::FileHistory;
 use serde_json::json;
@@ -26,7 +26,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal::ctrl_c;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 
 /// CLI 调试命令枚举（Plan 4）。
 #[derive(Debug, Clone)]
@@ -174,7 +174,7 @@ async fn main() -> Result<()> {
     let skill_prompt = skill_registry_raw.generate_contextual_prompt(None);
     let skill_registry = Arc::new(skill_registry_raw);
 
-    let task_store = Arc::new(Mutex::new(TaskStore::new()));
+    let task_store = TaskStoreHandle::new(TaskStore::new());
 
     let tools = ToolRegistry::new();
     let http_clients = HttpClients::new()?;
@@ -546,9 +546,8 @@ async fn print_status(agent: &AgentRuntime<impl LlmClient>) {
     println!("    - Deferred tools: {}", deferred.len());
 }
 
-async fn snapshot_tasks(task_store: &Arc<Mutex<TaskStore>>) -> Vec<nova_agent::tool::builtin::task::Task> {
-    let store = task_store.lock().await;
-    store.list().into_iter().cloned().collect()
+async fn snapshot_tasks(task_store: &TaskStoreHandle) -> Vec<nova_agent::tool::builtin::task::Task> {
+    task_store.list_tasks().await
 }
 
 /// Tests the MCP server by invoking the first tool.
@@ -800,10 +799,8 @@ mod tests {
     use super::summarize_tool_start;
     use super::truncate_inline;
     use super::CliCommand;
-    use nova_agent::tool::builtin::task::TaskStore;
+    use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
     use serde_json::json;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     #[test]
     fn test_parse_skills_command() {
@@ -883,17 +880,16 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_tasks_can_run_inside_runtime() {
-        let task_store = Arc::new(Mutex::new(TaskStore::new()));
-        {
-            let mut store = task_store.lock().await;
-            store.create(
+        let task_store = TaskStoreHandle::new(TaskStore::new());
+        task_store
+            .create_task(
                 "status check".to_string(),
                 "verify async snapshot path".to_string(),
                 Some("checking status".to_string()),
                 None,
                 true,
-            );
-        }
+            )
+            .await;
 
         let tasks = snapshot_tasks(&task_store).await;
         assert_eq!(tasks.len(), 1);

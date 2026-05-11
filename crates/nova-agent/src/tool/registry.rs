@@ -24,8 +24,8 @@ pub struct ToolContext {
     pub tool_use_id: String,
     /// The session_id associated with this tool execution.
     pub session_id: String,
-    /// Reference to the task store for TaskCreate/TaskList/TaskUpdate.
-    pub task_store: Option<Arc<Mutex<builtin::task::TaskStore>>>,
+    /// Session-level task store handle for TaskCreate/TaskList/TaskUpdate.
+    pub task_store: Option<builtin::task::TaskStoreHandle>,
     /// Reference to the skill registry.
     pub skill_registry: Option<Arc<SkillRegistry>>,
     /// Session-level state: files that have been read (for Write pre-read enforcement).

@@ -16,13 +16,12 @@ use crate::network::HttpClients;
 use crate::skill::SkillRegistry;
 use crate::tool::{ProjectDirService, ToolRegistry};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
 pub fn register_builtin_tools(
     registry: &ToolRegistry,
     config: &AppConfig,
-    task_store: Arc<Mutex<task::TaskStore>>,
+    task_store: task::TaskStoreHandle,
     skill_registry: Arc<SkillRegistry>,
     tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
@@ -152,7 +151,6 @@ mod tests {
     use crate::skill::SkillRegistry;
     use crate::tool::{ToolRegistry, UnavailableProjectDirService};
     use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     #[test]
     fn orchestrate_task_is_hidden_without_explicit_whitelist() {
@@ -160,7 +158,7 @@ mod tests {
         register_builtin_tools(
             &registry,
             &AppConfig::new("D:/config".into()),
-            Arc::new(Mutex::new(super::task::TaskStore::default())),
+            super::task::TaskStoreHandle::new(super::task::TaskStore::default()),
             Arc::new(SkillRegistry::new()),
             None,
             Arc::new(UnavailableProjectDirService::new("unavailable")),
@@ -177,7 +175,7 @@ mod tests {
         register_builtin_tools(
             &registry,
             &AppConfig::new("D:/config".into()),
-            Arc::new(Mutex::new(super::task::TaskStore::default())),
+            super::task::TaskStoreHandle::new(super::task::TaskStore::default()),
             Arc::new(SkillRegistry::new()),
             Some(&whitelist),
             Arc::new(UnavailableProjectDirService::new("unavailable")),

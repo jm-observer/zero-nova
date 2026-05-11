@@ -2472,7 +2472,10 @@ mod tests {
             normalize_shell_command(r"C:\Windows\System32\cmd.exe /c"),
             Some("cmd".to_string())
         );
-        assert_eq!(normalize_shell_command("/usr/bin/bash -lc"), Some("bash".to_string()));
+        assert_eq!(
+            normalize_shell_command("/usr/bin/bash -lc"),
+            Some("bash".to_string())
+        );
         assert_eq!(normalize_shell_command(""), None);
         assert_eq!(normalize_shell_command("   "), None);
     }

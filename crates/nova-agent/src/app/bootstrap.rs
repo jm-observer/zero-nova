@@ -15,7 +15,7 @@ use crate::prompt::{
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::skill::SkillRegistry;
 use crate::tool::builtin::register_builtin_tools;
-use crate::tool::builtin::task::TaskStore;
+use crate::tool::builtin::task::{TaskStore, TaskStoreHandle};
 use crate::tool::ToolRegistry;
 use anyhow::{bail, Context, Result};
 use arc_swap::ArcSwap;
@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
 pub struct BootstrapOptions {
     pub bind_addr: SocketAddr,
@@ -44,7 +44,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     let root_binding = config.resolve_agent_binding(root_agent)?;
     env_snapshot.model_id = Some(root_binding.model_config.model.clone());
 
-    let task_store = Arc::new(Mutex::new(TaskStore::new()));
+    let task_store = TaskStoreHandle::new(TaskStore::new());
     let data_dir_path = config.data_dir_path();
     let sqlite_manager = SqliteManager::new(&data_dir_path).await?;
     let repository = SqliteSessionRepository::new(sqlite_manager.pool);

@@ -151,7 +151,7 @@ impl EnvironmentSnapshot {
 //  Shell 检测
 // ---------------------------------------------------------------------------
 
-fn normalize_shell_command(raw: &str) -> Option<String> {
+pub(crate) fn normalize_shell_command(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;

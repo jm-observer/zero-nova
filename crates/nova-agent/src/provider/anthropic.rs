@@ -45,7 +45,6 @@ impl AnthropicClient {
     }
 }
 
-#[allow(clippy::single_match)]
 #[async_trait]
 impl LlmClient for AnthropicClient {
     /// Streams responses from the Anthropic API based on the provided messages and configuration.

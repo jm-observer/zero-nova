@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -80,6 +80,10 @@ impl TaskStore {
             tasks: HashMap::new(),
             next_id: AtomicU64::new(1),
         }
+    }
+
+    pub fn list_owned(&self) -> Vec<Task> {
+        self.tasks.values().cloned().collect()
     }
 
     pub fn create(
@@ -244,12 +248,47 @@ fn push_unique(values: &mut Vec<String>, value: String) {
     }
 }
 
+#[derive(Clone)]
+pub struct TaskStoreHandle {
+    inner: Arc<RwLock<TaskStore>>,
+}
+
+impl TaskStoreHandle {
+    pub fn new(store: TaskStore) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(store)),
+        }
+    }
+
+    pub async fn create_task(
+        &self,
+        subject: String,
+        description: String,
+        active_form: Option<String>,
+        metadata: Option<HashMap<String, Value>>,
+        is_main_task: bool,
+    ) -> Task {
+        let mut store = self.inner.write().await;
+        store.create(subject, description, active_form, metadata, is_main_task)
+    }
+
+    pub async fn list_tasks(&self) -> Vec<Task> {
+        let store = self.inner.read().await;
+        store.list_owned()
+    }
+
+    pub async fn update_task(&self, id: &str, update: TaskUpdateRequest) -> Result<Task> {
+        let mut store = self.inner.write().await;
+        store.update(id, update)
+    }
+}
+
 pub struct TaskCreateTool {
-    pub store: Arc<Mutex<TaskStore>>,
+    store: TaskStoreHandle,
 }
 
 impl TaskCreateTool {
-    pub fn new(store: Arc<Mutex<TaskStore>>) -> Self {
+    pub fn new(store: TaskStoreHandle) -> Self {
         Self { store }
     }
 
@@ -334,8 +373,10 @@ impl Tool for TaskCreateTool {
         let active_form = input["active_form"].as_str().map(|s| s.to_string());
         let metadata = input["metadata"].as_object().cloned().map(|m| m.into_iter().collect());
 
-        let mut store = self.store.lock().await;
-        let task = store.create(subject.clone(), description, active_form, metadata, true);
+        let task = self
+            .store
+            .create_task(subject.clone(), description, active_form, metadata, true)
+            .await;
 
         if let Some(ctx) = context {
             let _ = ctx
@@ -355,11 +396,11 @@ impl Tool for TaskCreateTool {
 }
 
 pub struct TaskListTool {
-    pub store: Arc<Mutex<TaskStore>>,
+    store: TaskStoreHandle,
 }
 
 impl TaskListTool {
-    pub fn new(store: Arc<Mutex<TaskStore>>) -> Self {
+    pub fn new(store: TaskStoreHandle) -> Self {
         Self { store }
     }
 
@@ -383,8 +424,7 @@ impl Tool for TaskListTool {
     }
 
     async fn execute(&self, _input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
-        let store = self.store.lock().await;
-        let tasks = store.list();
+        let tasks = self.store.list_tasks().await;
         Ok(ToolOutput {
             content: serde_json::to_string(&tasks)?,
             is_error: false,
@@ -393,11 +433,11 @@ impl Tool for TaskListTool {
 }
 
 pub struct TaskUpdateTool {
-    pub store: Arc<Mutex<TaskStore>>,
+    store: TaskStoreHandle,
 }
 
 impl TaskUpdateTool {
-    pub fn new(store: Arc<Mutex<TaskStore>>) -> Self {
+    pub fn new(store: TaskStoreHandle) -> Self {
         Self { store }
     }
 
@@ -455,8 +495,7 @@ impl Tool for TaskUpdateTool {
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()),
         };
 
-        let mut store = self.store.lock().await;
-        let task = store.update(id, update)?;
+        let task = self.store.update_task(id, update).await?;
 
         if let Some(ctx) = context {
             let _ = ctx
@@ -485,7 +524,7 @@ impl Default for TaskStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{TaskStatus, TaskStore, TaskUpdateRequest};
+    use super::{TaskStatus, TaskStore, TaskStoreHandle, TaskUpdateRequest};
 
     #[test]
     fn completing_task_unblocks_dependents() {
@@ -528,6 +567,80 @@ mod tests {
             .unwrap();
 
         assert!(store.get(&blocked.id).unwrap().blocked_by.is_empty());
+    }
+
+    #[tokio::test]
+    async fn task_store_handle_create_list_update_roundtrip() {
+        let store = TaskStoreHandle::new(TaskStore::new());
+        let created = store
+            .create_task(
+                "subject-1".to_string(),
+                "desc-1".to_string(),
+                Some("running-1".to_string()),
+                None,
+                true,
+            )
+            .await;
+
+        let listed = store.list_tasks().await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+        assert_eq!(listed[0].subject, "subject-1");
+
+        let updated = store
+            .update_task(
+                &created.id,
+                TaskUpdateRequest {
+                    status: Some(TaskStatus::InProgress),
+                    subject: None,
+                    description: None,
+                    active_form: None,
+                    owner: None,
+                    metadata: None,
+                    add_blocks: None,
+                    add_blocked_by: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(updated.status, TaskStatus::InProgress);
+        let listed_after_update = store.list_tasks().await;
+        assert_eq!(listed_after_update.len(), 1);
+        assert_eq!(listed_after_update[0].status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn task_store_handle_list_returns_owned_snapshot() {
+        let store = TaskStoreHandle::new(TaskStore::new());
+        let created = store
+            .create_task("snapshot".to_string(), "snapshot".to_string(), None, None, true)
+            .await;
+
+        let snapshot = store.list_tasks().await;
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].status, TaskStatus::Pending);
+
+        let _ = store
+            .update_task(
+                &created.id,
+                TaskUpdateRequest {
+                    status: Some(TaskStatus::Completed),
+                    subject: None,
+                    description: None,
+                    active_form: None,
+                    owner: None,
+                    metadata: None,
+                    add_blocks: None,
+                    add_blocked_by: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot[0].status, TaskStatus::Pending);
+        let latest = store.list_tasks().await;
+        assert_eq!(latest[0].status, TaskStatus::Completed);
     }
 
     #[test]

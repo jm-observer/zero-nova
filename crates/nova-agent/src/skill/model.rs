@@ -1,1 +1,1 @@
-﻿pub use super::registry::{Skill, SkillPackage, ToolPolicy};
+﻿pub use super::types::{Skill, SkillPackage, ToolPolicy};

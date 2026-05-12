@@ -271,6 +271,13 @@ mod tests {
     use tokio::sync::{mpsc, Mutex, RwLock};
 
     fn build_context(state: Arc<RwLock<TurnReadState>>) -> ToolContext {
+        build_context_with_read_files(state, Arc::new(Mutex::new(HashSet::new())))
+    }
+
+    fn build_context_with_read_files(
+        state: Arc<RwLock<TurnReadState>>,
+        read_files: Arc<Mutex<HashSet<String>>>,
+    ) -> ToolContext {
         let (event_tx, _event_rx) = mpsc::channel(4);
         ToolContext {
             event_tx,
@@ -278,7 +285,7 @@ mod tests {
             session_id: "read-tool-session".to_string(),
             task_store: None,
             skill_registry: None,
-            read_files: Arc::new(Mutex::new(HashSet::new())),
+            read_files,
             turn_read_state: Some(state),
             environment: Some(EnvironmentSnapshot {
                 config_dir: "D:/git/zero-nova".to_string(),
@@ -361,6 +368,56 @@ mod tests {
             second.content.contains("Read repeat detected in current turn."),
             "unexpected second output: {}",
             second.content
+        );
+    }
+
+    #[tokio::test]
+    async fn repeat_detection_does_not_leak_across_turn_states() {
+        let temp = tempdir().expect("create tempdir");
+        let file_path = temp.path().join("turn-isolation.txt");
+        tokio::fs::write(&file_path, "a\nb\nc\nd\n").await.expect("write file");
+
+        let tool = ReadTool::new(Some(temp.path().to_path_buf()));
+        let shared_read_files = Arc::new(Mutex::new(HashSet::new()));
+        let turn1 = Arc::new(RwLock::new(TurnReadState::default()));
+        let turn2 = Arc::new(RwLock::new(TurnReadState::default()));
+        let path = file_path.to_string_lossy().to_string();
+
+        let first_turn_first = tool
+            .execute(
+                json!({"file_path": path, "offset": 1, "limit": 2}),
+                Some(build_context_with_read_files(turn1.clone(), shared_read_files.clone())),
+            )
+            .await
+            .expect("first turn first read");
+        assert!(!first_turn_first
+            .content
+            .contains("Read repeat detected in current turn."));
+
+        let first_turn_second = tool
+            .execute(
+                json!({"file_path": file_path.to_string_lossy().to_string(), "offset": 1, "limit": 2}),
+                Some(build_context_with_read_files(turn1, shared_read_files.clone())),
+            )
+            .await
+            .expect("first turn second read");
+        assert!(first_turn_second
+            .content
+            .contains("Read repeat detected in current turn."));
+
+        let second_turn_first = tool
+            .execute(
+                json!({"file_path": file_path.to_string_lossy().to_string(), "offset": 1, "limit": 2}),
+                Some(build_context_with_read_files(turn2, shared_read_files)),
+            )
+            .await
+            .expect("second turn first read");
+        assert!(
+            !second_turn_first
+                .content
+                .contains("Read repeat detected in current turn."),
+            "turn state leaked across turns: {}",
+            second_turn_first.content
         );
     }
 }

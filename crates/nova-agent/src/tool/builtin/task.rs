@@ -524,7 +524,15 @@ impl Default for TaskStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{TaskStatus, TaskStore, TaskStoreHandle, TaskUpdateRequest};
+    use super::{
+        TaskCreateTool, TaskListTool, TaskStatus, TaskStore, TaskStoreHandle, TaskUpdateRequest, TaskUpdateTool,
+    };
+    use crate::event::AgentEvent;
+    use crate::tool::{Tool, ToolContext};
+    use serde_json::json;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tokio::sync::{mpsc, Mutex};
 
     #[test]
     fn completing_task_unblocks_dependents() {
@@ -682,5 +690,142 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().contains("blocked by"));
+    }
+
+    #[tokio::test]
+    async fn task_store_handle_concurrent_list_succeeds() {
+        let store = TaskStoreHandle::new(TaskStore::new());
+        for i in 0..10 {
+            let _ = store
+                .create_task(format!("subject-{i}"), format!("desc-{i}"), None, None, true)
+                .await;
+        }
+
+        let mut joins = Vec::new();
+        for _ in 0..16 {
+            let store = store.clone();
+            joins.push(tokio::spawn(async move { store.list_tasks().await.len() }));
+        }
+
+        for join in joins {
+            let len = join.await.unwrap();
+            assert_eq!(len, 10);
+        }
+    }
+
+    #[tokio::test]
+    async fn task_create_tool_emits_task_created_event() {
+        let store = TaskStoreHandle::new(TaskStore::new());
+        let tool = TaskCreateTool::new(store.clone());
+        let (event_tx, mut event_rx) = mpsc::channel(4);
+
+        let output = tool
+            .execute(
+                json!({
+                    "subject": "create-subject",
+                    "description": "create-desc",
+                    "active_form": "Creating task"
+                }),
+                Some(ToolContext {
+                    event_tx,
+                    tool_use_id: "tool-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    task_store: Some(store.clone()),
+                    skill_registry: None,
+                    read_files: Arc::new(Mutex::new(HashSet::new())),
+                    turn_read_state: None,
+                    environment: None,
+                    shared_environment: None,
+                    cancellation_token: None,
+                }),
+            )
+            .await
+            .unwrap();
+
+        let created: super::Task = serde_json::from_str(&output.content).unwrap();
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            AgentEvent::TaskCreated { id, subject } => {
+                assert_eq!(id, created.id);
+                assert_eq!(subject, "create-subject");
+            }
+            _ => panic!("expected TaskCreated event"),
+        }
+
+        let listed = store.list_tasks().await;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+    }
+
+    #[tokio::test]
+    async fn task_update_tool_emits_status_changed_event() {
+        let store = TaskStoreHandle::new(TaskStore::new());
+        let created = store
+            .create_task(
+                "to-update".to_string(),
+                "desc".to_string(),
+                Some("Running".to_string()),
+                None,
+                true,
+            )
+            .await;
+        let tool = TaskUpdateTool::new(store.clone());
+        let (event_tx, mut event_rx) = mpsc::channel(4);
+
+        let output = tool
+            .execute(
+                json!({
+                    "id": created.id,
+                    "status": "in_progress"
+                }),
+                Some(ToolContext {
+                    event_tx,
+                    tool_use_id: "tool-2".to_string(),
+                    session_id: "session-1".to_string(),
+                    task_store: Some(store.clone()),
+                    skill_registry: None,
+                    read_files: Arc::new(Mutex::new(HashSet::new())),
+                    turn_read_state: None,
+                    environment: None,
+                    shared_environment: None,
+                    cancellation_token: None,
+                }),
+            )
+            .await
+            .unwrap();
+
+        let updated: super::Task = serde_json::from_str(&output.content).unwrap();
+        let event = event_rx.recv().await.unwrap();
+        match event {
+            AgentEvent::TaskStatusChanged {
+                id,
+                subject,
+                status,
+                active_form,
+            } => {
+                assert_eq!(id, updated.id);
+                assert_eq!(subject, updated.subject);
+                assert_eq!(status, "in_progress");
+                assert_eq!(active_form, updated.active_form);
+            }
+            _ => panic!("expected TaskStatusChanged event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn task_list_tool_returns_owned_tasks_json() {
+        let store = TaskStoreHandle::new(TaskStore::new());
+        let _ = store
+            .create_task("list-1".to_string(), "desc-1".to_string(), None, None, true)
+            .await;
+        let _ = store
+            .create_task("list-2".to_string(), "desc-2".to_string(), None, None, true)
+            .await;
+
+        let tool = TaskListTool::new(store);
+        let output = tool.execute(json!({}), None).await.unwrap();
+        let tasks: Vec<super::Task> = serde_json::from_str(&output.content).unwrap();
+
+        assert_eq!(tasks.len(), 2);
     }
 }

@@ -1,7 +1,6 @@
-/// 静态模板文本、常量和正则表达式。
-///
-/// 此模块包含所有纯文本模板、常量和正则表达式定义，不含业务逻辑。
-
+//! 静态模板文本、常量和正则表达式。
+//!
+//! 此模块包含所有纯文本模板、常量和正则表达式定义，不含业务逻辑。
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
@@ -35,8 +34,7 @@ pub const BEHAVIOR_GUARDS: &str = r#"
 // ---------------------------------------------------------------------------
 
 /// 模板变量正则匹配
-pub static TEMPLATE_VAR_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap());
+pub static TEMPLATE_VAR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap());
 
 /// 预定义模板变量名称。
 pub mod template_vars {

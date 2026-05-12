@@ -4,37 +4,25 @@ use crate::skill::{CapabilityPolicy, SkillRegistry};
 #[cfg(test)]
 use crate::skill::{SkillPackage, ToolPolicy};
 use crate::tool::ToolRegistry;
-use once_cell::sync::Lazy;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+mod templates;
+
 // ---------------------------------------------------------------------------
 //  Section-based prompt building (Plan 1 升级)
 // ---------------------------------------------------------------------------
 
-/// 项目上下文文件名（按优先级排列）
-const PROJECT_CONTEXT_FILES: &[&str] = &["PROJECT.md", "NOVA.md"];
-
-/// 项目上下文最大字符数（约 4000 token）
-const MAX_PROJECT_CONTEXT_CHARS: usize = 16000;
-
 /// 开发项目提示词 section 标题
-const DEVELOPER_PROMPT_SECTION_HEADING: &str = "Developer Project Instructions";
+const DEVELOPER_PROMPT_SECTION_HEADING: &str = templates::DEVELOPER_PROMPT_SECTION_HEADING;
 
 /// 内置行为约束文本。
 ///
 /// 与 bootstrap.rs 中原始硬编码字符串语义一致，Phase 1 不做内容变更。
-pub const BEHAVIOR_GUARDS: &str = r#"
-## CRITICAL: Action Consistency
-- You are a physical entity with real-world capabilities.
-- If you state that you are going to perform an action (e.g., "running a command", "writing a file", "searching the web"), you MUST generate the corresponding tool_use block in the SAME response.
-- NEVER claim you are doing something "in the background" or "internally" without an actual tool call.
-- Textual confirmation of an action is only valid AFTER the tool has been invoked.
-"#;
+pub const BEHAVIOR_GUARDS: &str = templates::BEHAVIOR_GUARDS;
 
 /// 系统提示词 section 名称。
 ///
@@ -218,67 +206,8 @@ pub enum ToolGuidanceMode {
     Full,
 }
 
-/// 模板变量正则匹配
-static TEMPLATE_VAR_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}").unwrap());
-
-/// 预定义模板变量名称。
-pub mod template_vars {
-    /// 当前 workflow 阶段
-    pub const WORKFLOW_STAGE: &str = "workflow_stage";
-    /// 当前挂起交互
-    pub const PENDING_INTERACTION: &str = "pending_interaction";
-    /// 当前话题
-    pub const TOPIC: &str = "topic";
-    /// 约束条件
-    pub const CONSTRAINTS: &str = "constraints";
-    /// 候选方案列表
-    pub const CANDIDATES: &str = "candidates";
-    /// 已选方案
-    pub const SELECTED_CANDIDATE: &str = "selected_candidate";
-    /// 当前活跃 agent
-    pub const ACTIVE_AGENT: &str = "active_agent";
-}
-
-/// 简单的 `{{key}}` 模板变量替换。
-pub struct TemplateContext;
-
-impl TemplateContext {
-    /// 替换模板中的 `{{key}}` 占位符。
-    ///
-    /// - 已匹配的变量替换为对应值
-    /// - 未匹配的占位符替换为空字符串（清理模式）
-    pub fn render(template: &str, vars: &HashMap<String, String>) -> String {
-        TEMPLATE_VAR_RE
-            .replace_all(template, |caps: &regex::Captures| {
-                let key = &caps[1];
-                vars.get(key).cloned().unwrap_or_default()
-            })
-            .to_string()
-    }
-
-    /// 替换模板中的 `{{key}}` 占位符（保留模式）。
-    ///
-    /// 已匹配的变量替换为对应值，未匹配的保持原样。
-    pub fn render_partial(template: &str, vars: &HashMap<String, String>) -> String {
-        TEMPLATE_VAR_RE
-            .replace_all(template, |caps: &regex::Captures| {
-                let key = &caps[1];
-                match vars.get(key) {
-                    Some(value) => value.clone(),
-                    None => caps[0].to_string(),
-                }
-            })
-            .to_string()
-    }
-
-    /// 提取模板中所有占位符的名称。
-    pub fn extract_vars(template: &str) -> Vec<String> {
-        TEMPLATE_VAR_RE
-            .captures_iter(template)
-            .map(|cap| cap[1].to_string())
-            .collect()
-    }
-}
+pub use templates::template_vars;
+pub use templates::TemplateContext;
 
 /// 运行时环境快照，在会话创建时采集一次。
 #[derive(Debug, Clone, Default)]
@@ -501,7 +430,7 @@ pub async fn load_project_context_with_config_async(
 
     let project_dir = project_dir?;
 
-    for filename in PROJECT_CONTEXT_FILES {
+    for filename in templates::PROJECT_CONTEXT_FILES {
         let path = project_dir.join(filename);
         if let Some(content) = load_single_project_context_async(&path).await {
             return Some(content);
@@ -518,9 +447,9 @@ async fn load_single_project_context_async(path: &Path) -> Option<String> {
                 path,
                 content.len()
             );
-            if content.len() > MAX_PROJECT_CONTEXT_CHARS {
-                let truncated = &content[..MAX_PROJECT_CONTEXT_CHARS];
-                let last_newline = truncated.rfind('\n').unwrap_or(MAX_PROJECT_CONTEXT_CHARS);
+            if content.len() > templates::MAX_PROJECT_CONTEXT_CHARS {
+                let truncated = &content[..templates::MAX_PROJECT_CONTEXT_CHARS];
+                let last_newline = truncated.rfind('\n').unwrap_or(templates::MAX_PROJECT_CONTEXT_CHARS);
                 let mut result = truncated[..last_newline].to_string();
                 result.push_str("\n\n[... truncated due to size limit ...]");
                 return Some(result);
@@ -543,7 +472,7 @@ pub fn load_project_context_with_config(project_dir: Option<&Path>, configured_p
 
     let project_dir = project_dir?;
 
-    for filename in PROJECT_CONTEXT_FILES {
+    for filename in templates::PROJECT_CONTEXT_FILES {
         let path = project_dir.join(filename);
         if let Some(content) = load_single_project_context(&path) {
             return Some(content);
@@ -556,9 +485,9 @@ fn load_single_project_context(path: &Path) -> Option<String> {
     match std::fs::read_to_string(path) {
         Ok(content) if !content.trim().is_empty() => {
             log::info!("Loaded project context from {:?} ({} chars)", path, content.len());
-            if content.len() > MAX_PROJECT_CONTEXT_CHARS {
-                let truncated = &content[..MAX_PROJECT_CONTEXT_CHARS];
-                let last_newline = truncated.rfind('\n').unwrap_or(MAX_PROJECT_CONTEXT_CHARS);
+            if content.len() > templates::MAX_PROJECT_CONTEXT_CHARS {
+                let truncated = &content[..templates::MAX_PROJECT_CONTEXT_CHARS];
+                let last_newline = truncated.rfind('\n').unwrap_or(templates::MAX_PROJECT_CONTEXT_CHARS);
                 let mut result = truncated[..last_newline].to_string();
                 result.push_str("\n\n[... truncated due to size limit ...]");
                 return Some(result);
@@ -2008,12 +1937,12 @@ mod tests {
     #[test]
     fn load_project_context_truncates_large() {
         let dir = create_temp_dir("project-context-large");
-        let large = format!("{}\nend", "a".repeat(MAX_PROJECT_CONTEXT_CHARS + 128));
+        let large = format!("{}\nend", "a".repeat(templates::MAX_PROJECT_CONTEXT_CHARS + 128));
         fs::write(dir.join("PROJECT.md"), large).unwrap();
 
         let content = load_project_context(Some(&dir)).unwrap();
         assert!(content.contains("[... truncated due to size limit ...]"));
-        assert!(content.len() <= MAX_PROJECT_CONTEXT_CHARS + 64);
+        assert!(content.len() <= templates::MAX_PROJECT_CONTEXT_CHARS + 64);
 
         fs::remove_dir_all(dir).unwrap();
     }
@@ -2472,10 +2401,7 @@ mod tests {
             normalize_shell_command(r"C:\Windows\System32\cmd.exe /c"),
             Some("cmd".to_string())
         );
-        assert_eq!(
-            normalize_shell_command("/usr/bin/bash -lc"),
-            Some("bash".to_string())
-        );
+        assert_eq!(normalize_shell_command("/usr/bin/bash -lc"), Some("bash".to_string()));
         assert_eq!(normalize_shell_command(""), None);
         assert_eq!(normalize_shell_command("   "), None);
     }

@@ -127,6 +127,7 @@ impl ModelConfig {
             thinking_budget: None,
             reasoning_effort: None,
             max_tokens_field: "both".to_string(),
+            extra_body: None,
         }
     }
 }

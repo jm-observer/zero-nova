@@ -253,6 +253,7 @@ mod tests {
             thinking_budget: None,
             reasoning_effort: None,
             max_tokens_field: max_tokens_field.to_string(),
+            extra_body: None,
         }
     }
 

@@ -100,6 +100,8 @@ struct RawModelConfig {
     thinking_budget: Option<u32>,
     #[serde(default)]
     reasoning_effort: Option<String>,
+    #[serde(default)]
+    extra_body: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -198,6 +200,7 @@ impl RawAppConfig {
                     thinking_budget: raw_llm.model_config.thinking_budget,
                     reasoning_effort: raw_llm.model_config.reasoning_effort,
                     max_tokens_field: self.gateway.max_tokens_field.clone(),
+                    extra_body: raw_llm.model_config.extra_body,
                 };
                 if model_config.thinking_budget.is_some() && model_config.reasoning_effort.is_some() {
                     model_config.reasoning_effort = None;

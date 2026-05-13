@@ -71,6 +71,9 @@ pub struct ModelConfig {
     /// OpenAI-compatible: max token 字段策略 ("completion" | "legacy" | "both")
     #[serde(default = "default_max_tokens_field")]
     pub max_tokens_field: String,
+    /// OpenAI-compatible: 透传给服务端私有扩展字段的 extra_body 对象
+    #[serde(default)]
+    pub extra_body: Option<Value>,
 }
 
 fn default_max_tokens_field() -> String {

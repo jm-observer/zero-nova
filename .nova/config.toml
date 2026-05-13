@@ -21,15 +21,35 @@ base_url = "http://192.168.0.68:8082/v1"
 [llms.gemma]
 provider = "spark-12340"
 #model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
-model = "gemma-4-26B-A4B-it"
+#model = "gemma-4-26B-A4B-it"
+model = "gemma-4-26b-a4b"
 max_tokens = 8192
 temperature = 0.5
+# 如服务端要求 OpenAI-compatible 扩展参数，可在模型配置下声明
+# 占位符示例：取消注释后，将 `<...>` 替换为实际参数值
+# [llms.gemma.extra_body]
+# newking = <true_or_false>
+# top_k = <integer>
+# think = <true_or_false>
+# [llms.gemma.extra_body.chat_template_kwargs]
+# enable_thinking = <true_or_false>
+# preserve_thinking = <true_or_false>
 
 [llms."qwen3-6-4.6"]
 provider = "spark-8000"
-model = "Huihui-Qwen3.6-35B-A3B-Claude"
+#model = "Huihui-Qwen3.6-35B-A3B-Claude"
+model = "qwen"
 max_tokens = 8192
 temperature = 0.5
+# think 类非标准参数也建议放在对应 llm 下，而不是放到 gateway.agents
+# 占位符示例：取消注释后，将 `<...>` 替换为实际参数值
+# [llms."qwen3-6-4.6".extra_body]
+# newking = <true_or_false>
+# top_k = <integer>
+# think = <true_or_false>
+# [llms."qwen3-6-4.6".extra_body.chat_template_kwargs]
+# enable_thinking = <true_or_false>
+# preserve_thinking = <true_or_false>
 
 
 # ── 搜索 ───────────────────────────────────────────────────────

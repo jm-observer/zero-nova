@@ -300,6 +300,7 @@ mod tests {
             }),
             shared_environment: None,
             cancellation_token: None,
+            visible_tool_names: Arc::new(std::collections::HashSet::new()),
         }
     }
 

@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 impl<C: LlmClient> AgentRuntime<C> {
     /// 执行一组工具调用并返回格式化结果。
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn execute_tool_calls(
         &self,
         parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
@@ -29,6 +30,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         session_id: &str,
         environment: Option<EnvironmentSnapshot>,
         shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
+        visible_tool_names: Arc<std::collections::HashSet<String>>,
         event_tx: &mpsc::Sender<AgentEvent>,
     ) -> Result<Vec<ContentBlock>> {
         let mut tool_results_fut = FuturesUnordered::new();
@@ -91,6 +93,7 @@ impl<C: LlmClient> AgentRuntime<C> {
             let read_files = self.read_files.clone();
             let turn_read_state = turn_read_state.clone();
             let shared_environment = shared_environment.clone();
+            let visible_tool_names = visible_tool_names.clone();
 
             tool_results_fut.push(async move {
                 let _ = tx
@@ -117,6 +120,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                             environment,
                             shared_environment,
                             cancellation_token: None,
+                            visible_tool_names,
                         }),
                     ),
                 )
@@ -168,6 +172,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         &self,
         mut all_messages: Vec<Message>,
         tool_definitions: &[ToolDefinition],
+        visible_tool_names: Arc<std::collections::HashSet<String>>,
         iteration_budget: usize,
         session_id: &str,
         agent_id: Option<&str>,
@@ -383,6 +388,7 @@ impl<C: LlmClient> AgentRuntime<C> {
                     session_id,
                     current_environment,
                     shared_environment.clone(),
+                    visible_tool_names.clone(),
                     &event_tx,
                 )
                 .await?;

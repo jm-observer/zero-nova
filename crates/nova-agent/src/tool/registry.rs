@@ -38,6 +38,8 @@ pub struct ToolContext {
     pub shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
     /// Cancellation token for cooperative cancellation of long-running tools (e.g., orchestration).
     pub cancellation_token: Option<CancellationToken>,
+    /// 当前轮可见的工具名集合，用于 ToolInfo 等查询工具的可见性过滤。
+    pub visible_tool_names: Arc<HashSet<String>>,
 }
 
 /// Definition of a tool, including name, description, and input schema.
@@ -228,6 +230,17 @@ pub struct TurnToolView {
     pub tool_search_enabled: bool,
     pub skill_tool_enabled: bool,
     pub task_tools_enabled: bool,
+}
+
+/// 工具元信息的统一视图，供 prompt 展示、诊断和查询工具复用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolMetadataView {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+    pub loaded: bool,
+    pub deferred: bool,
+    pub category: Option<DeferredToolCategory>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -581,6 +594,77 @@ impl ToolRegistry {
         outcome
     }
 
+    /// 查询单个工具的元信息视图。
+    ///
+    /// 若同名工具同时存在于 loaded 和 deferred 中，优先返回 loaded 版本。
+    pub fn tool_metadata(&self, name: &str) -> Option<ToolMetadataView> {
+        let state = self.lock_state_startup_only();
+
+        // 先检查 loaded
+        if let Some(tool) = state.tools.iter().find(|tool| tool.definition().name == name) {
+            let def = tool.definition();
+            return Some(ToolMetadataView {
+                name: def.name.clone(),
+                description: def.description.clone(),
+                input_schema: def.input_schema.clone(),
+                loaded: true,
+                deferred: false,
+                category: None,
+            });
+        }
+
+        // 再检查 deferred
+        if let Some(entry) = state.deferred.iter().find(|entry| entry.name == name) {
+            return Some(ToolMetadataView {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                input_schema: entry.input_schema.clone(),
+                loaded: false,
+                deferred: true,
+                category: Some(entry.category.clone()),
+            });
+        }
+
+        None
+    }
+
+    /// 查询所有已注册工具的元信息视图。
+    pub fn all_tool_metadata(&self) -> Vec<ToolMetadataView> {
+        let state = self.lock_state_startup_only();
+        let mut result: Vec<ToolMetadataView> = state
+            .tools
+            .iter()
+            .map(|tool| {
+                let def = tool.definition();
+                ToolMetadataView {
+                    name: def.name.clone(),
+                    description: def.description.clone(),
+                    input_schema: def.input_schema.clone(),
+                    loaded: true,
+                    deferred: false,
+                    category: None,
+                }
+            })
+            .collect();
+
+        for entry in &state.deferred {
+            // 若同名已在 loaded 中则跳过
+            if result.iter().any(|v| v.name == entry.name) {
+                continue;
+            }
+            result.push(ToolMetadataView {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                input_schema: entry.input_schema.clone(),
+                loaded: false,
+                deferred: true,
+                category: Some(entry.category.clone()),
+            });
+        }
+
+        result
+    }
+
     /// Executes a tool by name with the given input and context.
     pub async fn execute(
         &self,
@@ -590,6 +674,18 @@ impl ToolRegistry {
     ) -> anyhow::Result<ToolOutput> {
         if name == builtin::tool_search::TOOL_NAME {
             return builtin::tool_search::execute(self, input).await;
+        }
+
+        if name == builtin::tool_info::TOOL_NAME {
+            let definition = builtin::tool_info::tool_definition();
+            if let Err(error_output) = crate::tool::schema_validation::validate_input_against_schema(
+                builtin::tool_info::TOOL_NAME,
+                &input,
+                &definition.input_schema,
+            ) {
+                return Ok(error_output);
+            }
+            return builtin::tool_info::execute(self, input, context.as_ref()).await;
         }
 
         let canonical_name = match name {
@@ -884,6 +980,7 @@ mod tests {
                     }),
                     shared_environment: None,
                     cancellation_token: None,
+                    visible_tool_names: Arc::new(std::collections::HashSet::new()),
                 }),
             )
             .await
@@ -1048,5 +1145,98 @@ mod tests {
             read_elapsed.as_millis(),
             mixed_elapsed.as_millis()
         );
+    }
+
+    #[test]
+    fn tool_metadata_returns_loaded_tool() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(StaticTool { name: "Bash" }));
+
+        let meta = registry.tool_metadata("Bash");
+        assert!(meta.is_some());
+        let meta = meta.unwrap();
+        assert_eq!(meta.name, "Bash");
+        assert!(meta.loaded);
+        assert!(!meta.deferred);
+        assert!(meta.input_schema.is_object());
+    }
+
+    #[test]
+    fn tool_metadata_returns_deferred_tool() {
+        let registry = ToolRegistry::new();
+        registry.register_deferred_with_category(
+            "DeferredTool".to_string(),
+            "deferred description".to_string(),
+            json!({"type": "object", "properties": {"key": {"type": "string"}}}),
+            Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
+            DeferredToolCategory::Task,
+        );
+
+        let meta = registry.tool_metadata("DeferredTool");
+        assert!(meta.is_some());
+        let meta = meta.unwrap();
+        assert_eq!(meta.name, "DeferredTool");
+        assert!(!meta.loaded);
+        assert!(meta.deferred);
+        assert_eq!(meta.category, Some(DeferredToolCategory::Task));
+        assert!(meta.input_schema.is_object());
+    }
+
+    #[test]
+    fn tool_metadata_loaded_takes_priority_over_deferred() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(StaticTool { name: "SameName" }));
+        registry.register_deferred(
+            "SameName".to_string(),
+            "deferred version".to_string(),
+            json!({"type": "object"}),
+            Box::new(|| Arc::new(StaticTool { name: "SameName" })),
+        );
+
+        let meta = registry.tool_metadata("SameName");
+        assert!(meta.is_some());
+        let meta = meta.unwrap();
+        assert!(meta.loaded);
+        assert!(!meta.deferred);
+        assert_eq!(meta.description, "SameName description");
+    }
+
+    #[test]
+    fn tool_metadata_returns_none_for_unknown() {
+        let registry = ToolRegistry::new();
+        assert!(registry.tool_metadata("UnknownTool").is_none());
+    }
+
+    #[test]
+    fn all_tool_metadata_includes_loaded_and_deferred() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(StaticTool { name: "Bash" }));
+        registry.register(Box::new(StaticTool { name: "Read" }));
+        registry.register_deferred_with_category(
+            "DeferredTool".to_string(),
+            "deferred".to_string(),
+            json!({"type": "object"}),
+            Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
+            DeferredToolCategory::Skill,
+        );
+
+        let metas = registry.all_tool_metadata();
+        let names: Vec<&str> = metas.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"Bash"));
+        assert!(names.contains(&"Read"));
+        assert!(names.contains(&"DeferredTool"));
+        assert_eq!(metas.len(), 3);
+        let deferred = metas.into_iter().find(|meta| meta.name == "DeferredTool").unwrap();
+        assert_eq!(deferred.category, Some(DeferredToolCategory::Skill));
+    }
+
+    #[tokio::test]
+    async fn execute_tool_info_uses_schema_validation() {
+        let registry = ToolRegistry::new();
+
+        let output = registry.execute("ToolInfo", json!("Bash"), None).await.unwrap();
+
+        assert!(output.is_error);
+        assert!(output.content.contains("input must be a JSON object"));
     }
 }

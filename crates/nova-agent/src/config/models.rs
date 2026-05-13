@@ -451,6 +451,7 @@ impl Default for LlmConfig {
                 thinking_budget: None,
                 reasoning_effort: None,
                 max_tokens_field: default_max_tokens_field(),
+                extra_body: None,
             },
         }
     }

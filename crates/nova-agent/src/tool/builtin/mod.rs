@@ -6,6 +6,7 @@ pub mod project_manager;
 pub mod read;
 pub mod skill;
 pub mod task;
+pub mod tool_info;
 pub mod tool_search;
 pub mod web_fetch;
 pub mod web_search;
@@ -57,6 +58,9 @@ pub fn register_builtin_tools(
     if is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
         registry.register(Box::new(orchestrate_task::OrchestrateTaskTool::new(config.clone())));
     }
+
+    // ToolInfo is always registered as a loaded tool (schema lookup infrastructure)
+    registry.register(Box::new(tool_info::ToolInfoTool {}));
 
     let skill_registry_for_skill = skill_registry.clone();
     if is_tool_enabled(tool_whitelist, "Skill") {

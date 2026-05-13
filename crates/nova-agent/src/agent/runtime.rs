@@ -170,9 +170,12 @@ impl<C: LlmClient> AgentRuntime<C> {
             chrono::Utc::now().timestamp_millis(),
         ));
         let tool_definitions = self.tools.tool_definitions();
+        let visible_tool_names: Arc<std::collections::HashSet<String>> =
+            Arc::new(tool_definitions.iter().map(|t| t.name.clone()).collect());
         self.execute_turn_loop(
             all_messages,
             &tool_definitions,
+            visible_tool_names,
             self.config.max_iterations,
             session_id,
             agent_id,
@@ -228,9 +231,12 @@ impl<C: LlmClient> AgentRuntime<C> {
         self.log_history_diagnostics(history.as_ref());
 
         // 6. 构造 TurnContext
+        let visible_tool_names: std::sync::Arc<std::collections::HashSet<String>> =
+            std::sync::Arc::new(tool_definitions.iter().map(|t| t.name.clone()).collect());
         Ok(TurnContext {
             system_prompt,
             tool_definitions,
+            visible_tool_names,
             history,
             active_skill,
             capability_policy,
@@ -320,6 +326,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         self.execute_turn_loop(
             all_messages,
             &ctx.tool_definitions,
+            ctx.visible_tool_names.clone(),
             ctx.iteration_budget,
             session_id,
             agent_id,
@@ -368,6 +375,10 @@ impl<C: LlmClient> AgentRuntime<C> {
         active_skill: &Option<ActiveSkillState>,
     ) -> Vec<ToolDefinition> {
         let mut tools = self.tools.tool_definitions();
+        let tool_info = tools
+            .iter()
+            .find(|tool| tool.name == crate::tool::builtin::tool_info::TOOL_NAME)
+            .cloned();
 
         if let Some(ref skill) = active_skill {
             if let Some(ref sr) = self.skill_registry {
@@ -389,6 +400,16 @@ impl<C: LlmClient> AgentRuntime<C> {
         } else {
             // 情况 B：无活跃技能，仅显示 CapabilityPolicy 中指定的始终开启工具
             tools.retain(|t| capability_policy.always_enabled_tools.contains(&t.name));
+        }
+
+        if !tools.is_empty()
+            && !tools
+                .iter()
+                .any(|tool| tool.name == crate::tool::builtin::tool_info::TOOL_NAME)
+        {
+            if let Some(tool_info) = tool_info {
+                tools.push(tool_info);
+            }
         }
 
         tools
@@ -465,6 +486,7 @@ mod tests {
                     thinking_budget: None,
                     reasoning_effort: None,
                     max_tokens_field: "completion".to_string(),
+                    extra_body: None,
                 },
                 tool_timeout: Duration::from_secs(1),
                 max_tokens: 128,

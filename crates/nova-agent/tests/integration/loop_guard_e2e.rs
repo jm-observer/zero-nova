@@ -173,6 +173,7 @@ fn build_runtime_with_loop_guard<C: LlmClient>(
             thinking_budget: None,
             reasoning_effort: None,
             max_tokens_field: "both".to_string(),
+            extra_body: None,
         },
         tool_timeout: std::time::Duration::from_secs(10),
         max_tokens: 1000,

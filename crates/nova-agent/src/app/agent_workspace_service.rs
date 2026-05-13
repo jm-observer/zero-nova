@@ -848,6 +848,7 @@ mod tests {
                     thinking_budget: None,
                     reasoning_effort: None,
                     max_tokens_field: "completion".to_string(),
+                    extra_body: None,
                 },
             },
         );

@@ -182,6 +182,11 @@ impl AppConfig {
             if !self.providers.contains_key(llm.provider.as_str()) {
                 bail!("llm '{}' references unknown provider '{}'", llm_id, llm.provider);
             }
+            if let Some(extra_body) = &llm.model_config.extra_body {
+                if !extra_body.is_object() {
+                    bail!("llm '{}' extra_body must be a TOML table / JSON object", llm_id);
+                }
+            }
         }
 
         if self.gateway.agents.is_empty() {

@@ -200,6 +200,12 @@ pub enum SkillInjectionMode {
     Full,
 }
 
+/// Tool 提示策略。
+///
+/// - `Compact`: 仅输出 `- name: description` 列表。
+/// - `Full`: 输出 `## name\n\ndescription\n\n` 格式，并在末尾附加
+///   `ToolInfo` 查询引导，不再内联完整 schema JSON。
+///   （provider request 中的 `tools[].input_schema` 保持不变。）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolGuidanceMode {
     Compact,
@@ -977,14 +983,19 @@ impl SystemPromptBuilder {
                     tool_desc.push_str(&format!("- `{}`: {}\n", def.name, def.description));
                 }
                 ToolGuidanceMode::Full => {
-                    tool_desc.push_str(&format!(
-                        "## {}\n\n{}\n\nInput schema:\n```json\n{}\n```\n\n---\n\n",
-                        def.name,
-                        def.description,
-                        serde_json::to_string_pretty(&def.input_schema).unwrap_or_else(|_| "{}".to_string())
-                    ));
+                    tool_desc.push_str(&format!("## {}\n\n{}\n\n", def.name, def.description));
                 }
             }
+        }
+
+        let tool_info_visible = definitions
+            .iter()
+            .any(|definition| definition.name == crate::tool::builtin::tool_info::TOOL_NAME);
+        if !definitions.is_empty() && tool_info_visible {
+            let lookup_hint = "\
+---\n\n\
+**Tool parameter lookup**: If you need exact parameters, field types, required/default/enum values, or nested object structures, call the `ToolInfo` tool first. Do not guess tool parameters based on experience.\n\n";
+            tool_desc.push_str(lookup_hint);
         }
 
         if let Some((_, section)) = self
@@ -1251,6 +1262,8 @@ pub struct TurnContext {
     pub system_prompt: String,
     /// 当前轮次可见的工具定义集合
     pub tool_definitions: Vec<ToolDefinition>,
+    /// 当前轮次可见的工具名集合（用于 ToolInfo 可见性过滤）
+    pub visible_tool_names: std::sync::Arc<std::collections::HashSet<String>>,
     /// 当前轮次使用的历史消息
     pub history: Arc<Vec<Message>>,
     /// 当前活跃的 skill 状态（可选）
@@ -2450,6 +2463,41 @@ mod tests {
             .build();
         assert!(prompt.contains("`Read`: Read file"));
         assert!(!prompt.contains("Input schema"));
+    }
+
+    #[test]
+    fn tool_guidance_full_includes_lookup_hint_only_when_tool_info_visible() {
+        let defs = vec![
+            ToolDefinition {
+                name: "Read".to_string(),
+                description: "Read file".to_string(),
+                input_schema: serde_json::json!({"type":"object"}),
+            },
+            ToolDefinition {
+                name: "ToolInfo".to_string(),
+                description: "Lookup tool metadata".to_string(),
+                input_schema: serde_json::json!({"type":"object"}),
+            },
+        ];
+        let prompt = SystemPromptBuilder::new()
+            .tool_guidance_section("tools")
+            .with_tool_definitions(&defs, ToolGuidanceMode::Full)
+            .build();
+        assert!(prompt.contains("Tool parameter lookup"));
+    }
+
+    #[test]
+    fn tool_guidance_full_omits_lookup_hint_when_tool_info_hidden() {
+        let defs = vec![ToolDefinition {
+            name: "Read".to_string(),
+            description: "Read file".to_string(),
+            input_schema: serde_json::json!({"type":"object"}),
+        }];
+        let prompt = SystemPromptBuilder::new()
+            .tool_guidance_section("tools")
+            .with_tool_definitions(&defs, ToolGuidanceMode::Full)
+            .build();
+        assert!(!prompt.contains("Tool parameter lookup"));
     }
 
     #[test]

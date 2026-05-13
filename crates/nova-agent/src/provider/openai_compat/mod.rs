@@ -117,6 +117,17 @@ impl OpenAiCompatClient {
         }
     }
 
+    fn enrich_request_body_for_diagnostics(
+        request: &serde_json::Value,
+        extra_body: Option<&serde_json::Value>,
+    ) -> serde_json::Value {
+        let mut request_body = request.clone();
+        if let (Some(obj), Some(extra_body)) = (request_body.as_object_mut(), extra_body) {
+            obj.insert("extra_body".to_string(), extra_body.clone());
+        }
+        request_body
+    }
+
     fn resolve_endpoint(&self, config: &ModelConfig) -> Result<(String, String)> {
         match &self.endpoint {
             OpenAiCompatEndpoint::Fixed { api_key, base_url } => Ok((api_key.clone(), base_url.clone())),
@@ -185,19 +196,10 @@ impl LlmClient for OpenAiCompatClient {
         );
 
         // 序列化请求体并注入 openai-compatible 扩展参数用于日志/诊断
-        let mut request_body = serde_json::to_value(&request).unwrap_or(serde_json::Value::Null);
-        if let Some(obj) = request_body.as_object_mut() {
-            obj.insert(
-                "extra_body".to_string(),
-                serde_json::json!({
-                    "top_k": 20,
-                    "chat_template_kwargs": {
-                        "enable_thinking": true,
-                        "preserve_thinking": true
-                    }
-                }),
-            );
-        }
+        let request_body = Self::enrich_request_body_for_diagnostics(
+            &serde_json::to_value(&request).unwrap_or(serde_json::Value::Null),
+            config.extra_body.as_ref(),
+        );
 
         // 构建请求 Header 并注入 x-session-id / x-agent-id
         let extra_headers = self.build_request_headers(request_context);
@@ -543,5 +545,32 @@ mod tests {
         let ctx = make_context(Some("sess-123"), Some("agent-456"));
         let headers = client.build_request_headers(&ctx);
         assert!(headers.is_empty());
+    }
+
+    #[test]
+    fn test_enrich_request_body_injects_extra_body() {
+        let extra_body = serde_json::json!({
+            "newking": true,
+            "chat_template_kwargs": {
+                "enable_thinking": true,
+                "preserve_thinking": true
+            }
+        });
+        let body = OpenAiCompatClient::enrich_request_body_for_diagnostics(
+            &serde_json::json!({
+                "model": "test-model"
+            }),
+            Some(&extra_body),
+        );
+
+        assert_eq!(body["extra_body"]["newking"], serde_json::json!(true));
+        assert_eq!(
+            body["extra_body"]["chat_template_kwargs"]["enable_thinking"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            body["extra_body"]["chat_template_kwargs"]["preserve_thinking"],
+            serde_json::json!(true)
+        );
     }
 }

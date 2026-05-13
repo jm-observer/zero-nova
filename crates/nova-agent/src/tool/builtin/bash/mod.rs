@@ -408,6 +408,7 @@ mod tests {
             }),
             shared_environment: None,
             cancellation_token: None,
+            visible_tool_names: Arc::new(std::collections::HashSet::new()),
         };
         assert_eq!(tool.resolve_working_dir(Some(&ctx)), Some(PathBuf::from("D:/fallback")));
     }
@@ -438,6 +439,7 @@ mod tests {
             }),
             shared_environment: None,
             cancellation_token: None,
+            visible_tool_names: Arc::new(std::collections::HashSet::new()),
         };
         assert_eq!(tool.resolve_working_dir(Some(&ctx)), Some(PathBuf::from("D:/project")));
     }

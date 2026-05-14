@@ -10,9 +10,8 @@ pub use builder::{
     build_agent_catalog_hint, build_agent_catalog_section, filter_project_instruction_by_profile, SystemPromptBuilder,
 };
 pub use context::{
-    detect_shell_command, load_developer_project_prompt, load_developer_project_prompt_async, load_project_context,
-    load_project_context_async, load_project_context_with_config, load_project_context_with_config_async,
-    EnvironmentSnapshot,
+    detect_shell_command, load_developer_project_prompt_async, load_project_context_async,
+    load_project_context_with_config_async, EnvironmentSnapshot,
 };
 pub use side_channel::{SideChannelConfig, SideChannelInjector};
 pub use templates::{template_vars, TemplateContext, BEHAVIOR_GUARDS};

@@ -156,8 +156,8 @@ mod tests {
     use crate::tool::{ToolRegistry, UnavailableProjectDirService};
     use std::sync::Arc;
 
-    #[test]
-    fn orchestrate_task_is_hidden_without_explicit_whitelist() {
+    #[tokio::test]
+    async fn orchestrate_task_is_hidden_without_explicit_whitelist() {
         let registry = ToolRegistry::new();
         register_builtin_tools(
             &registry,
@@ -169,11 +169,11 @@ mod tests {
             &HttpClients::new().expect("http clients should build"),
         );
 
-        assert!(!registry.has_loaded_tool("OrchestrateTask"));
+        assert!(!registry.has_loaded_tool("OrchestrateTask").await);
     }
 
-    #[test]
-    fn orchestrate_task_is_visible_when_whitelisted() {
+    #[tokio::test]
+    async fn orchestrate_task_is_visible_when_whitelisted() {
         let registry = ToolRegistry::new();
         let whitelist = vec!["OrchestrateTask".to_string()];
         register_builtin_tools(
@@ -186,6 +186,6 @@ mod tests {
             &HttpClients::new().expect("http clients should build"),
         );
 
-        assert!(registry.has_loaded_tool("OrchestrateTask"));
+        assert!(registry.has_loaded_tool("OrchestrateTask").await);
     }
 }

@@ -383,7 +383,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 prompt_config = prompt_config.with_project_context_content(content);
             }
 
-            let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config)?;
+            let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config).await?;
 
             // Phase C: Capture snapshot
             let snapshot = super::snapshot_assembler::RuntimeSnapshotAssembler::turn_context_to_snapshot(

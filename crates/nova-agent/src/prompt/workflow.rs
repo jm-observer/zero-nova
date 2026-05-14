@@ -8,11 +8,6 @@ pub struct WorkflowStagePrompts {
 }
 
 impl WorkflowStagePrompts {
-    pub fn load_from_file(path: &Path) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        Self::parse_workflow_stage_content(&content)
-    }
-
     pub async fn load_from_file_async(path: &Path) -> anyhow::Result<Self> {
         let content = tokio::fs::read_to_string(path).await?;
         Self::parse_workflow_stage_content(&content)
@@ -74,8 +69,8 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn workflow_stage_prompts_loads_code_blocks_only() {
+    #[tokio::test]
+    async fn workflow_stage_prompts_loads_code_blocks_only() {
         let dir = create_temp_dir("workflow-prompts");
         let file = dir.join("workflow-stages.md");
         fs::write(
@@ -84,7 +79,7 @@ mod tests {
         )
         .unwrap();
 
-        let prompts = WorkflowStagePrompts::load_from_file(&file).unwrap();
+        let prompts = WorkflowStagePrompts::load_from_file_async(&file).await.unwrap();
         let mut vars = HashMap::new();
         vars.insert("topic".to_string(), "prompt".to_string());
 

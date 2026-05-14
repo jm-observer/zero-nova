@@ -79,7 +79,7 @@ async fn handle_selection(registry: &ToolRegistry, raw_selection: &str) -> Strin
 
     let mut results = Vec::with_capacity(names.len());
     for name in names {
-        match registry.resolve_deferred_async(name).await {
+        match registry.resolve_deferred_with_outcome(name).await {
             DeferredResolveOutcome::Loaded => results.push(format!("Loaded tool: {}", name)),
             DeferredResolveOutcome::AlreadyLoaded => {
                 results.push(format!("Tool '{}' is already loaded.", name));

@@ -196,7 +196,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     ///
     /// `prompt_config` 由外部（bootstrap/CLI）统一创建，携带 agent prompt 文件和
     /// 模板变量等配置。
-    pub fn prepare_turn(
+    pub async fn prepare_turn(
         &self,
         input: &str,
         current_history: Arc<Vec<Message>>,
@@ -224,7 +224,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         if let Some(ref skill) = active_skill {
             config.active_skill = Some(skill.skill_id.clone());
         }
-        let system_prompt = self.build_system_prompt(&config, &tool_definitions);
+        let system_prompt = self.build_system_prompt(&config, &tool_definitions).await;
 
         // 5. 裁剪历史（如果 active skill 切换了则裁剪）
         let history = self.trim_history(&current_history, &system_prompt, &active_skill)?;
@@ -358,11 +358,12 @@ impl<C: LlmClient> AgentRuntime<C> {
 
     /// 构建系统提示词。
     ///
-    /// 接收 PromptConfig 参数，通过 SystemPromptBuilder::from_config 统一构建。
-    fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
+    /// 接收 PromptConfig 参数，通过 SystemPromptBuilder::from_config_async 统一构建。
+    async fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
         let empty = SkillRegistry::new();
         let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
-        let builder = SystemPromptBuilder::from_config(config, skills)
+        let builder = SystemPromptBuilder::from_config_async(config, skills)
+            .await
             .with_tool_definitions(tool_definitions, config.tool_guidance);
         self.log_prompt_diagnostics(&builder, tool_definitions);
         builder.build()

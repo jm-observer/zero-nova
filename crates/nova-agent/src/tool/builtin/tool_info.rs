@@ -80,7 +80,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
             continue;
         }
 
-        match registry.tool_metadata(name) {
+        match registry.tool_metadata(name).await {
             Some(meta) => {
                 let entry = build_info_entry(&meta, include_schema);
                 results.push(entry);

@@ -323,7 +323,9 @@ impl AgentTool {
             None
         };
 
-        let turn_ctx = runtime.prepare_turn(prompt, Arc::new(Vec::new()), &prompt_config)?;
+        let turn_ctx = runtime
+            .prepare_turn(prompt, Arc::new(Vec::new()), &prompt_config)
+            .await?;
         let session_id = context
             .as_ref()
             .map(|ctx| ctx.session_id.clone())

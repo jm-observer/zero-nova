@@ -1,7 +1,6 @@
 use crate::config::AgentSpec;
 use crate::prompt::context::{
-    load_developer_project_prompt, load_developer_project_prompt_async, load_project_context_with_config,
-    load_project_context_with_config_async, EnvironmentSnapshot,
+    load_developer_project_prompt_async, load_project_context_with_config_async, EnvironmentSnapshot,
 };
 use crate::prompt::templates::{template_vars, TemplateContext, BEHAVIOR_GUARDS};
 use crate::prompt::types::{
@@ -244,76 +243,6 @@ impl SystemPromptBuilder {
             .join("")
             .chars()
             .count()
-    }
-
-    pub fn from_config(config: &PromptConfig, skills: &SkillRegistry) -> Self {
-        let mut builder = Self::new();
-
-        let rendered_prompt = if config.template_vars.is_empty() {
-            config.agent_prompt.clone()
-        } else {
-            TemplateContext::render(&config.agent_prompt, &config.template_vars)
-        };
-        if !rendered_prompt.is_empty() {
-            builder = builder.base_section(&rendered_prompt);
-        }
-
-        builder = builder.behavior_guards_section();
-
-        let skill_prompt = match config.skill_injection {
-            SkillInjectionMode::Catalog => skills.generate_catalog_prompt(),
-            SkillInjectionMode::ActiveFull => skills.generate_contextual_prompt(config.active_skill.as_deref()),
-            SkillInjectionMode::Full => skills.generate_full_prompt(),
-        };
-        if !skill_prompt.is_empty() {
-            builder = builder.skill_section(&skill_prompt);
-        }
-
-        if let Some(content) = &config.developer_project_prompt_content {
-            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
-                content,
-                config.project_instruction_profile,
-            ));
-        } else if let Some(content) =
-            load_developer_project_prompt(config.project_dir.as_deref(), &config.developer_prompt_files)
-        {
-            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
-                &content,
-                config.project_instruction_profile,
-            ));
-        }
-
-        if let Some(content) = &config.project_context_content {
-            builder = builder.project_context_section(content);
-        } else if let Some(content) =
-            load_project_context_with_config(config.project_dir.as_deref(), config.project_context_path.as_deref())
-        {
-            builder = builder.project_context_section(&content);
-        }
-
-        if let Some(env) = &config.environment {
-            builder = builder.environment_snapshot(env);
-        }
-
-        if let Some(ref catalog) = config.agent_catalog {
-            if !catalog.is_empty() {
-                builder = builder.agent_catalog_section(catalog);
-            }
-        }
-
-        if let Some(stage) = config.template_vars.get(template_vars::WORKFLOW_STAGE) {
-            if stage != "idle" {
-                if let Some(path) = &config.workflow_prompt_path {
-                    if let Ok(workflow_prompts) = WorkflowStagePrompts::load_from_file(path) {
-                        if let Some(prompt) = workflow_prompts.render(stage, &config.template_vars) {
-                            builder = builder.workflow_section(prompt);
-                        }
-                    }
-                }
-            }
-        }
-
-        builder
     }
 
     pub async fn from_config_async(config: &PromptConfig, skills: &SkillRegistry) -> Self {

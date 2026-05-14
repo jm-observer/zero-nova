@@ -1,0 +1,11 @@
+[package]
+name = "nova-skill-loader"
+version = "0.1.0"
+edition = "2021"
+description = "Skill package discovery and parsing for zero-nova"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }

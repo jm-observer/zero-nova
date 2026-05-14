@@ -157,6 +157,7 @@ impl AgentWorkspaceService {
 
         let env = crate::prompt::EnvironmentSnapshot::collect(&reloaded_config.config_dir, None).await;
         prompt_config = prompt_config.with_environment(env);
+        #[allow(deprecated)]
         let compiled_prompt = SystemPromptBuilder::from_config_async(&prompt_config, &default_skill_registry())
             .await
             .build();

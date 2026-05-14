@@ -2,6 +2,8 @@ pub mod agent_workspace_service;
 pub mod application;
 pub mod bootstrap;
 pub mod conversation_service;
+pub mod prompt_loader;
+mod skill_adapter;
 pub mod snapshot_assembler;
 pub mod types;
 pub mod voice_service;

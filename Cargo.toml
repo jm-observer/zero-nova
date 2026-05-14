@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/nova-agent",
+  "crates/nova-skill-loader",
   "crates/nova-protocol",
   "crates/nova-gateway-core",
   "crates/nova-server",
@@ -47,6 +48,7 @@ arc-swap = "1"
 
 # Internal crates
 nova-agent = { path = "crates/nova-agent" }
+nova-skill-loader = { path = "crates/nova-skill-loader" }
 nova-protocol = { path = "crates/nova-protocol" }
 nova-gateway-core = { path = "crates/nova-gateway-core" }
 nova-server = { path = "crates/nova-server" }

@@ -1,5 +1,6 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
+use super::skill_adapter::convert_loaded_skills;
 use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
@@ -32,12 +33,25 @@ pub struct BootstrapOptions {
 pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplication>> {
     warn_unused_gateway_sections(&config).await?;
 
-    let mut skill_registry = SkillRegistry::new();
     let skill_dir = config.skills_dir();
-    if let Err(err) = skill_registry.load_from_dir_async(&skill_dir).await {
-        log::warn!("Failed to load skills from {:?}: {}", skill_dir, err);
-    }
-    let skill_registry = Arc::new(skill_registry);
+    let loaded_skills = match nova_skill_loader::load_skills_from_dir_async(&skill_dir).await {
+        Ok(skills) => {
+            log::info!("Loaded {} skills from {:?}", skills.len(), skill_dir);
+            skills
+        }
+        Err(err) => {
+            log::warn!("Failed to load skills from {:?}: {}", skill_dir, err);
+            Vec::new()
+        }
+    };
+    let skill_packages = convert_loaded_skills(loaded_skills);
+    let skill_registry = match SkillRegistry::from_packages(skill_packages) {
+        Ok(registry) => Arc::new(registry),
+        Err(err) => {
+            log::warn!("Failed to initialize skill registry: {}", err);
+            Arc::new(SkillRegistry::new())
+        }
+    };
 
     let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
     let root_agent = config.primary_agent()?;
@@ -143,6 +157,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         }
 
         // 如果 agent 启用了开发项目提示词，则注入文件列表
+        #[allow(deprecated)]
         let full_system_prompt = SystemPromptBuilder::from_config_async(&prompt_config, &skill_registry)
             .await
             .build();

@@ -112,6 +112,46 @@ pub enum ToolGuidanceMode {
     Full,
 }
 
+/// 启动期或 agent descriptor 构建所需的稳定 prompt 输入。
+/// 所有字段均为已加载内容，不包含路径信息。
+#[derive(Debug, Clone)]
+pub struct PromptMaterial {
+    pub agent_id: String,
+    pub agent_prompt: String,
+    pub agent_catalog: Option<String>,
+    pub environment_snapshot: Option<super::context::EnvironmentSnapshot>,
+    pub initial_template_vars: HashMap<String, String>,
+    pub skill_injection_mode: SkillInjectionMode,
+    pub project_instruction_profile: ProjectInstructionProfile,
+    pub tool_guidance: ToolGuidanceMode,
+}
+
+impl Default for PromptMaterial {
+    fn default() -> Self {
+        Self {
+            agent_id: String::new(),
+            agent_prompt: String::new(),
+            agent_catalog: None,
+            environment_snapshot: None,
+            initial_template_vars: HashMap::new(),
+            skill_injection_mode: SkillInjectionMode::Catalog,
+            project_instruction_profile: ProjectInstructionProfile::Auto,
+            tool_guidance: ToolGuidanceMode::Compact,
+        }
+    }
+}
+
+/// 每轮 turn 可能变化的动态 prompt 输入。
+/// 所有字段均为已加载内容，不包含路径信息。
+#[derive(Debug, Clone, Default)]
+pub struct TurnPromptMaterial {
+    pub developer_project_prompt: Option<String>,
+    pub project_context: Option<String>,
+    pub workflow_prompt: Option<String>,
+    pub turn_template_vars: HashMap<String, String>,
+    pub active_skill: Option<String>,
+}
+
 /// Prompt 构建所需的完整配置。
 ///
 /// 由 bootstrap / CLI / ConversationService 统一创建。

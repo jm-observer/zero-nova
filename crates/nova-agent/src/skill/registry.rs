@@ -2,9 +2,7 @@
 use super::types::FileToolPriority;
 use super::types::{CapabilityPolicy, PolicySource, Skill, SkillPackage, ToolPolicy};
 
-mod discovery;
 mod filter;
-mod parser;
 
 // ---------------------------------------------------------------------------
 //  SkillRegistry
@@ -22,13 +20,45 @@ impl SkillRegistry {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// 从已加载的 SkillPackage 列表创建 registry。
+    pub fn from_packages(packages: Vec<SkillPackage>) -> anyhow::Result<Self> {
+        let mut registry = Self::new();
+        registry.extend_packages(packages)?;
+        Ok(registry)
+    }
+
+    /// 追加已加载 SkillPackage；重复 id/slug 时返回错误。
+    pub fn extend_packages(&mut self, packages: Vec<SkillPackage>) -> anyhow::Result<()> {
+        for package in packages {
+            if self
+                .packages
+                .iter()
+                .any(|existing| existing.id == package.id || existing.slug == package.slug)
+            {
+                anyhow::bail!(
+                    "duplicate skill id/slug detected: id='{}', slug='{}'",
+                    package.id,
+                    package.slug
+                );
+            }
+            self.packages.push(package);
+        }
+        Ok(())
+    }
+
+    /// 替换当前所有 SkillPackage（用于热更新等场景）。
+    pub fn replace_packages(&mut self, packages: Vec<SkillPackage>) -> anyhow::Result<()> {
+        self.packages.clear();
+        self.skills.clear();
+        self.extend_packages(packages)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use tempfile::tempdir;
 
     #[test]
     fn policy_source_defaults_to_default() {
@@ -57,6 +87,40 @@ mod tests {
             ToolPolicy::AllowListWithDeferred(list)
             if list == tools
         ));
+    }
+
+    #[test]
+    fn from_packages_rejects_duplicate_id_or_slug() {
+        let result = SkillRegistry::from_packages(vec![
+            SkillPackage {
+                id: "skill-a".to_string(),
+                slug: "skill-a".to_string(),
+                display_name: "Skill A".to_string(),
+                description: "A".to_string(),
+                instructions: "A".to_string(),
+                tool_policy: ToolPolicy::InheritAll,
+                sticky: false,
+                aliases: vec![],
+                examples: vec![],
+                source_path: PathBuf::from("a"),
+                compat_mode: false,
+            },
+            SkillPackage {
+                id: "skill-a".to_string(),
+                slug: "skill-b".to_string(),
+                display_name: "Skill B".to_string(),
+                description: "B".to_string(),
+                instructions: "B".to_string(),
+                tool_policy: ToolPolicy::InheritAll,
+                sticky: false,
+                aliases: vec![],
+                examples: vec![],
+                source_path: PathBuf::from("b"),
+                compat_mode: false,
+            },
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -318,45 +382,5 @@ mod tests {
             registry.match_skill_by_input("/multi-agent 执行这个任务"),
             Some("orchestrator".to_string())
         );
-    }
-
-    #[tokio::test]
-    async fn load_from_dir_async_loads_toml_and_markdown_skills() {
-        let root = tempdir().unwrap();
-        let skill_a = root.path().join("a");
-        let skill_b = root.path().join("nested").join("b");
-        tokio::fs::create_dir_all(&skill_a).await.unwrap();
-        tokio::fs::create_dir_all(&skill_b).await.unwrap();
-
-        tokio::fs::write(
-            skill_a.join("skill.toml"),
-            r#"
-slug = "skill-a"
-display_name = "Skill A"
-description = "desc a"
-instructions = "do a"
-"#,
-        )
-        .await
-        .unwrap();
-
-        tokio::fs::write(
-            skill_b.join("SKILL.md"),
-            r#"---
-name: "Skill B"
-description: "desc b"
----
-do b
-"#,
-        )
-        .await
-        .unwrap();
-
-        let mut registry = SkillRegistry::new();
-        registry.load_from_dir_async(root.path()).await.unwrap();
-
-        assert_eq!(registry.packages.len(), 2);
-        assert!(registry.find_by_slug("skill-a").is_some());
-        assert!(registry.find_by_name("Skill B").is_some());
     }
 }

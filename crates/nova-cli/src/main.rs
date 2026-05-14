@@ -16,9 +16,10 @@ use nova_agent::network::HttpClients;
 use nova_agent::prompt::{EnvironmentSnapshot, SystemPromptBuilder, TrimmerConfig};
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::provider::LlmClient;
-use nova_agent::skill::SkillRegistry;
+use nova_agent::skill::{SkillPackage, SkillRegistry, ToolPolicy};
 use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
 use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry, UnavailableProjectDirService};
+use nova_skill_loader::{load_single_skill, load_skills_from_dir, LoadedSkill, LoadedSkillPackage, LoadedToolPolicy};
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
@@ -157,19 +158,28 @@ async fn main() -> Result<()> {
         snapshot
     };
 
-    let mut skill_registry_raw = SkillRegistry::new();
     let skill_dir = config.skills_dir();
-    if let Err(e) = skill_registry_raw.load_from_dir(&skill_dir) {
-        if matches!(cli.output_format, OutputFormat::PlainText) {
-            log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+    let mut loaded_skills = match load_skills_from_dir(&skill_dir) {
+        Ok(skills) => skills,
+        Err(e) => {
+            if matches!(cli.output_format, OutputFormat::PlainText) {
+                log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
+            }
+            Vec::new()
         }
-    }
+    };
     if let Some(extra_skill_path) = &cli.include_skill {
         let path = Path::new(extra_skill_path);
-        if let Err(e) = skill_registry_raw.load_single_skill(path) {
-            log::error!("Failed to load included skill from {:?}: {}", path, e);
+        match load_single_skill(path) {
+            Ok(Some(skill)) => loaded_skills.push(skill),
+            Ok(None) => log::warn!("Included skill path {:?} did not contain a valid skill", path),
+            Err(e) => log::error!("Failed to load included skill from {:?}: {}", path, e),
         }
     }
+    let skill_registry_raw = SkillRegistry::from_packages(convert_loaded_skills(loaded_skills)).unwrap_or_else(|err| {
+        log::warn!("Failed to initialize skill registry from loaded skills: {}", err);
+        SkillRegistry::new()
+    });
 
     let skill_prompt = skill_registry_raw.generate_contextual_prompt(None);
     let skill_registry = Arc::new(skill_registry_raw);
@@ -258,6 +268,40 @@ async fn main() -> Result<()> {
         Command::McpTest { cmd } => test_mcp(&cmd).await?,
     }
     Ok(())
+}
+
+fn convert_loaded_skills(loaded: Vec<LoadedSkill>) -> Vec<SkillPackage> {
+    loaded
+        .into_iter()
+        .map(|skill| match skill {
+            LoadedSkill::Package(package) => convert_package(package),
+            LoadedSkill::Compat { package, .. } => convert_package(package),
+        })
+        .collect()
+}
+
+fn convert_package(package: LoadedSkillPackage) -> SkillPackage {
+    SkillPackage {
+        id: package.id,
+        slug: package.slug,
+        display_name: package.display_name,
+        description: package.description,
+        instructions: package.instructions,
+        tool_policy: convert_tool_policy(package.tool_policy),
+        sticky: package.sticky,
+        aliases: package.aliases,
+        examples: package.examples,
+        source_path: package.source_path,
+        compat_mode: package.compat_mode,
+    }
+}
+
+fn convert_tool_policy(policy: LoadedToolPolicy) -> ToolPolicy {
+    match policy {
+        LoadedToolPolicy::InheritAll => ToolPolicy::InheritAll,
+        LoadedToolPolicy::AllowList(tools) => ToolPolicy::AllowList(tools),
+        LoadedToolPolicy::AllowListWithDeferred(tools) => ToolPolicy::AllowListWithDeferred(tools),
+    }
 }
 
 /// Runs the REPL loop for interactive chat.

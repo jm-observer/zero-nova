@@ -19,3 +19,4 @@ custom-utils = { workspace = true }
 log = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+nova-skill-loader = { workspace = true }

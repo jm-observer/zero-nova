@@ -383,6 +383,7 @@ impl<C: LlmClient> AgentRuntime<C> {
     async fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
         let empty = SkillRegistry::new();
         let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
+        #[allow(deprecated)]
         let builder = SystemPromptBuilder::from_config_async(config, skills)
             .await
             .with_tool_definitions(tool_definitions, config.tool_guidance);

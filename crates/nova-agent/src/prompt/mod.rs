@@ -17,8 +17,8 @@ pub use side_channel::{SideChannelConfig, SideChannelInjector};
 pub use templates::{template_vars, TemplateContext, BEHAVIOR_GUARDS};
 pub use trimmer::{HistoryTrimmer, TrimResult, TrimmerConfig};
 pub use types::{
-    ActiveSkillState, AgentCatalogEntry, NamedSection, ProjectInstructionProfile, PromptConfig, PromptLoadContext,
-    PromptMaterial, PromptPriority, PromptSectionSize, SectionName, SkillInjectionMode, SkillInvocationLevel,
-    SkillRouteDecision, SkillSwitchResult, ToolGuidanceMode, ToolSize, TurnContext, TurnPromptMaterial,
+    ActiveSkillState, AgentCatalogEntry, NamedSection, ProjectInstructionProfile, PromptMaterial, PromptPriority,
+    PromptSectionSize, SectionName, SkillInjectionMode, SkillInvocationLevel, SkillRouteDecision, SkillSwitchResult,
+    ToolGuidanceMode, ToolSize, TurnContext, TurnPromptMaterial,
 };
 pub use workflow::WorkflowStagePrompts;

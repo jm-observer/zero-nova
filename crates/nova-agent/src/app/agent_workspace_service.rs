@@ -1,10 +1,11 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
+use crate::app::prompt_loader::PromptMaterialLoader;
 use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
-use crate::prompt::{load_developer_project_prompt_async, PromptConfig, PromptLoadContext, SystemPromptBuilder};
+use crate::prompt::{PromptMaterial, SystemPromptBuilder};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
@@ -124,43 +125,41 @@ impl AgentWorkspaceService {
             .find(|agent| agent.id == agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' missing in config", agent_id))?;
-        let prompt_base = load_agent_prompt_for_reload(&agent_spec, &reloaded_config).await?;
+        let prompt_loader = PromptMaterialLoader::from_config(&reloaded_config);
+        let prompt_base = prompt_loader.load_agent_prompt(&agent_spec).await?;
         let prompt_base_fingerprint = fingerprint_text(&prompt_base);
-
-        let mut prompt_config = PromptConfig::new(
-            agent_id.clone(),
-            prompt_base.clone(),
-            PromptLoadContext {
-                project_dir: None,
-                project_context_path: reloaded_config.project_context_file(),
-                developer_prompt_files: Vec::new(),
-            },
-        )
-        .with_workflow_prompt_path(reloaded_config.prompts_dir().join("workflow-stages.md"))
-        .with_template_vars(agent_descriptor.initial_template_vars.clone());
-
-        if agent_spec.enable_project_developer_prompt {
-            prompt_config.load_context.developer_prompt_files = reloaded_config.developer_prompt_files.clone();
-            let project_dir = {
-                let control = session.control.read().await;
-                control.project_dir.clone()
-            };
-            let dev_prompt_content =
-                load_developer_project_prompt_async(project_dir.as_deref(), &reloaded_config.developer_prompt_files)
-                    .await;
-            if let Some(ref content) = dev_prompt_content {
-                let file_count = content.matches("### Source:").count();
-                log::info!("Reloaded developer project prompt: {} files matched", file_count);
-                prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
-            }
-        }
+        let project_dir = {
+            let control = session.control.read().await;
+            control.project_dir.clone()
+        };
 
         let env = crate::prompt::EnvironmentSnapshot::collect(&reloaded_config.config_dir, None).await;
-        prompt_config = prompt_config.with_environment(env);
-        #[allow(deprecated)]
-        let compiled_prompt = SystemPromptBuilder::from_config_async(&prompt_config, &default_skill_registry())
-            .await
-            .build();
+        let turn_material = prompt_loader
+            .load_turn_material(
+                project_dir.as_deref(),
+                Some("idle"),
+                None,
+                std::collections::HashMap::new(),
+                agent_spec.enable_project_developer_prompt,
+            )
+            .await?;
+        if let Some(ref content) = turn_material.developer_project_prompt {
+            let file_count = content.matches("### Source:").count();
+            log::info!("Reloaded developer project prompt: {} files matched", file_count);
+        }
+
+        let prompt_material = PromptMaterial {
+            agent_id: agent_id.clone(),
+            agent_prompt: prompt_base.clone(),
+            agent_catalog: None,
+            environment_snapshot: Some(env),
+            initial_template_vars: agent_descriptor.initial_template_vars.clone(),
+            skill_injection_mode: crate::prompt::SkillInjectionMode::Catalog,
+            project_instruction_profile: crate::prompt::ProjectInstructionProfile::Auto,
+            tool_guidance: crate::prompt::ToolGuidanceMode::Compact,
+        };
+        let compiled_prompt =
+            SystemPromptBuilder::from_material(&prompt_material, &turn_material, &default_skill_registry()).build();
         let prompt_version = fingerprint_text(&compiled_prompt);
         let source_revision = source_revision(&reloaded_config).await;
         log::info!(
@@ -616,30 +615,6 @@ impl AgentWorkspaceService {
 
 fn default_skill_registry() -> crate::skill::SkillRegistry {
     crate::skill::SkillRegistry::new()
-}
-
-async fn load_agent_prompt_for_reload(agent: &crate::config::AgentSpec, config: &AppConfig) -> Result<String> {
-    if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
-        anyhow::bail!(
-            "Agent '{}' has both prompt_file and prompt_inline configured; only one is allowed",
-            agent.id
-        );
-    }
-    if let Some(file) = &agent.prompt_file {
-        let prompt_path = config.prompts_dir().join(file);
-        return fs::read_to_string(&prompt_path)
-            .await
-            .with_context(|| format!("Failed to read prompt_file for agent '{}': {:?}", agent.id, prompt_path));
-    }
-    if let Some(inline) = &agent.prompt_inline {
-        return Ok(inline.clone());
-    }
-    let prompt_file = format!("agent-{}.md", agent.id);
-    let prompt_path = config.prompts_dir().join(&prompt_file);
-    match fs::read_to_string(&prompt_path).await {
-        Ok(content) => Ok(content),
-        Err(_) => Ok(String::new()),
-    }
 }
 
 fn fingerprint_text(value: &str) -> String {

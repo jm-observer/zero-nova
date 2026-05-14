@@ -1,14 +1,12 @@
 use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
+use crate::app::prompt_loader::PromptMaterialLoader;
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::message::{ContentBlock, Message, Role};
 use crate::network::HttpClients;
 use crate::prompt::TrimmerConfig;
-use crate::prompt::{
-    load_developer_project_prompt_async, load_project_context_with_config_async, template_vars, PromptConfig,
-    PromptLoadContext,
-};
+use crate::prompt::{template_vars, SystemPromptBuilder};
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::provider::ModelConfig;
 use crate::tool::builtin::register_builtin_tools;
@@ -239,38 +237,27 @@ impl AgentTool {
             runtime.read_files = ctx.read_files.clone();
         }
 
-        let mut prompt_config = PromptConfig::new(
-            spec.id.clone(),
-            self.load_agent_prompt(spec).await?,
-            PromptLoadContext {
-                project_dir: project_dir.clone(),
-                project_context_path: self.config.project_context_file(),
-                developer_prompt_files: Vec::new(),
-            },
-        )
-        .with_environment(environment.clone())
-        .with_workflow_prompt_path(self.config.prompts_dir().join("workflow-stages.md"));
+        let prompt_loader = PromptMaterialLoader::from_config(&self.config);
 
         let mut prompt_template_vars = HashMap::new();
         prompt_template_vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "idle".to_string());
         prompt_template_vars.insert(template_vars::PENDING_INTERACTION.to_string(), "none".to_string());
         prompt_template_vars.insert(template_vars::ACTIVE_AGENT.to_string(), spec.display_name.clone());
-        prompt_config = prompt_config.with_template_vars(prompt_template_vars);
-
-        let project_context_path = self.config.project_context_file();
-        let project_context =
-            load_project_context_with_config_async(project_dir.as_deref(), project_context_path.as_deref()).await;
-        if let Some(content) = project_context {
-            prompt_config = prompt_config.with_project_context_content(content);
-        }
-
-        if spec.enable_project_developer_prompt {
-            let files = self.config.developer_prompt_files.clone();
-            prompt_config.load_context.developer_prompt_files = files.clone();
-            if let Some(content) = load_developer_project_prompt_async(project_dir.as_deref(), &files).await {
-                prompt_config = prompt_config.with_developer_project_prompt_content(content);
-            }
-        }
+        let prompt_material = prompt_loader
+            .load_agent_material(spec, Some(environment.clone()), None, prompt_template_vars)
+            .await?;
+        let turn_material = prompt_loader
+            .load_turn_material(
+                project_dir.as_deref(),
+                Some("idle"),
+                None,
+                HashMap::new(),
+                spec.enable_project_developer_prompt,
+            )
+            .await?;
+        let empty_skill_registry = crate::skill::SkillRegistry::new();
+        let system_prompt =
+            SystemPromptBuilder::from_material(&prompt_material, &turn_material, &empty_skill_registry).build();
 
         let start_time = Instant::now();
         let (tx, mut rx) = mpsc::channel(100);
@@ -327,7 +314,7 @@ impl AgentTool {
         };
 
         let turn_ctx = runtime
-            .prepare_turn(prompt, Arc::new(Vec::new()), &prompt_config)
+            .prepare_turn(prompt, Arc::new(Vec::new()), system_prompt)
             .await?;
         let session_id = context
             .as_ref()
@@ -372,28 +359,6 @@ impl AgentTool {
             start_time.elapsed().as_millis(),
             std::mem::take(&mut warnings),
         ))
-    }
-
-    async fn load_agent_prompt(&self, spec: &AgentSpec) -> Result<String> {
-        if let Some(prompt_inline) = spec.prompt_inline.as_ref().filter(|value| !value.trim().is_empty()) {
-            return Ok(prompt_inline.clone());
-        }
-
-        if let Some(file) = spec.prompt_file.as_ref().filter(|value| !value.trim().is_empty()) {
-            let prompt_path = self.config.prompts_dir().join(file);
-            let content = tokio::fs::read_to_string(&prompt_path).await?;
-            return Ok(content);
-        }
-
-        if let Some(legacy_template) = spec
-            .system_prompt_template
-            .as_ref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            return Ok(legacy_template.clone());
-        }
-
-        Ok("You are a helpful assistant.".to_string())
     }
 }
 
@@ -579,7 +544,6 @@ mod tests {
     use crate::config::{AgentSpec, AppConfig, GatewayConfig};
     use serde_json::json;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn build_tool() -> AgentTool {
         let mut config = AppConfig::new(PathBuf::from("D:/workspace/.nova"));
@@ -669,55 +633,5 @@ mod tests {
             "subagent_type": "developer"
         });
         assert_eq!(AgentTool::selected_agent_type(&input), Some("developer"));
-    }
-
-    #[tokio::test]
-    async fn load_agent_prompt_prefers_prompt_inline() {
-        let mut tool = build_tool();
-        tool.config.gateway.agents[0].prompt_inline = Some("inline prompt".to_string());
-        tool.config.gateway.agents[0].prompt_file = Some("ignored.md".to_string());
-
-        let prompt = tool.load_agent_prompt(&tool.config.gateway.agents[0]).await.unwrap();
-        assert_eq!(prompt, "inline prompt");
-    }
-
-    #[tokio::test]
-    async fn load_agent_prompt_reads_prompt_file() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let temp_root = std::env::temp_dir().join(format!("zero-nova-agent-tool-{}", nanos));
-        let prompts_dir = temp_root.join("prompts");
-        std::fs::create_dir_all(&prompts_dir).unwrap();
-        std::fs::write(prompts_dir.join("agent.md"), "file prompt").unwrap();
-
-        let mut config = AppConfig::new(temp_root.clone());
-        config.tool.prompts_dir = Some("prompts".to_string());
-        config.gateway = GatewayConfig {
-            agents: vec![AgentSpec {
-                id: "nova".to_string(),
-                display_name: "Nova".to_string(),
-                description: "default".to_string(),
-                provider: "default".to_string(),
-                llm: "default".to_string(),
-                prompt_file: Some("agent.md".to_string()),
-                aliases: Vec::new(),
-                prompt_inline: None,
-                system_prompt_template: None,
-                tool_whitelist: None,
-                model_config: AgentModelOverride {
-                    model: "gpt-oss-120b".to_string(),
-                    temperature: 0.0,
-                    max_tokens: Some(8192),
-                    top_p: 1.0,
-                },
-                enable_project_developer_prompt: false,
-            }],
-            ..GatewayConfig::default()
-        };
-        let tool = AgentTool::new(config);
-
-        let prompt = tool.load_agent_prompt(&tool.config.gateway.agents[0]).await.unwrap();
-        assert_eq!(prompt, "file prompt");
-
-        std::fs::remove_dir_all(temp_root).unwrap();
     }
 }

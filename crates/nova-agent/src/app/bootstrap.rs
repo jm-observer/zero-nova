@@ -1,5 +1,6 @@
 use super::application::{AgentApplication, AgentApplicationImpl};
 use super::conversation_service::ConversationService;
+use super::prompt_loader::PromptMaterialLoader;
 use super::skill_adapter::convert_loaded_skills;
 use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
@@ -10,8 +11,8 @@ use crate::conversation::{SessionCache, SessionService};
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::network::HttpClients;
 use crate::prompt::{
-    build_agent_catalog_section, EnvironmentSnapshot, PromptConfig, PromptLoadContext, SideChannelConfig,
-    SideChannelInjector, SystemPromptBuilder, TrimmerConfig,
+    build_agent_catalog_section, EnvironmentSnapshot, SideChannelConfig, SideChannelInjector, SystemPromptBuilder,
+    TrimmerConfig, TurnPromptMaterial,
 };
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::skill::SkillRegistry;
@@ -126,41 +127,33 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         },
     };
 
+    let prompt_loader = PromptMaterialLoader::from_config(&config);
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
+    let catalog_text = build_agent_catalog_section(&config.gateway.agents, &config.primary_agent()?.id);
     for agent in &config.gateway.agents {
         let binding = config.resolve_agent_binding(agent)?;
-        let agent_prompt = load_agent_prompt(agent, &config).await?;
 
         let mut template_vars = HashMap::new();
         template_vars.insert("workflow_stage".to_string(), "idle".to_string());
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let load_context = PromptLoadContext {
-            project_dir: None,
-            project_context_path: config.project_context_file(),
-            developer_prompt_files: if agent.enable_project_developer_prompt {
-                config.developer_prompt_files.to_vec()
-            } else {
-                Vec::new()
-            },
-        };
-        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), load_context)
-            .with_environment(env_snapshot.clone())
-            .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))
-            .with_template_vars(template_vars.clone());
+        let prompt_material = prompt_loader
+            .load_agent_material(
+                agent,
+                Some(env_snapshot.clone()),
+                if catalog_text.is_empty() {
+                    None
+                } else {
+                    Some(catalog_text.clone())
+                },
+                template_vars.clone(),
+            )
+            .await?;
 
-        // Plan 1: 注入 agent catalog 到 orchestrator prompt
-        let catalog_text = build_agent_catalog_section(&config.gateway.agents, &config.primary_agent()?.id);
-        if !catalog_text.is_empty() {
-            prompt_config = prompt_config.with_agent_catalog(catalog_text);
-        }
-
-        // 如果 agent 启用了开发项目提示词，则注入文件列表
-        #[allow(deprecated)]
-        let full_system_prompt = SystemPromptBuilder::from_config_async(&prompt_config, &skill_registry)
-            .await
-            .build();
+        let full_system_prompt =
+            SystemPromptBuilder::from_material(&prompt_material, &TurnPromptMaterial::default(), &skill_registry)
+                .build();
 
         agents.push(AgentDescriptor {
             id: agent.id.clone(),
@@ -168,7 +161,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             description: agent.description.clone(),
             aliases: agent.aliases.clone(),
             system_prompt_template: full_system_prompt,
-            system_prompt_base: agent_prompt,
+            system_prompt_base: prompt_material.agent_prompt.clone(),
             initial_template_vars: template_vars,
             tool_whitelist: agent.tool_whitelist.clone(),
             model_config: Some(agent.model_config.clone()),
@@ -237,45 +230,6 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         config_path,
     )))
 }
-async fn load_agent_prompt(agent: &crate::config::AgentSpec, config: &AppConfig) -> Result<String> {
-    if agent.prompt_file.is_some() && agent.prompt_inline.is_some() {
-        bail!(
-            "Agent '{}' has both prompt_file and prompt_inline configured; only one is allowed",
-            agent.id
-        );
-    }
-
-    if let Some(file) = &agent.prompt_file {
-        let prompt_path = config.prompts_dir().join(file);
-        let content = tokio::fs::read_to_string(&prompt_path)
-            .await
-            .with_context(|| format!("Failed to read prompt_file for agent '{}': {:?}", agent.id, prompt_path))?;
-        return Ok(content);
-    }
-
-    if let Some(inline) = &agent.prompt_inline {
-        return Ok(inline.clone());
-    }
-
-    if let Some(legacy) = &agent.system_prompt_template {
-        log::warn!(
-            "Agent '{}' uses legacy system_prompt_template. This field is deprecated; use prompt_file/prompt_inline.",
-            agent.id
-        );
-        return Ok(legacy.clone());
-    }
-
-    let prompt_file = format!("agent-{}.md", agent.id);
-    let prompt_path = config.prompts_dir().join(&prompt_file);
-    match tokio::fs::read_to_string(&prompt_path).await {
-        Ok(content) => Ok(content),
-        Err(err) => {
-            log::warn!("Failed to read prompt file {:?}: {}", prompt_path, err);
-            Ok(String::new())
-        }
-    }
-}
-
 async fn warn_unused_gateway_sections(config: &AppConfig) -> Result<()> {
     let config_path = config.config_path();
     let content = tokio::fs::read_to_string(&config_path).await.ok();

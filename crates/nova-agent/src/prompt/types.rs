@@ -1,14 +1,12 @@
 /// 纯数据结构模块。
 ///
-/// 包含 TurnContext, SkillRouteDecision, AgentCatalogEntry 等数据定义以及
-/// PromptConfig、SectionName 等配置类型。
+/// 包含 TurnContext, SkillRouteDecision, AgentCatalogEntry 等数据定义。
 use crate::message::Message;
 use crate::provider::types::ToolDefinition;
 pub use crate::skill::types::{SkillInvocationLevel, SkillRouteDecision, SkillSwitchResult};
 use crate::skill::CapabilityPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -150,130 +148,6 @@ pub struct TurnPromptMaterial {
     pub workflow_prompt: Option<String>,
     pub turn_template_vars: HashMap<String, String>,
     pub active_skill: Option<String>,
-}
-
-/// Prompt 构建所需的完整配置。
-///
-/// 由 bootstrap / CLI / ConversationService 统一创建。
-#[derive(Debug, Clone, Default)]
-pub struct PromptLoadContext {
-    /// 项目目录（用于加载项目上下文文件等）
-    pub project_dir: Option<PathBuf>,
-    /// 自定义项目上下文文件路径
-    pub project_context_path: Option<PathBuf>,
-    /// 开发项目提示词文件名列表（按配置顺序）
-    pub developer_prompt_files: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PromptConfig {
-    /// Agent 标识（用于日志和调试）
-    pub agent_id: String,
-    /// 从文件加载的 agent prompt 内容（已读取为字符串）
-    pub agent_prompt: String,
-    /// 当前活跃的 skill id（如果有）
-    pub active_skill: Option<String>,
-    /// 模板变量键值对（用于替换 {{key}} 占位符）
-    pub template_vars: HashMap<String, String>,
-    /// 运行时环境快照
-    pub environment: Option<super::context::EnvironmentSnapshot>,
-    /// 文件加载上下文（路径与文件列表）
-    pub load_context: PromptLoadContext,
-    /// 已预加载的项目上下文内容（用于消除同步 I/O）
-    pub project_context_content: Option<String>,
-    /// workflow-stages.md 路径
-    pub workflow_prompt_path: Option<PathBuf>,
-    /// 已合并完成的开发项目提示词内容
-    pub developer_project_prompt_content: Option<String>,
-    /// Orchestrator agent catalog（Plan 1）。为空时不注入 catalog section。
-    pub agent_catalog: Option<String>,
-    /// 项目规则注入 profile。
-    pub project_instruction_profile: ProjectInstructionProfile,
-    /// skill 注入策略。
-    pub skill_injection: SkillInjectionMode,
-    /// tool 提示策略。
-    pub tool_guidance: ToolGuidanceMode,
-}
-
-impl PromptConfig {
-    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, load_context: PromptLoadContext) -> Self {
-        Self {
-            agent_id: agent_id.into(),
-            agent_prompt: agent_prompt.into(),
-            active_skill: None,
-            template_vars: HashMap::new(),
-            environment: None,
-            load_context,
-            project_context_content: None,
-            workflow_prompt_path: None,
-            developer_project_prompt_content: None,
-            agent_catalog: None,
-            project_instruction_profile: ProjectInstructionProfile::Auto,
-            skill_injection: SkillInjectionMode::Catalog,
-            tool_guidance: ToolGuidanceMode::Compact,
-        }
-    }
-
-    pub fn with_active_skill(mut self, skill_id: impl Into<String>) -> Self {
-        self.active_skill = Some(skill_id.into());
-        self
-    }
-
-    pub fn with_template_var(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.template_vars.insert(key.into(), value.into());
-        self
-    }
-
-    pub fn with_template_vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.template_vars = vars;
-        self
-    }
-
-    pub fn with_environment(mut self, env: super::context::EnvironmentSnapshot) -> Self {
-        self.environment = Some(env);
-        self
-    }
-
-    pub fn with_project_context_content(mut self, content: String) -> Self {
-        self.project_context_content = Some(content);
-        self
-    }
-
-    pub fn with_workflow_prompt_path(mut self, path: PathBuf) -> Self {
-        self.workflow_prompt_path = Some(path);
-        self
-    }
-
-    pub fn with_load_context(mut self, context: PromptLoadContext) -> Self {
-        self.load_context = context;
-        self
-    }
-
-    pub fn with_developer_project_prompt_content(mut self, content: String) -> Self {
-        self.developer_project_prompt_content = Some(content);
-        self
-    }
-
-    /// 设置 agent catalog 文本（Plan 1）。
-    pub fn with_agent_catalog(mut self, catalog: String) -> Self {
-        self.agent_catalog = Some(catalog);
-        self
-    }
-
-    pub fn with_project_instruction_profile(mut self, profile: ProjectInstructionProfile) -> Self {
-        self.project_instruction_profile = profile;
-        self
-    }
-
-    pub fn with_skill_injection(mut self, mode: SkillInjectionMode) -> Self {
-        self.skill_injection = mode;
-        self
-    }
-
-    pub fn with_tool_guidance(mut self, mode: ToolGuidanceMode) -> Self {
-        self.tool_guidance = mode;
-        self
-    }
 }
 
 // ---------------------------------------------------------------------------

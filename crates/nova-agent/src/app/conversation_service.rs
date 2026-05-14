@@ -1,5 +1,6 @@
 use crate::agent::{AgentRuntime, TurnResult, TurnWithContextRequest};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
+use crate::app::prompt_loader::PromptMaterialLoader;
 use crate::config::AppConfig;
 use crate::conversation::control::{LastTurnSnapshot, ModelRef};
 use crate::conversation::model::{RunRecord, RunStepRecord};
@@ -7,13 +8,13 @@ use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    load_developer_project_prompt_async, load_project_context_with_config_async, ProjectInstructionProfile,
-    PromptConfig, PromptLoadContext, SkillInjectionMode, ToolGuidanceMode,
+    ProjectInstructionProfile, PromptMaterial, SkillInjectionMode, SystemPromptBuilder, ToolGuidanceMode,
 };
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::{TurnUsage, UsageCompleteness, UsageSource};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -297,11 +298,6 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             base_binding.clone()
         };
         let project_dir = self.sessions.get_project_dir(session_id).await?;
-        let project_context = load_project_context_with_config_async(
-            project_dir.as_deref(),
-            self.agent.config.project_context_file.as_deref(),
-        )
-        .await;
 
         // 新路径：prepare_turn + run_turn_with_context
         let system_prompt_base = {
@@ -312,75 +308,57 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
         };
         let compaction = &self.app_config.prompt_compaction;
-        let mut prompt_config = PromptConfig::new(
-            agent_descriptor.id.clone(),
-            system_prompt_base,
-            PromptLoadContext {
-                project_dir: project_dir.clone(),
-                project_context_path: self.agent.config.project_context_file.clone(),
-                developer_prompt_files: Vec::new(),
-            },
-        )
-        .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
-        .with_template_vars(agent_descriptor.initial_template_vars.clone())
-        .with_project_instruction_profile(if compaction.enabled {
-            Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
-        } else {
-            ProjectInstructionProfile::Full
-        })
-        .with_skill_injection(if compaction.enabled {
-            Self::parse_skill_injection(compaction.skill_injection.as_str())
-        } else {
-            SkillInjectionMode::Full
-        })
-        .with_tool_guidance(if compaction.enabled {
-            Self::parse_tool_guidance(compaction.tool_guidance.as_str())
-        } else {
-            ToolGuidanceMode::Full
-        });
-
-        // 如果 agent 启用了开发项目提示词，则注入文件列表
-        if agent_descriptor.enable_project_developer_prompt {
-            let files = self.app_config.developer_prompt_files.clone();
-            let project_dir_display = project_dir
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "(not set)".to_string());
-            log::info!(
-                "Developer project prompt enabled for agent '{}': session_id={}, project_dir={}, configured_files={}",
-                agent_descriptor.id,
-                session_id,
-                project_dir_display,
-                files.len()
-            );
-            prompt_config.load_context.developer_prompt_files = files.clone();
-
-            // 会话执行期加载开发项目提示词内容（Plan 3）
-            let dev_prompt_content = load_developer_project_prompt_async(project_dir.as_deref(), &files).await;
-            if let Some(ref content) = dev_prompt_content {
-                let file_count = content.matches("### Source:").count();
-                log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
-                prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
-            } else {
-                log::info!(
-                    "Developer project prompt not loaded for session {} (project_dir={}, configured_files={})",
-                    session_id,
-                    project_dir_display,
-                    files.len()
-                );
-            }
-        }
 
         let mut env =
             crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref()).await;
         env.model_id = Some(execution_binding.model_config.model.clone());
-        prompt_config = prompt_config.with_environment(env.clone());
+        let prompt_loader = PromptMaterialLoader::from_config(&self.app_config);
+        let mut turn_vars = HashMap::new();
+        turn_vars.insert("workflow_stage".to_string(), "idle".to_string());
+        turn_vars.insert("pending_interaction".to_string(), "none".to_string());
+        turn_vars.insert("active_agent".to_string(), agent_descriptor.display_name.clone());
 
-        if let Some(content) = project_context {
-            prompt_config = prompt_config.with_project_context_content(content);
+        let turn_material = prompt_loader
+            .load_turn_material(
+                project_dir.as_deref(),
+                Some("idle"),
+                None,
+                turn_vars,
+                agent_descriptor.enable_project_developer_prompt,
+            )
+            .await?;
+        if let Some(content) = &turn_material.developer_project_prompt {
+            let file_count = content.matches("### Source:").count();
+            log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
         }
 
-        let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config).await?;
+        let prompt_material = PromptMaterial {
+            agent_id: agent_descriptor.id.clone(),
+            agent_prompt: system_prompt_base,
+            agent_catalog: None,
+            environment_snapshot: Some(env.clone()),
+            initial_template_vars: agent_descriptor.initial_template_vars.clone(),
+            skill_injection_mode: if compaction.enabled {
+                Self::parse_skill_injection(compaction.skill_injection.as_str())
+            } else {
+                SkillInjectionMode::Full
+            },
+            project_instruction_profile: if compaction.enabled {
+                Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
+            } else {
+                ProjectInstructionProfile::Full
+            },
+            tool_guidance: if compaction.enabled {
+                Self::parse_tool_guidance(compaction.tool_guidance.as_str())
+            } else {
+                ToolGuidanceMode::Full
+            },
+        };
+        let empty_skill_registry = crate::skill::SkillRegistry::new();
+        let skill_registry = self.agent.skill_registry.as_deref().unwrap_or(&empty_skill_registry);
+        let system_prompt =
+            SystemPromptBuilder::from_material(&prompt_material, &turn_material, skill_registry).build();
+        let turn_ctx = self.agent.prepare_turn(input, history_for_turn, system_prompt).await?;
 
         // Phase C: Capture snapshot
         let snapshot =

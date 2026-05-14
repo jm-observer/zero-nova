@@ -2,8 +2,8 @@ use crate::event::AgentEvent;
 use crate::loop_guard::LoopGuardConfig;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, PromptLoadContext, SideChannelInjector,
-    SystemPromptBuilder, TrimmerConfig, TurnContext,
+    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, SideChannelInjector, SystemPromptBuilder, TrimmerConfig,
+    TurnContext,
 };
 use crate::provider::types::{ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig};
@@ -181,12 +181,8 @@ impl<C: LlmClient> AgentRuntime<C> {
             cancellation_token,
             model_config,
         } = req;
-        let mut prompt_config = PromptConfig::new("default".to_string(), String::new(), PromptLoadContext::default());
-        if let Some(env) = environment.clone() {
-            prompt_config = prompt_config.with_environment(env);
-        }
         let turn_ctx = self
-            .prepare_turn(user_input, Arc::new(history.to_vec()), &prompt_config)
+            .prepare_turn(user_input, Arc::new(history.to_vec()), String::new())
             .await?;
         let user_message = Message::new(
             Role::User,
@@ -216,13 +212,12 @@ impl<C: LlmClient> AgentRuntime<C> {
     /// 准备 turn 上下文：决定 active skill、生成 system prompt sections、
     /// 过滤工具定义、裁剪历史、构造 `TurnContext`。
     ///
-    /// `prompt_config` 由外部（bootstrap/CLI）统一创建，携带 agent prompt 文件和
-    /// 模板变量等配置。
+    /// `system_prompt` 由调用方预先构建，runtime 不感知外部文件加载。
     pub async fn prepare_turn(
         &self,
         input: &str,
         current_history: Arc<Vec<Message>>,
-        prompt_config: &PromptConfig,
+        system_prompt: String,
     ) -> Result<TurnContext> {
         // 1. 决定 active skill
         let active_skill = self.decide_active_skill(input, &current_history)?;
@@ -241,18 +236,13 @@ impl<C: LlmClient> AgentRuntime<C> {
         // 3. 过滤工具定义
         let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill).await;
 
-        // 4. 构建 system prompt — 使用当前轮实际可见工具
-        let mut config = prompt_config.clone();
-        if let Some(ref skill) = active_skill {
-            config.active_skill = Some(skill.skill_id.clone());
-        }
-        let system_prompt = self.build_system_prompt(&config, &tool_definitions).await;
-
-        // 5. 裁剪历史（如果 active skill 切换了则裁剪）
+        // 4. 裁剪历史（如果 active skill 切换了则裁剪）
+        let prompt_diag_builder = SystemPromptBuilder::new().base_section(system_prompt.clone());
+        self.log_prompt_diagnostics(&prompt_diag_builder, &tool_definitions);
         let history = self.trim_history(&current_history, &system_prompt, &active_skill)?;
         self.log_history_diagnostics(history.as_ref());
 
-        // 6. 构造 TurnContext
+        // 5. 构造 TurnContext
         let visible_tool_names: std::sync::Arc<std::collections::HashSet<String>> =
             std::sync::Arc::new(tool_definitions.iter().map(|t| t.name.clone()).collect());
         Ok(TurnContext {
@@ -375,20 +365,6 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         // 阶段一：返回 None（后续添加 Sticky + LLM 路由）
         Ok(None)
-    }
-
-    /// 构建系统提示词。
-    ///
-    /// 接收 PromptConfig 参数，通过 SystemPromptBuilder::from_config_async 统一构建。
-    async fn build_system_prompt(&self, config: &PromptConfig, tool_definitions: &[ToolDefinition]) -> String {
-        let empty = SkillRegistry::new();
-        let skills = self.skill_registry.as_ref().map(|sr| sr.as_ref()).unwrap_or(&empty);
-        #[allow(deprecated)]
-        let builder = SystemPromptBuilder::from_config_async(config, skills)
-            .await
-            .with_tool_definitions(tool_definitions, config.tool_guidance);
-        self.log_prompt_diagnostics(&builder, tool_definitions);
-        builder.build()
     }
 
     /// 过滤工具定义（基于 `CapabilityPolicy` 和 `active skill`）。

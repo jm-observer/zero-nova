@@ -37,8 +37,8 @@
 
 | Plan | 说明 | 依赖 | 状态 |
 |------|------|------|------|
-| Plan 1 | 完成 `mod.rs` → 新子模块迁移，使 `mod.rs` 变为纯 re-export | 无 | 待开始 |
-| Plan 2 | 消除同步/异步双写，统一为 async | Plan 1 | 待开始 |
+| Plan 1 | 完成 `mod.rs` → 新子模块迁移，使 `mod.rs` 变为纯 re-export | 无 | 已完成 |
+| Plan 2 | 消除同步/异步双写，统一为 async | Plan 1 | 已完成 |
 
 ### Plan 1 验收标准（可检查）
 

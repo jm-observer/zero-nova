@@ -722,7 +722,7 @@ mod tests {
         schema: Value,
     }
 
-    struct PanicFactoryTool;
+
 
     #[async_trait::async_trait]
     impl Tool for StaticTool {
@@ -762,24 +762,7 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
-    impl Tool for PanicFactoryTool {
-        fn definition(&self) -> ToolDefinition {
-            ToolDefinition {
-                name: "PanicFactory".to_string(),
-                description: "panic".to_string(),
-                input_schema: json!({"type": "object"}),
-                defer_loading: false,
-            }
-        }
 
-        async fn execute(&self, _input: serde_json::Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
-            Ok(ToolOutput {
-                content: "ok".to_string(),
-                is_error: false,
-            })
-        }
-    }
 
     #[tokio::test]
     async fn execute_supports_legacy_tool_names() {

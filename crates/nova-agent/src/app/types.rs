@@ -1,6 +1,5 @@
 use crate::event::AgentEvent;
 use crate::message::ContentBlock;
-use crate::prompt::SkillInvocationLevel;
 use crate::provider::types::Usage;
 use serde_json::Value;
 
@@ -108,18 +107,6 @@ pub enum AppEvent {
     SkillExited {
         skill_id: String,
     },
-    SkillRouteEvaluated {
-        confidence: f64,
-        reasoning: String,
-    },
-    ToolUnlocked {
-        tool_name: String,
-    },
-    SkillInvocation {
-        skill_id: String,
-        skill_name: String,
-        level: SkillInvocationLevel,
-    },
     OrchestrationProgress {
         kind: String,
         args: Value,
@@ -206,44 +193,6 @@ impl From<AgentEvent> for AppEvent {
                 from_skill, to_skill, ..
             } => AppEvent::SkillSwitched { from_skill, to_skill },
             AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
-            AgentEvent::SkillRouteEvaluated {
-                confidence, reasoning, ..
-            } => AppEvent::SkillRouteEvaluated { confidence, reasoning },
-            AgentEvent::ToolUnlocked { tool_name } => AppEvent::ToolUnlocked { tool_name },
-            AgentEvent::SkillInvocation {
-                skill_id,
-                skill_name,
-                level,
-            } => AppEvent::SkillInvocation {
-                skill_id,
-                skill_name,
-                level,
-            },
-            AgentEvent::OrchestrationProgress {
-                kind,
-                args,
-                log,
-                stream,
-            } => AppEvent::OrchestrationProgress {
-                kind,
-                args,
-                log,
-                stream,
-            },
-            AgentEvent::LoopGuardTriggered {
-                reason,
-                tool,
-                session_id,
-                canonical_target,
-                duplicate_count,
-                stalled_iteration_count,
-                decision,
-                reason_code,
-                signature_hash,
-            } => AppEvent::SystemLog(format!(
-                "loop_guard_triggered session_id={} reason={} reason_code={} decision={} tool={:?} canonical_target={:?} duplicate_count={} stalled_iteration_count={} signature_hash={:?}",
-                session_id, reason, reason_code, decision, tool, canonical_target, duplicate_count, stalled_iteration_count, signature_hash
-            )),
         }
     }
 }

@@ -1,4 +1,4 @@
-# Plan 2：🟡 过度设计问题
+# Plan 2：✅ 过度设计问题（已完成）
 
 ## Plan 编号与标题
 
@@ -11,6 +11,36 @@ Plan 2：过度设计（同步/异步双写、双锁、双路径、AgentEvent �
 ## 本次目标
 
 识别并记录当前过度设计的具体表现，明确消除路径。
+
+## 实施状态（2026-05-14）
+
+本 Plan 已完成，关键收敛如下：
+
+1. **同步/异步双写收敛**
+   - `ToolRegistry` 相关 `_async` 重复命名已收敛为单一路径命名。
+   - `deferred_definitions` 读取语义拆分为明确的 snapshot 与 async 接口，调用方完成对齐。
+
+2. **ToolRegistry 锁语义收敛**
+   - 移除 `try_lock + panic` 作为常规控制流。
+   - 保留 snapshot 读多写少优化，同时避免 runtime 线程上的不安全阻塞方式。
+
+3. **Agent 双路径收敛（Plan 2.3）**
+   - 移除 `use_turn_context` 配置开关与相关分支。
+   - `run_turn_with_model_config` 收敛为桥接层，统一委托 `prepare_turn + run_turn_with_context_and_model_config`。
+   - `ConversationService` 统一走 context 路径。
+
+4. **AgentEvent 膨胀收敛（Plan 2.4）**
+   - 删除未实际发送的事件分支：`SkillRouteEvaluated`、`ToolUnlocked`、`SkillInvocation`。
+   - 按用户指令进一步删除 `OrchestrationProgress`、`LoopGuardTriggered`，发送点降级为 `SystemLog`。
+   - gateway / cli / integration tests 已完成对应适配。
+
+5. **Skill 类型归属收敛（Plan 2.5）**
+   - `SkillInvocationLevel`、`SkillRouteDecision`、`SkillSwitchResult` 已迁移至 `skill/types.rs`。
+   - `prompt/types.rs` 改为 re-export 转发，外部 API 名称保持兼容。
+
+6. **全量验证**
+   - `cargo clippy --workspace -- -D warnings` 通过。
+   - `cargo test --workspace` 通过。
 
 ---
 
@@ -105,7 +135,7 @@ Agent：    AgentSwitched、AssistantMessage
 
 | 路径 | 入口 | 状态 |
 |------|------|------|
-| 旧路径 | `run_turn()` → `run_turn_with_model_config()` | 应废弃 |
+| 旧路径 | `run_turn()` → `run_turn_with_model_config()` | 已收敛为桥接层 |
 | 新路径 | `prepare_turn()` + `run_turn_with_context()` → `run_turn_with_context_and_model_config()` | 正式路径 |
 
 **问题**：新路径已存在相当长时间（经历了 Phase 2、3），旧路径仍然保留，导致每个 turn 执行相关的改动都需要考虑两条路径。

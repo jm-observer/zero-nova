@@ -209,6 +209,20 @@ impl SystemPromptBuilder {
         self.with_tool_definitions(&definitions, ToolGuidanceMode::Full)
     }
 
+    pub async fn with_tools_async(self, registry: &ToolRegistry) -> Self {
+        let definitions: Vec<ToolDefinition> = registry
+            .loaded_definitions_async()
+            .await
+            .into_iter()
+            .map(|def| ToolDefinition {
+                name: def.name,
+                description: def.description,
+                input_schema: def.input_schema,
+            })
+            .collect();
+        self.with_tool_definitions(&definitions, ToolGuidanceMode::Full)
+    }
+
     pub fn with_tool_definitions(self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
         self.with_tool_definitions_internal(definitions, mode)
     }

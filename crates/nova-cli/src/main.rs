@@ -201,7 +201,6 @@ async fn main() -> Result<()> {
         model_config: root_binding.model_config.clone(),
         tool_timeout: Duration::from_secs(tool_timeout_secs),
         max_tokens: config.gateway.max_tokens,
-        use_turn_context: config.gateway.use_turn_context,
         trimmer: TrimmerConfig {
             context_window: config.gateway.trimmer.context_window,
             output_reserve: config.gateway.trimmer.output_reserve,
@@ -470,7 +469,7 @@ fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
     println!("{}", "Turn Tool View:".bold());
     println!("  - Tool Search: {}", if true { "enabled" } else { "disabled" });
     let loaded = tools.loaded_definitions();
-    let deferred = tools.deferred_definitions();
+    let deferred = tools.deferred_definitions_snapshot();
     println!("  - Loaded tools: {}", loaded.len());
     println!("  - Deferred tools: {}", deferred.len());
 }
@@ -542,7 +541,7 @@ async fn print_status(agent: &AgentRuntime<impl LlmClient>) {
     println!();
     println!("  Tool Capabilities:");
     println!("    - Always enabled tools: {}", agent.tools().tool_definitions().len());
-    let deferred = agent.tools().deferred_definitions();
+    let deferred = agent.tools().deferred_definitions_snapshot();
     println!("    - Deferred tools: {}", deferred.len());
 }
 
@@ -685,41 +684,6 @@ impl EventPrinter {
                 }
                 AgentEvent::SkillExited { skill_id, .. } => {
                     println!("\n{}", format!("[skill exited] {skill_id}").yellow());
-                }
-                AgentEvent::SkillRouteEvaluated { .. } => {
-                    // 该事件仅用于内部调试，CLI 不重复打印以避免输出噪音。
-                }
-                AgentEvent::ToolUnlocked { tool_name } => {
-                    println!("\n{}", format!("[tool unlocked] {tool_name}").bright_blue());
-                }
-                AgentEvent::SkillInvocation { skill_name, level, .. } => {
-                    println!(
-                        "\n{}",
-                        format!("[skill invoked:{:?}] {skill_name}", level).bright_cyan()
-                    );
-                }
-                AgentEvent::OrchestrationProgress { kind, args, .. } => {
-                    if self.verbose {
-                        println!("\n{} {}", format!("[orchestration:{kind}]").bright_black(), args);
-                    }
-                }
-                AgentEvent::LoopGuardTriggered {
-                    reason,
-                    tool,
-                    duplicate_count,
-                    stalled_iteration_count,
-                    ..
-                } => {
-                    if self.verbose {
-                        println!(
-                            "\n{}",
-                            format!(
-                                "[loop-guard] reason={} tool={:?} duplicate_count={} stalled_iteration_count={}",
-                                reason, tool, duplicate_count, stalled_iteration_count
-                            )
-                            .yellow()
-                        );
-                    }
                 }
             },
         }

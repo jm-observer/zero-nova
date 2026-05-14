@@ -114,7 +114,6 @@ async fn turn_prompt_shows_project_not_set_and_skips_project_context() {
         ),
         data_dir.path(),
         prompts_dir.path(),
-        false,
         NoopClient,
     );
 
@@ -251,7 +250,6 @@ async fn prepare_turn_exposes_project_manager_by_default() {
             model_config: ModelConfig::default(),
             tool_timeout: Duration::from_secs(1),
             max_tokens: 256,
-            use_turn_context: true,
             trimmer: TrimmerConfig::default(),
             config_dir: data_dir.path().to_path_buf(),
             prompts_dir: prompts_dir.path().to_path_buf(),
@@ -343,7 +341,6 @@ async fn inherited_project_dir_is_used_by_prompt_and_relative_tool_execution() {
         sessions,
         data_dir.path(),
         prompts_dir.path(),
-        true,
         RelativeReadClient::new(),
     );
     let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(16);
@@ -408,7 +405,6 @@ fn build_conversation_service<C: LlmClient + 'static>(
     sessions: SessionService,
     data_dir: &std::path::Path,
     prompts_dir: &std::path::Path,
-    use_turn_context: bool,
     client: C,
 ) -> (ConversationService<C>, SessionService) {
     let mut registry = AgentRegistry::new(agent_descriptor("agent-a"));
@@ -422,7 +418,6 @@ fn build_conversation_service<C: LlmClient + 'static>(
             model_config: ModelConfig::default(),
             tool_timeout: Duration::from_secs(1),
             max_tokens: 256,
-            use_turn_context,
             trimmer: TrimmerConfig::default(),
             config_dir: data_dir.to_path_buf(),
             prompts_dir: prompts_dir.to_path_buf(),

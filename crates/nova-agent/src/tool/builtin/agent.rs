@@ -185,7 +185,6 @@ impl AgentTool {
             model_config,
             tool_timeout: Duration::from_secs(self.config.gateway.subagent_timeout_secs),
             max_tokens: self.config.gateway.max_tokens,
-            use_turn_context: self.config.gateway.use_turn_context,
             trimmer: TrimmerConfig {
                 context_window: self.config.gateway.trimmer.context_window,
                 output_reserve: self.config.gateway.trimmer.output_reserve,
@@ -490,18 +489,14 @@ impl Tool for AgentTool {
 
             tokio::spawn(async move {
                 let _ = parent_tx
-                    .send(AgentEvent::OrchestrationProgress {
-                        kind: "sub_agent_spawn".to_string(),
-                        args: json!({
-                            "planId": plan_id.clone(),
-                            "agentId": agent_id.clone(),
-                            "stageId": stage_id.clone(),
-                            "description": description_owned.clone(),
-                            "subagentType": selected_agent_type_owned.as_deref().unwrap_or("default"),
-                        }),
-                        log: None,
-                        stream: None,
-                    })
+                    .send(AgentEvent::SystemLog(format!(
+                        "orchestration_progress kind=sub_agent_spawn planId={} agentId={} stageId={} subagentType={} description={}",
+                        plan_id,
+                        agent_id,
+                        stage_id,
+                        selected_agent_type_owned.as_deref().unwrap_or("default"),
+                        description_owned
+                    )))
                     .await;
 
                 let run = this
@@ -527,33 +522,18 @@ impl Tool for AgentTool {
                                 run_warnings
                             );
                         }
-                        AgentEvent::OrchestrationProgress {
-                            kind: "sub_agent_complete".to_string(),
-                            args: json!({
-                                "planId": plan_id.clone(),
-                                "agentId": agent_id.clone(),
-                                "stageId": stage_id.clone(),
-                                "status": "success",
-                                "outputSummary": output_summary,
-                                "error": serde_json::Value::Null,
-                            }),
-                            log: None,
-                            stream: None,
-                        }
+                        AgentEvent::SystemLog(format!(
+                            "orchestration_progress kind=sub_agent_complete planId={} agentId={} stageId={} status=success error=<none> outputSummary={}",
+                            plan_id,
+                            agent_id,
+                            stage_id,
+                            output_summary
+                        ))
                     }
-                    Err(err) => AgentEvent::OrchestrationProgress {
-                        kind: "sub_agent_complete".to_string(),
-                        args: json!({
-                            "planId": plan_id,
-                            "agentId": agent_id,
-                            "stageId": stage_id,
-                            "status": "failed",
-                            "outputSummary": "",
-                            "error": err.to_string(),
-                        }),
-                        log: None,
-                        stream: None,
-                    },
+                    Err(err) => AgentEvent::SystemLog(format!(
+                        "orchestration_progress kind=sub_agent_complete planId={} agentId={} stageId={} status=failed error={}",
+                        plan_id, agent_id, stage_id, err
+                    )),
                 };
                 let _ = parent_tx.send(completion_event).await;
             });

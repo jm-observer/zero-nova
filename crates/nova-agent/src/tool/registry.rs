@@ -289,9 +289,12 @@ impl ToolRegistry {
     }
 
     fn lock_state_sync(&self) -> tokio::sync::MutexGuard<'_, RegistryState> {
-        self.state
-            .try_lock()
-            .unwrap_or_else(|_| panic!("tool registry state lock contention in sync path"))
+        loop {
+            if let Ok(guard) = self.state.try_lock() {
+                return guard;
+            }
+            std::thread::yield_now();
+        }
     }
 
     async fn lock_state_async(&self) -> tokio::sync::MutexGuard<'_, RegistryState> {
@@ -299,9 +302,12 @@ impl ToolRegistry {
     }
 
     fn lock_snapshot_sync(&self) -> tokio::sync::RwLockReadGuard<'_, Arc<RegistrySnapshot>> {
-        self.snapshot
-            .try_read()
-            .unwrap_or_else(|_| panic!("tool registry snapshot lock contention in sync path"))
+        loop {
+            if let Ok(guard) = self.snapshot.try_read() {
+                return guard;
+            }
+            std::thread::yield_now();
+        }
     }
 
     async fn lock_snapshot_async(&self) -> tokio::sync::RwLockReadGuard<'_, Arc<RegistrySnapshot>> {
@@ -313,12 +319,13 @@ impl ToolRegistry {
         state: &RegistryState,
     ) -> tokio::sync::RwLockWriteGuard<'_, Arc<RegistrySnapshot>> {
         let next = Arc::new(RegistrySnapshot::from_state(state));
-        let mut snapshot = self
-            .snapshot
-            .try_write()
-            .unwrap_or_else(|_| panic!("tool registry snapshot lock contention in sync path"));
-        *snapshot = next;
-        snapshot
+        loop {
+            if let Ok(mut snapshot) = self.snapshot.try_write() {
+                *snapshot = next;
+                return snapshot;
+            }
+            std::thread::yield_now();
+        }
     }
 
     async fn refresh_snapshot_locked_async(
@@ -391,11 +398,30 @@ impl ToolRegistry {
         defs
     }
 
+    pub async fn tool_definitions_async(&self) -> Vec<ProviderToolDefinition> {
+        let snapshot = self.lock_snapshot_async().await;
+        let mut defs = snapshot.loaded_provider_definitions.clone();
+        if !snapshot.deferred_representations.is_empty() {
+            let d = builtin::tool_search::tool_definition();
+            defs.push(ProviderToolDefinition {
+                name: d.name,
+                description: d.description,
+                input_schema: d.input_schema,
+            });
+        }
+
+        defs
+    }
+
     pub fn loaded_definitions(&self) -> Vec<ToolDefinition> {
         self.lock_snapshot_sync().loaded_definitions.clone()
     }
 
-    pub fn deferred_definitions(&self) -> Vec<ToolDefinition> {
+    pub async fn loaded_definitions_async(&self) -> Vec<ToolDefinition> {
+        self.lock_snapshot_async().await.loaded_definitions.clone()
+    }
+
+    pub fn deferred_definitions_snapshot(&self) -> Vec<ToolDefinition> {
         self.lock_snapshot_sync().deferred_definitions.clone()
     }
 
@@ -477,6 +503,39 @@ impl ToolRegistry {
         }
     }
 
+    pub async fn get_turn_view_async(
+        &self,
+        tool_search_enabled: bool,
+        skill_tool_enabled: bool,
+        task_tools_enabled: bool,
+    ) -> TurnToolView {
+        let snapshot = self.lock_snapshot_async().await;
+        let loaded = snapshot.loaded_provider_definitions.clone();
+        let mut deferred: Vec<_> = snapshot
+            .deferred_representations
+            .iter()
+            .filter(|entry| {
+                if !task_tools_enabled && matches!(entry.category, DeferredToolCategory::Task) {
+                    return false;
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        if tool_search_enabled {
+            deferred.push(tool_search_representation());
+        }
+
+        TurnToolView {
+            loaded,
+            deferred,
+            tool_search_enabled,
+            skill_tool_enabled,
+            task_tools_enabled,
+        }
+    }
+
     pub fn filter_deferred_by_policy(&self, policy: &CapabilityPolicy) -> Vec<DeferredToolRepresentation> {
         self.lock_snapshot_sync()
             .deferred_representations
@@ -501,11 +560,11 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub async fn deferred_definitions_async(&self) -> Vec<ToolDefinition> {
+    pub async fn deferred_definitions(&self) -> Vec<ToolDefinition> {
         self.lock_snapshot_async().await.deferred_definitions.clone()
     }
 
-    pub async fn load_deferred_by_category_async(
+    pub async fn load_deferred_by_category(
         &self,
         category: &DeferredToolCategory,
         enabled: bool,
@@ -925,12 +984,12 @@ mod tests {
         let first = registry.resolve_deferred_with_outcome("PanicFactory").await;
         assert!(matches!(first, DeferredResolveOutcome::FactoryFailed { .. }));
 
-        let deferred = registry.deferred_definitions_async().await;
+        let deferred = registry.deferred_definitions().await;
         assert!(deferred.iter().any(|d| d.name == "PanicFactory"));
     }
 
     #[tokio::test]
-    async fn load_deferred_by_category_async_returns_structured_outcome() {
+    async fn load_deferred_by_category_returns_structured_outcome() {
         let registry = ToolRegistry::new();
         let panic_counter = Arc::new(AtomicUsize::new(0));
         registry.register_deferred_with_category(
@@ -955,7 +1014,7 @@ mod tests {
         );
 
         let outcome = registry
-            .load_deferred_by_category_async(&DeferredToolCategory::Task, true)
+            .load_deferred_by_category(&DeferredToolCategory::Task, true)
             .await;
         assert_eq!(outcome.requested, 2);
         assert_eq!(outcome.loaded, 1);
@@ -1032,7 +1091,7 @@ mod tests {
             reads.push(tokio::spawn(async move {
                 let _ = registry.tool_definitions();
                 let _ = registry.get_turn_view(true, true, true);
-                let _ = registry.deferred_definitions_async().await;
+                let _ = registry.deferred_definitions().await;
             }));
         }
         for read in reads {

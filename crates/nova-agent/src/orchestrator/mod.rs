@@ -417,12 +417,10 @@ impl OrchestratorEngine {
         };
         let _ = self
             .event_tx
-            .send(AgentEvent::OrchestrationProgress {
-                kind: kind.to_string(),
-                args: args_value,
-                log: None,
-                stream: None,
-            })
+            .send(AgentEvent::SystemLog(format!(
+                "orchestration_progress kind={} args={}",
+                kind, args_value
+            )))
             .await;
     }
 }
@@ -461,18 +459,17 @@ fn rewire_log_forwarding(
                     preview
                 );
 
+                let sub_agent_log_args = serde_json::to_value(&nova_protocol::orchestration::SubAgentLogArgs {
+                    plan_id: plan_id.clone(),
+                    agent_id: agent_id.clone(),
+                    stage_id: stage_id.clone(),
+                })
+                .unwrap_or_default();
                 let _ = orchestrator_tx
-                    .send(AgentEvent::OrchestrationProgress {
-                        kind: "sub_agent_log".to_string(),
-                        args: serde_json::to_value(&nova_protocol::orchestration::SubAgentLogArgs {
-                            plan_id: plan_id.clone(),
-                            agent_id: agent_id.clone(),
-                            stage_id: stage_id.clone(),
-                        })
-                        .unwrap_or_default(),
-                        log: Some(log.clone()),
-                        stream: Some(stream.clone()),
-                    })
+                    .send(AgentEvent::SystemLog(format!(
+                        "orchestration_progress kind=sub_agent_log args={} stream={} log={}",
+                        sub_agent_log_args, stream, log
+                    )))
                     .await;
             }
             // Always forward to original parent

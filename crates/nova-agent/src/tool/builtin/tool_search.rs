@@ -54,7 +54,7 @@ async fn handle_category_selection(registry: &ToolRegistry, category: &str) -> S
         }
     };
 
-    let outcome = registry.load_deferred_by_category_async(&category, true).await;
+    let outcome = registry.load_deferred_by_category(&category, true).await;
     format!(
         "Category '{}' load summary: requested={}, loaded={}, already_loaded={}, not_found={}, failed={}",
         category, outcome.requested, outcome.loaded, outcome.already_loaded, outcome.not_found, outcome.failed
@@ -96,8 +96,7 @@ async fn handle_selection(registry: &ToolRegistry, raw_selection: &str) -> Strin
 async fn handle_search(registry: &ToolRegistry, query: &str, max_results: usize) -> String {
     let query_lower = query.to_lowercase();
     let matches: Vec<String> = registry
-        .deferred_definitions_async()
-        .await
+        .deferred_definitions_snapshot()
         .into_iter()
         .filter(|definition| {
             definition.name.to_lowercase().contains(&query_lower)

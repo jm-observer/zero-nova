@@ -70,7 +70,6 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         model_config: root_binding.model_config.clone(),
         tool_timeout: Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
         max_tokens: config.gateway.max_tokens,
-        use_turn_context: config.gateway.use_turn_context,
         trimmer: TrimmerConfig {
             context_window: config.gateway.trimmer.context_window,
             output_reserve: config.gateway.trimmer.output_reserve,

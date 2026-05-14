@@ -127,8 +127,6 @@ struct RawGatewayConfig {
     #[serde(default = "default_skill_history_strategy")]
     skill_history_strategy: String,
     #[serde(default)]
-    use_turn_context: bool,
-    #[serde(default)]
     trimmer: RawTrimmerConfigToml,
     #[serde(default)]
     side_channel: SideChannelConfigToml,
@@ -324,7 +322,6 @@ impl RawAppConfig {
                     agents: migrated_agents,
                     skill_routing_enabled: self.gateway.skill_routing_enabled,
                     skill_history_strategy: self.gateway.skill_history_strategy,
-                    use_turn_context: self.gateway.use_turn_context,
                     trimmer,
                     side_channel: self.gateway.side_channel,
                     loop_guard: self.gateway.loop_guard,

@@ -177,7 +177,6 @@ fn build_runtime_with_loop_guard<C: LlmClient>(
         },
         tool_timeout: std::time::Duration::from_secs(10),
         max_tokens: 1000,
-        use_turn_context: true,
         trimmer: TrimmerConfig::default(),
         config_dir: std::path::PathBuf::from(""),
         prompts_dir: std::path::PathBuf::from(""),
@@ -224,8 +223,8 @@ async fn test_stalled_iteration_aborts_turn() {
 
     let mut hit_stall = false;
     while let Some(ev) = rx.recv().await {
-        if let AgentEvent::LoopGuardTriggered { reason_code, .. } = ev {
-            if reason_code == "stalled_iteration_abort" {
+        if let AgentEvent::SystemLog(log) = ev {
+            if log.contains("reason_code=stalled_iteration_abort") {
                 hit_stall = true;
             }
         }
@@ -255,10 +254,10 @@ async fn test_duplicate_tool_call_rejected() {
     let mut hit_warning = false;
     let mut hit_reject = false;
     while let Some(ev) = rx.recv().await {
-        if let AgentEvent::LoopGuardTriggered { reason_code, .. } = ev {
-            if reason_code == "duplicate_tool_call_warning" {
+        if let AgentEvent::SystemLog(log) = ev {
+            if log.contains("reason_code=duplicate_tool_call_warning") {
                 hit_warning = true;
-            } else if reason_code == "duplicate_tool_call_rejected" {
+            } else if log.contains("reason_code=duplicate_tool_call_rejected") {
                 hit_reject = true;
             }
         }
@@ -290,10 +289,10 @@ async fn duplicate_tool_rejection_is_fed_back_before_stall_abort() {
     let mut hit_reject = false;
     let mut hit_stall = false;
     while let Some(ev) = rx.recv().await {
-        if let AgentEvent::LoopGuardTriggered { reason_code, .. } = ev {
-            if reason_code == "duplicate_tool_call_rejected" {
+        if let AgentEvent::SystemLog(log) = ev {
+            if log.contains("reason_code=duplicate_tool_call_rejected") {
                 hit_reject = true;
-            } else if reason_code == "stalled_iteration_abort" {
+            } else if log.contains("reason_code=stalled_iteration_abort") {
                 hit_stall = true;
             }
         }

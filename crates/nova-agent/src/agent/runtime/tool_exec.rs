@@ -44,33 +44,30 @@ impl<C: LlmClient> AgentRuntime<C> {
                 LoopGuardDecision::Allow => {}
                 LoopGuardDecision::AllowWithWarning { message } => {
                     let _ = event_tx
-                        .send(AgentEvent::LoopGuardTriggered {
-                            reason: "duplicate_tool_call_warning".to_string(),
-                            tool: Some(name.clone()),
-                            session_id: session_id.to_string(),
-                            canonical_target: signature.canonical_primary_target.clone(),
-                            duplicate_count: loop_guard_state.duplicate_count(),
-                            stalled_iteration_count: loop_guard_state.stalled_count(),
-                            decision: "warn".to_string(),
-                            reason_code: "duplicate_tool_call_warning".to_string(),
-                            signature_hash: Some(signature_hash),
-                        })
+                        .send(AgentEvent::SystemLog(format!(
+                            "loop_guard_triggered session_id={} reason_code=duplicate_tool_call_warning decision=warn tool={} canonical_target={:?} duplicate_count={} stalled_iteration_count={} signature_hash={}",
+                            session_id,
+                            name,
+                            signature.canonical_primary_target,
+                            loop_guard_state.duplicate_count(),
+                            loop_guard_state.stalled_count(),
+                            signature_hash
+                        )))
                         .await;
                     let _ = event_tx.send(AgentEvent::SystemLog(message)).await;
                 }
                 LoopGuardDecision::Reject { message, reason_code } => {
                     let _ = event_tx
-                        .send(AgentEvent::LoopGuardTriggered {
-                            reason: reason_code.clone(),
-                            tool: Some(name.clone()),
-                            session_id: session_id.to_string(),
-                            canonical_target: signature.canonical_primary_target.clone(),
-                            duplicate_count: loop_guard_state.duplicate_count(),
-                            stalled_iteration_count: loop_guard_state.stalled_count(),
-                            decision: "reject".to_string(),
+                        .send(AgentEvent::SystemLog(format!(
+                            "loop_guard_triggered session_id={} reason_code={} decision=reject tool={} canonical_target={:?} duplicate_count={} stalled_iteration_count={} signature_hash={}",
+                            session_id,
                             reason_code,
-                            signature_hash: Some(signature_hash),
-                        })
+                            name,
+                            signature.canonical_primary_target,
+                            loop_guard_state.duplicate_count(),
+                            loop_guard_state.stalled_count(),
+                            signature_hash
+                        )))
                         .await;
                     indexed_results.push((
                         call_idx,
@@ -400,17 +397,13 @@ impl<C: LlmClient> AgentRuntime<C> {
 
             if !has_guard_rejection && loop_guard_state.detect_stalled_iteration(assistant_fp, calls_hash) {
                 let _ = event_tx
-                    .send(AgentEvent::LoopGuardTriggered {
-                        reason: "stalled_iteration_abort".to_string(),
-                        tool: None,
-                        session_id: session_id.to_string(),
-                        canonical_target: None,
-                        duplicate_count: loop_guard_state.duplicate_count(),
-                        stalled_iteration_count: loop_guard_state.stalled_count(),
-                        decision: "reject".to_string(),
-                        reason_code: "stalled_iteration_abort".to_string(),
-                        signature_hash: Some(calls_hash),
-                    })
+                    .send(AgentEvent::SystemLog(format!(
+                        "loop_guard_triggered session_id={} reason_code=stalled_iteration_abort decision=reject tool=<none> canonical_target=<none> duplicate_count={} stalled_iteration_count={} signature_hash={}",
+                        session_id,
+                        loop_guard_state.duplicate_count(),
+                        loop_guard_state.stalled_count(),
+                        calls_hash
+                    )))
                     .await;
                 completed_naturally = true;
                 break;

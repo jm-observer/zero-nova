@@ -1,5 +1,4 @@
 use crate::message::{ContentBlock, Message};
-use crate::prompt::{SkillInvocationLevel, SkillRouteDecision};
 use crate::provider::types::Usage;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -79,39 +78,5 @@ pub enum AgentEvent {
         skill_id: String,
         // Reason for deactivation
         reason: String,
-    },
-    /// Skill route evaluation was done.
-    SkillRouteEvaluated {
-        result: SkillRouteDecision,
-        confidence: f64, // 0.0 - 1.0
-        // Free-text reasoning from LLM or rule engine
-        reasoning: String,
-    },
-    /// Tool was unlocked via deferred loading (e.g., ToolSearch).
-    ToolUnlocked { tool_name: String },
-    /// Skill invocation at a specific level (三层模型).
-    SkillInvocation {
-        skill_id: String,
-        skill_name: String,
-        level: SkillInvocationLevel,
-    },
-    /// Structured orchestration progress event routed to gateway chat progress.
-    OrchestrationProgress {
-        kind: String,
-        args: serde_json::Value,
-        log: Option<String>,
-        stream: Option<String>,
-    },
-    /// Loop guard was triggered for duplicate or stalled behavior.
-    LoopGuardTriggered {
-        reason: String,
-        tool: Option<String>,
-        session_id: String,
-        canonical_target: Option<String>,
-        duplicate_count: usize,
-        stalled_iteration_count: usize,
-        decision: String,
-        reason_code: String,
-        signature_hash: Option<u64>,
     },
 }

@@ -346,9 +346,6 @@ pub struct GatewayConfig {
     /// 对应 Plan 1/2/3 的演进阶段。
     #[serde(default = "default_skill_history_strategy")]
     pub skill_history_strategy: String,
-    /// 是否启用新的 prepare_turn + run_turn_with_context 路径。
-    #[serde(default)]
-    pub use_turn_context: bool,
     /// 历史裁剪配置（Phase 3 新增）。
     #[serde(default)]
     pub trimmer: TrimmerConfigToml,
@@ -568,7 +565,6 @@ impl Default for GatewayConfig {
             agents: Vec::new(),
             skill_routing_enabled: false,
             skill_history_strategy: default_skill_history_strategy(),
-            use_turn_context: false,
             trimmer: TrimmerConfigToml::default(),
             side_channel: SideChannelConfigToml::default(),
             loop_guard: LoopGuardConfigToml::default(),

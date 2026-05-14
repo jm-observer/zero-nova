@@ -4,6 +4,7 @@
 /// PromptConfig、SectionName 等配置类型。
 use crate::message::Message;
 use crate::provider::types::ToolDefinition;
+pub use crate::skill::types::{SkillInvocationLevel, SkillRouteDecision, SkillSwitchResult};
 use crate::skill::CapabilityPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -319,53 +320,6 @@ impl ActiveSkillState {
     pub fn update_route_time(&mut self) {
         self.last_routed_at = Instant::now();
     }
-}
-
-// ---------------------------------------------------------------------------
-//  Routing — SkillRouteDecision
-// ---------------------------------------------------------------------------
-
-/// 路由决策结果。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum SkillRouteDecision {
-    /// 保持当前 skill
-    KeepCurrent,
-    /// 激活指定 skill
-    Activate(String),
-    /// 退出当前 skill
-    Deactivate,
-    /// 不激活任何 skill
-    NoSkill,
-}
-
-/// Skill 调用来源层级（三层模型）。
-///
-/// 基于 v1_messages 会话分析，Skills 暴露但未调用（`/skill-name` 模式
-/// 只支持用户显式输入）。需三层模型区分调用来源：
-/// - 会话级 Skill — Turn 自动路由决定
-/// - 工具级 SkillTool — 模型自动调用 SkillTool（需 prompt 明确触发条件）
-/// - 用户级 /skill-name — 用户显式输入
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum SkillInvocationLevel {
-    /// 会话级 —— Turn 自动路由决定
-    SessionLevel,
-    /// 工具级 —— 模型自动调用 SkillTool
-    ToolLevel,
-    /// 用户级 —— 用户显式输入 /skill-name
-    UserLevel,
-}
-
-/// 三层模型下的 Skill 切换结果。
-#[derive(Debug, Clone)]
-pub struct SkillSwitchResult {
-    /// 是否发生了 skill 切换
-    pub switched: bool,
-    /// 切换到的 skill（可能和之前一样表示重新激活）
-    pub to_skill: String,
-    /// 切换原因
-    pub reason: String,
-    /// 调用层级
-    pub level: SkillInvocationLevel,
 }
 
 // ---------------------------------------------------------------------------

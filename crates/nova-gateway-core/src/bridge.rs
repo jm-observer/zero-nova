@@ -2,8 +2,8 @@ use nova_agent::app::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, App
 use nova_agent::message::ContentBlock;
 use nova_protocol::{
     Agent, AgentsSwitchResponse, ContentBlockDTO, ErrorPayload, GatewayMessage, MessageDTO, MessageEnvelope,
-    ProgressEvent, Session as SessionProtocol, SkillActivatedPayload, SkillExitedPayload, SkillInvocationPayload,
-    SkillRouteEvaluatedPayload, SkillSwitchedPayload, TaskStatusChangedPayload, ToolUnlockedPayload, WelcomePayload,
+    ProgressEvent, Session as SessionProtocol, SkillActivatedPayload, SkillExitedPayload, SkillSwitchedPayload,
+    TaskStatusChangedPayload, WelcomePayload,
 };
 
 /// 将 AppEvent 转换为 GatewayMessage。
@@ -180,37 +180,6 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
                 reason: "manual".to_string(),
             };
             MessageEnvelope::SkillExited(payload)
-        }
-        AppEvent::SkillRouteEvaluated { confidence, reasoning } => {
-            let payload = SkillRouteEvaluatedPayload {
-                session_id: Some(session_id.to_string()),
-                skill_id: "unknown".to_string(),
-                confidence,
-                decision: "route".to_string(),
-                reasoning,
-            };
-            MessageEnvelope::SkillRouteEvaluated(payload)
-        }
-        AppEvent::ToolUnlocked { tool_name } => {
-            let payload = ToolUnlockedPayload {
-                session_id: Some(session_id.to_string()),
-                tool_name,
-                source: "tool_search".to_string(),
-            };
-            MessageEnvelope::ToolUnlocked(payload)
-        }
-        AppEvent::SkillInvocation {
-            skill_id,
-            skill_name,
-            level,
-        } => {
-            let payload = SkillInvocationPayload {
-                session_id: Some(session_id.to_string()),
-                skill_id,
-                skill_name,
-                level: format!("{:?}", level),
-            };
-            MessageEnvelope::SkillInvocation(payload)
         }
         AppEvent::OrchestrationProgress {
             kind,

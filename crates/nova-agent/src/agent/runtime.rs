@@ -54,8 +54,6 @@ pub struct AgentConfig {
     pub tool_timeout: Duration,
     /// 最大 token 限制
     pub max_tokens: usize,
-    /// Phase 3：是否启用新的 prepare_turn + run_turn_with_context 路径
-    pub use_turn_context: bool,
     /// 历史裁剪配置
     pub trimmer: TrimmerConfig,
     /// 配置目录路径
@@ -161,22 +159,24 @@ impl<C: LlmClient> AgentRuntime<C> {
         cancellation_token: Option<CancellationToken>,
         model_config: &ModelConfig,
     ) -> Result<TurnResult> {
-        let mut all_messages = history.to_vec();
-        all_messages.push(Message::new(
+        let mut prompt_config = PromptConfig::new("default".to_string(), String::new(), None);
+        if let Some(env) = environment.clone() {
+            prompt_config = prompt_config.with_environment(env);
+        }
+        let turn_ctx = self
+            .prepare_turn(user_input, Arc::new(history.to_vec()), &prompt_config)
+            .await?;
+        let user_message = Message::new(
             Role::User,
             vec![ContentBlock::Text {
                 text: user_input.to_string(),
             }],
             chrono::Utc::now().timestamp_millis(),
-        ));
-        let tool_definitions = self.tools.tool_definitions();
-        let visible_tool_names: Arc<std::collections::HashSet<String>> =
-            Arc::new(tool_definitions.iter().map(|t| t.name.clone()).collect());
-        self.execute_turn_loop(
-            all_messages,
-            &tool_definitions,
-            visible_tool_names,
-            self.config.max_iterations,
+        );
+
+        self.run_turn_with_context_and_model_config(
+            turn_ctx,
+            user_message,
             session_id,
             agent_id,
             environment,
@@ -217,7 +217,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         };
 
         // 3. 过滤工具定义
-        let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill);
+        let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill).await;
 
         // 4. 构建 system prompt — 使用当前轮实际可见工具
         let mut config = prompt_config.clone();
@@ -370,12 +370,12 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     /// 过滤工具定义（基于 `CapabilityPolicy` 和 `active skill`）。
-    fn filter_tool_definitions(
+    async fn filter_tool_definitions(
         &self,
         capability_policy: &CapabilityPolicy,
         active_skill: &Option<ActiveSkillState>,
     ) -> Vec<ToolDefinition> {
-        let mut tools = self.tools.tool_definitions();
+        let mut tools = self.tools.tool_definitions_async().await;
         let tool_info = tools
             .iter()
             .find(|tool| tool.name == crate::tool::builtin::tool_info::TOOL_NAME)
@@ -491,7 +491,6 @@ mod tests {
                 },
                 tool_timeout: Duration::from_secs(1),
                 max_tokens: 128,
-                use_turn_context: false,
                 trimmer: TrimmerConfig::default(),
                 config_dir: std::path::PathBuf::new(),
                 prompts_dir: std::path::PathBuf::new(),

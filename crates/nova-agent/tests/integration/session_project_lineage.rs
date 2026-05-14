@@ -265,7 +265,6 @@ fn build_conversation_service(
             },
             tool_timeout: Duration::from_secs(1),
             max_tokens: 256,
-            use_turn_context: false,
             trimmer: TrimmerConfig::default(),
             config_dir: data_dir.to_path_buf(),
             prompts_dir: data_dir.to_path_buf(),

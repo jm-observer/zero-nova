@@ -288,8 +288,6 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
 
-        // 渐进切换策略（Phase 3 G11）
-        let use_turn_context = self.agent.config.use_turn_context;
         let execution_binding = if let Some(override_model) = execution_model.as_ref() {
             self.app_config.resolve_model_override(
                 &base_binding,
@@ -299,348 +297,239 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         } else {
             base_binding.clone()
         };
-        let execution_environment = self.agent.config.initial_env_snapshot.clone().map(|mut env| {
-            env.model_id = Some(execution_binding.model_config.model.clone());
-            env
-        });
-        if use_turn_context {
-            let project_dir = self.sessions.get_project_dir(session_id).await?;
-            let project_context = load_project_context_with_config_async(
-                project_dir.as_deref(),
-                self.agent.config.project_context_file.as_deref(),
-            )
-            .await;
+        let project_dir = self.sessions.get_project_dir(session_id).await?;
+        let project_context = load_project_context_with_config_async(
+            project_dir.as_deref(),
+            self.agent.config.project_context_file.as_deref(),
+        )
+        .await;
 
-            // 新路径：prepare_turn + run_turn_with_context
-            let system_prompt_base = {
-                let control = session.control.read().await;
-                control
-                    .system_prompt_base_override
-                    .clone()
-                    .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
-            };
-            let compaction = &self.app_config.prompt_compaction;
-            let mut prompt_config =
-                PromptConfig::new(agent_descriptor.id.clone(), system_prompt_base, project_dir.clone())
-                    .with_project_context_path_opt(self.agent.config.project_context_file.clone())
-                    .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
-                    .with_template_vars(agent_descriptor.initial_template_vars.clone())
-                    .with_project_instruction_profile(if compaction.enabled {
-                        Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
-                    } else {
-                        ProjectInstructionProfile::Full
-                    })
-                    .with_skill_injection(if compaction.enabled {
-                        Self::parse_skill_injection(compaction.skill_injection.as_str())
-                    } else {
-                        SkillInjectionMode::Full
-                    })
-                    .with_tool_guidance(if compaction.enabled {
-                        Self::parse_tool_guidance(compaction.tool_guidance.as_str())
-                    } else {
-                        ToolGuidanceMode::Full
-                    });
+        // 新路径：prepare_turn + run_turn_with_context
+        let system_prompt_base = {
+            let control = session.control.read().await;
+            control
+                .system_prompt_base_override
+                .clone()
+                .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
+        };
+        let compaction = &self.app_config.prompt_compaction;
+        let mut prompt_config = PromptConfig::new(agent_descriptor.id.clone(), system_prompt_base, project_dir.clone())
+            .with_project_context_path_opt(self.agent.config.project_context_file.clone())
+            .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
+            .with_template_vars(agent_descriptor.initial_template_vars.clone())
+            .with_project_instruction_profile(if compaction.enabled {
+                Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
+            } else {
+                ProjectInstructionProfile::Full
+            })
+            .with_skill_injection(if compaction.enabled {
+                Self::parse_skill_injection(compaction.skill_injection.as_str())
+            } else {
+                SkillInjectionMode::Full
+            })
+            .with_tool_guidance(if compaction.enabled {
+                Self::parse_tool_guidance(compaction.tool_guidance.as_str())
+            } else {
+                ToolGuidanceMode::Full
+            });
 
-            // 如果 agent 启用了开发项目提示词，则注入文件列表
-            if agent_descriptor.enable_project_developer_prompt {
-                let files = self.app_config.developer_prompt_files.clone();
-                let project_dir_display = project_dir
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "(not set)".to_string());
+        // 如果 agent 启用了开发项目提示词，则注入文件列表
+        if agent_descriptor.enable_project_developer_prompt {
+            let files = self.app_config.developer_prompt_files.clone();
+            let project_dir_display = project_dir
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "(not set)".to_string());
+            log::info!(
+                "Developer project prompt enabled for agent '{}': session_id={}, project_dir={}, configured_files={}",
+                agent_descriptor.id,
+                session_id,
+                project_dir_display,
+                files.len()
+            );
+            prompt_config = prompt_config.with_developer_prompt_files(files.clone());
+
+            // 会话执行期加载开发项目提示词内容（Plan 3）
+            let dev_prompt_content = load_developer_project_prompt_async(project_dir.as_deref(), &files).await;
+            if let Some(ref content) = dev_prompt_content {
+                let file_count = content.matches("### Source:").count();
+                log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
+                prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
+            } else {
                 log::info!(
-                    "Developer project prompt enabled for agent '{}': session_id={}, project_dir={}, configured_files={}",
-                    agent_descriptor.id,
+                    "Developer project prompt not loaded for session {} (project_dir={}, configured_files={})",
                     session_id,
                     project_dir_display,
                     files.len()
                 );
-                prompt_config = prompt_config.with_developer_prompt_files(files.clone());
-
-                // 会话执行期加载开发项目提示词内容（Plan 3）
-                let dev_prompt_content = load_developer_project_prompt_async(project_dir.as_deref(), &files).await;
-                if let Some(ref content) = dev_prompt_content {
-                    let file_count = content.matches("### Source:").count();
-                    log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
-                    prompt_config = prompt_config.with_developer_project_prompt_content(content.clone());
-                } else {
-                    log::info!(
-                        "Developer project prompt not loaded for session {} (project_dir={}, configured_files={})",
-                        session_id,
-                        project_dir_display,
-                        files.len()
-                    );
-                }
             }
-
-            let mut env =
-                crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref())
-                    .await;
-            env.model_id = Some(execution_binding.model_config.model.clone());
-            prompt_config = prompt_config.with_environment(env.clone());
-
-            if let Some(content) = project_context {
-                prompt_config = prompt_config.with_project_context_content(content);
-            }
-
-            let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config).await?;
-
-            // Phase C: Capture snapshot
-            let snapshot = super::snapshot_assembler::RuntimeSnapshotAssembler::turn_context_to_snapshot(
-                turn_id.clone(),
-                &turn_ctx,
-            );
-            // We use Value for storage to avoid deep coupling
-            let prompt_preview_value = snapshot
-                .prompt_preview
-                .as_ref()
-                .map(serde_json::to_value)
-                .transpose()
-                .context("failed to serialize prompt preview for snapshot")?;
-            let tools: Vec<serde_json::Value> = snapshot
-                .tools
-                .iter()
-                .map(serde_json::to_value)
-                .collect::<Result<Vec<_>, _>>()
-                .context("failed to serialize tools for snapshot")?;
-            let skills: Vec<serde_json::Value> = snapshot
-                .skills
-                .iter()
-                .map(serde_json::to_value)
-                .collect::<Result<Vec<_>, _>>()
-                .context("failed to serialize skills for snapshot")?;
-            let snapshot_internal = LastTurnSnapshot {
-                turn_id: snapshot.turn_id.clone(),
-                prepared_at: snapshot.prepared_at,
-                prompt_preview: prompt_preview_value,
-                tools,
-                skills,
-                memory_hits: None,
-                usage: None,
-            };
-            let initial_skills =
-                self.collect_current_skills(turn_ctx.active_skill.as_ref().map(|s| s.skill_id.as_str()));
-            self.sessions
-                .update_runtime_state(session_id, Some(snapshot_internal.clone()), None, Some(initial_skills))
-                .await?;
-
-            let user_message = Message::new(
-                Role::User,
-                vec![ContentBlock::Text {
-                    text: input.to_string(),
-                }],
-                Utc::now().timestamp_millis(),
-            );
-            let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
-            let turn_result = match self
-                .agent
-                .run_turn_with_context_and_model_config(
-                    turn_ctx,
-                    user_message,
-                    session_id,
-                    Some(&agent_id),
-                    Some(env),
-                    event_tx,
-                    Some(token),
-                    &execution_binding.model_config,
-                )
-                .await
-            {
-                Ok(res) => res,
-                Err(e) => {
-                    self.sessions
-                        .get_repository()
-                        .update_run_status(&run_id, "failed", Utc::now().timestamp_millis())
-                        .await?;
-                    return Err(e);
-                }
-            };
-
-            for msg in &turn_result.messages {
-                let metadata = if msg.role == Role::Assistant {
-                    turn_result
-                        .provider_request_body
-                        .as_ref()
-                        .zip(turn_result.provider_response_body.as_ref())
-                        .map(|(request_body, response_body)| {
-                            serde_json::json!({
-                                "providerHttpTrace": {
-                                    "requestBody": request_body,
-                                    "responseBody": response_body,
-                                    "format": "json",
-                                    "boundMessageId": "",
-                                    "capturedAt": Utc::now().timestamp_millis(),
-                                    "truncated": false
-                                }
-                            })
-                        })
-                } else {
-                    None
-                };
-                self.sessions
-                    .append_message(session_id, msg.role.clone(), msg.content.clone(), metadata)
-                    .await?;
-            }
-
-            // Phase C: Update usage and skills
-            let usage = &turn_result.usage;
-            let turn_usage = TurnUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_creation_input_tokens: usage.cache_creation_input_tokens,
-                cache_read_input_tokens: usage.cache_read_input_tokens,
-                source: UsageSource::Provider,
-                completeness: infer_usage_completeness(usage),
-                raw_provider_usage: usage.raw_provider_usage.clone(),
-            };
-            let turn_usage_value = serde_json::to_value(&turn_usage)?;
-            self.sessions
-                .get_repository()
-                .update_run_usage(&run_id, &turn_usage_value)
-                .await?;
-            let mut final_skills = self.collect_current_skills(active_skill_id.as_deref());
-            {
-                // 合并运行过程中观察到的技能（动态激活/切换/退出事件）
-                let observed = observed_skills.lock().await;
-                log::info!(
-                    "[SKILL_REC] Merging {} observed events into {} initial skills",
-                    observed.len(),
-                    final_skills.len()
-                );
-                final_skills.extend(observed.clone());
-            }
-
-            log::info!(
-                "[SKILL_REC] Final skill list for session {}: {:?}",
-                session_id,
-                final_skills
-            );
-
-            self.sessions
-                .update_runtime_state(
-                    session_id,
-                    Some(LastTurnSnapshot {
-                        usage: Some(turn_usage_value),
-                        ..snapshot_internal
-                    }),
-                    Some((
-                        usage.input_tokens,
-                        usage.output_tokens,
-                        usage.cache_creation_input_tokens.unwrap_or(0),
-                        usage.cache_read_input_tokens.unwrap_or(0),
-                    )),
-                    Some(final_skills),
-                )
-                .await?;
-
-            // Phase 2: Update Run status
-            self.sessions
-                .get_repository()
-                .update_run_status(&run_id, "success", Utc::now().timestamp_millis())
-                .await?;
-
-            session.clear_cancellation_token().await;
-            session.touch_updated_at();
-            Ok(turn_result)
-        } else {
-            // 旧路径：run_turn（默认）
-            let history_for_turn: &[Message] = &history[..history.len() - 1];
-            let turn_result = match self
-                .agent
-                .run_turn_with_model_config(
-                    history_for_turn,
-                    input,
-                    session_id,
-                    Some(&agent_id),
-                    execution_environment,
-                    event_tx,
-                    Some(token),
-                    &execution_binding.model_config,
-                )
-                .await
-            {
-                Ok(res) => res,
-                Err(e) => {
-                    self.sessions
-                        .get_repository()
-                        .update_run_status(&run_id, "failed", Utc::now().timestamp_millis())
-                        .await?;
-                    return Err(e);
-                }
-            };
-
-            for msg in &turn_result.messages {
-                let metadata = if msg.role == Role::Assistant {
-                    turn_result
-                        .provider_request_body
-                        .as_ref()
-                        .zip(turn_result.provider_response_body.as_ref())
-                        .map(|(request_body, response_body)| {
-                            serde_json::json!({
-                                "providerHttpTrace": {
-                                    "requestBody": request_body,
-                                    "responseBody": response_body,
-                                    "format": "json",
-                                    "boundMessageId": "",
-                                    "capturedAt": Utc::now().timestamp_millis(),
-                                    "truncated": false
-                                }
-                            })
-                        })
-                } else {
-                    None
-                };
-                self.sessions
-                    .append_message(session_id, msg.role.clone(), msg.content.clone(), metadata)
-                    .await?;
-            }
-
-            // Phase C: Update usage and skills
-            let usage = &turn_result.usage;
-            let turn_usage = TurnUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_creation_input_tokens: usage.cache_creation_input_tokens,
-                cache_read_input_tokens: usage.cache_read_input_tokens,
-                source: UsageSource::Provider,
-                completeness: infer_usage_completeness(usage),
-                raw_provider_usage: usage.raw_provider_usage.clone(),
-            };
-            let turn_usage_value = serde_json::to_value(&turn_usage)?;
-            self.sessions
-                .get_repository()
-                .update_run_usage(&run_id, &turn_usage_value)
-                .await?;
-            let mut final_skills = self.collect_current_skills(None);
-            {
-                let observed = observed_skills.lock().await;
-                final_skills.extend(observed.clone());
-            }
-
-            self.sessions
-                .update_runtime_state(
-                    session_id,
-                    None,
-                    Some((
-                        usage.input_tokens,
-                        usage.output_tokens,
-                        usage.cache_creation_input_tokens.unwrap_or(0),
-                        usage.cache_read_input_tokens.unwrap_or(0),
-                    )),
-                    Some(final_skills),
-                )
-                .await?;
-
-            // Phase 2: Update Run status
-            self.sessions
-                .get_repository()
-                .update_run_status(&run_id, "success", Utc::now().timestamp_millis())
-                .await?;
-
-            session.clear_cancellation_token().await;
-            session.touch_updated_at();
-            Ok(turn_result)
         }
+
+        let mut env =
+            crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref()).await;
+        env.model_id = Some(execution_binding.model_config.model.clone());
+        prompt_config = prompt_config.with_environment(env.clone());
+
+        if let Some(content) = project_context {
+            prompt_config = prompt_config.with_project_context_content(content);
+        }
+
+        let turn_ctx = self.agent.prepare_turn(input, history_for_turn, &prompt_config).await?;
+
+        // Phase C: Capture snapshot
+        let snapshot =
+            super::snapshot_assembler::RuntimeSnapshotAssembler::turn_context_to_snapshot(turn_id.clone(), &turn_ctx);
+        // We use Value for storage to avoid deep coupling
+        let prompt_preview_value = snapshot
+            .prompt_preview
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .context("failed to serialize prompt preview for snapshot")?;
+        let tools: Vec<serde_json::Value> = snapshot
+            .tools
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .context("failed to serialize tools for snapshot")?;
+        let skills: Vec<serde_json::Value> = snapshot
+            .skills
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .context("failed to serialize skills for snapshot")?;
+        let snapshot_internal = LastTurnSnapshot {
+            turn_id: snapshot.turn_id.clone(),
+            prepared_at: snapshot.prepared_at,
+            prompt_preview: prompt_preview_value,
+            tools,
+            skills,
+            memory_hits: None,
+            usage: None,
+        };
+        let initial_skills = self.collect_current_skills(turn_ctx.active_skill.as_ref().map(|s| s.skill_id.as_str()));
+        self.sessions
+            .update_runtime_state(session_id, Some(snapshot_internal.clone()), None, Some(initial_skills))
+            .await?;
+
+        let user_message = Message::new(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: input.to_string(),
+            }],
+            Utc::now().timestamp_millis(),
+        );
+        let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
+        let turn_result = match self
+            .agent
+            .run_turn_with_context_and_model_config(
+                turn_ctx,
+                user_message,
+                session_id,
+                Some(&agent_id),
+                Some(env),
+                event_tx,
+                Some(token),
+                &execution_binding.model_config,
+            )
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                self.sessions
+                    .get_repository()
+                    .update_run_status(&run_id, "failed", Utc::now().timestamp_millis())
+                    .await?;
+                return Err(e);
+            }
+        };
+
+        for msg in &turn_result.messages {
+            let metadata = if msg.role == Role::Assistant {
+                turn_result
+                    .provider_request_body
+                    .as_ref()
+                    .zip(turn_result.provider_response_body.as_ref())
+                    .map(|(request_body, response_body)| {
+                        serde_json::json!({
+                            "providerHttpTrace": {
+                                "requestBody": request_body,
+                                "responseBody": response_body,
+                                "format": "json",
+                                "boundMessageId": "",
+                                "capturedAt": Utc::now().timestamp_millis(),
+                                "truncated": false
+                            }
+                        })
+                    })
+            } else {
+                None
+            };
+            self.sessions
+                .append_message(session_id, msg.role.clone(), msg.content.clone(), metadata)
+                .await?;
+        }
+
+        // Phase C: Update usage and skills
+        let usage = &turn_result.usage;
+        let turn_usage = TurnUsage {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens,
+            cache_read_input_tokens: usage.cache_read_input_tokens,
+            source: UsageSource::Provider,
+            completeness: infer_usage_completeness(usage),
+            raw_provider_usage: usage.raw_provider_usage.clone(),
+        };
+        let turn_usage_value = serde_json::to_value(&turn_usage)?;
+        self.sessions
+            .get_repository()
+            .update_run_usage(&run_id, &turn_usage_value)
+            .await?;
+        let mut final_skills = self.collect_current_skills(active_skill_id.as_deref());
+        {
+            // 合并运行过程中观察到的技能（动态激活/切换/退出事件）
+            let observed = observed_skills.lock().await;
+            log::info!(
+                "[SKILL_REC] Merging {} observed events into {} initial skills",
+                observed.len(),
+                final_skills.len()
+            );
+            final_skills.extend(observed.clone());
+        }
+
+        log::info!(
+            "[SKILL_REC] Final skill list for session {}: {:?}",
+            session_id,
+            final_skills
+        );
+
+        self.sessions
+            .update_runtime_state(
+                session_id,
+                Some(LastTurnSnapshot {
+                    usage: Some(turn_usage_value),
+                    ..snapshot_internal
+                }),
+                Some((
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.cache_creation_input_tokens.unwrap_or(0),
+                    usage.cache_read_input_tokens.unwrap_or(0),
+                )),
+                Some(final_skills),
+            )
+            .await?;
+
+        // Phase 2: Update Run status
+        self.sessions
+            .get_repository()
+            .update_run_status(&run_id, "success", Utc::now().timestamp_millis())
+            .await?;
+
+        session.clear_cancellation_token().await;
+        session.touch_updated_at();
+        Ok(turn_result)
     }
 
     fn collect_current_skills(&self, active_skill_id: Option<&str>) -> Vec<serde_json::Value> {

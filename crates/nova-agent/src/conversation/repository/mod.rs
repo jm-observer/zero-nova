@@ -1,5 +1,13 @@
+pub mod artifact_repo;
+pub mod audit_repo;
+pub mod diagnostic_repo;
 pub mod message_repo;
+pub mod permission_repo;
+pub mod run_repo;
 pub mod session_repo;
+pub mod types;
+pub mod usage_repo;
+pub mod workspace_repo;
 
 use anyhow::{Context, Result};
 use log::warn;
@@ -10,22 +18,7 @@ pub struct SqliteSessionRepository {
     pub(super) pool: sqlx::SqlitePool,
 }
 
-type SessionRow = (String, String, String, i64, i64, super::control::ControlState);
-
-#[derive(Debug, Clone)]
-pub struct SessionUsageAggregate {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_creation_input_tokens: u64,
-    pub cache_read_input_tokens: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct UsageQualityCounts {
-    pub total_turns: u32,
-    pub turns_with_unknown_cache: u32,
-    pub turns_with_missing_usage: u32,
-}
+pub use types::{SessionRow, SessionUsageAggregate, UsageQualityCounts};
 
 fn parse_model_ref(raw: Option<String>) -> Result<Option<super::control::ModelRef>> {
     raw.map(|value| serde_json::from_str(&value).context("Failed to parse run model metadata"))

@@ -722,8 +722,6 @@ mod tests {
         schema: Value,
     }
 
-
-
     #[async_trait::async_trait]
     impl Tool for StaticTool {
         fn definition(&self) -> ToolDefinition {
@@ -761,8 +759,6 @@ mod tests {
             })
         }
     }
-
-
 
     #[tokio::test]
     async fn execute_supports_legacy_tool_names() {

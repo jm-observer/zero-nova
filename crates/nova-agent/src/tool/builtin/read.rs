@@ -1,5 +1,5 @@
 use crate::tool::read_cache::ReadRange;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -198,8 +198,8 @@ impl ReadTool {
 
 #[async_trait]
 impl Tool for ReadTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "Read".to_string(),
             description: "Read the contents of a file. Supports paging, PDF (placeholder), and images.".to_string(),
             input_schema: json!({

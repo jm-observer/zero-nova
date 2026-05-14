@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -61,8 +61,8 @@ impl EditTool {
 
 #[async_trait]
 impl Tool for EditTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "Edit".to_string(),
             description: "Performs exact string replacements in files. Best for precise modifications.".to_string(),
             input_schema: json!({

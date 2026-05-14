@@ -6,7 +6,7 @@ mod bash_windows;
 
 use crate::config::BashConfig;
 use crate::event::AgentEvent;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use log::{info, warn};
@@ -86,8 +86,8 @@ impl BashTool {
 /// Implementation of the `Tool` trait for BashTool.
 impl Tool for BashTool {
     /// Returns the tool definition for BashTool.
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "Bash".to_string(),
             description: format!(
                 "Execute a shell command (using {}). Returns stdout, stderr and exit code. On Windows PowerShell, prefer PowerShell syntax such as `Get-ChildItem -Force` instead of Unix flags like `-la`.",

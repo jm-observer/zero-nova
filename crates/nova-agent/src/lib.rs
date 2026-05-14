@@ -31,9 +31,4 @@ pub use prompt::{
 };
 pub use provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 pub use skill::{CapabilityPolicy, FileToolPriority, PolicySource, Skill, SkillPackage, SkillRegistry, ToolPolicy};
-pub use tool::{Tool, ToolContext, ToolDefinition, ToolRegistry};
-
-pub async fn run() -> anyhow::Result<()> {
-    log::info!("nova-core started");
-    Ok(())
-}
+pub use tool::{RegisteredToolDefinition, Tool, ToolContext, ToolRegistry};

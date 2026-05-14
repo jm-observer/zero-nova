@@ -1,5 +1,4 @@
-use crate::agent::AgentRuntime;
-use crate::agent::TurnResult;
+use crate::agent::{AgentRuntime, TurnResult, TurnWithContextRequest};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
 use crate::config::AppConfig;
 use crate::conversation::control::{LastTurnSnapshot, ModelRef};
@@ -9,7 +8,7 @@ use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
     load_developer_project_prompt_async, load_project_context_with_config_async, ProjectInstructionProfile,
-    PromptConfig, SkillInjectionMode, ToolGuidanceMode,
+    PromptConfig, PromptLoadContext, SkillInjectionMode, ToolGuidanceMode,
 };
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
@@ -313,25 +312,32 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
         };
         let compaction = &self.app_config.prompt_compaction;
-        let mut prompt_config = PromptConfig::new(agent_descriptor.id.clone(), system_prompt_base, project_dir.clone())
-            .with_project_context_path_opt(self.agent.config.project_context_file.clone())
-            .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
-            .with_template_vars(agent_descriptor.initial_template_vars.clone())
-            .with_project_instruction_profile(if compaction.enabled {
-                Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
-            } else {
-                ProjectInstructionProfile::Full
-            })
-            .with_skill_injection(if compaction.enabled {
-                Self::parse_skill_injection(compaction.skill_injection.as_str())
-            } else {
-                SkillInjectionMode::Full
-            })
-            .with_tool_guidance(if compaction.enabled {
-                Self::parse_tool_guidance(compaction.tool_guidance.as_str())
-            } else {
-                ToolGuidanceMode::Full
-            });
+        let mut prompt_config = PromptConfig::new(
+            agent_descriptor.id.clone(),
+            system_prompt_base,
+            PromptLoadContext {
+                project_dir: project_dir.clone(),
+                project_context_path: self.agent.config.project_context_file.clone(),
+                developer_prompt_files: Vec::new(),
+            },
+        )
+        .with_workflow_prompt_path(self.agent.config.prompts_dir.join("workflow-stages.md"))
+        .with_template_vars(agent_descriptor.initial_template_vars.clone())
+        .with_project_instruction_profile(if compaction.enabled {
+            Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
+        } else {
+            ProjectInstructionProfile::Full
+        })
+        .with_skill_injection(if compaction.enabled {
+            Self::parse_skill_injection(compaction.skill_injection.as_str())
+        } else {
+            SkillInjectionMode::Full
+        })
+        .with_tool_guidance(if compaction.enabled {
+            Self::parse_tool_guidance(compaction.tool_guidance.as_str())
+        } else {
+            ToolGuidanceMode::Full
+        });
 
         // 如果 agent 启用了开发项目提示词，则注入文件列表
         if agent_descriptor.enable_project_developer_prompt {
@@ -347,7 +353,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 project_dir_display,
                 files.len()
             );
-            prompt_config = prompt_config.with_developer_prompt_files(files.clone());
+            prompt_config.load_context.developer_prompt_files = files.clone();
 
             // 会话执行期加载开发项目提示词内容（Plan 3）
             let dev_prompt_content = load_developer_project_prompt_async(project_dir.as_deref(), &files).await;
@@ -422,16 +428,16 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
         let turn_result = match self
             .agent
-            .run_turn_with_context_and_model_config(
-                turn_ctx,
-                user_message,
+            .run_turn_with_context_and_model_config(TurnWithContextRequest {
+                ctx: turn_ctx,
+                message: user_message,
                 session_id,
-                Some(&agent_id),
-                Some(env),
+                agent_id: Some(&agent_id),
+                environment: Some(env),
                 event_tx,
-                Some(token),
-                &execution_binding.model_config,
-            )
+                cancellation_token: Some(token),
+                model_config: &execution_binding.model_config,
+            })
             .await
         {
             Ok(res) => res,

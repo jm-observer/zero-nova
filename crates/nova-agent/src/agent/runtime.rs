@@ -2,8 +2,8 @@ use crate::event::AgentEvent;
 use crate::loop_guard::LoopGuardConfig;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, SideChannelInjector, SystemPromptBuilder,
-    TrimmerConfig, TurnContext,
+    ActiveSkillState, EnvironmentSnapshot, HistoryTrimmer, PromptConfig, PromptLoadContext, SideChannelInjector,
+    SystemPromptBuilder, TrimmerConfig, TurnContext,
 };
 use crate::provider::types::{ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig};
@@ -21,6 +21,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use tool_exec::ExecuteTurnLoopRequest;
 mod diagnostics;
 mod guards;
 mod tool_exec;
@@ -31,6 +32,28 @@ pub struct TurnResult {
     pub usage: Usage,
     pub provider_request_body: Option<Value>,
     pub provider_response_body: Option<Value>,
+}
+
+pub struct TurnRequest<'a> {
+    pub history: &'a [Message],
+    pub user_input: &'a str,
+    pub session_id: &'a str,
+    pub agent_id: Option<&'a str>,
+    pub environment: Option<EnvironmentSnapshot>,
+    pub event_tx: mpsc::Sender<AgentEvent>,
+    pub cancellation_token: Option<CancellationToken>,
+    pub model_config: &'a ModelConfig,
+}
+
+pub struct TurnWithContextRequest<'a> {
+    pub ctx: TurnContext,
+    pub message: Message,
+    pub session_id: &'a str,
+    pub agent_id: Option<&'a str>,
+    pub environment: Option<EnvironmentSnapshot>,
+    pub event_tx: mpsc::Sender<AgentEvent>,
+    pub cancellation_token: Option<CancellationToken>,
+    pub model_config: &'a ModelConfig,
 }
 
 /// Runtime for the zero-nova agent.
@@ -134,7 +157,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
-        self.run_turn_with_model_config(
+        self.run_turn_with_model_config(TurnRequest {
             history,
             user_input,
             session_id,
@@ -142,24 +165,23 @@ impl<C: LlmClient> AgentRuntime<C> {
             environment,
             event_tx,
             cancellation_token,
-            &self.config.model_config,
-        )
+            model_config: &self.config.model_config,
+        })
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn run_turn_with_model_config(
-        &self,
-        history: &[Message],
-        user_input: &str,
-        session_id: &str,
-        agent_id: Option<&str>,
-        environment: Option<EnvironmentSnapshot>,
-        event_tx: mpsc::Sender<AgentEvent>,
-        cancellation_token: Option<CancellationToken>,
-        model_config: &ModelConfig,
-    ) -> Result<TurnResult> {
-        let mut prompt_config = PromptConfig::new("default".to_string(), String::new(), None);
+    pub async fn run_turn_with_model_config(&self, req: TurnRequest<'_>) -> Result<TurnResult> {
+        let TurnRequest {
+            history,
+            user_input,
+            session_id,
+            agent_id,
+            environment,
+            event_tx,
+            cancellation_token,
+            model_config,
+        } = req;
+        let mut prompt_config = PromptConfig::new("default".to_string(), String::new(), PromptLoadContext::default());
         if let Some(env) = environment.clone() {
             prompt_config = prompt_config.with_environment(env);
         }
@@ -174,16 +196,16 @@ impl<C: LlmClient> AgentRuntime<C> {
             chrono::Utc::now().timestamp_millis(),
         );
 
-        self.run_turn_with_context_and_model_config(
-            turn_ctx,
-            user_message,
+        self.run_turn_with_context_and_model_config(TurnWithContextRequest {
+            ctx: turn_ctx,
+            message: user_message,
             session_id,
             agent_id,
             environment,
             event_tx,
             cancellation_token,
             model_config,
-        )
+        })
         .await
     }
 
@@ -262,7 +284,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         event_tx: mpsc::Sender<AgentEvent>,
         cancellation_token: Option<CancellationToken>,
     ) -> Result<TurnResult> {
-        self.run_turn_with_context_and_model_config(
+        self.run_turn_with_context_and_model_config(TurnWithContextRequest {
             ctx,
             message,
             session_id,
@@ -270,23 +292,22 @@ impl<C: LlmClient> AgentRuntime<C> {
             environment,
             event_tx,
             cancellation_token,
-            &self.config.model_config,
-        )
+            model_config: &self.config.model_config,
+        })
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn run_turn_with_context_and_model_config(
-        &self,
-        ctx: TurnContext,
-        message: Message,
-        session_id: &str,
-        agent_id: Option<&str>,
-        environment: Option<EnvironmentSnapshot>,
-        event_tx: mpsc::Sender<AgentEvent>,
-        cancellation_token: Option<CancellationToken>,
-        model_config: &ModelConfig,
-    ) -> Result<TurnResult> {
+    pub async fn run_turn_with_context_and_model_config(&self, req: TurnWithContextRequest<'_>) -> Result<TurnResult> {
+        let TurnWithContextRequest {
+            ctx,
+            message,
+            session_id,
+            agent_id,
+            environment,
+            event_tx,
+            cancellation_token,
+            model_config,
+        } = req;
         // 尝试直接移动所有权；失败则 clone 是预期行为（性能优化，语义等价）。
         let mut all_messages = Arc::try_unwrap(ctx.history)
             .unwrap_or_else(|h| (*h).clone())
@@ -323,18 +344,18 @@ impl<C: LlmClient> AgentRuntime<C> {
 
         all_messages.push(message);
 
-        self.execute_turn_loop(
+        self.execute_turn_loop(ExecuteTurnLoopRequest {
             all_messages,
-            &ctx.tool_definitions,
-            ctx.visible_tool_names.clone(),
-            ctx.iteration_budget,
+            tool_definitions: &ctx.tool_definitions,
+            visible_tool_names: ctx.visible_tool_names.clone(),
+            iteration_budget: ctx.iteration_budget,
             session_id,
             agent_id,
             environment,
             event_tx,
             cancellation_token,
             model_config,
-        )
+        })
         .await
     }
 

@@ -7,11 +7,12 @@ use crate::network::HttpClients;
 use crate::prompt::TrimmerConfig;
 use crate::prompt::{
     load_developer_project_prompt_async, load_project_context_with_config_async, template_vars, PromptConfig,
+    PromptLoadContext,
 };
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::provider::ModelConfig;
 use crate::tool::builtin::register_builtin_tools;
-use crate::tool::{ProjectDirService, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
+use crate::tool::{ProjectDirService, RegisteredToolDefinition, Tool, ToolContext, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -241,10 +242,13 @@ impl AgentTool {
         let mut prompt_config = PromptConfig::new(
             spec.id.clone(),
             self.load_agent_prompt(spec).await?,
-            project_dir.clone(),
+            PromptLoadContext {
+                project_dir: project_dir.clone(),
+                project_context_path: self.config.project_context_file(),
+                developer_prompt_files: Vec::new(),
+            },
         )
         .with_environment(environment.clone())
-        .with_project_context_path_opt(self.config.project_context_file())
         .with_workflow_prompt_path(self.config.prompts_dir().join("workflow-stages.md"));
 
         let mut prompt_template_vars = HashMap::new();
@@ -262,7 +266,7 @@ impl AgentTool {
 
         if spec.enable_project_developer_prompt {
             let files = self.config.developer_prompt_files.clone();
-            prompt_config = prompt_config.with_developer_prompt_files(files.clone());
+            prompt_config.load_context.developer_prompt_files = files.clone();
             if let Some(content) = load_developer_project_prompt_async(project_dir.as_deref(), &files).await {
                 prompt_config = prompt_config.with_developer_project_prompt_content(content);
             }
@@ -395,11 +399,11 @@ impl AgentTool {
 
 #[async_trait]
 impl Tool for AgentTool {
-    fn definition(&self) -> ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
         let catalog_hint =
             crate::prompt::build_agent_catalog_hint(&self.config.gateway.agents, &self.primary_agent_type);
 
-        ToolDefinition {
+        RegisteredToolDefinition {
             name: "Agent".to_string(),
             description:
                 "Spawn a specialized agent to perform a task. Supports multiple agent types and isolated execution."
@@ -571,7 +575,7 @@ impl Tool for AgentTool {
 #[cfg(test)]
 mod tests {
     use super::AgentTool;
-    use crate::agent_catalog::ModelConfig as AgentModelConfig;
+    use crate::agent_catalog::AgentModelOverride;
     use crate::config::{AgentSpec, AppConfig, GatewayConfig};
     use serde_json::json;
     use std::path::PathBuf;
@@ -592,7 +596,7 @@ mod tests {
                     prompt_inline: None,
                     system_prompt_template: None,
                     tool_whitelist: None,
-                    model_config: AgentModelConfig {
+                    model_config: AgentModelOverride {
                         model: "gpt-oss-120b".to_string(),
                         temperature: 0.0,
                         max_tokens: Some(8192),
@@ -611,7 +615,7 @@ mod tests {
                     prompt_inline: None,
                     system_prompt_template: None,
                     tool_whitelist: None,
-                    model_config: AgentModelConfig {
+                    model_config: AgentModelOverride {
                         model: "gpt-oss-120b".to_string(),
                         temperature: 0.0,
                         max_tokens: Some(8192),
@@ -699,7 +703,7 @@ mod tests {
                 prompt_inline: None,
                 system_prompt_template: None,
                 tool_whitelist: None,
-                model_config: AgentModelConfig {
+                model_config: AgentModelOverride {
                     model: "gpt-oss-120b".to_string(),
                     temperature: 0.0,
                     max_tokens: Some(8192),

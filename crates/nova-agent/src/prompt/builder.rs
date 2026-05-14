@@ -287,8 +287,11 @@ impl SystemPromptBuilder {
                 content,
                 config.project_instruction_profile,
             ));
-        } else if let Some(content) =
-            load_developer_project_prompt_async(config.project_dir.as_deref(), &config.developer_prompt_files).await
+        } else if let Some(content) = load_developer_project_prompt_async(
+            config.load_context.project_dir.as_deref(),
+            &config.load_context.developer_prompt_files,
+        )
+        .await
         {
             builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
                 &content,
@@ -299,8 +302,8 @@ impl SystemPromptBuilder {
         if let Some(content) = &config.project_context_content {
             builder = builder.project_context_section(content);
         } else if let Some(content) = load_project_context_with_config_async(
-            config.project_dir.as_deref(),
-            config.project_context_path.as_deref(),
+            config.load_context.project_dir.as_deref(),
+            config.load_context.project_context_path.as_deref(),
         )
         .await
         {

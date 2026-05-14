@@ -1,6 +1,6 @@
 use crate::config::SearchConfig;
 use crate::tool::builtin::web_search::types::SearchBackend;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use log::{debug, error, info};
@@ -105,7 +105,7 @@ impl WebSearchTool {
 #[async_trait]
 impl Tool for WebSearchTool {
     /// Returns the tool definition for the web search tool.
-    fn definition(&self) -> ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
         let backend_name = self.backend.name();
         let description = match backend_name {
             "Google" => "Search the web via Google. Focused on GitHub, HuggingFace, docs.rs if using Google backend.",
@@ -113,7 +113,7 @@ impl Tool for WebSearchTool {
             _ => "Search the web via DuckDuckGo. No API key required.",
         };
 
-        ToolDefinition {
+        RegisteredToolDefinition {
             name: "WebSearch".to_string(),
             description: description.to_string(),
             input_schema: json!({

@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -50,8 +50,8 @@ impl WriteTool {
 
 #[async_trait]
 impl Tool for WriteTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "Write".to_string(),
             description: "Write content to a file. Requires the file to have been read first if it exists.".to_string(),
             input_schema: json!({

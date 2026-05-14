@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelConfig {
+pub struct AgentModelOverride {
     pub model: String,
     pub temperature: f32,
     pub max_tokens: Option<u32>,
@@ -19,7 +19,7 @@ pub struct AgentDescriptor {
     pub system_prompt_base: String,                     // 基础提示词模板（用于新路径下的 prepare_turn）
     pub initial_template_vars: HashMap<String, String>, // 初始模板变量
     pub tool_whitelist: Option<Vec<String>>,            // None = 全部工具
-    pub model_config: Option<ModelConfig>,              // None = 使用默认
+    pub model_config: Option<AgentModelOverride>,       // None = 使用默认
     pub provider_id: String,
     pub llm_id: String,
     /// 是否启用开发项目提示词（Plan 2）

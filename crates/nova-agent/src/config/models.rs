@@ -1,6 +1,6 @@
 //! 配置数据模型、枚举和默认值构造。`r`n//!`r`n//! 此模块承载所有配置结构体、枚举和对应的 `Default` 实现，`r`n//! 确保模型层与加载/校验层职责分离。
 
-use crate::agent_catalog::ModelConfig as AgentModelConfig;
+use crate::agent_catalog::AgentModelOverride;
 use crate::provider::ModelConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,6 +8,33 @@ use std::path::PathBuf;
 
 const DEFAULT_BINDING_PROVIDER: &str = "default";
 const DEFAULT_BINDING_LLM: &str = "default";
+const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8082/v1";
+const DEFAULT_PROJECT_INSTRUCTION_PROFILE: &str = "auto";
+const DEFAULT_SKILL_INJECTION: &str = "catalog";
+const DEFAULT_TOOL_GUIDANCE: &str = "compact";
+const DEFAULT_MAX_TOKENS_FIELD: &str = "completion";
+const DEFAULT_STT_MODEL: &str = "whisper-1";
+const DEFAULT_TTS_MODEL: &str = "tts-1";
+const DEFAULT_TTS_VOICE: &str = "alloy";
+const DEFAULT_VOICE_PROVIDER: &str = "openai_compat";
+const DEFAULT_HOST_VALUE: &str = "127.0.0.1";
+const DEFAULT_GATEWAY_PORT: u16 = 18801;
+const DEFAULT_MAX_ITERATIONS_VALUE: usize = 30;
+const DEFAULT_SUBAGENT_TIMEOUT_SECS: u64 = 300;
+const DEFAULT_MAX_TOKENS_VALUE: usize = 4096;
+const DEFAULT_SKILL_HISTORY_STRATEGY: &str = "global";
+const DEFAULT_CONTEXT_WINDOW: usize = 128_000;
+const DEFAULT_OUTPUT_RESERVE: usize = 8_192;
+const DEFAULT_MIN_RECENT_MESSAGES: usize = 10;
+const DEFAULT_SKILL_REMINDER_INTERVAL: usize = 5;
+const DEFAULT_DUPLICATE_READ_MODE: &str = "warn_then_reject";
+const DEFAULT_ITERATION_TRIM_RATIO: f32 = 0.85;
+const DEFAULT_LARGE_SECTION_CHARS: usize = 8_000;
+const DEFAULT_LARGE_MESSAGE_CHARS: usize = 12_000;
+const DEFAULT_LARGE_TOOL_RESULT_CHARS: usize = 8_000;
+const DEFAULT_TOOL_RESULT_COMPACTION_MAX_CHARS: usize = 12_000;
+const DEFAULT_TOOL_RESULT_COMPACTION_HEAD_CHARS: usize = 4_000;
+const DEFAULT_TOOL_RESULT_COMPACTION_TAIL_CHARS: usize = 4_000;
 
 // ---------------------------------------------------------------------------
 //  Default helpers
@@ -22,23 +49,23 @@ pub(crate) fn default_llm_binding_id() -> String {
 }
 
 pub(crate) fn default_base_url() -> String {
-    "http://127.0.0.1:8082/v1".to_string()
+    DEFAULT_BASE_URL.to_string()
 }
 
 pub(crate) fn default_compaction_enabled() -> bool {
     true
 }
 pub(crate) fn default_project_instruction_profile() -> String {
-    "auto".to_string()
+    DEFAULT_PROJECT_INSTRUCTION_PROFILE.to_string()
 }
 pub(crate) fn default_skill_injection() -> String {
-    "catalog".to_string()
+    DEFAULT_SKILL_INJECTION.to_string()
 }
 pub(crate) fn default_tool_guidance() -> String {
-    "compact".to_string()
+    DEFAULT_TOOL_GUIDANCE.to_string()
 }
 pub(crate) fn default_max_tokens_field() -> String {
-    "completion".to_string()
+    DEFAULT_MAX_TOKENS_FIELD.to_string()
 }
 
 pub(crate) fn default_context_headers_enabled() -> bool {
@@ -49,13 +76,13 @@ pub(crate) fn default_voice_enabled() -> bool {
     true
 }
 pub(crate) fn default_stt_model() -> String {
-    "whisper-1".to_string()
+    DEFAULT_STT_MODEL.to_string()
 }
 pub(crate) fn default_tts_model() -> String {
-    "tts-1".to_string()
+    DEFAULT_TTS_MODEL.to_string()
 }
 pub(crate) fn default_tts_voice() -> String {
-    "alloy".to_string()
+    DEFAULT_TTS_VOICE.to_string()
 }
 pub(crate) fn default_stt_timeout_ms() -> u64 {
     30_000
@@ -67,44 +94,44 @@ pub(crate) fn default_voice_max_input_bytes() -> usize {
     5 * 1024 * 1024
 }
 pub(crate) fn default_voice_provider() -> String {
-    "openai_compat".to_string()
+    DEFAULT_VOICE_PROVIDER.to_string()
 }
 
 pub(crate) fn default_host() -> String {
-    "127.0.0.1".to_string()
+    DEFAULT_HOST_VALUE.to_string()
 }
 pub(crate) fn default_port() -> u16 {
-    18801
+    DEFAULT_GATEWAY_PORT
 }
 pub(crate) fn default_max_iterations() -> usize {
-    30
+    DEFAULT_MAX_ITERATIONS_VALUE
 }
 pub(crate) fn default_subagent_timeout() -> u64 {
-    300
+    DEFAULT_SUBAGENT_TIMEOUT_SECS
 }
 pub(crate) fn default_max_tokens() -> usize {
-    4096
+    DEFAULT_MAX_TOKENS_VALUE
 }
 pub(crate) fn default_skill_history_strategy() -> String {
-    "global".to_string()
+    DEFAULT_SKILL_HISTORY_STRATEGY.to_string()
 }
 pub(crate) fn default_trimmer_enabled() -> bool {
     true
 }
 pub(crate) fn default_context_window() -> usize {
-    128_000
+    DEFAULT_CONTEXT_WINDOW
 }
 pub(crate) fn default_output_reserve() -> usize {
-    8_192
+    DEFAULT_OUTPUT_RESERVE
 }
 pub(crate) fn default_min_recent() -> usize {
-    10
+    DEFAULT_MIN_RECENT_MESSAGES
 }
 pub(crate) fn default_side_channel_enabled() -> bool {
     false
 }
 pub(crate) fn default_skill_reminder_interval() -> usize {
-    5
+    DEFAULT_SKILL_REMINDER_INTERVAL
 }
 pub(crate) fn default_loop_guard_enabled() -> bool {
     true
@@ -116,34 +143,34 @@ pub(crate) fn default_max_stalled_iterations() -> usize {
     3
 }
 pub(crate) fn default_duplicate_read_mode() -> String {
-    "warn_then_reject".to_string()
+    DEFAULT_DUPLICATE_READ_MODE.to_string()
 }
 pub(crate) fn default_iteration_trim_ratio() -> f32 {
-    0.85
+    DEFAULT_ITERATION_TRIM_RATIO
 }
 pub(crate) fn default_prompt_diagnostics_enabled() -> bool {
     false
 }
 pub(crate) fn default_large_section_chars() -> usize {
-    8_000
+    DEFAULT_LARGE_SECTION_CHARS
 }
 pub(crate) fn default_large_message_chars() -> usize {
-    12_000
+    DEFAULT_LARGE_MESSAGE_CHARS
 }
 pub(crate) fn default_large_tool_result_chars() -> usize {
-    8_000
+    DEFAULT_LARGE_TOOL_RESULT_CHARS
 }
 pub(crate) fn default_tool_result_compaction_enabled() -> bool {
     true
 }
 pub(crate) fn default_tool_result_compaction_max_chars() -> usize {
-    12_000
+    DEFAULT_TOOL_RESULT_COMPACTION_MAX_CHARS
 }
 pub(crate) fn default_tool_result_compaction_head_chars() -> usize {
-    4_000
+    DEFAULT_TOOL_RESULT_COMPACTION_HEAD_CHARS
 }
 pub(crate) fn default_tool_result_compaction_tail_chars() -> usize {
-    4_000
+    DEFAULT_TOOL_RESULT_COMPACTION_TAIL_CHARS
 }
 
 pub(crate) fn default_provider_registry() -> HashMap<String, ProviderConfig> {
@@ -315,7 +342,7 @@ pub struct AgentSpec {
     #[serde(default)]
     pub system_prompt_template: Option<String>,
     pub tool_whitelist: Option<Vec<String>>,
-    pub model_config: AgentModelConfig,
+    pub model_config: AgentModelOverride,
     /// 是否启用开发项目提示词读取。
     #[serde(default)]
     pub enable_project_developer_prompt: bool,

@@ -4,7 +4,7 @@ use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
-use crate::prompt::{load_developer_project_prompt_async, PromptConfig, SystemPromptBuilder};
+use crate::prompt::{load_developer_project_prompt_async, PromptConfig, PromptLoadContext, SystemPromptBuilder};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
@@ -127,13 +127,20 @@ impl AgentWorkspaceService {
         let prompt_base = load_agent_prompt_for_reload(&agent_spec, &reloaded_config).await?;
         let prompt_base_fingerprint = fingerprint_text(&prompt_base);
 
-        let mut prompt_config = PromptConfig::new(agent_id.clone(), prompt_base.clone(), None)
-            .with_project_context_path_opt(reloaded_config.project_context_file())
-            .with_workflow_prompt_path(reloaded_config.prompts_dir().join("workflow-stages.md"))
-            .with_template_vars(agent_descriptor.initial_template_vars.clone());
+        let mut prompt_config = PromptConfig::new(
+            agent_id.clone(),
+            prompt_base.clone(),
+            PromptLoadContext {
+                project_dir: None,
+                project_context_path: reloaded_config.project_context_file(),
+                developer_prompt_files: Vec::new(),
+            },
+        )
+        .with_workflow_prompt_path(reloaded_config.prompts_dir().join("workflow-stages.md"))
+        .with_template_vars(agent_descriptor.initial_template_vars.clone());
 
         if agent_spec.enable_project_developer_prompt {
-            prompt_config = prompt_config.with_developer_prompt_files(reloaded_config.developer_prompt_files.clone());
+            prompt_config.load_context.developer_prompt_files = reloaded_config.developer_prompt_files.clone();
             let project_dir = {
                 let control = session.control.read().await;
                 control.project_dir.clone()
@@ -760,7 +767,7 @@ fn sort_file_tree_entries(entries: &mut [SessionFileTreeEntry]) {
 #[cfg(test)]
 mod tests {
     use super::{deserialize_skill_bindings, sort_file_tree_entries};
-    use crate::agent_catalog::ModelConfig as AgentModelConfig;
+    use crate::agent_catalog::AgentModelOverride;
     use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
     use crate::app::agent_workspace_service::AgentWorkspaceService;
     use crate::config::AppConfig;
@@ -863,7 +870,7 @@ mod tests {
             prompt_inline: None,
             system_prompt_template: None,
             tool_whitelist: None,
-            model_config: AgentModelConfig {
+            model_config: AgentModelOverride {
                 model: "gpt-4o".to_string(),
                 temperature: 0.3,
                 max_tokens: Some(4096),

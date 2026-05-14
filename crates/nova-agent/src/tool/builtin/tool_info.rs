@@ -1,13 +1,13 @@
 use crate::tool::registry::{ToolMetadataView, ToolRegistry};
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
 pub const TOOL_NAME: &str = "ToolInfo";
 
-pub fn tool_definition() -> ToolDefinition {
-    ToolDefinition {
+pub fn tool_definition() -> RegisteredToolDefinition {
+    RegisteredToolDefinition {
         name: TOOL_NAME.to_string(),
         description:
             "Retrieve complete metadata for one or more tools, including full input schema and required parameters."
@@ -241,7 +241,7 @@ pub struct ToolInfoTool {}
 
 #[async_trait]
 impl Tool for ToolInfoTool {
-    fn definition(&self) -> ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
         tool_definition()
     }
 
@@ -268,8 +268,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Tool for TestTool {
-        fn definition(&self) -> ToolDefinition {
-            ToolDefinition {
+        fn definition(&self) -> RegisteredToolDefinition {
+            RegisteredToolDefinition {
                 name: self.name.to_string(),
                 description: format!("{} description", self.name),
                 input_schema: json!({

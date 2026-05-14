@@ -1,11 +1,11 @@
-use crate::tool::{DeferredResolveOutcome, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
+use crate::tool::{DeferredResolveOutcome, RegisteredToolDefinition, Tool, ToolContext, ToolOutput, ToolRegistry};
 use anyhow::Result;
 use serde_json::{json, Value};
 
 pub const TOOL_NAME: &str = "ToolSearch";
 
-pub fn tool_definition() -> ToolDefinition {
-    ToolDefinition {
+pub fn tool_definition() -> RegisteredToolDefinition {
+    RegisteredToolDefinition {
         name: TOOL_NAME.to_string(),
         description: "Search deferred tools and load their schemas on demand.".to_string(),
         input_schema: json!({
@@ -121,7 +121,7 @@ pub struct ToolSearchTool {}
 
 #[async_trait::async_trait]
 impl Tool for ToolSearchTool {
-    fn definition(&self) -> ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
         tool_definition()
     }
 

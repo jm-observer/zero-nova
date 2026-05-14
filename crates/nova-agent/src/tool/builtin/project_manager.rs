@@ -17,8 +17,8 @@ impl ProjectManagerTool {
 
 #[async_trait]
 impl Tool for ProjectManagerTool {
-    fn definition(&self) -> crate::tool::ToolDefinition {
-        crate::tool::ToolDefinition {
+    fn definition(&self) -> crate::tool::RegisteredToolDefinition {
+        crate::tool::RegisteredToolDefinition {
             name: "ProjectManager".to_string(),
             description:
                 "Gets or changes the current session project directory. Use this when the user asks to switch the project or working directory."

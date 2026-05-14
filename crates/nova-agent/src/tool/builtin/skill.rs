@@ -1,6 +1,6 @@
 use crate::event::AgentEvent;
 use crate::skill::{Skill, SkillRegistry};
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -29,8 +29,8 @@ impl SkillTool {
 
 #[async_trait]
 impl Tool for SkillTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "Skill".to_string(),
             description: "Loads and injects specialized skills into the current session.".to_string(),
             input_schema: Self::input_schema(),

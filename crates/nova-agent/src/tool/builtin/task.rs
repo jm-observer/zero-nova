@@ -1,5 +1,5 @@
 use crate::event::AgentEvent;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -352,8 +352,8 @@ impl Default for TaskKeywordDetector {
 
 #[async_trait::async_trait]
 impl Tool for TaskCreateTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "TaskCreate".to_string(),
             description: "Creates a new task in the session's task store.".to_string(),
             input_schema: Self::input_schema(),
@@ -414,8 +414,8 @@ impl TaskListTool {
 
 #[async_trait::async_trait]
 impl Tool for TaskListTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "TaskList".to_string(),
             description: "Lists all tasks in the session's task store.".to_string(),
             input_schema: Self::input_schema(),
@@ -462,8 +462,8 @@ impl TaskUpdateTool {
 
 #[async_trait::async_trait]
 impl Tool for TaskUpdateTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "TaskUpdate".to_string(),
             description: "Updates an existing task.".to_string(),
             input_schema: Self::input_schema(),

@@ -115,28 +115,34 @@ pub enum ToolGuidanceMode {
 /// Prompt 构建所需的完整配置。
 ///
 /// 由 bootstrap / CLI / ConversationService 统一创建。
+#[derive(Debug, Clone, Default)]
+pub struct PromptLoadContext {
+    /// 项目目录（用于加载项目上下文文件等）
+    pub project_dir: Option<PathBuf>,
+    /// 自定义项目上下文文件路径
+    pub project_context_path: Option<PathBuf>,
+    /// 开发项目提示词文件名列表（按配置顺序）
+    pub developer_prompt_files: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PromptConfig {
     /// Agent 标识（用于日志和调试）
     pub agent_id: String,
     /// 从文件加载的 agent prompt 内容（已读取为字符串）
     pub agent_prompt: String,
-    /// 项目目录（用于加载项目上下文文件等）
-    pub project_dir: Option<PathBuf>,
     /// 当前活跃的 skill id（如果有）
     pub active_skill: Option<String>,
     /// 模板变量键值对（用于替换 {{key}} 占位符）
     pub template_vars: HashMap<String, String>,
     /// 运行时环境快照
     pub environment: Option<super::context::EnvironmentSnapshot>,
-    /// 自定义项目上下文文件路径
-    pub project_context_path: Option<PathBuf>,
+    /// 文件加载上下文（路径与文件列表）
+    pub load_context: PromptLoadContext,
     /// 已预加载的项目上下文内容（用于消除同步 I/O）
     pub project_context_content: Option<String>,
     /// workflow-stages.md 路径
     pub workflow_prompt_path: Option<PathBuf>,
-    /// 开发项目提示词文件名列表（按配置顺序）
-    pub developer_prompt_files: Vec<String>,
     /// 已合并完成的开发项目提示词内容
     pub developer_project_prompt_content: Option<String>,
     /// Orchestrator agent catalog（Plan 1）。为空时不注入 catalog section。
@@ -150,18 +156,16 @@ pub struct PromptConfig {
 }
 
 impl PromptConfig {
-    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, project_dir: Option<PathBuf>) -> Self {
+    pub fn new(agent_id: impl Into<String>, agent_prompt: impl Into<String>, load_context: PromptLoadContext) -> Self {
         Self {
             agent_id: agent_id.into(),
             agent_prompt: agent_prompt.into(),
-            project_dir,
             active_skill: None,
             template_vars: HashMap::new(),
             environment: None,
-            project_context_path: None,
+            load_context,
             project_context_content: None,
             workflow_prompt_path: None,
-            developer_prompt_files: Vec::new(),
             developer_project_prompt_content: None,
             agent_catalog: None,
             project_instruction_profile: ProjectInstructionProfile::Auto,
@@ -190,16 +194,6 @@ impl PromptConfig {
         self
     }
 
-    pub fn with_project_context_path(mut self, path: PathBuf) -> Self {
-        self.project_context_path = Some(path);
-        self
-    }
-
-    pub fn with_project_context_path_opt(mut self, path: Option<PathBuf>) -> Self {
-        self.project_context_path = path;
-        self
-    }
-
     pub fn with_project_context_content(mut self, content: String) -> Self {
         self.project_context_content = Some(content);
         self
@@ -210,8 +204,8 @@ impl PromptConfig {
         self
     }
 
-    pub fn with_developer_prompt_files(mut self, files: Vec<String>) -> Self {
-        self.developer_prompt_files = files;
+    pub fn with_load_context(mut self, context: PromptLoadContext) -> Self {
+        self.load_context = context;
         self
     }
 

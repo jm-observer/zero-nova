@@ -44,7 +44,7 @@ pub struct ToolContext {
 
 /// Definition of a tool, including name, description, and input schema.
 #[derive(Clone)]
-pub struct ToolDefinition {
+pub struct RegisteredToolDefinition {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
@@ -88,7 +88,7 @@ impl ProjectDirService for UnavailableProjectDirService {
 #[async_trait::async_trait]
 /// Trait representing a callable tool.
 pub trait Tool: Send + Sync {
-    fn definition(&self) -> ToolDefinition;
+    fn definition(&self) -> RegisteredToolDefinition;
     /// Executes the tool.
     async fn execute(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput>;
 }
@@ -119,14 +119,15 @@ impl RegistryState {
 #[derive(Clone)]
 struct RegistrySnapshot {
     loaded_provider_definitions: Vec<ProviderToolDefinition>,
-    loaded_definitions: Vec<ToolDefinition>,
-    deferred_definitions: Vec<ToolDefinition>,
+    loaded_definitions: Vec<RegisteredToolDefinition>,
+    deferred_definitions: Vec<RegisteredToolDefinition>,
     deferred_representations: Vec<DeferredToolRepresentation>,
 }
 
 impl RegistrySnapshot {
     fn from_state(state: &RegistryState) -> Self {
-        let loaded_definitions: Vec<ToolDefinition> = state.tools.iter().map(|tool| tool.definition()).collect();
+        let loaded_definitions: Vec<RegisteredToolDefinition> =
+            state.tools.iter().map(|tool| tool.definition()).collect();
         let loaded_provider_definitions: Vec<ProviderToolDefinition> = loaded_definitions
             .iter()
             .map(|d| ProviderToolDefinition {
@@ -135,10 +136,10 @@ impl RegistrySnapshot {
                 input_schema: d.input_schema.clone(),
             })
             .collect();
-        let deferred_definitions: Vec<ToolDefinition> = state
+        let deferred_definitions: Vec<RegisteredToolDefinition> = state
             .deferred
             .iter()
-            .map(|entry| ToolDefinition {
+            .map(|entry| RegisteredToolDefinition {
                 name: entry.name.clone(),
                 description: entry.description.clone(),
                 input_schema: entry.input_schema.clone(),
@@ -413,15 +414,15 @@ impl ToolRegistry {
         defs
     }
 
-    pub fn loaded_definitions(&self) -> Vec<ToolDefinition> {
+    pub fn loaded_definitions(&self) -> Vec<RegisteredToolDefinition> {
         self.lock_snapshot_sync().loaded_definitions.clone()
     }
 
-    pub async fn loaded_definitions_async(&self) -> Vec<ToolDefinition> {
+    pub async fn loaded_definitions_async(&self) -> Vec<RegisteredToolDefinition> {
         self.lock_snapshot_async().await.loaded_definitions.clone()
     }
 
-    pub fn deferred_definitions_snapshot(&self) -> Vec<ToolDefinition> {
+    pub fn deferred_definitions_snapshot(&self) -> Vec<RegisteredToolDefinition> {
         self.lock_snapshot_sync().deferred_definitions.clone()
     }
 
@@ -560,7 +561,7 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub async fn deferred_definitions(&self) -> Vec<ToolDefinition> {
+    pub async fn deferred_definitions(&self) -> Vec<RegisteredToolDefinition> {
         self.lock_snapshot_async().await.deferred_definitions.clone()
     }
 
@@ -761,7 +762,8 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::{
-        DeferredResolveOutcome, DeferredToolCategory, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
+        DeferredResolveOutcome, DeferredToolCategory, RegisteredToolDefinition, Tool, ToolContext, ToolOutput,
+        ToolRegistry,
     };
     use crate::prompt::EnvironmentSnapshot;
     use anyhow::Result;
@@ -783,8 +785,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Tool for StaticTool {
-        fn definition(&self) -> ToolDefinition {
-            ToolDefinition {
+        fn definition(&self) -> RegisteredToolDefinition {
+            RegisteredToolDefinition {
                 name: self.name.to_string(),
                 description: format!("{} description", self.name),
                 input_schema: json!({"type": "object"}),
@@ -802,8 +804,8 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Tool for SchemaTool {
-        fn definition(&self) -> ToolDefinition {
-            ToolDefinition {
+        fn definition(&self) -> RegisteredToolDefinition {
+            RegisteredToolDefinition {
                 name: self.name.to_string(),
                 description: format!("{} description", self.name),
                 input_schema: self.schema.clone(),

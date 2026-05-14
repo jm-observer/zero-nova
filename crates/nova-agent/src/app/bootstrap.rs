@@ -9,8 +9,8 @@ use crate::conversation::{SessionCache, SessionService};
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::network::HttpClients;
 use crate::prompt::{
-    build_agent_catalog_section, EnvironmentSnapshot, PromptConfig, SideChannelConfig, SideChannelInjector,
-    SystemPromptBuilder, TrimmerConfig,
+    build_agent_catalog_section, EnvironmentSnapshot, PromptConfig, PromptLoadContext, SideChannelConfig,
+    SideChannelInjector, SystemPromptBuilder, TrimmerConfig,
 };
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::skill::SkillRegistry;
@@ -122,9 +122,17 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
 
-        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), None)
+        let load_context = PromptLoadContext {
+            project_dir: None,
+            project_context_path: config.project_context_file(),
+            developer_prompt_files: if agent.enable_project_developer_prompt {
+                config.developer_prompt_files.to_vec()
+            } else {
+                Vec::new()
+            },
+        };
+        let mut prompt_config = PromptConfig::new(agent.id.clone(), agent_prompt.clone(), load_context)
             .with_environment(env_snapshot.clone())
-            .with_project_context_path_opt(config.project_context_file())
             .with_workflow_prompt_path(config.prompts_dir().join("workflow-stages.md"))
             .with_template_vars(template_vars.clone());
 
@@ -135,11 +143,6 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         }
 
         // 如果 agent 启用了开发项目提示词，则注入文件列表
-        if agent.enable_project_developer_prompt {
-            let files = config.developer_prompt_files.to_vec();
-            prompt_config = prompt_config.with_developer_prompt_files(files);
-        }
-
         let full_system_prompt = SystemPromptBuilder::from_config_async(&prompt_config, &skill_registry)
             .await
             .build();

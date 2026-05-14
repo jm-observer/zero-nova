@@ -19,20 +19,43 @@ use tokio::sync::RwLock;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
+pub(super) struct ExecuteToolCallsRequest<'a> {
+    pub parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
+    pub loop_guard_state: &'a mut LoopGuardState,
+    pub turn_read_state: Arc<RwLock<TurnReadState>>,
+    pub session_id: &'a str,
+    pub environment: Option<EnvironmentSnapshot>,
+    pub shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
+    pub visible_tool_names: Arc<std::collections::HashSet<String>>,
+    pub event_tx: &'a mpsc::Sender<AgentEvent>,
+}
+
+pub(super) struct ExecuteTurnLoopRequest<'a> {
+    pub all_messages: Vec<Message>,
+    pub tool_definitions: &'a [ToolDefinition],
+    pub visible_tool_names: Arc<std::collections::HashSet<String>>,
+    pub iteration_budget: usize,
+    pub session_id: &'a str,
+    pub agent_id: Option<&'a str>,
+    pub environment: Option<EnvironmentSnapshot>,
+    pub event_tx: mpsc::Sender<AgentEvent>,
+    pub cancellation_token: Option<CancellationToken>,
+    pub model_config: &'a ModelConfig,
+}
+
 impl<C: LlmClient> AgentRuntime<C> {
     /// 执行一组工具调用并返回格式化结果。
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn execute_tool_calls(
-        &self,
-        parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
-        loop_guard_state: &mut LoopGuardState,
-        turn_read_state: Arc<RwLock<TurnReadState>>,
-        session_id: &str,
-        environment: Option<EnvironmentSnapshot>,
-        shared_environment: Option<Arc<RwLock<EnvironmentSnapshot>>>,
-        visible_tool_names: Arc<std::collections::HashSet<String>>,
-        event_tx: &mpsc::Sender<AgentEvent>,
-    ) -> Result<Vec<ContentBlock>> {
+    pub(super) async fn execute_tool_calls(&self, req: ExecuteToolCallsRequest<'_>) -> Result<Vec<ContentBlock>> {
+        let ExecuteToolCallsRequest {
+            parsed_tool_calls,
+            loop_guard_state,
+            turn_read_state,
+            session_id,
+            environment,
+            shared_environment,
+            visible_tool_names,
+            event_tx,
+        } = req;
         let mut tool_results_fut = FuturesUnordered::new();
         let mut indexed_results = Vec::new();
 
@@ -164,20 +187,19 @@ impl<C: LlmClient> AgentRuntime<C> {
         Ok(indexed_results.into_iter().map(|(_, b)| b).collect())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn execute_turn_loop(
-        &self,
-        mut all_messages: Vec<Message>,
-        tool_definitions: &[ToolDefinition],
-        visible_tool_names: Arc<std::collections::HashSet<String>>,
-        iteration_budget: usize,
-        session_id: &str,
-        agent_id: Option<&str>,
-        environment: Option<EnvironmentSnapshot>,
-        event_tx: mpsc::Sender<AgentEvent>,
-        cancellation_token: Option<CancellationToken>,
-        model_config: &ModelConfig,
-    ) -> Result<TurnResult> {
+    pub(super) async fn execute_turn_loop(&self, req: ExecuteTurnLoopRequest<'_>) -> Result<TurnResult> {
+        let ExecuteTurnLoopRequest {
+            mut all_messages,
+            tool_definitions,
+            visible_tool_names,
+            iteration_budget,
+            session_id,
+            agent_id,
+            environment,
+            event_tx,
+            cancellation_token,
+            model_config,
+        } = req;
         let mut loop_guard_state = LoopGuardState::new(self.config.loop_guard.clone());
         let turn_read_state = Arc::new(RwLock::new(TurnReadState::default()));
 
@@ -378,16 +400,16 @@ impl<C: LlmClient> AgentRuntime<C> {
                 environment.clone()
             };
             let tool_result_blocks = self
-                .execute_tool_calls(
+                .execute_tool_calls(ExecuteToolCallsRequest {
                     parsed_tool_calls,
-                    &mut loop_guard_state,
-                    turn_read_state.clone(),
+                    loop_guard_state: &mut loop_guard_state,
+                    turn_read_state: turn_read_state.clone(),
                     session_id,
-                    current_environment,
-                    shared_environment.clone(),
-                    visible_tool_names.clone(),
-                    &event_tx,
-                )
+                    environment: current_environment,
+                    shared_environment: shared_environment.clone(),
+                    visible_tool_names: visible_tool_names.clone(),
+                    event_tx: &event_tx,
+                })
                 .await?;
 
             let tool_res_msg = Message::new(Role::User, tool_result_blocks, chrono::Utc::now().timestamp_millis());

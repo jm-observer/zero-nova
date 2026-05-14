@@ -1,4 +1,4 @@
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -35,8 +35,8 @@ impl Default for WebFetchTool {
 /// Implementation of the `Tool` trait for fetching web content.
 impl Tool for WebFetchTool {
     /// Returns the tool definition for web fetching.
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "WebFetch".to_string(),
             description: "Fetch a URL and extract its text content. Useful for reading web pages or documentation."
                 .to_string(),

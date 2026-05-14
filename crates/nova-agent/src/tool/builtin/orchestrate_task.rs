@@ -1,7 +1,7 @@
 use crate::config::AppConfig;
 use crate::orchestrator::OrchestratorEngine;
 use crate::tool::builtin::agent::AgentTool;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -34,8 +34,8 @@ impl OrchestrateTaskTool {
 
 #[async_trait]
 impl Tool for OrchestrateTaskTool {
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
+    fn definition(&self) -> RegisteredToolDefinition {
+        RegisteredToolDefinition {
             name: "OrchestrateTask".to_string(),
             description: "Execute a validated multi-agent orchestration plan.".to_string(),
             input_schema: Self::input_schema(),

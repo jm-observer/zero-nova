@@ -1,6 +1,7 @@
 use super::helpers::{normalize_project_dir, sync_last_turn_prompt_preview};
-use super::{Session, SessionService, TitleState, DEFAULT_SESSION_TITLE};
-use crate::conversation::control::{ControlState, LastTurnSnapshot, ModelRef};
+use super::{SessionService, DEFAULT_SESSION_TITLE};
+use crate::conversation::control::{ControlState, LastTurnSnapshot, ModelRef, TitleState};
+use crate::conversation::session::Session;
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -249,7 +250,7 @@ impl SessionService {
             }
             if let Some(skills) = new_skills {
                 let prev_len = control.skill_bindings.len();
-                super::merge_skill_bindings(&mut control.skill_bindings, skills);
+                super::skill_bindings::merge_skill_bindings(&mut control.skill_bindings, skills);
                 log::info!(
                     "[SKILL_REC] DB Update: session_id={}, prev_count={}, new_count={}, incoming_updates={}",
                     session_id,

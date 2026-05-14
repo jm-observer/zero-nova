@@ -11,7 +11,7 @@ impl SessionService {
         for (id, title, agent_id, created_at, updated_at, runtime_control) in rows {
             let title_state = runtime_control.title_state.clone();
             let session = Arc::new(
-                super::session_from_index_row(
+                super::session_factory::session_from_index_row(
                     id.clone(),
                     title,
                     agent_id,
@@ -64,7 +64,7 @@ impl SessionService {
 
         let title_state = runtime_control.title_state.clone();
         let session = Arc::new(
-            super::session_from_index_row(
+            super::session_factory::session_from_index_row(
                 id.clone(),
                 title,
                 agent_id,

@@ -1,9 +1,11 @@
 use super::helpers::normalize_generated_title;
 use super::{
-    Session, SessionService, TitleGenerationError, TITLE_GENERATION_TIMEOUT_MS, TITLE_MAX_ATTEMPTS,
-    TITLE_MIN_TOTAL_CHARS, TITLE_MIN_USER_MESSAGES_FIRST_ATTEMPT, TITLE_MIN_USER_MESSAGES_SECOND_ATTEMPT,
+    SessionService, TITLE_GENERATION_TIMEOUT_MS, TITLE_MAX_ATTEMPTS, TITLE_MIN_TOTAL_CHARS,
+    TITLE_MIN_USER_MESSAGES_FIRST_ATTEMPT, TITLE_MIN_USER_MESSAGES_SECOND_ATTEMPT,
 };
 use crate::conversation::control::{TitleSource, TitleStatus};
+use crate::conversation::session::Session;
+use crate::conversation::title_generator::TitleGenerationError;
 use crate::message::{ContentBlock, Role};
 use anyhow::Result;
 use std::sync::Arc;

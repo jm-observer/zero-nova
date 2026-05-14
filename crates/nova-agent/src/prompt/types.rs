@@ -2,12 +2,11 @@
 ///
 /// 包含 TurnContext, SkillRouteDecision, AgentCatalogEntry 等数据定义以及
 /// PromptConfig、SectionName 等配置类型。
-
-use crate::message::{ContentBlock, Message, Role};
+use crate::message::Message;
 use crate::provider::types::ToolDefinition;
 use crate::skill::CapabilityPolicy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -252,6 +251,8 @@ pub struct TurnContext {
     pub system_prompt: String,
     /// 当前轮次可见的工具定义集合
     pub tool_definitions: Vec<ToolDefinition>,
+    /// 当前轮次可见的工具名集合（用于 ToolInfo 可见性过滤）
+    pub visible_tool_names: Arc<HashSet<String>>,
     /// 当前轮次使用的历史消息
     pub history: Arc<Vec<Message>>,
     /// 当前活跃的 skill 状态（可选）
@@ -384,4 +385,23 @@ pub struct AgentCatalogEntry {
     pub is_default: bool,
     /// 适用场景说明（可选）
     pub use_cases: Vec<String>,
+}
+
+impl SectionName {
+    /// 返回该 section 在最终 prompt 中的标题。
+    pub fn heading(&self) -> &str {
+        match self {
+            Self::Base => "Identity & Role",
+            Self::Agent => "Agent Configuration",
+            Self::Skill => "Available Skills",
+            Self::ProjectContext => "Project Context",
+            Self::BehaviorGuards => "Behavior Constraints",
+            Self::Environment => "Environment",
+            Self::Workflow => "Workflow State",
+            Self::ToolGuidance => "Tool Capabilities",
+            Self::History => "Conversation Summary",
+            Self::DeveloperProjectPrompt => super::templates::DEVELOPER_PROMPT_SECTION_HEADING,
+            Self::AgentCatalog => "Available Agents",
+        }
+    }
 }

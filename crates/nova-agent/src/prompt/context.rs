@@ -1,13 +1,11 @@
+use super::templates::{MAX_PROJECT_CONTEXT_CHARS, PROJECT_CONTEXT_FILES};
 /// 环境快照与项目上下文加载。
 ///
 /// 此模块负责：
 /// - 采集运行时环境信息（git 分支、shell 类型等）
 /// - 异步/同步加载项目上下文和项目提示词文件
 /// - Shell 命令检测与归一化
-
-use crate::message::{ContentBlock, Message};
-use super::templates::{PROJECT_CONTEXT_FILES, MAX_PROJECT_CONTEXT_CHARS};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ---------------------------------------------------------------------------
 //  环境快照 — EnvironmentSnapshot

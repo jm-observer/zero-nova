@@ -1,483 +1,597 @@
-/// SystemPromptBuilder 及相关构建器模块。
-///
-/// 包含：
-/// - `SystemPromptBuilder` — 组装完整的 System Prompt
-/// - `HistoryTrimmer` — 历史消息裁剪
-/// - `SideChannelInjector` — 侧信道注入器
-/// - `WorkflowStagePrompts` — Workflow 阶段提示词
-/// - `TrimmerConfig` — 裁剪配置
-/// - `SideChannelConfig` — 侧信道配置
-/// - `build_agent_catalog_section` — Agent 目录构建
-
-use crate::message::ContentBlock;
-use crate::prompt::templates::TemplateContext;
-use crate::prompt::types::{
-    AgentCatalogEntry, NamedSection, PromptConfig, PromptSectionSize, PromptPriority, SectionName, SkillInvocationLevel, SkillRouteDecision, SkillSwitchResult, ToolSize, TurnContext, ActiveSkillState,
+use crate::config::AgentSpec;
+use crate::prompt::context::{
+    load_developer_project_prompt, load_developer_project_prompt_async, load_project_context_with_config,
+    load_project_context_with_config_async, EnvironmentSnapshot,
 };
+use crate::prompt::templates::{template_vars, TemplateContext, BEHAVIOR_GUARDS};
+use crate::prompt::types::{
+    AgentCatalogEntry, NamedSection, ProjectInstructionProfile, PromptConfig, PromptPriority, PromptSectionSize,
+    SectionName, SkillInjectionMode, ToolGuidanceMode, ToolSize,
+};
+use crate::prompt::workflow::WorkflowStagePrompts;
+use crate::provider::types::ToolDefinition;
 use crate::skill::SkillRegistry;
-use crate::config::{SideChannelConfigToml, TrimmerConfigToml};
-use std::collections::HashMap;
+use crate::tool::ToolRegistry;
 
-// ---------------------------------------------------------------------------
-//  配置类型
-// ---------------------------------------------------------------------------
-
-/// 历史裁剪配置（非 TOML 版本，用于运行时）。
-#[derive(Debug, Clone)]
-pub struct TrimmerConfig {
-    /// 模型上下文窗口大小
-    pub context_window: usize,
-    /// 输出预留 token 数
-    pub output_reserve: usize,
-    /// 最少保留的最近消息数
-    pub min_recent_messages: usize,
-}
-
-impl Default for TrimmerConfig {
-    fn default() -> Self {
-        Self {
-            context_window: 128_000,
-            output_reserve: 8_000,
-            min_recent_messages: 10,
-        }
-    }
-}
-
-impl From<TrimmerConfigToml> for TrimmerConfig {
-    fn from(toml: TrimmerConfigToml) -> Self {
-        Self {
-            context_window: toml.context_window,
-            output_reserve: toml.output_reserve,
-            min_recent_messages: toml.min_recent_messages,
-        }
-    }
-}
-
-/// 侧信道注入配置（运行时版本）。
-#[derive(Debug, Clone)]
-pub struct SideChannelConfig {
-    /// 是否启用侧信道
-    pub enabled: bool,
-    /// 注入 skill 列表的间隔
-    pub skill_reminder_interval: usize,
-    /// 是否注入当前日期
-    pub inject_date: bool,
-    /// 自定义提醒文本
-    pub custom_reminders: Vec<String>,
-}
-
-impl From<SideChannelConfigToml> for SideChannelConfig {
-    fn from(toml: SideChannelConfigToml) -> Self {
-        Self {
-            enabled: toml.enabled,
-            skill_reminder_interval: toml.skill_reminder_interval,
-            inject_date: toml.inject_date.unwrap_or(true),
-            custom_reminders: Vec::new(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  HistoryTrimmer
-// ---------------------------------------------------------------------------
-
-/// 历史消息裁剪器。
-///
-/// 根据 `TrimmerConfig` 的配置，对历史消息进行 token 预算感知的裁剪。
-pub struct HistoryTrimmer {
-    config: TrimmerConfig,
-}
-
-impl HistoryTrimmer {
-    /// 创建新的 `HistoryTrimmer`。
-    pub fn new(config: TrimmerConfig) -> Self {
-        Self { config }
-    }
-
-    /// 估算消息的 token 数量（简化版：字符数 / 4）。
-    pub fn estimate_tokens(text: &str) -> usize {
-        text.chars().count() / 4
-    }
-
-    /// 裁剪历史消息。
-    ///
-    /// 策略：
-    /// 1. 保留最近的 `min_recent_messages` 条消息（全量保留）
-    /// 2. 从旧到新一段段检查，累积 token
-    /// 3. 当总 token 超过 `context_window - output_reserve` 时停止
-    pub fn trim(&self, messages: &[Message]) -> Vec<Message> {
-        let max_token = self.config.context_window.saturating_sub(self.config.output_reserve);
-
-        let mut total_tokens: usize = 0;
-
-        // 首先计算保留最近消息的 token 数量
-        let keep_recent = self.config.min_recent_messages.min(messages.len());
-        let recent_messages = &messages[messages.len() - keep_recent..];
-        let recent_tokens: usize = recent_messages.iter().map(|m| {
-            let content = match &m.content_blocks[0] {
-                ContentBlock::Text { text, .. } => text.as_str(),
-                _ => "",
-            };
-            Self::estimate_tokens(content)
-        }).sum();
-
-        total_tokens += recent_tokens;
-
-        // 如果最近消息已经超过限制，直接返回
-        if total_tokens >= max_token {
-            return recent_messages.to_vec();
-        }
-
-        // 从旧消息中追加直到超过限制
-        let mut result = Vec::with_capacity(keep_recent);
-        result.extend(recent_messages.iter().cloned());
-
-        let older_messages = &messages[..messages.len() - keep_recent];
-        for msg in older_messages.iter().rev() {
-            let content = match &msg.content_blocks[0] {
-                ContentBlock::Text { text, .. } => text.as_str(),
-                _ => "",
-            };
-            let tokens = Self::estimate_tokens(content);
-
-            if total_tokens + tokens > max_token {
-                break;
-            }
-
-            total_tokens += tokens;
-            result.push(msg.clone());
-        }
-
-        result.reverse();
-        result
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  SideChannelInjector
-// ---------------------------------------------------------------------------
-
-/// 侧信道注入器。
-///
-/// 在 System Prompt 末尾注入额外的提示词，例如：
-/// - 当前日期
-/// - 可用 Skill 列表
-/// - 自定义提醒
-pub struct SideChannelInjector {
-    config: SideChannelConfig,
-}
-
-impl SideChannelInjector {
-    /// 创建新的 `SideChannelInjector`。
-    pub fn new(config: SideChannelConfig) -> Self {
-        Self { config }
-    }
-
-    /// 构建侧信道注入内容。
-    pub fn build(&self) -> String {
-        let mut parts = Vec::new();
-
-        if self.config.enabled {
-            if self.config.inject_date {
-                if let Some(date) = self.get_current_date() {
-                    parts.push(format!("**Current date:** {}", date));
-                }
-            }
-
-            if !self.config.custom_reminders.is_empty() {
-                parts.push("\n**Reminders:**".to_string());
-                for reminder in &self.config.custom_reminders {
-                    parts.push(format!("- {}", reminder));
-                }
-            }
-        }
-
-        if !parts.is_empty() {
-            format!("\n---\n\nSide Channel:\n{}\n", parts.join("\n"))
-        } else {
-            String::new()
-        }
-    }
-
-    fn get_current_date(&self) -> Option<String> {
-        Some(chrono::Local::now().format("%Y-%m-%d").to_string())
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  WorkflowStagePrompts
-// ---------------------------------------------------------------------------
-
-/// 单个 Workflow 阶段提示词。
-#[derive(Debug, Clone)]
-pub struct StagePrompt {
-    /// 阶段名称
-    pub name: String,
-    /// 阶段描述
-    pub description: String,
-    /// 阶段约束
-    pub constraints: String,
-}
-
-/// Workflow 阶段提示词管理器。
-///
-/// 从 `workflow-stages.md` 文件中加载和解析所有阶段。
-pub struct WorkflowStagePrompts {
-    stages: Vec<StagePrompt>,
-    current_stage: String,
-    template_vars: HashMap<String, String>,
-}
-
-impl WorkflowStagePrompts {
-    /// 创建新的 `WorkflowStagePrompts`（空）。
-    pub fn new() -> Self {
-        Self {
-            stages: Vec::new(),
-            current_stage: "idle".to_string(),
-            template_vars: HashMap::new(),
-        }
-    }
-
-    /// 从工作流提示词文件加载阶段信息。
-    ///
-    /// 当前实现预留，后续可解析 `workflow-stages.md` 格式。
-    pub async fn load_from_file(&mut self, _path: &std::path::Path) {
-        // Placeholder for future workflow-stages.md parsing
-        log::debug!("Loading workflow stages from {:?}", _path);
-    }
-
-    /// 设置当前阶段。
-    pub fn set_current_stage(&mut self, stage: String) {
-        self.current_stage = stage;
-        self.template_vars.insert(
-            "workflow_stage".to_string(),
-            stage.clone(),
-        );
-    }
-
-    /// 获取当前阶段的提示词。
-    pub fn get_current_prompt(&self) -> String {
-        if let Some(stage) = self.stages.iter().find(|s| s.name == self.current_stage) {
-            TemplateContext::render(&stage.description, &self.template_vars)
-        } else {
-            String::new()
-        }
-    }
-
-    /// 获取所有阶段名称。
-    pub fn stage_names(&self) -> Vec<String> {
-        self.stages.iter().map(|s| s.name.clone()).collect()
-    }
-
-    pub fn current_stage(&self) -> &str {
-        &self.current_stage
-    }
-
-    fn get_current_date(&self) -> Option<String> {
-        Some(chrono::Local::now().format("%Y-%m-%d").to_string())
-    }
-}
-
-impl Default for WorkflowStagePrompts {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ---------------------------------------------------------------------------
-//  SystemPromptBuilder
-// ---------------------------------------------------------------------------
-
-/// System Prompt 构建器。
-///
-/// 负责根据 `PromptConfig` 和 `SkillRegistry` 构建完整的 System Prompt。
-/// 所有 section 按优先级和条件注入到最终 prompt 中。
+#[derive(Default)]
 pub struct SystemPromptBuilder {
-    config: PromptConfig,
-    skills: Vec<String>,
-    sections: Vec<NamedSection>,
+    sections: Vec<(SectionName, NamedSection)>,
 }
 
 impl SystemPromptBuilder {
-    /// 从配置和 Skill 注册表创建构建器。
-    pub fn from_config(config: &PromptConfig, skill_registry: &SkillRegistry) -> Self {
-        let skills: Vec<String> = skill_registry
-            .list()
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_section(mut self, name: SectionName, content: impl Into<String>, priority: PromptPriority) -> Self {
+        let content_val: String = content.into();
+        if !content_val.is_empty() {
+            self.sections.push((
+                name.clone(),
+                NamedSection {
+                    name,
+                    content: content_val,
+                    required: priority == PromptPriority::High,
+                    priority,
+                },
+            ));
+        }
+        self
+    }
+
+    pub fn base_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::Base, content, PromptPriority::High)
+    }
+
+    pub fn agent_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::Agent, content, PromptPriority::High)
+    }
+
+    pub fn skill_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::Skill, content, PromptPriority::Medium)
+    }
+
+    pub fn environment_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::Environment, content, PromptPriority::High)
+    }
+
+    pub fn workflow_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::Workflow, content, PromptPriority::Medium)
+    }
+
+    pub fn tool_guidance_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::ToolGuidance, content, PromptPriority::Medium)
+    }
+
+    pub fn history_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::History, content, PromptPriority::Low)
+    }
+
+    pub fn role(mut self, role: impl Into<String>) -> Self {
+        self.sections.push((
+            SectionName::Base,
+            NamedSection {
+                name: SectionName::Base,
+                content: format!("Role: {}", role.into()),
+                required: true,
+                priority: PromptPriority::High,
+            },
+        ));
+        self
+    }
+
+    pub fn guideline(mut self, text: impl Into<String>) -> Self {
+        self.sections.push((
+            SectionName::Base,
+            NamedSection {
+                name: SectionName::Base,
+                content: format!("Guideline: {}", text.into()),
+                required: true,
+                priority: PromptPriority::High,
+            },
+        ));
+        self
+    }
+
+    pub fn environment(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.sections.push((
+            SectionName::Environment,
+            NamedSection {
+                name: SectionName::Environment,
+                content: format!("Environment {} = {}", key.into(), value.into()),
+                required: false,
+                priority: PromptPriority::Medium,
+            },
+        ));
+        self
+    }
+
+    pub fn custom_instruction(mut self, text: impl Into<String>) -> Self {
+        self.sections.push((
+            SectionName::Workflow,
+            NamedSection {
+                name: SectionName::Workflow,
+                content: format!("Instruction: {}", text.into()),
+                required: false,
+                priority: PromptPriority::Medium,
+            },
+        ));
+        self
+    }
+
+    pub fn extra_section(mut self, text: impl Into<String>) -> Self {
+        self.sections.push((
+            SectionName::Base,
+            NamedSection {
+                name: SectionName::Base,
+                content: text.into(),
+                required: false,
+                priority: PromptPriority::Low,
+            },
+        ));
+        self
+    }
+
+    pub fn behavior_guards_section(self) -> Self {
+        self.add_section(
+            SectionName::BehaviorGuards,
+            BEHAVIOR_GUARDS.trim(),
+            PromptPriority::High,
+        )
+    }
+
+    pub fn project_context_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::ProjectContext, content, PromptPriority::Medium)
+    }
+
+    pub fn developer_project_prompt_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::DeveloperProjectPrompt, content, PromptPriority::Medium)
+    }
+
+    pub fn agent_catalog_section(self, content: impl Into<String>) -> Self {
+        self.add_section(SectionName::AgentCatalog, content, PromptPriority::Medium)
+    }
+
+    pub fn environment_snapshot(self, env: &EnvironmentSnapshot) -> Self {
+        self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
+    }
+
+    fn with_tool_definitions_internal(mut self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
+        let mut tool_desc = String::new();
+        for def in definitions {
+            match mode {
+                ToolGuidanceMode::Compact => {
+                    tool_desc.push_str(&format!("- `{}`: {}\n", def.name, def.description));
+                }
+                ToolGuidanceMode::Full => {
+                    tool_desc.push_str(&format!("## {}\n\n{}\n\n", def.name, def.description));
+                }
+            }
+        }
+
+        let tool_info_visible = definitions
             .iter()
-            .map(|s| s.id.clone())
+            .any(|definition| definition.name == crate::tool::builtin::tool_info::TOOL_NAME);
+        if !definitions.is_empty() && tool_info_visible {
+            tool_desc.push_str("---\n\n**Tool parameter lookup**: If you need exact parameters, field types, required/default/enum values, or nested object structures, call the `ToolInfo` tool first. Do not guess tool parameters based on experience.\n\n");
+        }
+
+        if let Some((_, section)) = self
+            .sections
+            .iter_mut()
+            .rev()
+            .find(|(name, _)| *name == SectionName::ToolGuidance)
+        {
+            section.content.push_str(&tool_desc);
+        } else {
+            self.sections.push((
+                SectionName::ToolGuidance,
+                NamedSection {
+                    name: SectionName::ToolGuidance,
+                    content: tool_desc,
+                    required: false,
+                    priority: PromptPriority::Medium,
+                },
+            ));
+        }
+        self
+    }
+
+    pub fn with_tools(self, registry: &ToolRegistry) -> Self {
+        let definitions: Vec<ToolDefinition> = registry
+            .loaded_definitions()
+            .into_iter()
+            .map(|def| ToolDefinition {
+                name: def.name,
+                description: def.description,
+                input_schema: def.input_schema,
+            })
             .collect();
+        self.with_tool_definitions(&definitions, ToolGuidanceMode::Full)
+    }
 
-        let mut builder = Self {
-            config: config.clone(),
-            skills,
-            sections: Vec::new(),
+    pub fn with_tool_definitions(self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
+        self.with_tool_definitions_internal(definitions, mode)
+    }
+
+    pub fn size_report(&self, large_section_chars: usize) -> Vec<PromptSectionSize> {
+        self.sections
+            .iter()
+            .map(|(name, section)| PromptSectionSize {
+                name: name.clone(),
+                heading: name.heading().to_string(),
+                chars: section.content.chars().count(),
+                priority: section.priority.clone(),
+                required: section.required,
+                is_large: section.content.chars().count() > large_section_chars,
+            })
+            .collect()
+    }
+
+    pub fn tool_size_report(definitions: &[ToolDefinition]) -> Vec<ToolSize> {
+        definitions
+            .iter()
+            .map(|tool| ToolSize {
+                name: tool.name.clone(),
+                chars: Self::single_tool_chars(tool),
+            })
+            .collect()
+    }
+
+    fn single_tool_chars(tool: &ToolDefinition) -> usize {
+        let schema = serde_json::to_string(&tool.input_schema).unwrap_or_else(|_| "{}".to_string());
+        [tool.name.as_str(), tool.description.as_str(), schema.as_str()]
+            .join("")
+            .chars()
+            .count()
+    }
+
+    pub fn from_config(config: &PromptConfig, skills: &SkillRegistry) -> Self {
+        let mut builder = Self::new();
+
+        let rendered_prompt = if config.template_vars.is_empty() {
+            config.agent_prompt.clone()
+        } else {
+            TemplateContext::render(&config.agent_prompt, &config.template_vars)
         };
+        if !rendered_prompt.is_empty() {
+            builder = builder.base_section(&rendered_prompt);
+        }
 
-        builder.add_default_sections();
+        builder = builder.behavior_guards_section();
+
+        let skill_prompt = match config.skill_injection {
+            SkillInjectionMode::Catalog => skills.generate_catalog_prompt(),
+            SkillInjectionMode::ActiveFull => skills.generate_contextual_prompt(config.active_skill.as_deref()),
+            SkillInjectionMode::Full => skills.generate_full_prompt(),
+        };
+        if !skill_prompt.is_empty() {
+            builder = builder.skill_section(&skill_prompt);
+        }
+
+        if let Some(content) = &config.developer_project_prompt_content {
+            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
+                content,
+                config.project_instruction_profile,
+            ));
+        } else if let Some(content) =
+            load_developer_project_prompt(config.project_dir.as_deref(), &config.developer_prompt_files)
+        {
+            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
+                &content,
+                config.project_instruction_profile,
+            ));
+        }
+
+        if let Some(content) = &config.project_context_content {
+            builder = builder.project_context_section(content);
+        } else if let Some(content) =
+            load_project_context_with_config(config.project_dir.as_deref(), config.project_context_path.as_deref())
+        {
+            builder = builder.project_context_section(&content);
+        }
+
+        if let Some(env) = &config.environment {
+            builder = builder.environment_snapshot(env);
+        }
+
+        if let Some(ref catalog) = config.agent_catalog {
+            if !catalog.is_empty() {
+                builder = builder.agent_catalog_section(catalog);
+            }
+        }
+
+        if let Some(stage) = config.template_vars.get(template_vars::WORKFLOW_STAGE) {
+            if stage != "idle" {
+                if let Some(path) = &config.workflow_prompt_path {
+                    if let Ok(workflow_prompts) = WorkflowStagePrompts::load_from_file(path) {
+                        if let Some(prompt) = workflow_prompts.render(stage, &config.template_vars) {
+                            builder = builder.workflow_section(prompt);
+                        }
+                    }
+                }
+            }
+        }
+
         builder
     }
 
-    /// 添加默认 section。
-    fn add_default_sections(&mut self) {
-        // Base section always included
-        self.sections.push(NamedSection {
-            name: SectionName::Base,
-            content: String::new(),
-            required: true,
-            priority: PromptPriority::High,
-        });
+    pub async fn from_config_async(config: &PromptConfig, skills: &SkillRegistry) -> Self {
+        let mut builder = Self::new();
 
-        // Agent section always included
-        self.sections.push(NamedSection {
-            name: SectionName::Agent,
-            content: self.config.agent_prompt.clone(),
-            required: true,
-            priority: PromptPriority::High,
-        });
-
-        // Skill section conditionally included
-        if !self.skills.is_empty() {
-            let skill_section = format!("Available Skills:\n{}", self.skills.join(", "));
-            self.sections.push(NamedSection {
-                name: SectionName::Skill,
-                content: skill_section,
-                required: true,
-                priority: PromptPriority::Medium,
-            });
-        }
-
-        // Tool guidance
-        let tool_guidance = match self.config.tool_guidance {
-            crate::prompt::types::ToolGuidanceMode::Compact => "Use tools when appropriate. Keep tool explanations concise.".to_string(),
-            crate::prompt::types::ToolGuidanceMode::Full => "Always explain your reasoning before using tools. Consider alternative approaches.".to_string(),
+        let rendered_prompt = if config.template_vars.is_empty() {
+            config.agent_prompt.clone()
+        } else {
+            TemplateContext::render(&config.agent_prompt, &config.template_vars)
         };
-        self.sections.push(NamedSection {
-            name: SectionName::ToolGuidance,
-            content: tool_guidance,
-            required: true,
-            priority: PromptPriority::High,
-        });
-    }
-
-    /// 构建完整的 System Prompt。
-    pub fn build(&self) -> String {
-        let mut parts = Vec::new();
-
-        // Sort sections by priority
-        let mut sorted_sections = self.sections.clone();
-        sorted_sections.sort_by(|a, b| {
-            let priority_order = match (a.priority, b.priority) {
-                (PromptPriority::High, PromptPriority::High) => std::cmp::Ordering::Equal,
-                (PromptPriority::High, _) => std::cmp::Ordering::Greater,
-                (_, PromptPriority::High) => std::cmp::Ordering::Less,
-                (PromptPriority::Medium, PromptPriority::Medium) => std::cmp::Ordering::Equal,
-                (PromptPriority::Medium, PromptPriority::Low) => std::cmp::Ordering::Greater,
-                (PromptPriority::Low, PromptPriority::Medium) => std::cmp::Ordering::Less,
-                (PromptPriority::Low, PromptPriority::Low) => std::cmp::Ordering::Equal,
-            };
-            priority_order.then_with(|| a.name.cmp(&b.name))
-        });
-
-        for section in &sorted_sections {
-            if required_or_has_content(&section.required, &section.content) {
-                parts.push(format!("\n## {}\n{}", section.name, section.content));
-            }
+        if !rendered_prompt.is_empty() {
+            builder = builder.base_section(&rendered_prompt);
         }
 
-        // Add agent catalog if available
-        if let Some(catalog) = &self.config.agent_catalog {
+        builder = builder.behavior_guards_section();
+
+        let skill_prompt = match config.skill_injection {
+            SkillInjectionMode::Catalog => skills.generate_catalog_prompt(),
+            SkillInjectionMode::ActiveFull => skills.generate_contextual_prompt(config.active_skill.as_deref()),
+            SkillInjectionMode::Full => skills.generate_full_prompt(),
+        };
+        if !skill_prompt.is_empty() {
+            builder = builder.skill_section(&skill_prompt);
+        }
+
+        if let Some(content) = &config.developer_project_prompt_content {
+            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
+                content,
+                config.project_instruction_profile,
+            ));
+        } else if let Some(content) =
+            load_developer_project_prompt_async(config.project_dir.as_deref(), &config.developer_prompt_files).await
+        {
+            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
+                &content,
+                config.project_instruction_profile,
+            ));
+        }
+
+        if let Some(content) = &config.project_context_content {
+            builder = builder.project_context_section(content);
+        } else if let Some(content) = load_project_context_with_config_async(
+            config.project_dir.as_deref(),
+            config.project_context_path.as_deref(),
+        )
+        .await
+        {
+            builder = builder.project_context_section(&content);
+        }
+
+        if let Some(env) = &config.environment {
+            builder = builder.environment_snapshot(env);
+        }
+
+        if let Some(ref catalog) = config.agent_catalog {
             if !catalog.is_empty() {
-                parts.push(format!("\n## {}\n{}", SectionName::AgentCatalog, catalog));
+                builder = builder.agent_catalog_section(catalog);
             }
         }
 
-        // Add developer project prompt if available
-        if let Some(developer_prompt) = &self.config.developer_project_prompt_content {
-            if !developer_prompt.is_empty() {
-                parts.push(format!("\n## {}\n{}", SectionName::DeveloperProjectPrompt, developer_prompt));
+        if let Some(stage) = config.template_vars.get(template_vars::WORKFLOW_STAGE) {
+            if stage != "idle" {
+                if let Some(path) = &config.workflow_prompt_path {
+                    if let Ok(workflow_prompts) = WorkflowStagePrompts::load_from_file_async(path).await {
+                        if let Some(prompt) = workflow_prompts.render(stage, &config.template_vars) {
+                            builder = builder.workflow_section(prompt);
+                        }
+                    }
+                }
             }
         }
 
-        // Add project context if available
-        if let Some(project_context) = &self.config.project_context_content {
-            if !project_context.is_empty() {
-                parts.push(format!("\n## {}\n{}", SectionName::ProjectContext, project_context));
-            }
-        }
-
-        parts.join("")
+        builder
     }
 
-    /// 获取 section 大小报告。
-    pub fn section_size_report(&self) -> Vec<PromptSectionSize> {
-        self.sections.iter().map(|s| {
-            PromptSectionSize {
-                name: s.name.clone(),
-                heading: format!("{}", s.name),
-                chars: s.content.chars().count(),
-                priority: s.priority.clone(),
-                required: s.required,
-                is_large: s.content.chars().count() > 4000,
-            }
-        }).collect()
+    pub fn build(&self) -> String {
+        self.sections
+            .iter()
+            .filter(|(_, section)| !section.content.is_empty())
+            .map(|(name, section)| format!("## {}\n\n{}", name.heading(), section.content))
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n")
     }
 
-    /// 生成工具大小报告。
-    pub fn tool_size_report(tools: &[ToolDefinition]) -> Vec<ToolSize> {
-        tools.iter().map(|t| {
-            ToolSize {
-                name: t.name.clone(),
-                chars: t.json_description().unwrap_or_default().chars().count(),
-            }
-        }).collect()
+    pub fn debug_sections(&self) -> Vec<String> {
+        self.sections
+            .iter()
+            .map(|(name, section)| {
+                format!(
+                    "{:?}: {} ({:?}, required={})",
+                    name,
+                    if section.content.is_empty() { "empty" } else { "present" },
+                    section.priority,
+                    section.required
+                )
+            })
+            .collect()
+    }
+
+    pub fn get_section(&self, name: &SectionName) -> Option<&str> {
+        self.sections
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, section)| section.content.as_str())
     }
 }
 
-/// 检查 section 是否应该被包含。
-fn required_or_has_content(required: bool, content: &str) -> bool {
-    if required {
-        return true;
+pub fn filter_project_instruction_by_profile(content: &str, profile: ProjectInstructionProfile) -> String {
+    if matches!(profile, ProjectInstructionProfile::Full) {
+        return content.to_string();
     }
-    !content.trim().is_empty()
+    let normalized = if matches!(profile, ProjectInstructionProfile::Auto) {
+        ProjectInstructionProfile::Code
+    } else {
+        profile
+    };
+
+    let mut output = Vec::new();
+    let mut current_heading = String::new();
+    let mut current_lines: Vec<String> = Vec::new();
+    let flush = |heading: &str, lines: &[String], dst: &mut Vec<String>| {
+        if heading.is_empty() {
+            return;
+        }
+        let keep = match normalized {
+            ProjectInstructionProfile::Analysis => matches!(heading, "基本行为" | "代码结构"),
+            ProjectInstructionProfile::Code => {
+                matches!(heading, "基本行为" | "技术栈" | "代码结构" | "代码质量" | "修复流程")
+            }
+            ProjectInstructionProfile::Design => matches!(heading, "基本行为" | "计划与设计文档"),
+            ProjectInstructionProfile::Review => matches!(heading, "基本行为" | "代码质量"),
+            ProjectInstructionProfile::Auto | ProjectInstructionProfile::Full => false,
+        };
+        if keep {
+            dst.extend(lines.iter().cloned());
+        }
+    };
+
+    for line in content.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            flush(&current_heading, &current_lines, &mut output);
+            current_heading = heading.trim().to_string();
+            current_lines.clear();
+        }
+        current_lines.push(line.to_string());
+    }
+    flush(&current_heading, &current_lines, &mut output);
+
+    if output.is_empty() {
+        content.to_string()
+    } else {
+        output.join("\n")
+    }
 }
 
-// ---------------------------------------------------------------------------
-//  Agent Catalog 构建
-// ---------------------------------------------------------------------------
+pub fn build_agent_catalog_section(agents: &[AgentSpec], primary_agent_id: &str) -> String {
+    if agents.is_empty() {
+        return String::new();
+    }
 
-/// 构建 agent catalog section 文本。
-pub fn build_agent_catalog_section(
-    agents: &[crate::agent_catalog::AgentDescriptor],
-    primary_agent_id: &str,
-) -> String {
-    let entries: Vec<AgentCatalogEntry> = agents.iter().map(|a| {
-        AgentCatalogEntry {
-            id: a.id.clone(),
-            display_name: a.display_name.clone(),
-            description: a.description.clone(),
-            is_default: a.id == primary_agent_id,
-            use_cases: vec![],
-        }
-    }).collect();
+    let mut lines = vec![
+        "## Available Agents".to_string(),
+        String::new(),
+        "The following agents are available for task execution.".to_string(),
+        "Choose from this list only — do not invent new agent names.".to_string(),
+        String::new(),
+        "| ID | Display Name | Default | Description | Use Cases |".to_string(),
+        "|----|-------------|---------|-------------|-----------|".to_string(),
+    ];
 
-    let mut parts = Vec::new();
-    parts.push("## Available Agents".to_string());
-    parts.push("Use the appropriate agent based on task requirements.".to_string());
-    parts.push(String::new());
+    for agent in agents {
+        let is_default = agent.id == primary_agent_id;
+        let default_mark = if is_default { "✓" } else { " " };
+        let use_cases = if agent.description.is_empty() {
+            "general".to_string()
+        } else {
+            agent.description.clone()
+        };
+        lines.push(format!(
+            "| {} | {} | {} | {} | {} |",
+            agent.id,
+            agent.display_name,
+            default_mark,
+            use_cases,
+            agent.aliases.join(", ")
+        ));
+    }
 
-    for entry in &entries {
-        let default_marker = if entry.is_default { " (default)" } else { "" };
-        parts.push(format!("- **{}{}**: {}", entry.id, default_marker, entry.description));
+    lines.push(String::new());
+    lines.push("Rules:".to_string());
+    lines.push("- Always select an agent from the list above.".to_string());
+    lines.push("- If unsure, use the default agent.".to_string());
+    lines.push("- Do not use natural language names like \"reviewer\" or \"coder\".".to_string());
+    lines.push("- The `subagent_type` field is deprecated; use the agent `id` directly.".to_string());
+
+    lines.join("\n")
+}
+
+pub fn build_agent_catalog_hint(agents: &[AgentSpec], primary_agent_id: &str) -> String {
+    if agents.is_empty() {
+        return String::new();
+    }
+
+    let mut entries: Vec<AgentCatalogEntry> = agents
+        .iter()
+        .map(|agent| AgentCatalogEntry {
+            id: agent.id.clone(),
+            display_name: agent.display_name.clone(),
+            description: agent.description.clone(),
+            is_default: agent.id == primary_agent_id,
+            use_cases: agent.aliases.clone(),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let mut parts = vec![
+        "## Available Agents (Orchestrator Catalog)".to_string(),
+        String::new(),
+        "When creating or selecting agents for orchestration, use only these IDs:".to_string(),
+        String::new(),
+    ];
+
+    for entry in entries {
+        let default_note = if entry.is_default { " (default)" } else { "" };
+        parts.push(format!("- `{}`: {}{}", entry.id, entry.display_name, default_note));
     }
 
     parts.push(String::new());
-    parts.push(format!("Current agent: {}", primary_agent_id));
+    parts.push("Do NOT use natural language names like 'reviewer', 'coder', or 'researcher'.".to_string());
+    parts.push("If you need a new agent, use the default agent or refer to the full catalog.".to_string());
 
     parts.join("\n")
 }
 
-// ---------------------------------------------------------------------------
-//  辅助模块
-// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
 
+    #[test]
+    fn empty_builder_produces_empty_string() {
+        let builder = SystemPromptBuilder::new();
+        assert_eq!(builder.build(), "");
+    }
 
+    #[test]
+    fn section_with_content_is_included() {
+        let builder = SystemPromptBuilder::new()
+            .base_section("Base content")
+            .agent_section("Agent content");
+        let result = builder.build();
+        assert!(result.contains("## Identity & Role\n\nBase content"));
+        assert!(result.contains("## Agent Configuration\n\nAgent content"));
+    }
+
+    #[test]
+    fn project_instruction_profile_code_filters_sections() {
+        let raw = "## 基本行为\nA\n## 计划与设计文档\nB\n## 代码质量\nC";
+        let filtered = filter_project_instruction_by_profile(raw, ProjectInstructionProfile::Code);
+        assert!(filtered.contains("## 基本行为"));
+        assert!(filtered.contains("## 代码质量"));
+        assert!(!filtered.contains("## 计划与设计文档"));
+    }
+
+    #[test]
+    fn template_context_render_replaces_vars() {
+        let mut vars = HashMap::new();
+        vars.insert("workflow_stage".into(), "idle".into());
+        vars.insert("pending_interaction".into(), "none".into());
+        let result = TemplateContext::render("Stage: {{workflow_stage}}, Pending: {{pending_interaction}}", &vars);
+        assert_eq!(result, "Stage: idle, Pending: none");
+    }
+
+    #[test]
+    fn developer_prompt_section_heading() {
+        assert_eq!(
+            SectionName::DeveloperProjectPrompt.heading(),
+            crate::prompt::templates::DEVELOPER_PROMPT_SECTION_HEADING
+        );
+    }
+}

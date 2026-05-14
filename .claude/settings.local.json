@@ -3,7 +3,8 @@
     "allow": [
       "Bash(xargs -I {} ls {})",
       "Bash(cargo --version)",
-      "Bash(rustc --version)"
+      "Bash(rustc --version)",
+      "Bash(git worktree *)"
     ]
   }
 }

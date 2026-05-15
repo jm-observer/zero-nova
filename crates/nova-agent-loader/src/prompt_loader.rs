@@ -1,14 +1,32 @@
-use crate::config::{AgentSpec, AppConfig};
-use crate::prompt::context::{
+use anyhow::{bail, Context, Result};
+use nova_agent::prompt::context::{
     load_developer_project_prompt_async, load_project_context_with_config_async, EnvironmentSnapshot,
 };
-use crate::prompt::types::{
+use nova_agent::prompt::types::{
     ProjectInstructionProfile, PromptMaterial, SkillInjectionMode, ToolGuidanceMode, TurnPromptMaterial,
 };
-use crate::prompt::workflow::WorkflowStagePrompts;
-use anyhow::{bail, Context, Result};
+use nova_agent::prompt::workflow::WorkflowStagePrompts;
+use nova_agent_config::{AgentSpec, AppConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+pub struct PromptLoaderConfig {
+    pub config_dir: PathBuf,
+    pub prompts_dir: PathBuf,
+    pub project_context_file: Option<PathBuf>,
+    pub developer_prompt_files: Vec<String>,
+}
+
+impl From<&AppConfig> for PromptLoaderConfig {
+    fn from(config: &AppConfig) -> Self {
+        Self {
+            config_dir: config.config_dir.clone(),
+            prompts_dir: config.prompts_dir(),
+            project_context_file: config.project_context_file(),
+            developer_prompt_files: config.developer_prompt_files.clone(),
+        }
+    }
+}
 
 pub struct PromptMaterialLoader {
     pub config_dir: PathBuf,
@@ -18,11 +36,11 @@ pub struct PromptMaterialLoader {
 }
 
 impl PromptMaterialLoader {
-    pub fn from_config(config: &AppConfig) -> Self {
+    pub fn from_config(config: &PromptLoaderConfig) -> Self {
         Self {
             config_dir: config.config_dir.clone(),
-            prompts_dir: config.prompts_dir(),
-            project_context_file: config.project_context_file(),
+            prompts_dir: config.prompts_dir.clone(),
+            project_context_file: config.project_context_file.clone(),
             developer_prompt_files: config.developer_prompt_files.clone(),
         }
     }
@@ -143,7 +161,7 @@ impl PromptMaterialLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_catalog::AgentModelOverride;
+    use nova_agent_config::ConfiguredAgentModel;
     use tempfile::tempdir;
 
     fn test_agent_spec() -> AgentSpec {
@@ -158,7 +176,7 @@ mod tests {
             prompt_inline: None,
             system_prompt_template: None,
             tool_whitelist: None,
-            model_config: AgentModelOverride {
+            model_config: ConfiguredAgentModel {
                 model: "gpt-test".to_string(),
                 temperature: 0.0,
                 max_tokens: None,

@@ -6,6 +6,8 @@ description = "WebSocket server for zero-nova"
 
 [dependencies]
 nova-agent = { workspace = true }
+nova-agent-loader = { workspace = true }
+nova-agent-config = { workspace = true }
 nova-protocol = { workspace = true }
 nova-gateway-core = { workspace = true }
 channel-core = { workspace = true }

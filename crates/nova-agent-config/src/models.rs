@@ -1,7 +1,5 @@
 //! 配置数据模型、枚举和默认值构造。`r`n//!`r`n//! 此模块承载所有配置结构体、枚举和对应的 `Default` 实现，`r`n//! 确保模型层与加载/校验层职责分离。
 
-use crate::agent_catalog::AgentModelOverride;
-use crate::provider::ModelConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -267,14 +265,14 @@ pub struct VoiceConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmConfig {
     #[serde(flatten)]
-    pub model_config: ModelConfig,
+    pub model_config: ConfiguredModel,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RegisteredLlmConfig {
     pub provider: String,
     #[serde(flatten)]
-    pub model_config: ModelConfig,
+    pub model_config: ConfiguredModel,
 }
 
 #[derive(Debug, Clone)]
@@ -282,7 +280,30 @@ pub struct ResolvedAgentBinding {
     pub provider_id: String,
     pub provider: ProviderConfig,
     pub llm_id: Option<String>,
-    pub model_config: ModelConfig,
+    pub model_config: ConfiguredModel,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConfiguredAgentModel {
+    pub model: String,
+    pub temperature: f32,
+    pub max_tokens: Option<u32>,
+    pub top_p: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ConfiguredModel {
+    #[serde(default)]
+    pub provider: Option<String>,
+    pub model: String,
+    pub max_tokens: u32,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub thinking_budget: Option<u32>,
+    pub reasoning_effort: Option<String>,
+    pub max_tokens_field: String,
+    #[serde(default)]
+    pub extra_body: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -342,7 +363,7 @@ pub struct AgentSpec {
     #[serde(default)]
     pub system_prompt_template: Option<String>,
     pub tool_whitelist: Option<Vec<String>>,
-    pub model_config: AgentModelOverride,
+    pub model_config: ConfiguredAgentModel,
     /// 是否启用开发项目提示词读取。
     #[serde(default)]
     pub enable_project_developer_prompt: bool,
@@ -466,7 +487,7 @@ pub struct ToolResultCompactionConfigToml {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            model_config: ModelConfig {
+            model_config: ConfiguredModel {
                 provider: Some(default_provider_binding_id()),
                 model: "gpt-oss-120b".to_string(),
                 max_tokens: 8192,
@@ -604,6 +625,7 @@ impl Default for GatewayConfig {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::RawAppConfig;
 
     #[test]
     fn default_gateway_port_is_18801() {
@@ -665,7 +687,7 @@ description = "d"
 provider = "local"
 llm = "local_default"
 "#;
-        let raw: crate::config::RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, _) = raw.migrate(PathBuf::from("."));
         let agent = config.find_agent("nova").expect("agent should exist");
         assert!(!agent.enable_project_developer_prompt);
@@ -689,7 +711,7 @@ provider = "local"
 llm = "local_default"
 enable_project_developer_prompt = true
 "#;
-        let raw: crate::config::RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, _) = raw.migrate(PathBuf::from("."));
         let agent = config.find_agent("developer").expect("agent should exist");
         assert!(agent.enable_project_developer_prompt);
@@ -715,7 +737,7 @@ description = "d"
 provider = "local"
 llm = "local_default"
 "#;
-        let raw: crate::config::RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, _) = raw.migrate(PathBuf::from("."));
         config.validate().expect("config should validate");
     }
@@ -737,7 +759,7 @@ description = "d"
 provider = "local"
 llm = "local_default"
 "#;
-        let raw: crate::config::RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
+        let raw: RawAppConfig = toml::from_str(toml).expect("raw config should deserialize");
         let (config, _) = raw.migrate(PathBuf::from("."));
         assert!(config.developer_prompt_files.is_empty());
     }

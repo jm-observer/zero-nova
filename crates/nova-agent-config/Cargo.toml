@@ -1,0 +1,12 @@
+[package]
+name = "nova-agent-config"
+version = "0.1.0"
+edition = "2021"
+description = "Shared config models and loaders for zero-nova"
+
+[dependencies]
+log = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }

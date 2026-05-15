@@ -28,6 +28,28 @@ pub fn register_builtin_tools(
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
 ) {
+    register_builtin_tools_with_agent_prompt_loader(
+        registry,
+        config,
+        task_store,
+        skill_registry,
+        tool_whitelist,
+        project_dir_service,
+        http_clients,
+        None,
+    );
+}
+
+pub fn register_builtin_tools_with_agent_prompt_loader(
+    registry: &ToolRegistry,
+    config: &AppConfig,
+    task_store: task::TaskStoreHandle,
+    skill_registry: Arc<SkillRegistry>,
+    tool_whitelist: Option<&[String]>,
+    project_dir_service: Arc<dyn ProjectDirService>,
+    http_clients: &HttpClients,
+    agent_prompt_loader: Option<Arc<dyn agent::AgentPromptLoader>>,
+) {
     if is_tool_enabled(tool_whitelist, "Bash") {
         registry.register(Box::new(bash::BashTool::new(&config.tool.bash)));
     }
@@ -41,7 +63,10 @@ pub fn register_builtin_tools(
         registry.register(Box::new(edit::EditTool::new(None)));
     }
     if is_tool_enabled(tool_whitelist, "Agent") {
-        registry.register(Box::new(agent::AgentTool::new(config.clone())));
+        registry.register(Box::new(agent::AgentTool::new_with_prompt_loader(
+            config.clone(),
+            agent_prompt_loader,
+        )));
     }
     if is_tool_enabled(tool_whitelist, "WebSearch") {
         registry.register(Box::new(web_search::WebSearchTool::with_client(

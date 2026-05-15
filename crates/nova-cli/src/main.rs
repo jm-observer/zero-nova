@@ -7,7 +7,6 @@ use custom_utils::args::workspace as resolve_workspace;
 use custom_utils::logger::logger_feature;
 use log::info;
 use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
-use nova_agent::config::AppConfig;
 use nova_agent::event::AgentEvent;
 use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::mcp::client::McpClient;
@@ -19,6 +18,7 @@ use nova_agent::provider::LlmClient;
 use nova_agent::skill::{SkillPackage, SkillRegistry, ToolPolicy};
 use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
 use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry, UnavailableProjectDirService};
+use nova_agent_config::AppConfig;
 use nova_skill_loader::{load_single_skill, load_skills_from_dir, LoadedSkill, LoadedSkillPackage, LoadedToolPolicy};
 use rustyline::history::FileHistory;
 use serde_json::json;
@@ -208,7 +208,7 @@ async fn main() -> Result<()> {
     let tool_timeout_secs = config.gateway.tool_timeout_secs.unwrap_or(300);
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
-        model_config: root_binding.model_config.clone(),
+        model_config: root_binding.model_config.clone().into(),
         tool_timeout: Duration::from_secs(tool_timeout_secs),
         max_tokens: config.gateway.max_tokens,
         trimmer: TrimmerConfig {

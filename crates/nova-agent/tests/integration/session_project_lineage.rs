@@ -292,6 +292,7 @@ fn build_conversation_service(
         registry,
         sessions,
         AppConfig::new(data_dir.to_path_buf()),
+        None,
     )
 }
 
@@ -310,4 +311,3 @@ fn agent_descriptor(id: &str) -> AgentDescriptor {
         llm_id: "gpt_oss_primary".to_string(),
     }
 }
-

@@ -3,7 +3,6 @@
 //! 此模块包含所有 `Raw*` 结构体定义、迁移方法、文件加载函数和
 //! 环境变量覆盖逻辑，与模型层和校验层职责分离。
 
-use crate::agent_catalog::AgentModelOverride;
 use serde::de::{self, IgnoredAny};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -158,7 +157,7 @@ struct RawAgentSpec {
     #[serde(default)]
     tool_whitelist: Option<Vec<String>>,
     #[serde(default)]
-    model_config: Option<AgentModelOverride>,
+    model_config: Option<ConfiguredAgentModel>,
     #[serde(default)]
     pub enable_project_developer_prompt: bool,
 }
@@ -189,7 +188,7 @@ impl RawAppConfig {
             .llms
             .into_iter()
             .map(|(llm_id, raw_llm)| {
-                let mut model_config = crate::provider::ModelConfig {
+                let mut model_config = ConfiguredModel {
                     provider: Some(raw_llm.provider.clone()),
                     model: raw_llm.model_config.model,
                     max_tokens: raw_llm.model_config.max_tokens.unwrap_or(LlmConfig::default().model_config.max_tokens),
@@ -240,14 +239,14 @@ impl RawAppConfig {
             let model_config = if let Some(model_config) = agent.model_config.take() {
                 model_config
             } else if let Some(llm) = llms.get(&agent.llm) {
-                AgentModelOverride {
+                ConfiguredAgentModel {
                     model: llm.model_config.model.clone(),
                     temperature: llm.model_config.temperature.unwrap_or(0.0),
                     max_tokens: Some(llm.model_config.max_tokens),
                     top_p: llm.model_config.top_p.unwrap_or(1.0),
                 }
             } else {
-                AgentModelOverride {
+                ConfiguredAgentModel {
                     model: LlmConfig::default().model_config.model,
                     temperature: LlmConfig::default().model_config.temperature.unwrap_or(0.0),
                     max_tokens: Some(LlmConfig::default().model_config.max_tokens),

@@ -1,4 +1,4 @@
-use crate::skill::{SkillPackage, ToolPolicy};
+use nova_agent::skill::{SkillPackage, ToolPolicy};
 use nova_skill_loader::{LoadedSkill, LoadedSkillPackage, LoadedToolPolicy};
 
 pub fn convert_loaded_skills(loaded: Vec<LoadedSkill>) -> Vec<SkillPackage> {

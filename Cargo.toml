@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/nova-agent-config",
+  "crates/nova-agent-loader",
   "crates/nova-agent",
   "crates/nova-skill-loader",
   "crates/nova-protocol",
@@ -48,6 +50,8 @@ arc-swap = "1"
 
 # Internal crates
 nova-agent = { path = "crates/nova-agent" }
+nova-agent-config = { path = "crates/nova-agent-config" }
+nova-agent-loader = { path = "crates/nova-agent-loader" }
 nova-skill-loader = { path = "crates/nova-skill-loader" }
 nova-protocol = { path = "crates/nova-protocol" }
 nova-gateway-core = { path = "crates/nova-gateway-core" }

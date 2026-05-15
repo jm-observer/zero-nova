@@ -26,7 +26,7 @@ once_cell = { workspace = true }
 regex = { workspace = true }
 sqlx = { workspace = true }
 nova-protocol = { workspace = true }
-nova-skill-loader = { workspace = true }
+nova-agent-config = { workspace = true }
 async-openai = { workspace = true }
 tokio-stream = { workspace = true }
 arc-swap = { workspace = true }

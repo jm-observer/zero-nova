@@ -1,4 +1,4 @@
-//! Core library module for zero-nova.
+﻿//! Core library module for zero-nova.
 //!
 //! This module re-exports the project sub-modules and provides the library entry point.
 

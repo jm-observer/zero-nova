@@ -1,13 +1,12 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
-use crate::app::prompt_loader::PromptMaterialLoader;
 use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
-use crate::prompt::{PromptMaterial, SystemPromptBuilder};
 use crate::skill::SkillRegistry;
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use chrono::Utc;
 use nova_protocol::observability::*;
 use std::collections::hash_map::DefaultHasher;
@@ -22,6 +21,39 @@ pub struct AgentWorkspaceService {
     pub sessions: SessionService,
     pub config: Arc<RwLock<AppConfig>>,
     pub skill_registry: Arc<SkillRegistry>,
+    prompt_reloader: Arc<dyn SessionPromptReloader>,
+}
+
+pub struct ReloadedSessionPrompt {
+    pub prompt_base: String,
+    pub prompt_version: String,
+    pub source_revision: String,
+}
+
+#[async_trait]
+pub trait SessionPromptReloader: Send + Sync {
+    async fn reload_session_prompt(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+        initial_template_vars: &std::collections::HashMap<String, String>,
+        project_dir: Option<&Path>,
+    ) -> Result<ReloadedSessionPrompt>;
+}
+
+struct StaticSessionPromptReloader;
+
+#[async_trait]
+impl SessionPromptReloader for StaticSessionPromptReloader {
+    async fn reload_session_prompt(
+        &self,
+        _session_id: &str,
+        _agent_id: &str,
+        _initial_template_vars: &std::collections::HashMap<String, String>,
+        _project_dir: Option<&Path>,
+    ) -> Result<ReloadedSessionPrompt> {
+        anyhow::bail!("Session prompt reloader is not configured")
+    }
 }
 
 impl AgentWorkspaceService {
@@ -30,12 +62,14 @@ impl AgentWorkspaceService {
         sessions: SessionService,
         config: Arc<RwLock<AppConfig>>,
         skill_registry: Arc<SkillRegistry>,
+        prompt_reloader: Option<Arc<dyn SessionPromptReloader>>,
     ) -> Self {
         Self {
             agent_registry,
             sessions,
             config,
             skill_registry,
+            prompt_reloader: prompt_reloader.unwrap_or_else(|| Arc::new(StaticSessionPromptReloader)),
         }
     }
 
@@ -120,70 +154,37 @@ impl AgentWorkspaceService {
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
 
-        let app_config_snapshot = self.config.read().await.clone();
-        let reloaded_config = AppConfig::load_from_file(
-            app_config_snapshot.config_path(),
-            app_config_snapshot.config_dir.clone(),
-        )?;
-
-        let agent_spec = reloaded_config
-            .gateway
-            .agents
-            .iter()
-            .find(|agent| agent.id == agent_id)
-            .cloned()
-            .with_context(|| format!("Agent '{}' missing in config", agent_id))?;
-        let prompt_loader = PromptMaterialLoader::from_config(&reloaded_config);
-        let prompt_base = prompt_loader.load_agent_prompt(&agent_spec).await?;
-        let prompt_base_fingerprint = fingerprint_text(&prompt_base);
         let project_dir = {
             let control = session.control.read().await;
             control.project_dir.clone()
         };
-
-        let env = crate::prompt::EnvironmentSnapshot::collect(&reloaded_config.config_dir, None).await;
-        let turn_material = prompt_loader
-            .load_turn_material(
+        let reloaded = self
+            .prompt_reloader
+            .reload_session_prompt(
+                session_id,
+                &agent_id,
+                &agent_descriptor.initial_template_vars,
                 project_dir.as_deref(),
-                Some("idle"),
-                None,
-                std::collections::HashMap::new(),
-                agent_spec.enable_project_developer_prompt,
             )
             .await?;
-        if let Some(ref content) = turn_material.developer_project_prompt {
-            let file_count = content.matches("### Source:").count();
-            log::info!("Reloaded developer project prompt: {} files matched", file_count);
-        }
-
-        let prompt_material = PromptMaterial {
-            agent_id: agent_id.clone(),
-            agent_prompt: prompt_base.clone(),
-            agent_catalog: None,
-            environment_snapshot: Some(env),
-            initial_template_vars: agent_descriptor.initial_template_vars.clone(),
-            skill_injection_mode: crate::prompt::SkillInjectionMode::Catalog,
-            project_instruction_profile: crate::prompt::ProjectInstructionProfile::Auto,
-            tool_guidance: crate::prompt::ToolGuidanceMode::Compact,
-        };
-        let compiled_prompt =
-            SystemPromptBuilder::from_material(&prompt_material, &turn_material, &self.skill_registry).build();
-        let prompt_version = fingerprint_text(&compiled_prompt);
-        let source_revision = source_revision(&reloaded_config).await;
         log::info!(
-            "Session prompt reload prepared: session_id={}, agent_id={}, source_revision={}, prompt_base_len={}, prompt_base_hash={}, compiled_prompt_len={}, compiled_prompt_hash={}",
+            "Session prompt reload prepared: session_id={}, agent_id={}, source_revision={}, prompt_base_len={}, prompt_base_hash={}, compiled_prompt_hash={}",
             session_id,
             agent_id,
-            source_revision,
-            prompt_base.len(),
-            prompt_base_fingerprint,
-            compiled_prompt.len(),
-            prompt_version
+            reloaded.source_revision,
+            reloaded.prompt_base.len(),
+            fingerprint_text(&reloaded.prompt_base),
+            reloaded.prompt_version
         );
 
         let (version_before, version_after, changed, updated_at) = self
             .sessions
-            .reload_system_prompt(session_id, prompt_base, prompt_version, source_revision)
+            .reload_system_prompt(
+                session_id,
+                reloaded.prompt_base,
+                reloaded.prompt_version,
+                reloaded.source_revision,
+            )
             .await?;
         log::info!(
             "Session system prompt reloaded: session_id={}, version_before={}, version_after={}, changed={}",
@@ -627,22 +628,6 @@ fn fingerprint_text(value: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-async fn source_revision(config: &AppConfig) -> String {
-    let path = config.config_path();
-    match fs::metadata(&path).await {
-        Ok(meta) => {
-            let modified = meta
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|duration| duration.as_millis())
-                .unwrap_or_default();
-            format!("mtime:{}:len:{}", modified, meta.len())
-        }
-        Err(_) => "unknown".to_string(),
-    }
-}
-
 fn proto_model_ref(model: &ModelRef) -> nova_protocol::ModelRef {
     nova_protocol::ModelRef {
         provider: model.provider.clone(),
@@ -747,10 +732,9 @@ fn sort_file_tree_entries(entries: &mut [SessionFileTreeEntry]) {
 #[cfg(test)]
 mod tests {
     use super::{deserialize_skill_bindings, sort_file_tree_entries};
-    use crate::agent_catalog::AgentModelOverride;
     use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
     use crate::app::agent_workspace_service::AgentWorkspaceService;
-    use crate::config::AppConfig;
+    use crate::config::{AppConfig, ConfiguredAgentModel, ConfiguredModel};
     use crate::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
     use nova_protocol::observability::SessionFileTreeEntry;
     use std::collections::HashMap;
@@ -826,7 +810,7 @@ mod tests {
             "cloud_gpt4o".to_string(),
             crate::config::RegisteredLlmConfig {
                 provider: "cloud".to_string(),
-                model_config: crate::provider::ModelConfig {
+                model_config: ConfiguredModel {
                     provider: Some("cloud".to_string()),
                     model: "gpt-4o".to_string(),
                     max_tokens: 4096,
@@ -850,7 +834,7 @@ mod tests {
             prompt_inline: None,
             system_prompt_template: None,
             tool_whitelist: None,
-            model_config: AgentModelOverride {
+            model_config: ConfiguredAgentModel {
                 model: "gpt-4o".to_string(),
                 temperature: 0.3,
                 max_tokens: Some(4096),
@@ -873,8 +857,13 @@ mod tests {
             llm_id: "cloud_gpt4o".to_string(),
             enable_project_developer_prompt: true,
         });
-        let service =
-            AgentWorkspaceService::new(registry, sessions, config, Arc::new(crate::skill::SkillRegistry::new()));
+        let service = AgentWorkspaceService::new(
+            registry,
+            sessions,
+            config,
+            Arc::new(crate::skill::SkillRegistry::new()),
+            None,
+        );
 
         let response = service
             .inspect_agent("developer", &session.id)

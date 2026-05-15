@@ -456,6 +456,7 @@ fn build_conversation_service<C: LlmClient + 'static>(
             registry,
             sessions.clone(),
             AppConfig::new(data_dir.to_path_buf()),
+            None,
         ),
         sessions,
     )
@@ -505,4 +506,3 @@ fn tool_context_with_session(session_id: &str, project_dir: Option<String>) -> T
         cancellation_token: None,
     }
 }
-

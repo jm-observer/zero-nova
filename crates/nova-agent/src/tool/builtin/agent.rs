@@ -1,5 +1,4 @@
 use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
-use crate::app::prompt_loader::PromptMaterialLoader;
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
@@ -28,6 +27,116 @@ pub struct AgentTool {
     config: AppConfig,
     agent_types: HashMap<String, AgentSpec>,
     primary_agent_type: String,
+    prompt_loader: Arc<dyn AgentPromptLoader>,
+}
+
+#[async_trait]
+pub trait AgentPromptLoader: Send + Sync {
+    async fn load_agent_material(
+        &self,
+        spec: &AgentSpec,
+        env: Option<crate::prompt::EnvironmentSnapshot>,
+        template_vars: HashMap<String, String>,
+    ) -> Result<crate::prompt::PromptMaterial>;
+    async fn load_turn_material(
+        &self,
+        project_dir: Option<&std::path::Path>,
+        active_skill: Option<String>,
+        enable_developer_prompt: bool,
+    ) -> Result<crate::prompt::TurnPromptMaterial>;
+}
+
+#[derive(Clone)]
+struct ConfigBackedAgentPromptLoader {
+    config: AppConfig,
+}
+
+#[async_trait]
+impl AgentPromptLoader for ConfigBackedAgentPromptLoader {
+    async fn load_agent_material(
+        &self,
+        spec: &AgentSpec,
+        env: Option<crate::prompt::EnvironmentSnapshot>,
+        template_vars: HashMap<String, String>,
+    ) -> Result<crate::prompt::PromptMaterial> {
+        if spec.prompt_file.is_some() && spec.prompt_inline.is_some() {
+            anyhow::bail!(
+                "Agent '{}' has both prompt_file and prompt_inline configured; only one is allowed",
+                spec.id
+            );
+        }
+
+        let agent_prompt = if let Some(file) = &spec.prompt_file {
+            let prompt_path = self.config.prompts_dir().join(file);
+            tokio::fs::read_to_string(&prompt_path).await.map_err(|err| {
+                anyhow::anyhow!(
+                    "Failed to read prompt_file for agent '{}': {:?}, {}",
+                    spec.id,
+                    prompt_path,
+                    err
+                )
+            })?
+        } else if let Some(inline) = &spec.prompt_inline {
+            inline.clone()
+        } else if let Some(legacy) = &spec.system_prompt_template {
+            log::warn!(
+                "Agent '{}' uses legacy system_prompt_template. This field is deprecated; use prompt_file/prompt_inline.",
+                spec.id
+            );
+            legacy.clone()
+        } else {
+            let default_file = format!("agent-{}.md", spec.id);
+            let prompt_path = self.config.prompts_dir().join(default_file);
+            match tokio::fs::read_to_string(&prompt_path).await {
+                Ok(content) => content,
+                Err(err) => {
+                    log::warn!(
+                        "Default prompt file {:?} not found for agent '{}': {}",
+                        prompt_path,
+                        spec.id,
+                        err
+                    );
+                    String::new()
+                }
+            }
+        };
+
+        Ok(crate::prompt::PromptMaterial {
+            agent_id: spec.id.clone(),
+            agent_prompt,
+            agent_catalog: None,
+            environment_snapshot: env,
+            initial_template_vars: template_vars,
+            skill_injection_mode: crate::prompt::SkillInjectionMode::Catalog,
+            project_instruction_profile: crate::prompt::ProjectInstructionProfile::Auto,
+            tool_guidance: crate::prompt::ToolGuidanceMode::Compact,
+        })
+    }
+
+    async fn load_turn_material(
+        &self,
+        project_dir: Option<&std::path::Path>,
+        active_skill: Option<String>,
+        enable_developer_prompt: bool,
+    ) -> Result<crate::prompt::TurnPromptMaterial> {
+        let developer_project_prompt = if enable_developer_prompt {
+            crate::prompt::load_developer_project_prompt_async(project_dir, &self.config.developer_prompt_files).await
+        } else {
+            None
+        };
+        let project_context = crate::prompt::load_project_context_with_config_async(
+            project_dir,
+            self.config.project_context_file().as_deref(),
+        )
+        .await;
+        Ok(crate::prompt::TurnPromptMaterial {
+            developer_project_prompt,
+            project_context,
+            workflow_prompt: None,
+            turn_template_vars: HashMap::new(),
+            active_skill,
+        })
+    }
 }
 
 struct NoopProjectDirService;
@@ -52,6 +161,10 @@ impl AgentTool {
     }
 
     pub fn new(config: AppConfig) -> Self {
+        Self::new_with_prompt_loader(config, None)
+    }
+
+    pub fn new_with_prompt_loader(config: AppConfig, prompt_loader: Option<Arc<dyn AgentPromptLoader>>) -> Self {
         let mut agent_types = HashMap::new();
         for agent in &config.gateway.agents {
             agent_types.insert(agent.id.clone(), agent.clone());
@@ -62,10 +175,12 @@ impl AgentTool {
             .first()
             .map(|agent| agent.id.clone())
             .unwrap_or_else(|| "primary".to_string());
+        let default_prompt_loader = Arc::new(ConfigBackedAgentPromptLoader { config: config.clone() });
         Self {
             config,
             agent_types,
             primary_agent_type,
+            prompt_loader: prompt_loader.unwrap_or(default_prompt_loader),
         }
     }
 
@@ -237,22 +352,20 @@ impl AgentTool {
             runtime.read_files = ctx.read_files.clone();
         }
 
-        let prompt_loader = PromptMaterialLoader::from_config(&self.config);
-
         let mut prompt_template_vars = HashMap::new();
         prompt_template_vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "idle".to_string());
         prompt_template_vars.insert(template_vars::PENDING_INTERACTION.to_string(), "none".to_string());
         prompt_template_vars.insert(template_vars::ACTIVE_AGENT.to_string(), spec.display_name.clone());
-        let prompt_material = prompt_loader
-            .load_agent_material(spec, Some(environment.clone()), None, prompt_template_vars)
+        let prompt_material = self
+            .prompt_loader
+            .load_agent_material(spec, Some(environment.clone()), prompt_template_vars)
             .await?;
         let active_skill_id = runtime.resolve_active_skill_id(prompt, &[])?;
-        let turn_material = prompt_loader
+        let turn_material = self
+            .prompt_loader
             .load_turn_material(
                 project_dir.as_deref(),
-                Some("idle"),
                 active_skill_id,
-                HashMap::new(),
                 spec.enable_project_developer_prompt,
             )
             .await?;
@@ -283,7 +396,7 @@ impl AgentTool {
                             logs.lock().await.push(text);
                         }
                         AgentEvent::ToolStart { name, input, .. } => {
-                            let log = format!("\n[Agent] 🚀 Executing {}: {}\n", name, input);
+                            let log = format!("\n[Agent] Executing {}: {}\n", name, input);
                             let _ = parent_tx
                                 .send(AgentEvent::LogDelta {
                                     id: parent_tool_id.clone(),
@@ -295,7 +408,7 @@ impl AgentTool {
                             logs.lock().await.push(log);
                         }
                         AgentEvent::ToolEnd { name, is_error, .. } => {
-                            let status = if is_error { "❌ FAILED" } else { "✅ SUCCESS" };
+                            let status = if is_error { "FAILED" } else { "SUCCESS" };
                             let log = format!("[Agent] {} finished: {}\n", name, status);
                             let _ = parent_tx
                                 .send(AgentEvent::LogDelta {
@@ -542,8 +655,7 @@ impl Tool for AgentTool {
 #[cfg(test)]
 mod tests {
     use super::AgentTool;
-    use crate::agent_catalog::AgentModelOverride;
-    use crate::config::{AgentSpec, AppConfig, GatewayConfig};
+    use crate::config::{AgentSpec, AppConfig, ConfiguredAgentModel, GatewayConfig};
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -562,7 +674,7 @@ mod tests {
                     prompt_inline: None,
                     system_prompt_template: None,
                     tool_whitelist: None,
-                    model_config: AgentModelOverride {
+                    model_config: ConfiguredAgentModel {
                         model: "gpt-oss-120b".to_string(),
                         temperature: 0.0,
                         max_tokens: Some(8192),
@@ -581,7 +693,7 @@ mod tests {
                     prompt_inline: None,
                     system_prompt_template: None,
                     tool_whitelist: None,
-                    model_config: AgentModelOverride {
+                    model_config: ConfiguredAgentModel {
                         model: "gpt-oss-120b".to_string(),
                         temperature: 0.0,
                         max_tokens: Some(8192),

@@ -1,0 +1,19 @@
+[package]
+name = "nova-agent-loader"
+version = "0.1.0"
+edition = "2021"
+description = "External resource loaders and descriptor factory for zero-nova"
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+nova-agent = { workspace = true }
+nova-agent-config = { workspace = true }
+nova-skill-loader = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

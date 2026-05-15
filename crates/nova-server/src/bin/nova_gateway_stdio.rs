@@ -1,7 +1,7 @@
 use clap::Parser;
 use custom_utils::{args::workspace as resolve_workspace, logger::logger_feature};
-use nova_agent::app::bootstrap::build_application;
-use nova_agent::config::AppConfig;
+use nova_agent_config::AppConfig;
+use nova_agent_loader::build_application;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

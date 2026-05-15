@@ -1,6 +1,5 @@
 use crate::agent::{AgentRuntime, TurnResult, TurnWithContextRequest};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
-use crate::app::prompt_loader::PromptMaterialLoader;
 use crate::config::AppConfig;
 use crate::conversation::control::{LastTurnSnapshot, ModelRef};
 use crate::conversation::model::{RunRecord, RunStepRecord};
@@ -12,6 +11,7 @@ use crate::prompt::{
 };
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use chrono::Utc;
 use nova_protocol::observability::{TurnUsage, UsageCompleteness, UsageSource};
 use std::collections::HashMap;
@@ -27,6 +27,76 @@ pub struct ConversationService<C: LlmClient> {
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
     pub app_config: AppConfig,
+    turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
+}
+
+#[async_trait]
+pub trait TurnPromptMaterialLoader: Send + Sync {
+    async fn load_turn_material(
+        &self,
+        project_dir: Option<&Path>,
+        workflow_stage: Option<&str>,
+        active_skill: Option<String>,
+        turn_vars: HashMap<String, String>,
+        enable_developer_prompt: bool,
+    ) -> Result<crate::prompt::TurnPromptMaterial>;
+}
+
+struct StaticTurnPromptMaterialLoader {
+    app_config: AppConfig,
+}
+
+#[async_trait]
+impl TurnPromptMaterialLoader for StaticTurnPromptMaterialLoader {
+    async fn load_turn_material(
+        &self,
+        project_dir: Option<&Path>,
+        workflow_stage: Option<&str>,
+        active_skill: Option<String>,
+        turn_vars: HashMap<String, String>,
+        enable_developer_prompt: bool,
+    ) -> Result<crate::prompt::TurnPromptMaterial> {
+        let developer_project_prompt = if enable_developer_prompt {
+            crate::prompt::load_developer_project_prompt_async(project_dir, &self.app_config.developer_prompt_files)
+                .await
+        } else {
+            None
+        };
+        let project_context = crate::prompt::load_project_context_with_config_async(
+            project_dir,
+            self.app_config.project_context_file().as_deref(),
+        )
+        .await;
+        let workflow_prompt = if let Some(stage) = workflow_stage {
+            if stage != "idle" {
+                let path = self.app_config.prompts_dir().join("workflow-stages.md");
+                match crate::prompt::WorkflowStagePrompts::load_from_file_async(&path).await {
+                    Ok(prompts) => prompts.render(stage, &turn_vars),
+                    Err(err) => {
+                        log::warn!(
+                            "Failed to load workflow prompt stage '{}' from {:?}: {}",
+                            stage,
+                            path,
+                            err
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(crate::prompt::TurnPromptMaterial {
+            developer_project_prompt,
+            project_context,
+            workflow_prompt,
+            turn_template_vars: turn_vars,
+            active_skill,
+        })
+    }
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
@@ -61,12 +131,17 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         agent_registry: AgentRegistry,
         sessions: SessionService,
         app_config: AppConfig,
+        turn_prompt_loader: Option<Arc<dyn TurnPromptMaterialLoader>>,
     ) -> Self {
+        let fallback_loader = Arc::new(StaticTurnPromptMaterialLoader {
+            app_config: app_config.clone(),
+        });
         Self {
             agent,
             agent_registry,
             sessions,
-            app_config,
+            app_config: app_config.clone(),
+            turn_prompt_loader: turn_prompt_loader.unwrap_or(fallback_loader),
         }
     }
 
@@ -312,14 +387,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let mut env =
             crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref()).await;
         env.model_id = Some(execution_binding.model_config.model.clone());
-        let prompt_loader = PromptMaterialLoader::from_config(&self.app_config);
         let mut turn_vars = HashMap::new();
         turn_vars.insert("workflow_stage".to_string(), "idle".to_string());
         turn_vars.insert("pending_interaction".to_string(), "none".to_string());
         turn_vars.insert("active_agent".to_string(), agent_descriptor.display_name.clone());
         let active_skill_id = self.agent.resolve_active_skill_id(input, history_for_turn.as_ref())?;
 
-        let turn_material = prompt_loader
+        let turn_material = self
+            .turn_prompt_loader
             .load_turn_material(
                 project_dir.as_deref(),
                 Some("idle"),
@@ -405,6 +480,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             Utc::now().timestamp_millis(),
         );
         let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
+        let execution_model_config: crate::provider::ModelConfig = execution_binding.model_config.clone().into();
         let turn_result = match self
             .agent
             .run_turn_with_context_and_model_config(TurnWithContextRequest {
@@ -415,7 +491,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 environment: Some(env),
                 event_tx,
                 cancellation_token: Some(token),
-                model_config: &execution_binding.model_config,
+                model_config: &execution_model_config,
             })
             .await
         {
@@ -473,7 +549,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             .await?;
         let mut final_skills = self.collect_current_skills(active_skill_id.as_deref());
         {
-            // 合并运行过程中观察到的技能（动态激活/切换/退出事件）
+            // 合并运行过程中观察到的技能（动态激�?切换/退出事件）
             let observed = observed_skills.lock().await;
             log::info!(
                 "[SKILL_REC] Merging {} observed events into {} initial skills",

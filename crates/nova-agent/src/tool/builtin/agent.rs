@@ -1,33 +1,60 @@
-use crate::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
+use crate::agent::AgentRuntime;
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
-use crate::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use crate::message::{ContentBlock, Message, Role};
-use crate::network::HttpClients;
-use crate::prompt::TrimmerConfig;
 use crate::prompt::{template_vars, SystemPromptBuilder};
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::provider::ModelConfig;
-use crate::tool::builtin::register_builtin_tools;
-use crate::tool::{ProjectDirService, RegisteredToolDefinition, Tool, ToolContext, ToolOutput, ToolRegistry};
+use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
 /// Tool to spawn a subagent for specialized task execution.
 #[derive(Clone)]
 pub struct AgentTool {
-    config: AppConfig,
+    config_store: Arc<RwLock<AppConfig>>,
     agent_types: HashMap<String, AgentSpec>,
     primary_agent_type: String,
     prompt_loader: Arc<dyn AgentPromptLoader>,
+    subagent_runtime_factory: Arc<dyn SubagentRuntimeFactory>,
+}
+
+#[async_trait]
+pub trait SubagentRuntimeFactory: Send + Sync {
+    async fn build_runtime(
+        &self,
+        spec: &AgentSpec,
+        binding: &crate::config::ResolvedAgentBinding,
+        model_override: Option<&str>,
+        context: Option<&ToolContext>,
+        project_dir: Option<&std::path::Path>,
+        environment: crate::prompt::EnvironmentSnapshot,
+    ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)>;
+}
+
+#[derive(Clone)]
+struct UnconfiguredSubagentRuntimeFactory;
+
+#[async_trait]
+impl SubagentRuntimeFactory for UnconfiguredSubagentRuntimeFactory {
+    async fn build_runtime(
+        &self,
+        _spec: &AgentSpec,
+        _binding: &crate::config::ResolvedAgentBinding,
+        _model_override: Option<&str>,
+        _context: Option<&ToolContext>,
+        _project_dir: Option<&std::path::Path>,
+        _environment: crate::prompt::EnvironmentSnapshot,
+    ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)> {
+        anyhow::bail!("SubagentRuntimeFactory is not configured")
+    }
 }
 
 #[async_trait]
@@ -74,19 +101,6 @@ impl AgentPromptLoader for UnconfiguredAgentPromptLoader {
     }
 }
 
-struct NoopProjectDirService;
-
-#[async_trait]
-impl ProjectDirService for NoopProjectDirService {
-    async fn get_project_dir(&self, _session_id: &str) -> Result<Option<PathBuf>> {
-        anyhow::bail!("Project directory management is unavailable in subagent runtime")
-    }
-
-    async fn set_project_dir(&self, _session_id: &str, _project_dir: PathBuf) -> Result<PathBuf> {
-        anyhow::bail!("Project directory management is unavailable in subagent runtime")
-    }
-}
-
 impl AgentTool {
     fn selected_agent_type(input: &Value) -> Option<&str> {
         input["agent_selection"]
@@ -96,10 +110,18 @@ impl AgentTool {
     }
 
     pub fn new(config: AppConfig) -> Self {
-        Self::new_with_prompt_loader(config, None)
+        Self::new_with_prompt_loader_and_factory(config, None, None)
     }
 
     pub fn new_with_prompt_loader(config: AppConfig, prompt_loader: Option<Arc<dyn AgentPromptLoader>>) -> Self {
+        Self::new_with_prompt_loader_and_factory(config, prompt_loader, None)
+    }
+
+    pub fn new_with_prompt_loader_and_factory(
+        config: AppConfig,
+        prompt_loader: Option<Arc<dyn AgentPromptLoader>>,
+        subagent_runtime_factory: Option<Arc<dyn SubagentRuntimeFactory>>,
+    ) -> Self {
         let mut agent_types = HashMap::new();
         for agent in &config.gateway.agents {
             agent_types.insert(agent.id.clone(), agent.clone());
@@ -111,28 +133,24 @@ impl AgentTool {
             .map(|agent| agent.id.clone())
             .unwrap_or_else(|| "primary".to_string());
         let default_prompt_loader = Arc::new(UnconfiguredAgentPromptLoader);
+        let config_store = Arc::new(RwLock::new(config.clone()));
         Self {
-            config,
+            config_store: config_store.clone(),
             agent_types,
             primary_agent_type,
             prompt_loader: prompt_loader.unwrap_or(default_prompt_loader),
+            subagent_runtime_factory: subagent_runtime_factory
+                .unwrap_or_else(|| Arc::new(UnconfiguredSubagentRuntimeFactory)),
         }
     }
 
     pub fn catalog_agent_ids(&self) -> std::collections::HashSet<String> {
-        self.config
-            .gateway
-            .agents
-            .iter()
-            .map(|agent| agent.id.clone())
-            .collect()
+        self.agent_types.values().map(|agent| agent.id.clone()).collect()
     }
 
     pub fn default_agent_id(&self) -> String {
-        self.config
-            .gateway
-            .agents
-            .first()
+        self.agent_types
+            .get(&self.primary_agent_type)
             .map(|agent| agent.id.clone())
             .unwrap_or_else(|| "nova".to_string())
     }
@@ -170,43 +188,8 @@ impl AgentTool {
         context: Option<ToolContext>,
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
-        let binding = self.config.resolve_agent_binding(spec)?;
-        let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
-            self.config.providers.clone(),
-            binding.provider_id.clone(),
-            crate::network::build_provider_client()?,
-            self.config.outbound_context_headers.enabled,
-        );
-        let sub_registry = ToolRegistry::new();
-        if let Some(ctx) = &context {
-            if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
-                let http_clients = HttpClients::new()?;
-                register_builtin_tools(
-                    &sub_registry,
-                    &self.config,
-                    task_store.clone(),
-                    skill_registry.clone(),
-                    spec.tool_whitelist.as_deref(),
-                    Arc::new(NoopProjectDirService),
-                    &http_clients,
-                );
-            }
-        }
-
-        let mut model_config = ModelConfig {
-            provider: Some(binding.provider_id.clone()),
-            model: spec.model_config.model.clone(),
-            max_tokens: spec.model_config.max_tokens.unwrap_or(binding.model_config.max_tokens),
-            temperature: Some(spec.model_config.temperature),
-            top_p: Some(spec.model_config.top_p),
-            thinking_budget: None,
-            reasoning_effort: None,
-            max_tokens_field: binding.model_config.max_tokens_field.clone(),
-            extra_body: binding.model_config.extra_body.clone(),
-        };
-        if let Some(m) = model_override {
-            model_config.model = m.to_string();
-        }
+        let config = self.config_store.read().await.clone();
+        let binding = config.resolve_agent_binding(spec)?;
 
         let project_dir = context
             .as_ref()
@@ -217,8 +200,19 @@ impl AgentTool {
         let mut environment = if let Some(env) = context.as_ref().and_then(|ctx| ctx.environment.clone()) {
             env
         } else {
-            crate::prompt::EnvironmentSnapshot::collect(&self.config.config_dir, project_dir.as_deref()).await
+            crate::prompt::EnvironmentSnapshot::collect(&config.config_dir, project_dir.as_deref()).await
         };
+        let (runtime, model_config) = self
+            .subagent_runtime_factory
+            .build_runtime(
+                spec,
+                &binding,
+                model_override,
+                context.as_ref(),
+                project_dir.as_deref(),
+                environment.clone(),
+            )
+            .await?;
         environment.model_id = Some(model_config.model.clone());
 
         log::info!(
@@ -228,64 +222,6 @@ impl AgentTool {
             binding.llm_id,
             model_config.model
         );
-
-        let agent_config = AgentConfig {
-            max_iterations: self.config.gateway.max_iterations,
-            model_config,
-            tool_timeout: Duration::from_secs(self.config.gateway.subagent_timeout_secs),
-            max_tokens: self.config.gateway.max_tokens,
-            trimmer: TrimmerConfig {
-                context_window: self.config.gateway.trimmer.context_window,
-                output_reserve: self.config.gateway.trimmer.output_reserve,
-                min_recent_messages: self.config.gateway.trimmer.min_recent_messages,
-                enable_summary: false,
-            },
-            config_dir: self.config.config_dir.clone(),
-            prompts_dir: self.config.prompts_dir(),
-            project_context_file: self.config.project_context_file(),
-            initial_env_snapshot: Some(environment.clone()),
-            loop_guard: LoopGuardConfig {
-                enabled: self.config.gateway.loop_guard.enabled,
-                max_consecutive_duplicate_tool_calls: self
-                    .config
-                    .gateway
-                    .loop_guard
-                    .max_consecutive_duplicate_tool_calls,
-                max_stalled_iterations: self.config.gateway.loop_guard.max_stalled_iterations,
-                duplicate_read_mode: if self.config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
-                    DuplicateReadMode::WarnOnly
-                } else {
-                    DuplicateReadMode::WarnThenReject
-                },
-                iteration_trim_ratio: self.config.gateway.loop_guard.iteration_trim_ratio,
-            },
-            prompt_diagnostics: PromptDiagnosticsConfig {
-                enabled: self.config.gateway.prompt_diagnostics.enabled,
-                large_section_chars: self.config.gateway.prompt_diagnostics.large_section_chars,
-                large_message_chars: self.config.gateway.prompt_diagnostics.large_message_chars,
-                large_tool_result_chars: self.config.gateway.prompt_diagnostics.large_tool_result_chars,
-            },
-            tool_result_compaction: ToolResultCompactionConfig {
-                enabled: self.config.gateway.tool_result_compaction.enabled,
-                max_chars: self.config.gateway.tool_result_compaction.max_chars,
-                head_chars: self.config.gateway.tool_result_compaction.head_chars,
-                tail_chars: self.config.gateway.tool_result_compaction.tail_chars,
-                disable_for_tools: self
-                    .config
-                    .gateway
-                    .tool_result_compaction
-                    .disable_for_tools
-                    .iter()
-                    .map(|name| name.to_ascii_lowercase())
-                    .collect(),
-            },
-        };
-        let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);
-        if let Some(ctx) = &context {
-            runtime.task_store = ctx.task_store.clone();
-            runtime.skill_registry = ctx.skill_registry.clone();
-            runtime.read_files = ctx.read_files.clone();
-        }
 
         let mut prompt_template_vars = HashMap::new();
         prompt_template_vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "idle".to_string());
@@ -420,8 +356,10 @@ impl AgentTool {
 #[async_trait]
 impl Tool for AgentTool {
     fn definition(&self) -> RegisteredToolDefinition {
-        let catalog_hint =
-            crate::prompt::build_agent_catalog_hint(&self.config.gateway.agents, &self.primary_agent_type);
+        let catalog_hint = crate::prompt::build_agent_catalog_hint(
+            &self.agent_types.values().cloned().collect::<Vec<_>>(),
+            &self.primary_agent_type,
+        );
 
         RegisteredToolDefinition {
             name: "Agent".to_string(),

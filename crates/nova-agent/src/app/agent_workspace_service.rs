@@ -1,6 +1,7 @@
 use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
-use crate::config::AppConfig;
+use crate::app::agent_registry_snapshot::AgentRegistrySnapshot;
+use crate::app::config_snapshot::ConfigSnapshot;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
@@ -14,12 +15,11 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
-use tokio::sync::RwLock;
 
 pub struct AgentWorkspaceService {
-    pub agent_registry: AgentRegistry,
+    pub agent_registry: Arc<dyn AgentRegistrySnapshot>,
     pub sessions: SessionService,
-    pub config: Arc<RwLock<AppConfig>>,
+    pub config_snapshot: Arc<dyn ConfigSnapshot>,
     pub skill_registry: Arc<SkillRegistry>,
     prompt_reloader: Arc<dyn SessionPromptReloader>,
 }
@@ -60,14 +60,32 @@ impl AgentWorkspaceService {
     pub fn new(
         agent_registry: AgentRegistry,
         sessions: SessionService,
-        config: Arc<RwLock<AppConfig>>,
+        config_snapshot: Arc<dyn ConfigSnapshot>,
+        skill_registry: Arc<SkillRegistry>,
+        prompt_reloader: Option<Arc<dyn SessionPromptReloader>>,
+    ) -> Self {
+        Self::new_with_registry_snapshot(
+            Arc::new(StaticAgentRegistrySnapshot {
+                registry: agent_registry,
+            }),
+            sessions,
+            config_snapshot,
+            skill_registry,
+            prompt_reloader,
+        )
+    }
+
+    pub fn new_with_registry_snapshot(
+        agent_registry: Arc<dyn AgentRegistrySnapshot>,
+        sessions: SessionService,
+        config_snapshot: Arc<dyn ConfigSnapshot>,
         skill_registry: Arc<SkillRegistry>,
         prompt_reloader: Option<Arc<dyn SessionPromptReloader>>,
     ) -> Self {
         Self {
             agent_registry,
             sessions,
-            config,
+            config_snapshot,
             skill_registry,
             prompt_reloader: prompt_reloader.unwrap_or_else(|| Arc::new(StaticSessionPromptReloader)),
         }
@@ -76,7 +94,7 @@ impl AgentWorkspaceService {
     pub async fn inspect_agent(&self, agent_id: &str, session_id: &str) -> Result<AgentInspectResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().await;
-        let config = self.config.read().await.clone();
+        let config = self.config_snapshot.current().await;
         let base_binding = config.resolve_agent_binding_by_id(agent_id)?;
 
         let default_model = nova_protocol::ModelRef {
@@ -150,6 +168,7 @@ impl AgentWorkspaceService {
         };
         let agent_descriptor = self
             .agent_registry
+            .current()
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
@@ -275,7 +294,7 @@ impl AgentWorkspaceService {
             let control = session.control.read().await;
             control.active_agent.clone()
         };
-        let config = self.config.read().await.clone();
+        let config = self.config_snapshot.current().await;
         let base_binding = config.resolve_agent_binding_by_id(active_agent.as_str())?;
         let orchestration = req
             .orchestration
@@ -622,6 +641,16 @@ impl AgentWorkspaceService {
     }
 }
 
+struct StaticAgentRegistrySnapshot {
+    registry: AgentRegistry,
+}
+
+impl AgentRegistrySnapshot for StaticAgentRegistrySnapshot {
+    fn current(&self) -> AgentRegistry {
+        self.registry.clone()
+    }
+}
+
 fn fingerprint_text(value: &str) -> String {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
@@ -734,14 +763,26 @@ mod tests {
     use super::{deserialize_skill_bindings, sort_file_tree_entries};
     use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
     use crate::app::agent_workspace_service::AgentWorkspaceService;
+    use crate::app::ConfigSnapshot;
     use crate::config::{AppConfig, ConfiguredAgentModel, ConfiguredModel};
     use crate::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
+    use async_trait::async_trait;
     use nova_protocol::observability::SessionFileTreeEntry;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
-    use tokio::sync::RwLock;
+
+    struct TestConfigSnapshot {
+        config: AppConfig,
+    }
+
+    #[async_trait]
+    impl ConfigSnapshot for TestConfigSnapshot {
+        async fn current(&self) -> AppConfig {
+            self.config.clone()
+        }
+    }
 
     #[test]
     fn session_skill_bindings_reading_does_not_depend_on_last_turn() {
@@ -842,7 +883,6 @@ mod tests {
             },
             enable_project_developer_prompt: true,
         }];
-        let config = Arc::new(RwLock::new(config_value));
         let registry = AgentRegistry::new(AgentDescriptor {
             id: "developer".to_string(),
             display_name: "Developer".to_string(),
@@ -860,7 +900,7 @@ mod tests {
         let service = AgentWorkspaceService::new(
             registry,
             sessions,
-            config,
+            Arc::new(TestConfigSnapshot { config: config_value }),
             Arc::new(crate::skill::SkillRegistry::new()),
             None,
         );

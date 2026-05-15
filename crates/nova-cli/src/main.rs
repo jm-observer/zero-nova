@@ -6,26 +6,19 @@ use colored::Colorize;
 use custom_utils::args::workspace as resolve_workspace;
 use custom_utils::logger::logger_feature;
 use log::info;
-use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
-use nova_agent::config::AppConfig;
+use nova_agent::agent::AgentRuntime;
 use nova_agent::event::AgentEvent;
-use nova_agent::loop_guard::{DuplicateReadMode, LoopGuardConfig};
 use nova_agent::mcp::client::McpClient;
 use nova_agent::message::{ContentBlock, Message, Role};
-use nova_agent::network::HttpClients;
-use nova_agent::prompt::{EnvironmentSnapshot, SystemPromptBuilder, TrimmerConfig};
-use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::provider::LlmClient;
-use nova_agent::skill::{SkillPackage, SkillRegistry, ToolPolicy};
-use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
-use nova_agent::tool::{builtin::register_builtin_tools, ToolRegistry, UnavailableProjectDirService};
-use nova_skill_loader::{load_single_skill, load_skills_from_dir, LoadedSkill, LoadedSkillPackage, LoadedToolPolicy};
+use nova_agent::tool::builtin::task::TaskStoreHandle;
+use nova_agent::tool::UnavailableProjectDirService;
+use nova_agent_config::AppConfig;
+use nova_agent_loader::{build_agent_runtime, AgentRuntimeBuildOptions};
 use rustyline::history::FileHistory;
 use serde_json::json;
 use std::io::Write;
-use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::signal::ctrl_c;
 use tokio::sync::mpsc;
 
@@ -142,120 +135,31 @@ async fn main() -> Result<()> {
     let config_path = workspace.join("config.toml");
 
     let config = AppConfig::load_from_file(&config_path, workspace.clone())?;
-    let root_agent = config.selected_agent(cli.agent.as_deref())?;
-    let root_binding = config.resolve_agent_binding(root_agent)?;
+    let _ = config.selected_agent(cli.agent.as_deref())?;
 
     log::info!("Starting Nova CLI with : {:?}", config);
-    let client = OpenAiCompatClient::from_registry_with_context_headers_enabled(
-        config.providers.clone(),
-        root_binding.provider_id.clone(),
-        config.outbound_context_headers.enabled,
-    );
-
-    let env_snapshot = {
-        let mut snapshot = EnvironmentSnapshot::collect(&config.config_dir, Some(&config.config_dir)).await;
-        snapshot.model_id = Some(root_binding.model_config.model.clone());
-        snapshot
-    };
-
-    let skill_dir = config.skills_dir();
-    let mut loaded_skills = match load_skills_from_dir(&skill_dir) {
-        Ok(skills) => skills,
-        Err(e) => {
-            if matches!(cli.output_format, OutputFormat::PlainText) {
-                log::warn!("Failed to load skills from {:?}: {}", skill_dir, e);
-            }
-            Vec::new()
-        }
-    };
-    if let Some(extra_skill_path) = &cli.include_skill {
-        let path = Path::new(extra_skill_path);
-        match load_single_skill(path) {
-            Ok(Some(skill)) => loaded_skills.push(skill),
-            Ok(None) => log::warn!("Included skill path {:?} did not contain a valid skill", path),
-            Err(e) => log::error!("Failed to load included skill from {:?}: {}", path, e),
-        }
-    }
-    let skill_registry_raw = SkillRegistry::from_packages(convert_loaded_skills(loaded_skills)).unwrap_or_else(|err| {
-        log::warn!("Failed to initialize skill registry from loaded skills: {}", err);
-        SkillRegistry::new()
-    });
-
-    let skill_prompt = skill_registry_raw.generate_contextual_prompt(None);
-    let skill_registry = Arc::new(skill_registry_raw);
-
-    let task_store = TaskStoreHandle::new(TaskStore::new());
-
-    let tools = ToolRegistry::new();
-    let http_clients = HttpClients::new()?;
-    register_builtin_tools(
-        &tools,
+    let extra_skill_paths = cli
+        .include_skill
+        .as_ref()
+        .map(|path| vec![path.into()])
+        .unwrap_or_default();
+    let built = build_agent_runtime(
         &config,
-        task_store.clone(),
-        skill_registry.clone(),
-        None,
-        Arc::new(UnavailableProjectDirService::new(
-            "ProjectManager is unavailable in CLI mode",
-        )),
-        &http_clients,
-    );
-
-    let prompt_builder = SystemPromptBuilder::new();
-    let system_prompt_str = prompt_builder.with_tools(&tools).build();
-    let final_system_prompt = format!("{}\n\n{}", system_prompt_str, skill_prompt);
-
-    // Use config defaults instead of hardcoded values (synchronizes with nova-app bootstrap)
-    let tool_timeout_secs = config.gateway.tool_timeout_secs.unwrap_or(300);
-    let agent_config = AgentConfig {
-        max_iterations: config.gateway.max_iterations,
-        model_config: root_binding.model_config.clone().into(),
-        tool_timeout: Duration::from_secs(tool_timeout_secs),
-        max_tokens: config.gateway.max_tokens,
-        trimmer: TrimmerConfig {
-            context_window: config.gateway.trimmer.context_window,
-            output_reserve: config.gateway.trimmer.output_reserve,
-            min_recent_messages: config.gateway.trimmer.min_recent_messages,
-            enable_summary: false,
+        AgentRuntimeBuildOptions {
+            extra_skill_paths,
+            project_dir_service: Arc::new(UnavailableProjectDirService::new(
+                "ProjectManager is unavailable in CLI mode",
+            )),
         },
-        config_dir: config.config_dir.clone(),
-        prompts_dir: config.prompts_dir(),
-        project_context_file: config.project_context_file(),
-        initial_env_snapshot: Some(env_snapshot),
-        loop_guard: LoopGuardConfig {
-            enabled: config.gateway.loop_guard.enabled,
-            max_consecutive_duplicate_tool_calls: config.gateway.loop_guard.max_consecutive_duplicate_tool_calls,
-            max_stalled_iterations: config.gateway.loop_guard.max_stalled_iterations,
-            duplicate_read_mode: if config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
-                DuplicateReadMode::WarnOnly
-            } else {
-                DuplicateReadMode::WarnThenReject
-            },
-            iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
-        },
-        prompt_diagnostics: PromptDiagnosticsConfig {
-            enabled: config.gateway.prompt_diagnostics.enabled,
-            large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
-            large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
-            large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
-        },
-        tool_result_compaction: ToolResultCompactionConfig {
-            enabled: config.gateway.tool_result_compaction.enabled,
-            max_chars: config.gateway.tool_result_compaction.max_chars,
-            head_chars: config.gateway.tool_result_compaction.head_chars,
-            tail_chars: config.gateway.tool_result_compaction.tail_chars,
-            disable_for_tools: config
-                .gateway
-                .tool_result_compaction
-                .disable_for_tools
-                .iter()
-                .map(|name| name.to_ascii_lowercase())
-                .collect(),
-        },
-    };
-
-    let mut agent = AgentRuntime::new(client, tools, agent_config);
-    agent.task_store = Some(task_store);
-    agent.skill_registry = Some(skill_registry);
+    )
+    .await?;
+    let mut agent = built.runtime;
+    let primary_id = built.agent_registry.primary_id();
+    let final_system_prompt = built
+        .agent_registry
+        .get(primary_id)
+        .map(|desc| desc.system_prompt_template.clone())
+        .unwrap_or_default();
 
     match cli.command {
         Command::Chat => run_repl(&mut agent, &final_system_prompt, cli.verbose, cli.output_format).await?,
@@ -268,40 +172,6 @@ async fn main() -> Result<()> {
         Command::McpTest { cmd } => test_mcp(&cmd).await?,
     }
     Ok(())
-}
-
-fn convert_loaded_skills(loaded: Vec<LoadedSkill>) -> Vec<SkillPackage> {
-    loaded
-        .into_iter()
-        .map(|skill| match skill {
-            LoadedSkill::Package(package) => convert_package(package),
-            LoadedSkill::Compat { package, .. } => convert_package(package),
-        })
-        .collect()
-}
-
-fn convert_package(package: LoadedSkillPackage) -> SkillPackage {
-    SkillPackage {
-        id: package.id,
-        slug: package.slug,
-        display_name: package.display_name,
-        description: package.description,
-        instructions: package.instructions,
-        tool_policy: convert_tool_policy(package.tool_policy),
-        sticky: package.sticky,
-        aliases: package.aliases,
-        examples: package.examples,
-        source_path: package.source_path,
-        compat_mode: package.compat_mode,
-    }
-}
-
-fn convert_tool_policy(policy: LoadedToolPolicy) -> ToolPolicy {
-    match policy {
-        LoadedToolPolicy::InheritAll => ToolPolicy::InheritAll,
-        LoadedToolPolicy::AllowList(tools) => ToolPolicy::AllowList(tools),
-        LoadedToolPolicy::AllowListWithDeferred(tools) => ToolPolicy::AllowListWithDeferred(tools),
-    }
 }
 
 /// Runs the REPL loop for interactive chat.

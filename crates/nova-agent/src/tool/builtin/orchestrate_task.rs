@@ -1,6 +1,5 @@
-use crate::config::AppConfig;
 use crate::orchestrator::OrchestratorEngine;
-use crate::tool::builtin::agent::{AgentPromptLoader, AgentTool};
+use crate::tool::builtin::agent::AgentTool;
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -10,20 +9,12 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct OrchestrateTaskTool {
-    config: AppConfig,
-    agent_prompt_loader: Option<Arc<dyn AgentPromptLoader>>,
+    agent_tool: Arc<AgentTool>,
 }
 
 impl OrchestrateTaskTool {
-    pub fn new(config: AppConfig) -> Self {
-        Self::new_with_prompt_loader(config, None)
-    }
-
-    pub fn new_with_prompt_loader(config: AppConfig, agent_prompt_loader: Option<Arc<dyn AgentPromptLoader>>) -> Self {
-        Self {
-            config,
-            agent_prompt_loader,
-        }
+    pub fn new(agent_tool: Arc<AgentTool>) -> Self {
+        Self { agent_tool }
     }
 
     pub fn input_schema() -> Value {
@@ -70,10 +61,7 @@ impl Tool for OrchestrateTaskTool {
             .unwrap_or_else(CancellationToken::new);
 
         let engine = OrchestratorEngine::new(
-            Arc::new(AgentTool::new_with_prompt_loader(
-                self.config.clone(),
-                self.agent_prompt_loader.clone(),
-            )),
+            self.agent_tool.clone(),
             tool_context.event_tx.clone(),
             Some(tool_context),
         );
@@ -112,6 +100,7 @@ mod tests {
     use crate::config::AppConfig;
     use crate::event::AgentEvent;
     use crate::prompt::EnvironmentSnapshot;
+    use crate::tool::builtin::agent::AgentTool;
     use crate::tool::{Tool, ToolContext};
     use std::collections::HashSet;
     use std::sync::Arc;
@@ -123,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn orchestrate_task_requires_tool_context() {
-        let tool = OrchestrateTaskTool::new(test_config());
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new(test_config())));
 
         let error = tool
             .execute(
@@ -142,7 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn orchestrate_task_accepts_minimal_valid_plan() {
-        let tool = OrchestrateTaskTool::new(test_config());
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new(test_config())));
         let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
 
         let output = tool

@@ -29,6 +29,7 @@ nova-protocol = { workspace = true }
 async-openai = { workspace = true }
 tokio-stream = { workspace = true }
 arc-swap = { workspace = true }
+nova-agent-config = { workspace = true }
 
 [features]
 default = []

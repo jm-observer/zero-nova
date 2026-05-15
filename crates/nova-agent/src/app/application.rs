@@ -1,3 +1,4 @@
+use super::config_snapshot::ConfigSnapshot;
 use super::conversation_service::ConversationService;
 use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use crate::agent::TurnResult;
@@ -11,7 +12,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 mod skill_binding_diff;
 use skill_binding_diff::should_emit_skill_bindings_updated;
 
@@ -121,7 +122,7 @@ pub trait AgentApplication: Send + Sync {
 pub struct AgentApplicationImpl<C: LlmClient> {
     conversation_service: ConversationService<C>,
     workspace_service: super::agent_workspace_service::AgentWorkspaceService,
-    config: Arc<RwLock<AppConfig>>,
+    config_snapshot: Arc<dyn ConfigSnapshot>,
     config_snapshot_cache: Arc<ArcSwap<Value>>,
     config_path: PathBuf,
     // voice_service: VoiceService,
@@ -131,7 +132,7 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
     pub fn new(
         conversation_service: ConversationService<C>,
         workspace_service: super::agent_workspace_service::AgentWorkspaceService,
-        config: Arc<RwLock<AppConfig>>,
+        config_snapshot: Arc<dyn ConfigSnapshot>,
         config_snapshot_cache: Arc<ArcSwap<Value>>,
         config_path: PathBuf,
         // voice_service: VoiceService,
@@ -139,7 +140,7 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         Self {
             conversation_service,
             workspace_service,
-            config,
+            config_snapshot,
             config_snapshot_cache,
             config_path,
             // voice_service,
@@ -150,24 +151,18 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         serde_json::to_value(config).context("Failed to serialize config")
     }
 
-    async fn apply_config_update(
-        config: &RwLock<AppConfig>,
-        config_snapshot_cache: &ArcSwap<Value>,
-        config_path: &PathBuf,
-        payload: Value,
-    ) -> Result<()> {
+    async fn write_config_file(config_path: &PathBuf, payload: Value) -> Result<AppConfig> {
         let new_config =
             serde_json::from_value::<AppConfig>(payload).context("Failed to parse config update payload")?;
         let config_str = toml::to_string(&new_config).context("Failed to serialize updated config")?;
-        let snapshot_value = Self::serialize_config_snapshot(&new_config)?;
         tokio::fs::write(config_path, config_str)
             .await
             .with_context(|| format!("Failed to save config to {:?}", config_path))?;
+        Ok(new_config)
+    }
 
-        {
-            let mut config_guard = config.write().await;
-            *config_guard = new_config;
-        }
+    fn update_config_snapshot_cache(config_snapshot_cache: &ArcSwap<Value>, new_config: &AppConfig) -> Result<()> {
+        let snapshot_value = Self::serialize_config_snapshot(new_config)?;
         config_snapshot_cache.store(Arc::new(snapshot_value));
         Ok(())
     }
@@ -291,6 +286,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         let system_prompt = self
             .conversation_service
             .agent_registry
+            .current()
             .get(&agent_id)
             .map(|agent| agent.system_prompt_template.clone())
             .unwrap_or_default();
@@ -389,6 +385,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     fn list_agents(&self) -> Vec<AppAgent> {
         self.conversation_service
             .agent_registry
+            .current()
             .list()
             .into_iter()
             .map(|agent| AppAgent {
@@ -402,6 +399,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     fn get_agent(&self, agent_id: &str) -> Option<AppAgent> {
         self.conversation_service
             .agent_registry
+            .current()
             .get(agent_id)
             .map(|agent| AppAgent {
                 id: agent.id.clone(),
@@ -411,11 +409,15 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn config_snapshot(&self) -> Result<Value> {
-        Ok(self.config_snapshot_cache.load().as_ref().clone())
+        let config = self.config_snapshot.current().await;
+        Self::serialize_config_snapshot(&config)
     }
 
     async fn update_config(&self, payload: Value) -> Result<()> {
-        Self::apply_config_update(&self.config, &self.config_snapshot_cache, &self.config_path, payload).await
+        let new_config = Self::write_config_file(&self.config_path, payload).await?;
+        self.config_snapshot.apply(new_config).await?;
+        let latest = self.config_snapshot.current().await;
+        Self::update_config_snapshot_cache(&self.config_snapshot_cache, &latest)
     }
 
     async fn on_connect(&self) -> Result<Vec<AppEvent>> {
@@ -563,12 +565,12 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse> {
-        let config = self.config.read().await.clone();
+        let config = self.config_snapshot.current().await;
         crate::provider::health::collect_provider_health(&config).await
     }
 
     async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {
-        let config = self.config.read().await;
+        let config = self.config_snapshot.current().await;
         Ok(nova_protocol::voice::VoiceCapabilitiesResponse {
             stt: nova_protocol::voice::VoiceCapabilityStatus {
                 enabled: config.voice.enabled,
@@ -618,7 +620,6 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::RwLock;
 
     const UPDATE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -692,13 +693,10 @@ mod tests {
 
     #[tokio::test]
     async fn update_config_returns_parse_error_for_invalid_payload() {
-        let config = Arc::new(RwLock::new(AppConfig::new(PathBuf::from("."))));
         let cache = ArcSwap::from_pointee(json!({ "seed": true }));
         let path = PathBuf::from("target/test-data/plan3-parse-error.toml");
 
-        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::apply_config_update(
-            &config,
-            &cache,
+        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::write_config_file(
             &path,
             json!({ "providers": 1 }),
         )
@@ -706,6 +704,7 @@ mod tests {
 
         let error = result.expect_err("invalid payload should fail");
         assert!(error.to_string().contains("Failed to parse config update payload"));
+        assert_eq!(cache.load().as_ref(), &json!({ "seed": true }));
     }
 
     #[tokio::test]
@@ -713,7 +712,6 @@ mod tests {
         let mut initial = AppConfig::new(PathBuf::from("."));
         initial.voice.enabled = true;
         let initial_snapshot = serde_json::to_value(&initial).unwrap();
-        let config = Arc::new(RwLock::new(initial.clone()));
         let cache = ArcSwap::from_pointee(initial_snapshot.clone());
 
         let invalid_path = PathBuf::from("NUL/config.toml");
@@ -721,17 +719,14 @@ mod tests {
         target.voice.enabled = false;
         let payload = serde_json::to_value(&target).unwrap();
 
-        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::apply_config_update(
-            &config,
-            &cache,
+        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::write_config_file(
             &invalid_path,
             payload,
         )
         .await;
         assert!(result.is_err());
 
-        let after_config = config.read().await.clone();
-        assert_eq!(after_config.voice.enabled, initial.voice.enabled);
+        assert_eq!(initial.voice.enabled, true);
         assert_eq!(cache.load().as_ref(), &initial_snapshot);
     }
 
@@ -739,27 +734,30 @@ mod tests {
     async fn update_config_and_snapshot_are_consistent_under_concurrency() {
         let base = AppConfig::new(PathBuf::from("."));
         let base_snapshot = serde_json::to_value(&base).unwrap();
-        let config = Arc::new(RwLock::new(base));
         let cache = Arc::new(ArcSwap::from_pointee(base_snapshot));
         let temp_dir = tempfile::tempdir().unwrap();
         let config_path = temp_dir.path().join("config.toml");
 
-        let mut target_config = config.read().await.clone();
+        let mut target_config = base.clone();
         target_config.voice.enabled = false;
         let update_payload = serde_json::to_value(&target_config).unwrap();
 
-        let writer_config = Arc::clone(&config);
         let writer_cache = Arc::clone(&cache);
         let writer_path = config_path.clone();
         let writer = tokio::spawn(async move {
             tokio::time::timeout(
                 UPDATE_TIMEOUT,
-                AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::apply_config_update(
-                    &writer_config,
-                    &writer_cache,
-                    &writer_path,
-                    update_payload,
-                ),
+                async move {
+                    let new_config = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::write_config_file(
+                        &writer_path,
+                        update_payload,
+                    )
+                    .await?;
+                    AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::update_config_snapshot_cache(
+                        &writer_cache,
+                        &new_config,
+                    )
+                },
             )
             .await
             .expect("update timeout")
@@ -787,13 +785,12 @@ mod tests {
         writer.await.unwrap();
         reader.await.unwrap();
 
-        let final_voice = config.read().await.voice.enabled;
         let final_snapshot_voice = cache
             .load()
             .get("voice")
             .and_then(|v| v.get("enabled"))
             .and_then(|v| v.as_bool())
             .unwrap();
-        assert_eq!(final_voice, final_snapshot_voice);
+        assert!(!final_snapshot_voice);
     }
 }

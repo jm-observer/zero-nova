@@ -18,6 +18,11 @@ use crate::skill::SkillRegistry;
 use crate::tool::{ProjectDirService, ToolRegistry};
 use std::sync::Arc;
 
+pub struct BuiltinToolWiring {
+    pub agent_prompt_loader: Option<Arc<dyn agent::AgentPromptLoader>>,
+    pub subagent_runtime_factory: Option<Arc<dyn agent::SubagentRuntimeFactory>>,
+}
+
 /// Registers all built-in tools into the provided `ToolRegistry`.
 pub fn register_builtin_tools(
     registry: &ToolRegistry,
@@ -36,7 +41,10 @@ pub fn register_builtin_tools(
         tool_whitelist,
         project_dir_service,
         http_clients,
-        None,
+        BuiltinToolWiring {
+            agent_prompt_loader: None,
+            subagent_runtime_factory: None,
+        },
     );
 }
 
@@ -48,8 +56,20 @@ pub fn register_builtin_tools_with_agent_prompt_loader(
     tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
-    agent_prompt_loader: Option<Arc<dyn agent::AgentPromptLoader>>,
+    wiring: BuiltinToolWiring,
 ) {
+    let shared_agent_tool =
+        if is_tool_enabled(tool_whitelist, "Agent") || is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
+            Arc::new(agent::AgentTool::new_with_prompt_loader_and_factory(
+                config.clone(),
+                wiring.agent_prompt_loader.clone(),
+                wiring.subagent_runtime_factory.clone(),
+            ))
+            .into()
+        } else {
+            None
+        };
+
     if is_tool_enabled(tool_whitelist, "Bash") {
         registry.register(Box::new(bash::BashTool::new(&config.tool.bash)));
     }
@@ -63,10 +83,9 @@ pub fn register_builtin_tools_with_agent_prompt_loader(
         registry.register(Box::new(edit::EditTool::new(None)));
     }
     if is_tool_enabled(tool_whitelist, "Agent") {
-        registry.register(Box::new(agent::AgentTool::new_with_prompt_loader(
-            config.clone(),
-            agent_prompt_loader.clone(),
-        )));
+        if let Some(agent_tool) = &shared_agent_tool {
+            registry.register(Box::new((**agent_tool).clone()));
+        }
     }
     if is_tool_enabled(tool_whitelist, "WebSearch") {
         registry.register(Box::new(web_search::WebSearchTool::with_client(
@@ -81,10 +100,9 @@ pub fn register_builtin_tools_with_agent_prompt_loader(
         registry.register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)));
     }
     if is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
-        registry.register(Box::new(orchestrate_task::OrchestrateTaskTool::new_with_prompt_loader(
-            config.clone(),
-            agent_prompt_loader.clone(),
-        )));
+        if let Some(agent_tool) = &shared_agent_tool {
+            registry.register(Box::new(orchestrate_task::OrchestrateTaskTool::new(agent_tool.clone())));
+        }
     }
 
     // ToolInfo is always registered as a loaded tool (schema lookup infrastructure)

@@ -1,6 +1,7 @@
 use crate::agent::{AgentRuntime, TurnResult, TurnWithContextRequest};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
-use crate::config::AppConfig;
+use crate::app::agent_registry_snapshot::AgentRegistrySnapshot;
+use crate::app::config_snapshot::ConfigSnapshot;
 use crate::conversation::control::{LastTurnSnapshot, ModelRef};
 use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
@@ -24,9 +25,9 @@ use tokio_util::sync::CancellationToken;
 /// 核心会话业务服务
 pub struct ConversationService<C: LlmClient> {
     pub agent: AgentRuntime<C>,
-    pub agent_registry: AgentRegistry,
+    pub agent_registry: Arc<dyn AgentRegistrySnapshot>,
     pub sessions: SessionService,
-    pub app_config: AppConfig,
+    pub config_snapshot: Arc<dyn ConfigSnapshot>,
     turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
 }
 
@@ -73,14 +74,32 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         agent: AgentRuntime<C>,
         agent_registry: AgentRegistry,
         sessions: SessionService,
-        app_config: AppConfig,
+        config_snapshot: Arc<dyn ConfigSnapshot>,
+        turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
+    ) -> Self {
+        Self::new_with_registry_snapshot(
+            agent,
+            Arc::new(StaticAgentRegistrySnapshot {
+                registry: agent_registry,
+            }),
+            sessions,
+            config_snapshot,
+            turn_prompt_loader,
+        )
+    }
+
+    pub fn new_with_registry_snapshot(
+        agent: AgentRuntime<C>,
+        agent_registry: Arc<dyn AgentRegistrySnapshot>,
+        sessions: SessionService,
+        config_snapshot: Arc<dyn ConfigSnapshot>,
         turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
     ) -> Self {
         Self {
             agent,
             agent_registry,
             sessions,
-            app_config: app_config.clone(),
+            config_snapshot,
             turn_prompt_loader,
         }
     }
@@ -89,11 +108,10 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         &self,
         session: &crate::conversation::session::Session,
         agent_descriptor: &AgentDescriptor,
+        app_config: &crate::config::AppConfig,
     ) -> Result<(Option<ModelRef>, Option<ModelRef>, crate::config::ResolvedAgentBinding)> {
         let control = session.control.read().await;
-        let base_binding = self
-            .app_config
-            .resolve_agent_binding_by_id(agent_descriptor.id.as_str())?;
+        let base_binding = app_config.resolve_agent_binding_by_id(agent_descriptor.id.as_str())?;
         let default_model = ModelRef {
             provider: base_binding.provider_id.clone(),
             model: base_binding.model_config.model.clone(),
@@ -134,6 +152,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
     ) -> Result<(AgentDescriptor, Arc<crate::conversation::session::Session>)> {
         let agent = self
             .agent_registry
+            .current()
             .get(agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
@@ -177,11 +196,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry
+            .current()
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
-        let (orchestration_model, execution_model, base_binding) =
-            self.resolve_run_models(&session, &agent_descriptor).await?;
+        let app_config = self.config_snapshot.current().await;
+        let (orchestration_model, execution_model, base_binding) = self
+            .resolve_run_models(&session, &agent_descriptor, &app_config)
+            .await?;
 
         // Phase 2: Create Run record
         self.sessions
@@ -299,12 +321,13 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry
+            .current()
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
 
         let execution_binding = if let Some(override_model) = execution_model.as_ref() {
-            self.app_config.resolve_model_override(
+            app_config.resolve_model_override(
                 &base_binding,
                 override_model.provider.as_str(),
                 override_model.model.as_str(),
@@ -322,7 +345,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
                 .clone()
                 .unwrap_or_else(|| agent_descriptor.system_prompt_base.clone())
         };
-        let compaction = &self.app_config.prompt_compaction;
+        let compaction = app_config.prompt_compaction.clone();
 
         let mut env =
             crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref()).await;
@@ -553,6 +576,16 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             }
         }
         skills
+    }
+}
+
+struct StaticAgentRegistrySnapshot {
+    registry: AgentRegistry,
+}
+
+impl AgentRegistrySnapshot for StaticAgentRegistrySnapshot {
+    fn current(&self) -> AgentRegistry {
+        self.registry.clone()
     }
 }
 

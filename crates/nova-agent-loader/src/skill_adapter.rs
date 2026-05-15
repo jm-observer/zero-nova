@@ -1,5 +1,27 @@
+use anyhow::Result;
 use nova_agent::skill::{SkillPackage, ToolPolicy};
 use nova_skill_loader::{LoadedSkill, LoadedSkillPackage, LoadedToolPolicy};
+use std::path::{Path, PathBuf};
+
+pub async fn load_skills(skills_dir: &Path, extra_paths: &[PathBuf]) -> Result<Vec<SkillPackage>> {
+    let mut loaded = match nova_skill_loader::load_skills_from_dir_async(skills_dir).await {
+        Ok(skills) => skills,
+        Err(err) => {
+            log::warn!("Failed to load skills from {:?}: {}", skills_dir, err);
+            Vec::new()
+        }
+    };
+
+    for path in extra_paths {
+        match nova_skill_loader::load_single_skill(path) {
+            Ok(Some(skill)) => loaded.push(skill),
+            Ok(None) => log::warn!("Included skill path {:?} did not contain a valid skill", path),
+            Err(err) => log::error!("Failed to load included skill from {:?}: {}", path, err),
+        }
+    }
+
+    Ok(convert_loaded_skills(loaded))
+}
 
 pub fn convert_loaded_skills(loaded: Vec<LoadedSkill>) -> Vec<SkillPackage> {
     loaded

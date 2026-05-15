@@ -1,5 +1,4 @@
 use anyhow::{bail, Context, Result};
-use nova_agent::config::{AgentSpec, AppConfig};
 use nova_agent::prompt::context::{
     load_developer_project_prompt_async, load_project_context_with_config_async, EnvironmentSnapshot,
 };
@@ -7,6 +6,7 @@ use nova_agent::prompt::types::{
     ProjectInstructionProfile, PromptMaterial, SkillInjectionMode, ToolGuidanceMode, TurnPromptMaterial,
 };
 use nova_agent::prompt::workflow::WorkflowStagePrompts;
+use nova_agent_config::{AgentSpec, AppConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -161,7 +161,7 @@ impl PromptMaterialLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nova_agent::config::ConfiguredAgentModel;
+    use nova_agent_config::ConfiguredAgentModel;
     use tempfile::tempdir;
 
     fn test_agent_spec() -> AgentSpec {

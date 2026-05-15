@@ -1,6 +1,9 @@
+use crate::agent_registry_store::AgentRegistryStore;
+use crate::config_store::{ConfigListener, ConfigStore};
 use crate::descriptor_factory::{AgentDescriptorFactory, AgentMaterialInputs};
 use crate::prompt_loader::{PromptLoaderConfig, PromptMaterialLoader};
-use crate::skill_adapter::convert_loaded_skills;
+use crate::skill_adapter::load_skills;
+use crate::subagent_factory::LoaderSubagentRuntimeFactory;
 use anyhow::{bail, Context, Result};
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -9,7 +12,6 @@ use nova_agent::agent_catalog::AgentRegistry;
 use nova_agent::app::agent_workspace_service::{AgentWorkspaceService, ReloadedSessionPrompt, SessionPromptReloader};
 use nova_agent::app::application::{AgentApplication, AgentApplicationImpl};
 use nova_agent::app::conversation_service::{ConversationService, TurnPromptMaterialLoader};
-use nova_agent::config::{AgentSpec, AppConfig};
 use nova_agent::conversation::repository::SqliteSessionRepository;
 use nova_agent::conversation::sqlite_manager::SqliteManager;
 use nova_agent::conversation::{SessionCache, SessionService};
@@ -21,26 +23,183 @@ use nova_agent::prompt::{
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::skill::SkillRegistry;
 use nova_agent::tool::builtin::agent::AgentPromptLoader;
-use nova_agent::tool::builtin::register_builtin_tools_with_agent_prompt_loader;
 use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
+use nova_agent::tool::builtin::{register_builtin_tools_with_agent_prompt_loader, BuiltinToolWiring};
 use nova_agent::tool::ToolRegistry;
+use nova_agent_config::{AgentSpec, AppConfig};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 struct ConfigBackedSessionPromptReloader {
-    config: Arc<RwLock<AppConfig>>,
+    config_store: ConfigStore,
+    agent_registry_store: AgentRegistryStore,
     skill_registry: Arc<SkillRegistry>,
 }
 
 struct ConfigBackedTurnPromptMaterialLoader {
-    config: Arc<RwLock<AppConfig>>,
+    config_store: ConfigStore,
 }
 
 struct ConfigBackedAgentPromptLoader {
-    config: Arc<RwLock<AppConfig>>,
+    config_store: ConfigStore,
+}
+
+struct ConfigSnapshotCacheUpdater {
+    cache: Arc<ArcSwap<serde_json::Value>>,
+}
+
+pub struct BuiltAgentRuntime {
+    pub runtime: AgentRuntime<OpenAiCompatClient>,
+    pub agent_registry: AgentRegistry,
+    pub skill_registry: Arc<SkillRegistry>,
+}
+
+pub struct AgentRuntimeBuildOptions {
+    pub extra_skill_paths: Vec<std::path::PathBuf>,
+    pub project_dir_service: Arc<dyn nova_agent::tool::ProjectDirService>,
+}
+
+pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildOptions) -> Result<BuiltAgentRuntime> {
+    let skill_packages = load_skills(config.skills_dir().as_path(), &options.extra_skill_paths).await?;
+    let skill_registry =
+        Arc::new(SkillRegistry::from_packages(skill_packages).context("Failed to initialize skill registry")?);
+
+    let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
+    let root_agent = config.primary_agent()?;
+    let root_binding = config.resolve_agent_binding(root_agent)?;
+    env_snapshot.model_id = Some(root_binding.model_config.model.clone());
+
+    let task_store = TaskStoreHandle::new(TaskStore::new());
+    let http_clients = HttpClients::new()?;
+    let tools = ToolRegistry::new();
+    register_builtin_tools_with_agent_prompt_loader(
+        &tools,
+        config,
+        task_store.clone(),
+        skill_registry.clone(),
+        None,
+        options.project_dir_service,
+        &http_clients,
+        BuiltinToolWiring {
+            agent_prompt_loader: None,
+            subagent_runtime_factory: Some(Arc::new(LoaderSubagentRuntimeFactory::new(Arc::new(ConfigStore::new(
+                config.clone(),
+            ))))),
+        },
+    );
+
+    let agent_config = AgentConfig {
+        max_iterations: config.gateway.max_iterations,
+        model_config: root_binding.model_config.clone().into(),
+        tool_timeout: Duration::from_secs(config.gateway.tool_timeout_secs.unwrap_or(120)),
+        max_tokens: config.gateway.max_tokens,
+        trimmer: TrimmerConfig {
+            context_window: config.gateway.trimmer.context_window,
+            output_reserve: config.gateway.trimmer.output_reserve,
+            min_recent_messages: config.gateway.trimmer.min_recent_messages,
+            enable_summary: false,
+        },
+        config_dir: config.config_dir.clone(),
+        prompts_dir: config.prompts_dir(),
+        project_context_file: config.project_context_file(),
+        initial_env_snapshot: Some(env_snapshot.clone()),
+        loop_guard: LoopGuardConfig {
+            enabled: config.gateway.loop_guard.enabled,
+            max_consecutive_duplicate_tool_calls: config.gateway.loop_guard.max_consecutive_duplicate_tool_calls,
+            max_stalled_iterations: config.gateway.loop_guard.max_stalled_iterations,
+            duplicate_read_mode: if config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
+                DuplicateReadMode::WarnOnly
+            } else {
+                DuplicateReadMode::WarnThenReject
+            },
+            iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
+        },
+        prompt_diagnostics: PromptDiagnosticsConfig {
+            enabled: config.gateway.prompt_diagnostics.enabled,
+            large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
+            large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
+            large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
+        },
+        tool_result_compaction: ToolResultCompactionConfig {
+            enabled: config.gateway.tool_result_compaction.enabled,
+            max_chars: config.gateway.tool_result_compaction.max_chars,
+            head_chars: config.gateway.tool_result_compaction.head_chars,
+            tail_chars: config.gateway.tool_result_compaction.tail_chars,
+            disable_for_tools: config
+                .gateway
+                .tool_result_compaction
+                .disable_for_tools
+                .iter()
+                .map(|name| name.to_ascii_lowercase())
+                .collect(),
+        },
+    };
+
+    let prompt_loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(config));
+    let descriptor_factory = AgentDescriptorFactory::new(prompt_loader);
+    let mut agents = Vec::with_capacity(config.gateway.agents.len());
+    let catalog_text = build_agent_catalog_section(&config.gateway.agents, &config.primary_agent()?.id);
+    for agent in &config.gateway.agents {
+        let binding = config.resolve_agent_binding(agent)?;
+        let mut template_vars = HashMap::new();
+        template_vars.insert("workflow_stage".to_string(), "idle".to_string());
+        template_vars.insert("pending_interaction".to_string(), "none".to_string());
+        template_vars.insert("active_agent".to_string(), agent.display_name.clone());
+        agents.push(
+            descriptor_factory
+                .build_descriptor(
+                    agent,
+                    &binding,
+                    AgentMaterialInputs {
+                        environment_snapshot: Some(env_snapshot.clone()),
+                        agent_catalog: if catalog_text.is_empty() {
+                            None
+                        } else {
+                            Some(catalog_text.clone())
+                        },
+                        initial_template_vars: template_vars,
+                    },
+                    &skill_registry,
+                )
+                .await?,
+        );
+    }
+    if agents.is_empty() {
+        bail!("No agents configured");
+    }
+
+    let mut agent_registry = AgentRegistry::new(agents.remove(0));
+    for agent in agents {
+        agent_registry.register(agent);
+    }
+
+    let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
+        config.providers.clone(),
+        root_binding.provider_id.clone(),
+        http_clients.provider.clone(),
+        config.outbound_context_headers.enabled,
+    );
+    let mut runtime = AgentRuntime::new(client, tools, agent_config);
+    runtime.task_store = Some(task_store);
+    runtime.skill_registry = Some(skill_registry.clone());
+
+    if config.gateway.side_channel.enabled {
+        let side_channel = SideChannelConfig {
+            enabled: config.gateway.side_channel.enabled,
+            skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
+            inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
+            custom_reminders: vec![],
+        };
+        runtime.set_side_channel_injector(SideChannelInjector::new(side_channel));
+    }
+
+    Ok(BuiltAgentRuntime {
+        runtime,
+        agent_registry,
+        skill_registry,
+    })
 }
 
 #[async_trait]
@@ -51,7 +210,7 @@ impl AgentPromptLoader for ConfigBackedAgentPromptLoader {
         env: Option<nova_agent::prompt::EnvironmentSnapshot>,
         template_vars: HashMap<String, String>,
     ) -> Result<nova_agent::prompt::PromptMaterial> {
-        let config = self.config.read().await.clone();
+        let config = self.config_store.current().await;
         let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
         loader.load_agent_material(spec, env, None, template_vars).await
     }
@@ -64,7 +223,7 @@ impl AgentPromptLoader for ConfigBackedAgentPromptLoader {
         turn_vars: HashMap<String, String>,
         enable_developer_prompt: bool,
     ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
-        let config = self.config.read().await.clone();
+        let config = self.config_store.current().await;
         let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
         loader
             .load_turn_material(
@@ -88,7 +247,7 @@ impl TurnPromptMaterialLoader for ConfigBackedTurnPromptMaterialLoader {
         turn_vars: HashMap<String, String>,
         enable_developer_prompt: bool,
     ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
-        let config = self.config.read().await.clone();
+        let config = self.config_store.current().await;
         let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
         loader
             .load_turn_material(
@@ -103,6 +262,15 @@ impl TurnPromptMaterialLoader for ConfigBackedTurnPromptMaterialLoader {
 }
 
 #[async_trait]
+impl ConfigListener for ConfigSnapshotCacheUpdater {
+    async fn on_config_changed(&self, config: AppConfig) -> Result<()> {
+        let snapshot = serde_json::to_value(&config).context("Failed to serialize config")?;
+        self.cache.store(Arc::new(snapshot));
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl SessionPromptReloader for ConfigBackedSessionPromptReloader {
     async fn reload_session_prompt(
         &self,
@@ -111,11 +279,9 @@ impl SessionPromptReloader for ConfigBackedSessionPromptReloader {
         initial_template_vars: &HashMap<String, String>,
         project_dir: Option<&Path>,
     ) -> Result<ReloadedSessionPrompt> {
-        let app_config_snapshot = self.config.read().await.clone();
-        let reloaded_config = AppConfig::load_from_file(
-            app_config_snapshot.config_path(),
-            app_config_snapshot.config_dir.clone(),
-        )?;
+        let reloaded_config = self.config_store.reload_from_disk().await?;
+        let next_registry = build_agent_registry(&reloaded_config, &self.skill_registry).await?;
+        self.agent_registry_store.replace(next_registry);
         let agent_spec = reloaded_config
             .gateway
             .agents
@@ -166,18 +332,7 @@ impl SessionPromptReloader for ConfigBackedSessionPromptReloader {
 pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplication>> {
     warn_unused_gateway_sections(&config).await?;
 
-    let skill_dir = config.skills_dir();
-    let loaded_skills = match nova_skill_loader::load_skills_from_dir_async(&skill_dir).await {
-        Ok(skills) => {
-            log::info!("Loaded {} skills from {:?}", skills.len(), skill_dir);
-            skills
-        }
-        Err(err) => {
-            log::warn!("Failed to load skills from {:?}: {}", skill_dir, err);
-            Vec::new()
-        }
-    };
-    let skill_packages = convert_loaded_skills(loaded_skills);
+    let skill_packages = load_skills(config.skills_dir().as_path(), &[]).await?;
     let skill_registry =
         Arc::new(SkillRegistry::from_packages(skill_packages).context("Failed to initialize skill registry")?);
 
@@ -195,7 +350,8 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     session_service.load_session_index().await?;
 
     let http_clients = HttpClients::new()?;
-    let config_arc = Arc::new(RwLock::new(config.clone()));
+    let config_store = ConfigStore::new(config.clone());
+    let config_snapshot: Arc<dyn nova_agent::app::ConfigSnapshot> = Arc::new(config_store.clone());
 
     let tools = ToolRegistry::new();
     register_builtin_tools_with_agent_prompt_loader(
@@ -206,9 +362,12 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         None,
         Arc::new(session_service.clone()),
         &http_clients,
-        Some(Arc::new(ConfigBackedAgentPromptLoader {
-            config: config_arc.clone(),
-        })),
+        BuiltinToolWiring {
+            agent_prompt_loader: Some(Arc::new(ConfigBackedAgentPromptLoader {
+                config_store: config_store.clone(),
+            })),
+            subagent_runtime_factory: Some(Arc::new(LoaderSubagentRuntimeFactory::new(config_snapshot.clone()))),
+        },
     );
 
     let agent_config = AgentConfig {
@@ -258,18 +417,85 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         },
     };
 
-    let prompt_loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
+    let agent_registry = build_agent_registry(&config, &skill_registry).await?;
+    let agent_registry_store = AgentRegistryStore::new(agent_registry.clone());
+
+    let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
+        config.providers.clone(),
+        root_binding.provider_id.clone(),
+        http_clients.provider.clone(),
+        config.outbound_context_headers.enabled,
+    );
+    let mut runtime = AgentRuntime::new(client, tools, agent_config);
+    runtime.task_store = Some(task_store);
+    runtime.skill_registry = Some(skill_registry.clone());
+
+    if config.gateway.side_channel.enabled {
+        let side_channel = SideChannelConfig {
+            enabled: config.gateway.side_channel.enabled,
+            skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
+            inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
+            custom_reminders: vec![],
+        };
+        runtime.set_side_channel_injector(SideChannelInjector::new(side_channel));
+    }
+
+    let config_snapshot_cache = Arc::new(ArcSwap::from_pointee(
+        serde_json::to_value(&config).context("Failed to serialize config")?,
+    ));
+    config_store
+        .add_listener(Arc::new(ConfigSnapshotCacheUpdater {
+            cache: config_snapshot_cache.clone(),
+        }))
+        .await;
+    let config_path = config.config_path();
+
+    let agent_registry_snapshot: Arc<dyn nova_agent::app::AgentRegistrySnapshot> =
+        Arc::new(agent_registry_store.clone());
+    let conversation_service = ConversationService::new_with_registry_snapshot(
+        runtime,
+        agent_registry_snapshot.clone(),
+        session_service.clone(),
+        config_snapshot.clone(),
+        Arc::new(ConfigBackedTurnPromptMaterialLoader {
+            config_store: config_store.clone(),
+        }),
+    );
+    let workspace_service = AgentWorkspaceService::new_with_registry_snapshot(
+        agent_registry_snapshot,
+        session_service,
+        config_snapshot.clone(),
+        skill_registry.clone(),
+        Some(Arc::new(ConfigBackedSessionPromptReloader {
+            config_store: config_store.clone(),
+            agent_registry_store,
+            skill_registry,
+        })),
+    );
+
+    Ok(Arc::new(AgentApplicationImpl::new(
+        conversation_service,
+        workspace_service,
+        config_snapshot,
+        config_snapshot_cache,
+        config_path,
+    )))
+}
+
+async fn build_agent_registry(config: &AppConfig, skill_registry: &Arc<SkillRegistry>) -> Result<AgentRegistry> {
+    let env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
+    let prompt_loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(config));
     let descriptor_factory = AgentDescriptorFactory::new(prompt_loader);
     let mut agents = Vec::with_capacity(config.gateway.agents.len());
-    let catalog_text = build_agent_catalog_section(&config.gateway.agents, &config.primary_agent()?.id);
+    let primary_agent_id = config.primary_agent()?.id.clone();
+    let catalog_text = build_agent_catalog_section(&config.gateway.agents, &primary_agent_id);
+
     for agent in &config.gateway.agents {
         let binding = config.resolve_agent_binding(agent)?;
-
         let mut template_vars = HashMap::new();
         template_vars.insert("workflow_stage".to_string(), "idle".to_string());
         template_vars.insert("pending_interaction".to_string(), "none".to_string());
         template_vars.insert("active_agent".to_string(), agent.display_name.clone());
-
         agents.push(
             descriptor_factory
                 .build_descriptor(
@@ -284,16 +510,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
                         },
                         initial_template_vars: template_vars,
                     },
-                    &skill_registry,
+                    skill_registry,
                 )
                 .await?,
-        );
-        log::info!(
-            "Bootstrapped agent '{}' with provider='{}', llm={:?}, model='{}'",
-            agent.id,
-            binding.provider_id,
-            binding.llm_id,
-            binding.model_config.model
         );
     }
 
@@ -305,59 +524,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     for agent in agents {
         agent_registry.register(agent);
     }
-
-    let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
-        config.providers.clone(),
-        root_binding.provider_id.clone(),
-        http_clients.provider.clone(),
-        config.outbound_context_headers.enabled,
-    );
-    let mut agent = AgentRuntime::new(client, tools, agent_config);
-    agent.task_store = Some(task_store);
-    agent.skill_registry = Some(skill_registry.clone());
-
-    if config.gateway.side_channel.enabled {
-        let side_channel = SideChannelConfig {
-            enabled: config.gateway.side_channel.enabled,
-            skill_reminder_interval: config.gateway.side_channel.skill_reminder_interval,
-            inject_date: config.gateway.side_channel.inject_date.unwrap_or(true),
-            custom_reminders: vec![],
-        };
-        agent.set_side_channel_injector(SideChannelInjector::new(side_channel));
-    }
-
-    let config_snapshot_cache = Arc::new(ArcSwap::from_pointee(
-        serde_json::to_value(&config).context("Failed to serialize config")?,
-    ));
-    let config_path = config.config_path();
-
-    let conversation_service = ConversationService::new(
-        agent,
-        agent_registry.clone(),
-        session_service.clone(),
-        config.clone(),
-        Arc::new(ConfigBackedTurnPromptMaterialLoader {
-            config: config_arc.clone(),
-        }),
-    );
-    let workspace_service = AgentWorkspaceService::new(
-        agent_registry,
-        session_service,
-        config_arc.clone(),
-        skill_registry.clone(),
-        Some(Arc::new(ConfigBackedSessionPromptReloader {
-            config: config_arc.clone(),
-            skill_registry,
-        })),
-    );
-
-    Ok(Arc::new(AgentApplicationImpl::new(
-        conversation_service,
-        workspace_service,
-        config_arc,
-        config_snapshot_cache,
-        config_path,
-    )))
+    Ok(agent_registry)
 }
 
 fn fingerprint_text(value: &str) -> String {

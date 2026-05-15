@@ -1,5 +1,7 @@
+pub mod agent_registry_snapshot;
 pub mod agent_workspace_service;
 pub mod application;
+pub mod config_snapshot;
 pub mod conversation_service;
 pub mod snapshot_assembler;
 pub mod types;
@@ -7,7 +9,9 @@ pub mod voice_service;
 
 pub use agent_workspace_service::AgentWorkspaceService;
 
+pub use agent_registry_snapshot::AgentRegistrySnapshot;
 pub use application::{AgentApplication, AgentApplicationImpl};
+pub use config_snapshot::ConfigSnapshot;
 pub use conversation_service::ConversationService;
 pub use types::{AppAgent, AppEvent, AppMessage, AppSession};
 pub use voice_service::VoiceService;

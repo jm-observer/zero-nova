@@ -1,9 +1,9 @@
 use crate::prompt_loader::PromptMaterialLoader;
 use anyhow::{Context, Result};
 use nova_agent::agent_catalog::AgentDescriptor;
-use nova_agent::config::{AgentSpec, ResolvedAgentBinding};
 use nova_agent::prompt::{SystemPromptBuilder, TurnPromptMaterial};
 use nova_agent::skill::SkillRegistry;
+use nova_agent_config::{AgentSpec, ResolvedAgentBinding};
 use std::collections::HashMap;
 
 pub struct AgentMaterialInputs {

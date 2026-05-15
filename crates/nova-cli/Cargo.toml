@@ -20,4 +20,4 @@ log = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 nova-agent-config = { workspace = true }
-nova-skill-loader = { workspace = true }
+nova-agent-loader = { workspace = true }

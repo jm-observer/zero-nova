@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 struct ConfigBackedSessionPromptReloader {
-    config_store: ConfigStore,
+    config_store: Arc<ConfigStore>,
     agent_registry_store: AgentRegistryStore,
     skill_registry: Arc<SkillRegistry>,
 }
@@ -211,7 +211,7 @@ impl AgentPromptLoader for ConfigBackedAgentPromptLoader {
         template_vars: HashMap<String, String>,
     ) -> Result<nova_agent::prompt::PromptMaterial> {
         let config = self.config_store.current().await;
-        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
+        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&*config));
         loader.load_agent_material(spec, env, None, template_vars).await
     }
 
@@ -224,7 +224,7 @@ impl AgentPromptLoader for ConfigBackedAgentPromptLoader {
         enable_developer_prompt: bool,
     ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
         let config = self.config_store.current().await;
-        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
+        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&*config));
         loader
             .load_turn_material(
                 project_dir,
@@ -248,7 +248,7 @@ impl TurnPromptMaterialLoader for ConfigBackedTurnPromptMaterialLoader {
         enable_developer_prompt: bool,
     ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
         let config = self.config_store.current().await;
-        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
+        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&*config));
         loader
             .load_turn_material(
                 project_dir,
@@ -263,7 +263,7 @@ impl TurnPromptMaterialLoader for ConfigBackedTurnPromptMaterialLoader {
 
 #[async_trait]
 impl ConfigListener for ConfigSnapshotCacheUpdater {
-    async fn on_config_changed(&self, config: AppConfig) -> Result<()> {
+    async fn on_config_changed(&self, config: Arc<AppConfig>) -> Result<()> {
         let snapshot = serde_json::to_value(&config).context("Failed to serialize config")?;
         self.cache.store(Arc::new(snapshot));
         Ok(())
@@ -467,7 +467,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         config_snapshot.clone(),
         skill_registry.clone(),
         Some(Arc::new(ConfigBackedSessionPromptReloader {
-            config_store: config_store.clone(),
+            config_store: Arc::new(config_store.clone()),
             agent_registry_store,
             skill_registry,
         })),

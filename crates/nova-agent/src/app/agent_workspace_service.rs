@@ -779,8 +779,8 @@ mod tests {
 
     #[async_trait]
     impl ConfigSnapshot for TestConfigSnapshot {
-        async fn current(&self) -> AppConfig {
-            self.config.clone()
+        async fn current(&self) -> Arc<AppConfig> {
+            Arc::new(self.config.clone())
         }
     }
 

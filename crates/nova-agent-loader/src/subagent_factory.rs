@@ -52,6 +52,8 @@ impl SubagentRuntimeFactory for LoaderSubagentRuntimeFactory {
         environment: nova_agent::prompt::EnvironmentSnapshot,
     ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)> {
         let config = self.config_snapshot.current().await;
+        // Deref Arc<AppConfig> to &AppConfig for register_builtin_tools
+        let config: &nova_agent_config::AppConfig = &config;
         let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
             config.providers.clone(),
             binding.provider_id.clone(),
@@ -65,7 +67,7 @@ impl SubagentRuntimeFactory for LoaderSubagentRuntimeFactory {
                 let http_clients = HttpClients::new()?;
                 register_builtin_tools(
                     &sub_registry,
-                    &config,
+                    config,
                     task_store.clone(),
                     skill_registry.clone(),
                     spec.tool_whitelist.as_deref(),

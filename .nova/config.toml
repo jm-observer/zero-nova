@@ -37,8 +37,8 @@ temperature = 0.5
 
 [llms."qwen3-6-4.6"]
 provider = "spark-8000"
-#model = "Huihui-Qwen3.6-35B-A3B-Claude"
-model = "qwen"
+model = "Huihui-Qwen3.6-35B-A3B-Claude"
+#model = "qwen"
 max_tokens = 8192
 temperature = 0.5
 # think 类非标准参数也建议放在对应 llm 下，而不是放到 gateway.agents
@@ -114,35 +114,35 @@ llm = "qwen3-6-4.6"
 prompt_file = "agent-developer.md"
 enable_project_developer_prompt = true
 
-[[gateway.agents]]
-id = "feature-developer"
-display_name = "Feature Developer"
-description = "开发新功能子代理"
-aliases = ["新功能", "功能开发", "feature", "feature-dev"]
-provider = "spark-8000"
-llm = "qwen3-6-4.6"
-prompt_file = "agent-feature-developer.md"
-enable_project_developer_prompt = true
-
-[[gateway.agents]]
-id = "bugfix-developer"
-display_name = "Bugfix Developer"
-description = "修复 Bug 子代理"
-aliases = ["修复Bug", "修Bug", "bugfix", "fix"]
-provider = "spark-8000"
-llm = "qwen3-6-4.6"
-prompt_file = "agent-bugfix-developer.md"
-enable_project_developer_prompt = true
-
-[[gateway.agents]]
-id = "detailed-design"
-display_name = "Detailed Design"
-description = "详细设计文档子代理"
-aliases = ["详细设计", "设计", "design"]
-provider = "spark-8000"
-llm = "qwen3-6-4.6"
-prompt_file = "agent-detailed-design.md"
-enable_project_developer_prompt = true
+#[[gateway.agents]]
+#id = "feature-developer"
+#display_name = "Feature Developer"
+#description = "开发新功能子代理"
+#aliases = ["新功能", "功能开发", "feature", "feature-dev"]
+#provider = "spark-8000"
+#llm = "qwen3-6-4.6"
+#prompt_file = "agent-feature-developer.md"
+#enable_project_developer_prompt = true
+#
+#[[gateway.agents]]
+#id = "bugfix-developer"
+#display_name = "Bugfix Developer"
+#description = "修复 Bug 子代理"
+#aliases = ["修复Bug", "修Bug", "bugfix", "fix"]
+#provider = "spark-8000"
+#llm = "qwen3-6-4.6"
+#prompt_file = "agent-bugfix-developer.md"
+#enable_project_developer_prompt = true
+#
+#[[gateway.agents]]
+#id = "detailed-design"
+#display_name = "Detailed Design"
+#description = "详细设计文档子代理"
+#aliases = ["详细设计", "设计", "design"]
+#provider = "spark-8000"
+#llm = "qwen3-6-4.6"
+#prompt_file = "agent-detailed-design.md"
+#enable_project_developer_prompt = true
 
 # ── 桌面端远程连接 ──────────────────────────────────────────────
 [remote]

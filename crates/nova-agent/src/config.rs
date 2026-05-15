@@ -1,4 +1,12 @@
-pub use nova_agent_config::*;
+#[path = "../../nova-agent-config/src/loaders.rs"]
+mod loaders;
+#[path = "../../nova-agent-config/src/models.rs"]
+mod models;
+#[path = "../../nova-agent-config/src/validation.rs"]
+mod validation;
+
+pub use loaders::*;
+pub use models::*;
 
 impl From<ConfiguredModel> for crate::provider::ModelConfig {
     fn from(value: ConfiguredModel) -> Self {

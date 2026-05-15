@@ -1,5 +1,8 @@
 use super::mock_client::MockClient;
+use anyhow::Result;
+use async_trait::async_trait;
 use nova_agent::app::ConversationService;
+use nova_agent::app::conversation_service::TurnPromptMaterialLoader;
 use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::{
@@ -13,6 +16,28 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio::task::JoinSet;
+
+struct NoopTurnPromptLoader;
+
+#[async_trait]
+impl TurnPromptMaterialLoader for NoopTurnPromptLoader {
+    async fn load_turn_material(
+        &self,
+        _project_dir: Option<&std::path::Path>,
+        _workflow_stage: Option<&str>,
+        active_skill: Option<String>,
+        turn_vars: HashMap<String, String>,
+        _enable_developer_prompt: bool,
+    ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
+        Ok(nova_agent::prompt::TurnPromptMaterial {
+            developer_project_prompt: None,
+            project_context: None,
+            workflow_prompt: None,
+            turn_template_vars: turn_vars,
+            active_skill,
+        })
+    }
+}
 
 #[tokio::test]
 async fn create_for_agent_inherits_latest_project_dir_from_same_agent_only() {
@@ -292,7 +317,7 @@ fn build_conversation_service(
         registry,
         sessions,
         AppConfig::new(data_dir.to_path_buf()),
-        None,
+        Arc::new(NoopTurnPromptLoader),
     )
 }
 

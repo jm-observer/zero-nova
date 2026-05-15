@@ -65,7 +65,7 @@ pub fn register_builtin_tools_with_agent_prompt_loader(
     if is_tool_enabled(tool_whitelist, "Agent") {
         registry.register(Box::new(agent::AgentTool::new_with_prompt_loader(
             config.clone(),
-            agent_prompt_loader,
+            agent_prompt_loader.clone(),
         )));
     }
     if is_tool_enabled(tool_whitelist, "WebSearch") {
@@ -81,7 +81,10 @@ pub fn register_builtin_tools_with_agent_prompt_loader(
         registry.register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)));
     }
     if is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
-        registry.register(Box::new(orchestrate_task::OrchestrateTaskTool::new(config.clone())));
+        registry.register(Box::new(orchestrate_task::OrchestrateTaskTool::new_with_prompt_loader(
+            config.clone(),
+            agent_prompt_loader.clone(),
+        )));
     }
 
     // ToolInfo is always registered as a loaded tool (schema lookup infrastructure)

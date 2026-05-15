@@ -23,6 +23,7 @@ pub mod conversation;
 
 pub use agent::{AgentConfig, AgentRuntime, TurnResult};
 pub use agent_catalog::{AgentDescriptor, AgentRegistry};
+pub use config::RawAppConfig;
 pub use event::AgentEvent;
 pub use mcp::{McpClient, McpToolDef, ServerInfo};
 pub use message::{ContentBlock, Message, Role};

@@ -9,6 +9,7 @@ use nova_agent::agent_catalog::AgentRegistry;
 use nova_agent::app::agent_workspace_service::{AgentWorkspaceService, ReloadedSessionPrompt, SessionPromptReloader};
 use nova_agent::app::application::{AgentApplication, AgentApplicationImpl};
 use nova_agent::app::conversation_service::{ConversationService, TurnPromptMaterialLoader};
+use nova_agent::config::{AgentSpec, AppConfig};
 use nova_agent::conversation::repository::SqliteSessionRepository;
 use nova_agent::conversation::sqlite_manager::SqliteManager;
 use nova_agent::conversation::{SessionCache, SessionService};
@@ -19,10 +20,10 @@ use nova_agent::prompt::{
 };
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::skill::SkillRegistry;
-use nova_agent::tool::builtin::register_builtin_tools;
+use nova_agent::tool::builtin::agent::AgentPromptLoader;
+use nova_agent::tool::builtin::register_builtin_tools_with_agent_prompt_loader;
 use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
 use nova_agent::tool::ToolRegistry;
-use nova_agent_config::AppConfig;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -36,6 +37,45 @@ struct ConfigBackedSessionPromptReloader {
 
 struct ConfigBackedTurnPromptMaterialLoader {
     config: Arc<RwLock<AppConfig>>,
+}
+
+struct ConfigBackedAgentPromptLoader {
+    config: Arc<RwLock<AppConfig>>,
+}
+
+#[async_trait]
+impl AgentPromptLoader for ConfigBackedAgentPromptLoader {
+    async fn load_agent_material(
+        &self,
+        spec: &AgentSpec,
+        env: Option<nova_agent::prompt::EnvironmentSnapshot>,
+        template_vars: HashMap<String, String>,
+    ) -> Result<nova_agent::prompt::PromptMaterial> {
+        let config = self.config.read().await.clone();
+        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
+        loader.load_agent_material(spec, env, None, template_vars).await
+    }
+
+    async fn load_turn_material(
+        &self,
+        project_dir: Option<&Path>,
+        workflow_stage: Option<&str>,
+        active_skill: Option<String>,
+        turn_vars: HashMap<String, String>,
+        enable_developer_prompt: bool,
+    ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
+        let config = self.config.read().await.clone();
+        let loader = PromptMaterialLoader::from_config(&PromptLoaderConfig::from(&config));
+        loader
+            .load_turn_material(
+                project_dir,
+                workflow_stage,
+                active_skill,
+                turn_vars,
+                enable_developer_prompt,
+            )
+            .await
+    }
 }
 
 #[async_trait]
@@ -155,9 +195,10 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     session_service.load_session_index().await?;
 
     let http_clients = HttpClients::new()?;
+    let config_arc = Arc::new(RwLock::new(config.clone()));
 
     let tools = ToolRegistry::new();
-    register_builtin_tools(
+    register_builtin_tools_with_agent_prompt_loader(
         &tools,
         &config,
         task_store.clone(),
@@ -165,6 +206,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         None,
         Arc::new(session_service.clone()),
         &http_clients,
+        Some(Arc::new(ConfigBackedAgentPromptLoader {
+            config: config_arc.clone(),
+        })),
     );
 
     let agent_config = AgentConfig {
@@ -282,7 +326,6 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         agent.set_side_channel_injector(SideChannelInjector::new(side_channel));
     }
 
-    let config_arc = Arc::new(RwLock::new(config.clone()));
     let config_snapshot_cache = Arc::new(ArcSwap::from_pointee(
         serde_json::to_value(&config).context("Failed to serialize config")?,
     ));
@@ -293,9 +336,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         agent_registry.clone(),
         session_service.clone(),
         config.clone(),
-        Some(Arc::new(ConfigBackedTurnPromptMaterialLoader {
+        Arc::new(ConfigBackedTurnPromptMaterialLoader {
             config: config_arc.clone(),
-        })),
+        }),
     );
     let workspace_service = AgentWorkspaceService::new(
         agent_registry,

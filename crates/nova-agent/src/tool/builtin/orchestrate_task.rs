@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use crate::orchestrator::OrchestratorEngine;
-use crate::tool::builtin::agent::AgentTool;
+use crate::tool::builtin::agent::{AgentPromptLoader, AgentTool};
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -11,11 +11,19 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct OrchestrateTaskTool {
     config: AppConfig,
+    agent_prompt_loader: Option<Arc<dyn AgentPromptLoader>>,
 }
 
 impl OrchestrateTaskTool {
     pub fn new(config: AppConfig) -> Self {
-        Self { config }
+        Self::new_with_prompt_loader(config, None)
+    }
+
+    pub fn new_with_prompt_loader(config: AppConfig, agent_prompt_loader: Option<Arc<dyn AgentPromptLoader>>) -> Self {
+        Self {
+            config,
+            agent_prompt_loader,
+        }
     }
 
     pub fn input_schema() -> Value {
@@ -62,7 +70,10 @@ impl Tool for OrchestrateTaskTool {
             .unwrap_or_else(CancellationToken::new);
 
         let engine = OrchestratorEngine::new(
-            Arc::new(AgentTool::new(self.config.clone())),
+            Arc::new(AgentTool::new_with_prompt_loader(
+                self.config.clone(),
+                self.agent_prompt_loader.clone(),
+            )),
             tool_context.event_tx.clone(),
             Some(tool_context),
         );

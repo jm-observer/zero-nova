@@ -42,63 +42,6 @@ pub trait TurnPromptMaterialLoader: Send + Sync {
     ) -> Result<crate::prompt::TurnPromptMaterial>;
 }
 
-struct StaticTurnPromptMaterialLoader {
-    app_config: AppConfig,
-}
-
-#[async_trait]
-impl TurnPromptMaterialLoader for StaticTurnPromptMaterialLoader {
-    async fn load_turn_material(
-        &self,
-        project_dir: Option<&Path>,
-        workflow_stage: Option<&str>,
-        active_skill: Option<String>,
-        turn_vars: HashMap<String, String>,
-        enable_developer_prompt: bool,
-    ) -> Result<crate::prompt::TurnPromptMaterial> {
-        let developer_project_prompt = if enable_developer_prompt {
-            crate::prompt::load_developer_project_prompt_async(project_dir, &self.app_config.developer_prompt_files)
-                .await
-        } else {
-            None
-        };
-        let project_context = crate::prompt::load_project_context_with_config_async(
-            project_dir,
-            self.app_config.project_context_file().as_deref(),
-        )
-        .await;
-        let workflow_prompt = if let Some(stage) = workflow_stage {
-            if stage != "idle" {
-                let path = self.app_config.prompts_dir().join("workflow-stages.md");
-                match crate::prompt::WorkflowStagePrompts::load_from_file_async(&path).await {
-                    Ok(prompts) => prompts.render(stage, &turn_vars),
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to load workflow prompt stage '{}' from {:?}: {}",
-                            stage,
-                            path,
-                            err
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        Ok(crate::prompt::TurnPromptMaterial {
-            developer_project_prompt,
-            project_context,
-            workflow_prompt,
-            turn_template_vars: turn_vars,
-            active_skill,
-        })
-    }
-}
-
 impl<C: LlmClient + 'static> ConversationService<C> {
     fn parse_project_instruction_profile(raw: &str) -> ProjectInstructionProfile {
         match raw {
@@ -131,17 +74,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         agent_registry: AgentRegistry,
         sessions: SessionService,
         app_config: AppConfig,
-        turn_prompt_loader: Option<Arc<dyn TurnPromptMaterialLoader>>,
+        turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
     ) -> Self {
-        let fallback_loader = Arc::new(StaticTurnPromptMaterialLoader {
-            app_config: app_config.clone(),
-        });
         Self {
             agent,
             agent_registry,
             sessions,
             app_config: app_config.clone(),
-            turn_prompt_loader: turn_prompt_loader.unwrap_or(fallback_loader),
+            turn_prompt_loader,
         }
     }
 

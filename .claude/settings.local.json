@@ -4,7 +4,8 @@
       "Bash(xargs -I {} ls {})",
       "Bash(cargo --version)",
       "Bash(rustc --version)",
-      "Bash(git worktree *)"
+      "Bash(git worktree *)",
+      "Bash(cargo tree *)"
     ]
   }
 }

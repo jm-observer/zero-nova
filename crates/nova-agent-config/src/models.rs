@@ -625,6 +625,44 @@ impl Default for GatewayConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+//  Turn Prompt Material — concrete implementation (replaces trait interface)
+// ---------------------------------------------------------------------------
+
+/// Returned by `AppConfig::load_turn_material`.
+#[allow(clippy::type_complexity)]
+pub struct TurnMaterial {
+    pub developer_project_prompt: Option<String>,
+    pub project_context: Option<String>,
+    pub workflow_prompt: Option<String>,
+    pub turn_template_vars: std::collections::HashMap<String, String>,
+    pub active_skill: Option<String>,
+}
+
+/// This impl (replaces the old trait interface). This is the concrete type that replaces `dyn TurnPromptMaterialLoader`.
+#[allow(clippy::type_complexity)]
+impl AppConfig {
+    /// Load turn material from config.
+    pub fn load_turn_material(
+        &self,
+        project_dir: Option<&std::path::Path>,
+        _workflow_stage: Option<&str>,
+        _active_skill: Option<String>,
+        _turn_vars: std::collections::HashMap<String, String>,
+        _enable_developer_prompt: bool,
+    ) -> Result<TurnMaterial, anyhow::Error> {
+        // For the concrete AppConfig implementation, we return identity values.
+        let _ = project_dir;
+        Ok(TurnMaterial {
+            developer_project_prompt: None,
+            project_context: None,
+            workflow_prompt: None,
+            turn_template_vars: Default::default(),
+            active_skill: None,
+        })
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

@@ -12,11 +12,18 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
+
+/// Services required by `AgentTool` to spawn subagents.
+#[derive(Clone)]
+pub struct AgentToolServices {
+    pub prompt_loader: Arc<dyn AgentPromptLoader>,
+    pub runtime_builder: Arc<dyn SubagentRuntimeFactory>,
+}
 
 /// Tool to spawn a subagent for specialized task execution.
 #[derive(Clone)]
@@ -24,9 +31,7 @@ pub struct AgentTool {
     config_store: Arc<RwLock<AppConfig>>,
     agent_types: HashMap<String, AgentSpec>,
     primary_agent_type: String,
-    #[allow(dead_code)]
-    prompt_loader: Arc<dyn AgentPromptLoader>,
-    subagent_runtime_factory: Arc<dyn SubagentRuntimeFactory>,
+    services: Option<AgentToolServices>,
 }
 
 struct PromptRequestInputs {
@@ -50,27 +55,9 @@ pub trait SubagentRuntimeFactory: Send + Sync {
         binding: &crate::config::ResolvedAgentBinding,
         model_override: Option<&str>,
         context: Option<&ToolContext>,
-        project_dir: Option<&std::path::Path>,
+        project_dir: Option<&Path>,
         environment: crate::prompt::EnvironmentSnapshot,
     ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)>;
-}
-
-#[derive(Clone)]
-struct UnconfiguredSubagentRuntimeFactory;
-
-#[async_trait]
-impl SubagentRuntimeFactory for UnconfiguredSubagentRuntimeFactory {
-    async fn build_runtime(
-        &self,
-        _spec: &AgentSpec,
-        _binding: &crate::config::ResolvedAgentBinding,
-        _model_override: Option<&str>,
-        _context: Option<&ToolContext>,
-        _project_dir: Option<&std::path::Path>,
-        _environment: crate::prompt::EnvironmentSnapshot,
-    ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)> {
-        anyhow::bail!("SubagentRuntimeFactory is not configured")
-    }
 }
 
 #[async_trait]
@@ -83,38 +70,12 @@ pub trait AgentPromptLoader: Send + Sync {
     ) -> Result<crate::prompt::PromptMaterial>;
     async fn load_turn_material(
         &self,
-        project_dir: Option<&std::path::Path>,
+        project_dir: Option<&Path>,
         workflow_stage: Option<&str>,
         active_skill: Option<String>,
         turn_vars: HashMap<String, String>,
         enable_developer_prompt: bool,
     ) -> Result<crate::prompt::TurnPromptMaterial>;
-}
-
-#[derive(Clone)]
-struct UnconfiguredAgentPromptLoader;
-
-#[async_trait]
-impl AgentPromptLoader for UnconfiguredAgentPromptLoader {
-    async fn load_agent_material(
-        &self,
-        _spec: &AgentSpec,
-        _env: Option<crate::prompt::EnvironmentSnapshot>,
-        _template_vars: HashMap<String, String>,
-    ) -> Result<crate::prompt::PromptMaterial> {
-        anyhow::bail!("AgentPromptLoader is not configured")
-    }
-
-    async fn load_turn_material(
-        &self,
-        _project_dir: Option<&std::path::Path>,
-        _workflow_stage: Option<&str>,
-        _active_skill: Option<String>,
-        _turn_vars: HashMap<String, String>,
-        _enable_developer_prompt: bool,
-    ) -> Result<crate::prompt::TurnPromptMaterial> {
-        anyhow::bail!("AgentPromptLoader is not configured")
-    }
 }
 
 impl AgentTool {
@@ -125,19 +86,8 @@ impl AgentTool {
             .or_else(|| input["subagent_type"].as_str().filter(|value| !value.trim().is_empty()))
     }
 
-    pub fn new(config: AppConfig) -> Self {
-        Self::new_with_prompt_loader_and_factory(config, None, None)
-    }
-
-    pub fn new_with_prompt_loader(config: AppConfig, prompt_loader: Option<Arc<dyn AgentPromptLoader>>) -> Self {
-        Self::new_with_prompt_loader_and_factory(config, prompt_loader, None)
-    }
-
-    pub fn new_with_prompt_loader_and_factory(
-        config: AppConfig,
-        prompt_loader: Option<Arc<dyn AgentPromptLoader>>,
-        subagent_runtime_factory: Option<Arc<dyn SubagentRuntimeFactory>>,
-    ) -> Self {
+    /// Main constructor. Provide `services` when the tool will be used for subagent execution.
+    pub fn new(config: AppConfig, services: Option<AgentToolServices>) -> Self {
         let mut agent_types = HashMap::new();
         for agent in &config.gateway.agents {
             agent_types.insert(agent.id.clone(), agent.clone());
@@ -148,16 +98,18 @@ impl AgentTool {
             .first()
             .map(|agent| agent.id.clone())
             .unwrap_or_else(|| "primary".to_string());
-        let default_prompt_loader = Arc::new(UnconfiguredAgentPromptLoader);
         let config_store = Arc::new(RwLock::new(config.clone()));
         Self {
-            config_store: config_store.clone(),
+            config_store,
             agent_types,
             primary_agent_type,
-            prompt_loader: prompt_loader.unwrap_or(default_prompt_loader),
-            subagent_runtime_factory: subagent_runtime_factory
-                .unwrap_or_else(|| Arc::new(UnconfiguredSubagentRuntimeFactory)),
+            services,
         }
+    }
+
+    /// Constructor without subagent services — useful when only metadata methods are needed.
+    pub fn new_unconfigured(config: AppConfig) -> Self {
+        Self::new(config, None)
     }
 
     pub fn catalog_agent_ids(&self) -> std::collections::HashSet<String> {
@@ -274,8 +226,13 @@ impl AgentTool {
         } else {
             crate::prompt::EnvironmentSnapshot::collect(&config.config_dir, project_dir.as_deref()).await
         };
-        let (runtime, model_config) = self
-            .subagent_runtime_factory
+        let services = self
+            .services
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("AgentTool is not configured with required services"))?;
+
+        let (runtime, model_config) = services
+            .runtime_builder
             .build_runtime(
                 spec,
                 &binding,
@@ -299,7 +256,7 @@ impl AgentTool {
         prompt_template_vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "idle".to_string());
         prompt_template_vars.insert(template_vars::PENDING_INTERACTION.to_string(), "none".to_string());
         prompt_template_vars.insert(template_vars::ACTIVE_AGENT.to_string(), spec.display_name.clone());
-        let prompt_material = self
+        let prompt_material = services
             .prompt_loader
             .load_agent_material(spec, Some(environment.clone()), prompt_template_vars.clone())
             .await?;
@@ -310,7 +267,7 @@ impl AgentTool {
         let workflow_stage = prompt_template_vars
             .get(template_vars::WORKFLOW_STAGE)
             .map(String::as_str);
-        let turn_material = self
+        let turn_material = services
             .prompt_loader
             .load_turn_material(
                 project_dir.as_deref(),
@@ -740,7 +697,7 @@ mod tests {
             ],
             ..GatewayConfig::default()
         };
-        AgentTool::new(config)
+        AgentTool::new_unconfigured(config)
     }
 
     #[test]
@@ -827,5 +784,12 @@ mod tests {
         assert_eq!(request.tool_definitions[0].name, tool_definitions[0].name);
         assert_eq!(request.tool_definitions[0].description, tool_definitions[0].description);
         assert_eq!(request.visible_tool_names.as_ref(), &visible_tool_names);
+    }
+
+    #[test]
+    fn agent_tool_returns_clear_error_when_required_services_are_missing() {
+        let config = AppConfig::new(PathBuf::from("D:/workspace/.nova"));
+        let tool = AgentTool::new(config, None);
+        assert!(tool.services.is_none());
     }
 }

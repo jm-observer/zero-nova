@@ -14,26 +14,57 @@ use serde_json::{json, Value};
 use std::borrow::Cow;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{timeout, Instant};
-
-/// Shell 执行后端接口
-pub trait ShellBackend: Send + Sync {
-    /// 返回 shell 名称（用于日志/调试）
-    fn name(&self) -> &str;
-
-    /// 构建 Command，将 command_str 作为参数传入
-    fn build_command(&self, command_str: &str) -> Command;
-}
 
 // Platform-specific re-exports for external use
 #[cfg(target_os = "linux")]
 pub use bash_linux::{select_shell, UnixBash, UnixSh};
 #[cfg(target_os = "windows")]
 pub use bash_windows::{select_shell, CmdBackend, PowerShellBackend};
+
+///封闭的后端集合，覆盖所有支持的 shell 类型
+#[derive(Clone)]
+pub enum ShellBackend {
+    #[cfg(target_os = "windows")]
+    PowerShell(bash_windows::PowerShellBackend),
+    #[cfg(target_os = "windows")]
+    Cmd(CmdBackend),
+    #[cfg(target_os = "linux")]
+    UnixSh(UnixSh),
+    #[cfg(target_os = "linux")]
+    UnixBash(UnixBash),
+}
+
+impl ShellBackend {
+    fn name(&self) -> &str {
+        match self {
+            #[cfg(target_os = "windows")]
+            Self::PowerShell(b) => b.name(),
+            #[cfg(target_os = "windows")]
+            Self::Cmd(b) => b.name(),
+            #[cfg(target_os = "linux")]
+            Self::UnixSh(b) => b.name(),
+            #[cfg(target_os = "linux")]
+            Self::UnixBash(b) => b.name(),
+        }
+    }
+
+    fn build_command(&self, command_str: &str) -> Command {
+        match self {
+            #[cfg(target_os = "windows")]
+            Self::PowerShell(b) => b.build_command(command_str),
+            #[cfg(target_os = "windows")]
+            Self::Cmd(b) => b.build_command(command_str),
+            #[cfg(target_os = "linux")]
+            Self::UnixSh(b) => b.build_command(command_str),
+            #[cfg(target_os = "linux")]
+            Self::UnixBash(b) => b.build_command(command_str),
+        }
+    }
+}
 
 fn is_cross_shell_nested_command(command_str: &str, shell_name: &str) -> bool {
     let normalized = command_str.trim().to_lowercase();
@@ -49,23 +80,22 @@ fn is_cross_shell_nested_command(command_str: &str, shell_name: &str) -> bool {
 
 /// Tool for executing shell commands.
 pub struct BashTool {
-    shell: Arc<dyn ShellBackend>,
+    shell: ShellBackend,
     /// Optional workspace directory to execute commands in.
     workspace: Option<PathBuf>,
 }
 
 impl BashTool {
     pub fn new(config: &BashConfig) -> Self {
-        let shell: Arc<dyn ShellBackend> = select_shell(config).into();
+        let shell = select_shell(config);
         info!("BashTool initialized using shell: {}", shell.name());
         Self { shell, workspace: None }
     }
 
     /// Creates a new `BashTool` with a specific workspace directory.
     pub fn with_workspace(config: &BashConfig, workspace: PathBuf) -> Self {
-        let shell: Arc<dyn ShellBackend> = select_shell(config).into();
         Self {
-            shell,
+            shell: select_shell(config),
             workspace: Some(workspace),
         }
     }
@@ -127,12 +157,12 @@ impl Tool for BashTool {
 
         if run_in_background {
             let shell = self.shell.clone();
-            let command_str_owned = command_str.to_string();
+            let cmd_str_owned = command_str.to_string();
             let workspace = self.resolve_working_dir(context.as_ref());
             let ctx = context.clone();
 
             tokio::spawn(async move {
-                let mut cmd = shell.build_command(&command_str_owned);
+                let mut cmd = shell.build_command(&cmd_str_owned);
                 if let Some(ws) = workspace {
                     cmd.current_dir(ws);
                 }
@@ -350,6 +380,7 @@ fn decode_lossy_with_flag(bytes: &[u8]) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_truncate_safe() {

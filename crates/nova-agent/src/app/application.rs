@@ -1,4 +1,3 @@
-use super::config_snapshot::ConfigSnapshot;
 use super::conversation_service::ConversationService;
 use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use crate::agent::TurnResult;
@@ -122,7 +121,8 @@ pub trait AgentApplication: Send + Sync {
 pub struct AgentApplicationImpl<C: LlmClient> {
     conversation_service: ConversationService<C>,
     workspace_service: super::agent_workspace_service::AgentWorkspaceService,
-    config_snapshot: Arc<dyn ConfigSnapshot>,
+    config: Arc<AppConfig>,
+    config_inner: ArcSwap<AppConfig>,
     config_snapshot_cache: Arc<ArcSwap<Value>>,
     config_path: PathBuf,
     // voice_service: VoiceService,
@@ -132,7 +132,7 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
     pub fn new(
         conversation_service: ConversationService<C>,
         workspace_service: super::agent_workspace_service::AgentWorkspaceService,
-        config_snapshot: Arc<dyn ConfigSnapshot>,
+        config: Arc<AppConfig>,
         config_snapshot_cache: Arc<ArcSwap<Value>>,
         config_path: PathBuf,
         // voice_service: VoiceService,
@@ -140,7 +140,8 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         Self {
             conversation_service,
             workspace_service,
-            config_snapshot,
+            config: config.clone(),
+            config_inner: ArcSwap::from_pointee((*config).clone()),
             config_snapshot_cache,
             config_path,
             // voice_service,
@@ -161,6 +162,7 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         Ok(new_config)
     }
 
+    #[allow(dead_code)]
     fn update_config_snapshot_cache(config_snapshot_cache: &ArcSwap<Value>, new_config: &AppConfig) -> Result<()> {
         let snapshot_value = Self::serialize_config_snapshot(new_config)?;
         config_snapshot_cache.store(Arc::new(snapshot_value));
@@ -286,7 +288,6 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         let system_prompt = self
             .conversation_service
             .agent_registry
-            .current()
             .get(&agent_id)
             .map(|agent| agent.system_prompt_template.clone())
             .unwrap_or_default();
@@ -385,7 +386,6 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     fn list_agents(&self) -> Vec<AppAgent> {
         self.conversation_service
             .agent_registry
-            .current()
             .list()
             .into_iter()
             .map(|agent| AppAgent {
@@ -399,7 +399,6 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     fn get_agent(&self, agent_id: &str) -> Option<AppAgent> {
         self.conversation_service
             .agent_registry
-            .current()
             .get(agent_id)
             .map(|agent| AppAgent {
                 id: agent.id.clone(),
@@ -409,15 +408,18 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn config_snapshot(&self) -> Result<Value> {
-        let config = self.config_snapshot.current().await;
-        Self::serialize_config_snapshot(&config)
+        Self::serialize_config_snapshot(&self.config)
     }
 
     async fn update_config(&self, payload: Value) -> Result<()> {
         let new_config = Self::write_config_file(&self.config_path, payload).await?;
-        self.config_snapshot.apply(new_config).await?;
-        let latest = self.config_snapshot.current().await;
-        Self::update_config_snapshot_cache(&self.config_snapshot_cache, &latest)
+        // store the new AppConfig for service access
+        let new_arc = Arc::new(new_config);
+        self.config_inner.store(new_arc.clone());
+        // cache for snapshot serialization
+        self.config_snapshot_cache
+            .store(Arc::new(serde_json::to_value(new_arc.as_ref())?));
+        Ok(())
     }
 
     async fn on_connect(&self) -> Result<Vec<AppEvent>> {
@@ -565,12 +567,12 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
     }
 
     async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse> {
-        let config = self.config_snapshot.current().await;
+        let config = self.config.clone();
         crate::provider::health::collect_provider_health(&config).await
     }
 
     async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {
-        let config = self.config_snapshot.current().await;
+        let config = self.config.clone();
         Ok(nova_protocol::voice::VoiceCapabilitiesResponse {
             stt: nova_protocol::voice::VoiceCapabilityStatus {
                 enabled: config.voice.enabled,

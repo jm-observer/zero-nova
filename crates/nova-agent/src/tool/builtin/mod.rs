@@ -18,9 +18,9 @@ use crate::skill::SkillRegistry;
 use crate::tool::{ProjectDirService, ToolRegistry};
 use std::sync::Arc;
 
+/// Wiring parameters for built-in tools that require subagent execution capabilities.
 pub struct BuiltinToolWiring {
-    pub agent_prompt_loader: Option<Arc<dyn agent::AgentPromptLoader>>,
-    pub subagent_runtime_factory: Option<Arc<dyn agent::SubagentRuntimeFactory>>,
+    pub services: Option<agent::AgentToolServices>,
 }
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
@@ -33,7 +33,7 @@ pub fn register_builtin_tools(
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
 ) {
-    register_builtin_tools_with_agent_prompt_loader(
+    register_builtin_tools_inner(
         registry,
         config,
         task_store,
@@ -41,14 +41,34 @@ pub fn register_builtin_tools(
         tool_whitelist,
         project_dir_service,
         http_clients,
-        BuiltinToolWiring {
-            agent_prompt_loader: None,
-            subagent_runtime_factory: None,
-        },
+        BuiltinToolWiring { services: None },
     );
 }
 
-pub fn register_builtin_tools_with_agent_prompt_loader(
+/// Registers built-in tools with subagent execution capabilities.
+pub fn register_builtin_tools_with_services(
+    registry: &ToolRegistry,
+    config: &AppConfig,
+    task_store: task::TaskStoreHandle,
+    skill_registry: Arc<SkillRegistry>,
+    tool_whitelist: Option<&[String]>,
+    project_dir_service: Arc<dyn ProjectDirService>,
+    http_clients: &HttpClients,
+    wiring: BuiltinToolWiring,
+) {
+    register_builtin_tools_inner(
+        registry,
+        config,
+        task_store,
+        skill_registry,
+        tool_whitelist,
+        project_dir_service,
+        http_clients,
+        wiring,
+    );
+}
+
+fn register_builtin_tools_inner(
     registry: &ToolRegistry,
     config: &AppConfig,
     task_store: task::TaskStoreHandle,
@@ -60,12 +80,7 @@ pub fn register_builtin_tools_with_agent_prompt_loader(
 ) {
     let shared_agent_tool =
         if is_tool_enabled(tool_whitelist, "Agent") || is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
-            Arc::new(agent::AgentTool::new_with_prompt_loader_and_factory(
-                config.clone(),
-                wiring.agent_prompt_loader.clone(),
-                wiring.subagent_runtime_factory.clone(),
-            ))
-            .into()
+            Some(Arc::new(agent::AgentTool::new(config.clone(), wiring.services)))
         } else {
             None
         };

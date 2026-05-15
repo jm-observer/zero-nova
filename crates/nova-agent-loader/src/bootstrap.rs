@@ -22,9 +22,9 @@ use nova_agent::prompt::{
 };
 use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::skill::SkillRegistry;
-use nova_agent::tool::builtin::agent::AgentPromptLoader;
+use nova_agent::tool::builtin::agent::{AgentPromptLoader, AgentToolServices};
 use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
-use nova_agent::tool::builtin::{register_builtin_tools_with_agent_prompt_loader, BuiltinToolWiring};
+use nova_agent::tool::builtin::{register_builtin_tools_with_services, BuiltinToolWiring};
 use nova_agent::tool::ToolRegistry;
 use nova_agent_config::{AgentSpec, AppConfig};
 use std::collections::HashMap;
@@ -74,7 +74,17 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
     let task_store = TaskStoreHandle::new(TaskStore::new());
     let http_clients = HttpClients::new()?;
     let tools = ToolRegistry::new();
-    register_builtin_tools_with_agent_prompt_loader(
+    let wiring = BuiltinToolWiring {
+        services: Some(AgentToolServices {
+            prompt_loader: Arc::new(ConfigBackedAgentPromptLoader {
+                config_store: ConfigStore::new(config.clone()),
+            }),
+            runtime_builder: Arc::new(LoaderSubagentRuntimeFactory::new(Arc::new(ConfigStore::new(
+                config.clone(),
+            )))),
+        }),
+    };
+    register_builtin_tools_with_services(
         &tools,
         config,
         task_store.clone(),
@@ -82,12 +92,7 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
         None,
         options.project_dir_service,
         &http_clients,
-        BuiltinToolWiring {
-            agent_prompt_loader: None,
-            subagent_runtime_factory: Some(Arc::new(LoaderSubagentRuntimeFactory::new(Arc::new(ConfigStore::new(
-                config.clone(),
-            ))))),
-        },
+        wiring,
     );
 
     let agent_config = AgentConfig {
@@ -354,7 +359,15 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     let config_snapshot: Arc<dyn nova_agent::app::ConfigSnapshot> = Arc::new(config_store.clone());
 
     let tools = ToolRegistry::new();
-    register_builtin_tools_with_agent_prompt_loader(
+    let wiring = BuiltinToolWiring {
+        services: Some(AgentToolServices {
+            prompt_loader: Arc::new(ConfigBackedAgentPromptLoader {
+                config_store: config_store.clone(),
+            }),
+            runtime_builder: Arc::new(LoaderSubagentRuntimeFactory::new(config_snapshot.clone())),
+        }),
+    };
+    register_builtin_tools_with_services(
         &tools,
         &config,
         task_store.clone(),
@@ -362,12 +375,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         None,
         Arc::new(session_service.clone()),
         &http_clients,
-        BuiltinToolWiring {
-            agent_prompt_loader: Some(Arc::new(ConfigBackedAgentPromptLoader {
-                config_store: config_store.clone(),
-            })),
-            subagent_runtime_factory: Some(Arc::new(LoaderSubagentRuntimeFactory::new(config_snapshot.clone()))),
-        },
+        wiring,
     );
 
     let agent_config = AgentConfig {

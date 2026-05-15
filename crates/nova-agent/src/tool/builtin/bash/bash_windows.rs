@@ -1,9 +1,10 @@
+use super::ShellBackend;
 use crate::config::BashConfig;
-use crate::tool::builtin::bash::ShellBackend;
 use tokio::process::Command;
 use which::which;
 
 /// PowerShell 后端 (pwsh 或 powershell)
+#[derive(Clone)]
 pub struct PowerShellBackend {
     executable: String, // "pwsh" 或 "powershell"
 }
@@ -25,14 +26,12 @@ impl PowerShellBackend {
         }
         None
     }
-}
 
-impl ShellBackend for PowerShellBackend {
-    fn name(&self) -> &str {
+    pub(super) fn name(&self) -> &str {
         &self.executable
     }
 
-    fn build_command(&self, command_str: &str) -> Command {
+    pub(super) fn build_command(&self, command_str: &str) -> Command {
         // 使用 Tokio Command 以支持异步
         let mut cmd = Command::new(&self.executable);
         if self.executable == "powershell" {
@@ -57,14 +56,15 @@ impl ShellBackend for PowerShellBackend {
 }
 
 /// cmd.exe 后端
+#[derive(Clone)]
 pub struct CmdBackend;
 
-impl ShellBackend for CmdBackend {
-    fn name(&self) -> &str {
+impl CmdBackend {
+    pub(super) fn name(&self) -> &str {
         "cmd"
     }
 
-    fn build_command(&self, command_str: &str) -> Command {
+    pub(super) fn build_command(&self, command_str: &str) -> Command {
         let mut cmd = Command::new("cmd");
         cmd.args(["/C", command_str]);
         cmd
@@ -72,23 +72,23 @@ impl ShellBackend for CmdBackend {
 }
 
 /// Windows 平台的 shell 选择逻辑
-pub fn select_shell(config: &BashConfig) -> Box<dyn ShellBackend> {
+pub fn select_shell(config: &BashConfig) -> ShellBackend {
     // 1. 配置覆盖
     if let Some(shell) = &config.shell {
         match shell.to_lowercase().as_str() {
             "pwsh" | "powershell" => {
                 if let Some(ps) = PowerShellBackend::detect() {
-                    return Box::new(ps);
+                    return ShellBackend::PowerShell(ps);
                 }
             }
-            "cmd" => return Box::new(CmdBackend),
+            "cmd" => return ShellBackend::Cmd(CmdBackend),
             _ => {} // 忽略无效值，走自动检测
         }
     }
 
     // 2. 自动检测: pwsh > powershell > cmd
     if let Some(ps) = PowerShellBackend::detect() {
-        return Box::new(ps);
+        return ShellBackend::PowerShell(ps);
     }
-    Box::new(CmdBackend)
+    ShellBackend::Cmd(CmdBackend)
 }

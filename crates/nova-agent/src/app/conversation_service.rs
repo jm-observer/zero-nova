@@ -1,7 +1,6 @@
 use crate::agent::{AgentRuntime, TurnResult, TurnWithContextRequest};
 use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
-use crate::app::agent_registry_snapshot::AgentRegistrySnapshot;
-use crate::app::config_snapshot::ConfigSnapshot;
+use crate::config::AppConfig;
 use crate::conversation::control::{LastTurnSnapshot, ModelRef};
 use crate::conversation::model::{RunRecord, RunStepRecord};
 use crate::conversation::SessionService;
@@ -13,7 +12,6 @@ use crate::prompt::{
 };
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use chrono::Utc;
 use nova_protocol::observability::{TurnUsage, UsageCompleteness, UsageSource};
 use std::collections::{HashMap, HashSet};
@@ -26,22 +24,10 @@ use tokio_util::sync::CancellationToken;
 /// 核心会话业务服务
 pub struct ConversationService<C: LlmClient> {
     pub agent: AgentRuntime<C>,
-    pub agent_registry: Arc<dyn AgentRegistrySnapshot>,
+    pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
-    pub config_snapshot: Arc<dyn ConfigSnapshot>,
-    turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
-}
-
-#[async_trait]
-pub trait TurnPromptMaterialLoader: Send + Sync {
-    async fn load_turn_material(
-        &self,
-        project_dir: Option<&Path>,
-        workflow_stage: Option<&str>,
-        active_skill: Option<String>,
-        turn_vars: HashMap<String, String>,
-        enable_developer_prompt: bool,
-    ) -> Result<crate::prompt::TurnPromptMaterial>;
+    pub config: Arc<AppConfig>,
+    turn_prompt_loader: Arc<AppConfig>,
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
@@ -77,32 +63,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         agent: AgentRuntime<C>,
         agent_registry: AgentRegistry,
         sessions: SessionService,
-        config_snapshot: Arc<dyn ConfigSnapshot>,
-        turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
-    ) -> Self {
-        Self::new_with_registry_snapshot(
-            agent,
-            Arc::new(StaticAgentRegistrySnapshot {
-                registry: agent_registry,
-            }),
-            sessions,
-            config_snapshot,
-            turn_prompt_loader,
-        )
-    }
-
-    pub fn new_with_registry_snapshot(
-        agent: AgentRuntime<C>,
-        agent_registry: Arc<dyn AgentRegistrySnapshot>,
-        sessions: SessionService,
-        config_snapshot: Arc<dyn ConfigSnapshot>,
-        turn_prompt_loader: Arc<dyn TurnPromptMaterialLoader>,
+        config: Arc<AppConfig>,
+        turn_prompt_loader: Arc<AppConfig>,
     ) -> Self {
         Self {
             agent,
             agent_registry,
             sessions,
-            config_snapshot,
+            config: config.clone(),
             turn_prompt_loader,
         }
     }
@@ -155,7 +123,6 @@ impl<C: LlmClient + 'static> ConversationService<C> {
     ) -> Result<(AgentDescriptor, Arc<crate::conversation::session::Session>)> {
         let agent = self
             .agent_registry
-            .current()
             .get(agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
@@ -199,11 +166,10 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry
-            .current()
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
-        let app_config = self.config_snapshot.current().await;
+        let app_config = self.config.clone();
         let (orchestration_model, execution_model, base_binding) = self
             .resolve_run_models(&session, &agent_descriptor, &app_config)
             .await?;
@@ -324,7 +290,6 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let agent_id = session.get_active_agent().await;
         let agent_descriptor = self
             .agent_registry
-            .current()
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
@@ -399,16 +364,13 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         };
 
         // 额外 sections：保留旧的 turn_prompt_loader 调用以获取 developer/project/workflow sections
-        let turn_material = self
-            .turn_prompt_loader
-            .load_turn_material(
-                project_dir.as_deref(),
-                Some("idle"),
-                active_skill_id.clone(),
-                context_overrides,
-                agent_descriptor.enable_project_developer_prompt,
-            )
-            .await?;
+        let turn_material = self.turn_prompt_loader.load_turn_material(
+            project_dir.as_deref(),
+            Some("idle"),
+            active_skill_id.clone(),
+            context_overrides,
+            agent_descriptor.enable_project_developer_prompt,
+        )?;
         if let Some(ref content) = turn_material.developer_project_prompt {
             let file_count = content.matches("### Source:").count();
             log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
@@ -611,15 +573,9 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         }
         skills
     }
-}
 
-struct StaticAgentRegistrySnapshot {
-    registry: AgentRegistry,
-}
-
-impl AgentRegistrySnapshot for StaticAgentRegistrySnapshot {
-    fn current(&self) -> AgentRegistry {
-        self.registry.clone()
+    pub fn update_config(&mut self, config: Arc<AppConfig>) {
+        self.config = config;
     }
 }
 

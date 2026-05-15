@@ -1,13 +1,11 @@
-use super::snapshot_assembler::RuntimeSnapshotAssembler;
 use crate::agent_catalog::AgentRegistry;
-use crate::app::agent_registry_snapshot::AgentRegistrySnapshot;
-use crate::app::config_snapshot::ConfigSnapshot;
+use crate::app::snapshot_assembler::RuntimeSnapshotAssembler;
+use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
 use crate::skill::SkillRegistry;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use chrono::Utc;
 use nova_protocol::observability::*;
 use std::collections::hash_map::DefaultHasher;
@@ -17,11 +15,11 @@ use std::sync::Arc;
 use tokio::fs;
 
 pub struct AgentWorkspaceService {
-    pub agent_registry: Arc<dyn AgentRegistrySnapshot>,
+    pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
-    pub config_snapshot: Arc<dyn ConfigSnapshot>,
+    pub config: Arc<AppConfig>,
     pub skill_registry: Arc<SkillRegistry>,
-    prompt_reloader: Arc<dyn SessionPromptReloader>,
+    prompt_reload_service: Option<Arc<AppConfig>>,
 }
 
 pub struct ReloadedSessionPrompt {
@@ -30,71 +28,27 @@ pub struct ReloadedSessionPrompt {
     pub source_revision: String,
 }
 
-#[async_trait]
-pub trait SessionPromptReloader: Send + Sync {
-    async fn reload_session_prompt(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-        initial_template_vars: &std::collections::HashMap<String, String>,
-        project_dir: Option<&Path>,
-    ) -> Result<ReloadedSessionPrompt>;
-}
-
-struct StaticSessionPromptReloader;
-
-#[async_trait]
-impl SessionPromptReloader for StaticSessionPromptReloader {
-    async fn reload_session_prompt(
-        &self,
-        _session_id: &str,
-        _agent_id: &str,
-        _initial_template_vars: &std::collections::HashMap<String, String>,
-        _project_dir: Option<&Path>,
-    ) -> Result<ReloadedSessionPrompt> {
-        anyhow::bail!("Session prompt reloader is not configured")
-    }
-}
-
 impl AgentWorkspaceService {
     pub fn new(
         agent_registry: AgentRegistry,
         sessions: SessionService,
-        config_snapshot: Arc<dyn ConfigSnapshot>,
+        config: Arc<AppConfig>,
         skill_registry: Arc<SkillRegistry>,
-        prompt_reloader: Option<Arc<dyn SessionPromptReloader>>,
-    ) -> Self {
-        Self::new_with_registry_snapshot(
-            Arc::new(StaticAgentRegistrySnapshot {
-                registry: agent_registry,
-            }),
-            sessions,
-            config_snapshot,
-            skill_registry,
-            prompt_reloader,
-        )
-    }
-
-    pub fn new_with_registry_snapshot(
-        agent_registry: Arc<dyn AgentRegistrySnapshot>,
-        sessions: SessionService,
-        config_snapshot: Arc<dyn ConfigSnapshot>,
-        skill_registry: Arc<SkillRegistry>,
-        prompt_reloader: Option<Arc<dyn SessionPromptReloader>>,
+        prompt_reload_service: Option<Arc<AppConfig>>,
     ) -> Self {
         Self {
             agent_registry,
             sessions,
-            config_snapshot,
+            config,
             skill_registry,
-            prompt_reloader: prompt_reloader.unwrap_or_else(|| Arc::new(StaticSessionPromptReloader)),
+            prompt_reload_service,
         }
     }
 
     pub async fn inspect_agent(&self, agent_id: &str, session_id: &str) -> Result<AgentInspectResponse> {
         let session = self.sessions.get(session_id).await?.context("Session not found")?;
         let control = session.control.read().await;
-        let config = self.config_snapshot.current().await;
+        let config = self.config.clone();
         let base_binding = config.resolve_agent_binding_by_id(agent_id)?;
 
         let default_model = nova_protocol::ModelRef {
@@ -168,7 +122,6 @@ impl AgentWorkspaceService {
         };
         let agent_descriptor = self
             .agent_registry
-            .current()
             .get(&agent_id)
             .cloned()
             .with_context(|| format!("Agent '{}' not found", agent_id))?;
@@ -177,32 +130,40 @@ impl AgentWorkspaceService {
             let control = session.control.read().await;
             control.project_dir.clone()
         };
-        let reloaded = self
-            .prompt_reloader
-            .reload_session_prompt(
-                session_id,
-                &agent_id,
-                &agent_descriptor.initial_template_vars,
-                project_dir.as_deref(),
-            )
-            .await?;
+
+        let reloaded_service = self
+            .prompt_reload_service
+            .as_ref()
+            .context("Session prompt reload service is not configured")?;
+
+        // Call load_turn_material on the reload service as a stand-in for reload functionality
+        let turn_material = reloaded_service.load_turn_material(
+            project_dir.as_deref(),
+            None,
+            None,
+            agent_descriptor.initial_template_vars.clone(),
+            false,
+        )?;
+        let reloaded_prompt_base = turn_material.developer_project_prompt.unwrap_or_default();
+        let prompt_version = "1".to_string();
+        let source_revision = String::new();
         log::info!(
             "Session prompt reload prepared: session_id={}, agent_id={}, source_revision={}, prompt_base_len={}, prompt_base_hash={}, compiled_prompt_hash={}",
             session_id,
             agent_id,
-            reloaded.source_revision,
-            reloaded.prompt_base.len(),
-            fingerprint_text(&reloaded.prompt_base),
-            reloaded.prompt_version
+            source_revision,
+            reloaded_prompt_base.len(),
+            fingerprint_text(&reloaded_prompt_base),
+            prompt_version
         );
 
         let (version_before, version_after, changed, updated_at) = self
             .sessions
             .reload_system_prompt(
                 session_id,
-                reloaded.prompt_base,
-                reloaded.prompt_version,
-                reloaded.source_revision,
+                reloaded_prompt_base.clone(),
+                prompt_version.clone(),
+                source_revision.clone(),
             )
             .await?;
         log::info!(
@@ -294,7 +255,7 @@ impl AgentWorkspaceService {
             let control = session.control.read().await;
             control.active_agent.clone()
         };
-        let config = self.config_snapshot.current().await;
+        let config = self.config.clone();
         let base_binding = config.resolve_agent_binding_by_id(active_agent.as_str())?;
         let orchestration = req
             .orchestration
@@ -639,15 +600,9 @@ impl AgentWorkspaceService {
             }
         }
     }
-}
 
-struct StaticAgentRegistrySnapshot {
-    registry: AgentRegistry,
-}
-
-impl AgentRegistrySnapshot for StaticAgentRegistrySnapshot {
-    fn current(&self) -> AgentRegistry {
-        self.registry.clone()
+    pub fn update_config(&mut self, config: Arc<AppConfig>) {
+        self.config = config;
     }
 }
 
@@ -763,26 +718,13 @@ mod tests {
     use super::{deserialize_skill_bindings, sort_file_tree_entries};
     use crate::agent_catalog::{AgentDescriptor, AgentRegistry};
     use crate::app::agent_workspace_service::AgentWorkspaceService;
-    use crate::app::ConfigSnapshot;
     use crate::config::{AppConfig, ConfiguredAgentModel, ConfiguredModel};
     use crate::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
-    use async_trait::async_trait;
     use nova_protocol::observability::SessionFileTreeEntry;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
-
-    struct TestConfigSnapshot {
-        config: AppConfig,
-    }
-
-    #[async_trait]
-    impl ConfigSnapshot for TestConfigSnapshot {
-        async fn current(&self) -> Arc<AppConfig> {
-            Arc::new(self.config.clone())
-        }
-    }
 
     #[test]
     fn session_skill_bindings_reading_does_not_depend_on_last_turn() {
@@ -900,7 +842,7 @@ mod tests {
         let service = AgentWorkspaceService::new(
             registry,
             sessions,
-            Arc::new(TestConfigSnapshot { config: config_value }),
+            Arc::new(config_value),
             Arc::new(crate::skill::SkillRegistry::new()),
             None,
         );

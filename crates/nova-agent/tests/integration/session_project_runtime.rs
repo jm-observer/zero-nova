@@ -1,7 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use nova_agent::app::ConversationService;
-use nova_agent::app::conversation_service::TurnPromptMaterialLoader;
 use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::message::ContentBlock;
@@ -26,28 +25,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
 use tokio::sync::{mpsc, Mutex};
-
-struct NoopTurnPromptLoader;
-
-#[async_trait]
-impl TurnPromptMaterialLoader for NoopTurnPromptLoader {
-    async fn load_turn_material(
-        &self,
-        _project_dir: Option<&std::path::Path>,
-        _workflow_stage: Option<&str>,
-        active_skill: Option<String>,
-        turn_vars: HashMap<String, String>,
-        _enable_developer_prompt: bool,
-    ) -> Result<nova_agent::prompt::TurnPromptMaterial> {
-        Ok(nova_agent::prompt::TurnPromptMaterial {
-            developer_project_prompt: None,
-            project_context: None,
-            workflow_prompt: None,
-            turn_template_vars: turn_vars,
-            active_skill,
-        })
-    }
-}
 
 struct SequenceReceiver {
     events: Vec<ProviderStreamEvent>,
@@ -479,7 +456,7 @@ fn build_conversation_service<C: LlmClient + 'static>(
             registry,
             sessions.clone(),
             AppConfig::new(data_dir.to_path_buf()),
-            Arc::new(NoopTurnPromptLoader),
+            Arc::new(AppConfig::new(prompts_dir.to_path_buf())),
         ),
         sessions,
     )

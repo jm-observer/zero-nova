@@ -1,6 +1,5 @@
-use crate::tool::builtin::web_search::types::{SearchBackend, SearchResult};
+use super::types::SearchResult;
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use reqwest::Client;
 use scraper::{Html, Selector};
 
@@ -12,15 +11,12 @@ impl DuckDuckGoBackend {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
-}
 
-#[async_trait]
-impl SearchBackend for DuckDuckGoBackend {
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         "DuckDuckGo"
     }
 
-    async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let params = [("q", query)];
         let resp = self.client
             .post("https://html.duckduckgo.com/html/")

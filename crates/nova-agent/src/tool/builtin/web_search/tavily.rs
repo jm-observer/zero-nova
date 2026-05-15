@@ -1,7 +1,6 @@
-use crate::tool::builtin::web_search::types::{SearchBackend, SearchResult};
+use super::types::SearchResult;
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
-use log::{error, info};
+use log::info;
 use reqwest::Client;
 use serde_json::Value;
 
@@ -14,15 +13,12 @@ impl TavilyBackend {
     pub fn new(api_key: String, client: Client) -> Self {
         Self { api_key, client }
     }
-}
 
-#[async_trait]
-impl SearchBackend for TavilyBackend {
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         "Tavily"
     }
 
-    async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let body = serde_json::json!({
             "api_key": self.api_key,
             "query": query,
@@ -41,7 +37,6 @@ impl SearchBackend for TavilyBackend {
 
         if !resp.status().is_success() {
             let err_text = resp.text().await.unwrap_or_default();
-            error!("Tavily API error response: {}", err_text);
             return Err(anyhow!("Tavily API error: {}", err_text));
         }
 

@@ -1,7 +1,6 @@
 use crate::config::SearchConfig;
-use crate::tool::builtin::web_search::types::SearchBackend;
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reqwest::Client;
@@ -15,10 +14,36 @@ pub mod types;
 use self::duckduckgo::DuckDuckGoBackend;
 use self::google::GoogleBackend;
 use self::tavily::TavilyBackend;
+pub use self::types::SearchResult;
 
-/// Reconstructed WebSearchTool using the Strategy Pattern.
+/// 封闭的后端集合，覆盖所有支持的搜索引擎
+pub enum SearchBackend {
+    Google(GoogleBackend),
+    Tavily(TavilyBackend),
+    DuckDuckGo(DuckDuckGoBackend),
+}
+
+impl SearchBackend {
+    fn name(&self) -> &str {
+        match self {
+            Self::Google(_) => "Google",
+            Self::Tavily(_) => "Tavily",
+            Self::DuckDuckGo(_) => "DuckDuckGo",
+        }
+    }
+
+    async fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        match self {
+            Self::Google(b) => b.search(query, limit).await,
+            Self::Tavily(b) => b.search(query, limit).await,
+            Self::DuckDuckGo(b) => b.search(query, limit).await,
+        }
+    }
+}
+
+/// Reconstructed WebSearchTool using enum-based backend dispatch.
 pub struct WebSearchTool {
-    backend: Box<dyn SearchBackend>,
+    backend: SearchBackend,
 }
 
 impl WebSearchTool {
@@ -39,7 +64,12 @@ impl WebSearchTool {
                             .unwrap_or_else(|| "https://www.googleapis.com/customsearch/v1".to_string());
                         info!("Web search backend selected: Google");
                         return Self {
-                            backend: Box::new(GoogleBackend::new(api_key.clone(), endpoint, cx.clone(), client)),
+                            backend: SearchBackend::Google(GoogleBackend::new(
+                                api_key.clone(),
+                                endpoint,
+                                cx.clone(),
+                                client,
+                            )),
                         };
                     } else {
                         error!("Explicitly selected Google backend but keys are missing. Falling back...");
@@ -49,7 +79,7 @@ impl WebSearchTool {
                     if let Some(api_key) = &config.tavily_api_key {
                         info!("Web search backend selected: Tavily (API key present)");
                         return Self {
-                            backend: Box::new(TavilyBackend::new(api_key.clone(), client)),
+                            backend: SearchBackend::Tavily(TavilyBackend::new(api_key.clone(), client)),
                         };
                     } else {
                         error!("Explicitly selected Tavily backend but API key is missing. Falling back...");
@@ -58,7 +88,7 @@ impl WebSearchTool {
                 "duckduckgo" => {
                     info!("Web search backend selected: DuckDuckGo");
                     return Self {
-                        backend: Box::new(DuckDuckGoBackend::new(client)),
+                        backend: SearchBackend::DuckDuckGo(DuckDuckGoBackend::new(client)),
                     };
                 }
                 _ => {
@@ -77,7 +107,7 @@ impl WebSearchTool {
 
             info!("Web search backend automatically initialized: Google");
             return Self {
-                backend: Box::new(GoogleBackend::new(
+                backend: SearchBackend::Google(GoogleBackend::new(
                     api_key.clone(),
                     endpoint,
                     cx.clone(),
@@ -90,14 +120,14 @@ impl WebSearchTool {
         if let Some(api_key) = &config.tavily_api_key {
             info!("Web search backend automatically initialized: Tavily (API key present)");
             return Self {
-                backend: Box::new(TavilyBackend::new(api_key.clone(), client.clone())),
+                backend: SearchBackend::Tavily(TavilyBackend::new(api_key.clone(), client.clone())),
             };
         }
 
         // DuckDuckGo (Fallback)
         info!("Web search backend automatically initialized: DuckDuckGo");
         Self {
-            backend: Box::new(DuckDuckGoBackend::new(client)),
+            backend: SearchBackend::DuckDuckGo(DuckDuckGoBackend::new(client)),
         }
     }
 }
@@ -132,7 +162,7 @@ impl Tool for WebSearchTool {
     async fn execute(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
-            .ok_or_else(|| anyhow!("Missing 'query' field"))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing 'query' field"))?;
         let count = input["count"].as_u64().unwrap_or(5).min(10);
 
         let start_time = std::time::Instant::now();
@@ -189,5 +219,37 @@ impl Tool for WebSearchTool {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SearchConfig;
+
+    #[test]
+    fn selects_google_when_explicit_backend_and_keys_present() {
+        let config = SearchConfig {
+            backend: Some("google".to_string()),
+            google_api_key: Some("test-key".to_string()),
+            google_cx: Some("test-cx".to_string()),
+            google_endpoint: None,
+            tavily_api_key: None,
+        };
+        let tool = WebSearchTool::with_client(&config, Client::new());
+        assert!(matches!(tool.backend, SearchBackend::Google(_)));
+    }
+
+    #[test]
+    fn falls_back_to_duckduckgo_when_selected_backend_is_unavailable() {
+        let config = SearchConfig {
+            backend: Some("tavily".to_string()),
+            google_api_key: None,
+            google_cx: None,
+            google_endpoint: None,
+            tavily_api_key: None,
+        };
+        let tool = WebSearchTool::with_client(&config, Client::new());
+        assert!(matches!(tool.backend, SearchBackend::DuckDuckGo(_)));
     }
 }

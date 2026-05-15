@@ -246,18 +246,20 @@ impl AgentTool {
         let prompt_material = prompt_loader
             .load_agent_material(spec, Some(environment.clone()), None, prompt_template_vars)
             .await?;
+        let active_skill_id = runtime.resolve_active_skill_id(prompt, &[])?;
         let turn_material = prompt_loader
             .load_turn_material(
                 project_dir.as_deref(),
                 Some("idle"),
-                None,
+                active_skill_id,
                 HashMap::new(),
                 spec.enable_project_developer_prompt,
             )
             .await?;
         let empty_skill_registry = crate::skill::SkillRegistry::new();
+        let skill_registry = runtime.skill_registry.as_deref().unwrap_or(&empty_skill_registry);
         let system_prompt =
-            SystemPromptBuilder::from_material(&prompt_material, &turn_material, &empty_skill_registry).build();
+            SystemPromptBuilder::from_material(&prompt_material, &turn_material, skill_registry).build();
 
         let start_time = Instant::now();
         let (tx, mut rx) = mpsc::channel(100);

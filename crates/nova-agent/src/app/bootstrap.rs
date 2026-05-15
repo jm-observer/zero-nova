@@ -46,13 +46,8 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
         }
     };
     let skill_packages = convert_loaded_skills(loaded_skills);
-    let skill_registry = match SkillRegistry::from_packages(skill_packages) {
-        Ok(registry) => Arc::new(registry),
-        Err(err) => {
-            log::warn!("Failed to initialize skill registry: {}", err);
-            Arc::new(SkillRegistry::new())
-        }
-    };
+    let skill_registry =
+        Arc::new(SkillRegistry::from_packages(skill_packages).context("Failed to initialize skill registry")?);
 
     let mut env_snapshot = EnvironmentSnapshot::collect(&config.config_dir, None).await;
     let root_agent = config.primary_agent()?;
@@ -198,7 +193,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
     );
     let mut agent = AgentRuntime::new(client, tools, agent_config);
     agent.task_store = Some(task_store);
-    agent.skill_registry = Some(skill_registry);
+    agent.skill_registry = Some(skill_registry.clone());
 
     if config.gateway.side_channel.enabled {
         let side_channel = SideChannelConfig {
@@ -218,8 +213,12 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
 
     let conversation_service =
         ConversationService::new(agent, agent_registry.clone(), session_service.clone(), config.clone());
-    let workspace_service =
-        super::agent_workspace_service::AgentWorkspaceService::new(agent_registry, session_service, config_arc.clone());
+    let workspace_service = super::agent_workspace_service::AgentWorkspaceService::new(
+        agent_registry,
+        session_service,
+        config_arc.clone(),
+        skill_registry.clone(),
+    );
     // let voice_service = build_voice_service(&config);
 
     Ok(Arc::new(AgentApplicationImpl::new(

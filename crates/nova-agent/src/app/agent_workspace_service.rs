@@ -6,6 +6,7 @@ use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
 use crate::prompt::{PromptMaterial, SystemPromptBuilder};
+use crate::skill::SkillRegistry;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
@@ -20,14 +21,21 @@ pub struct AgentWorkspaceService {
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
     pub config: Arc<RwLock<AppConfig>>,
+    pub skill_registry: Arc<SkillRegistry>,
 }
 
 impl AgentWorkspaceService {
-    pub fn new(agent_registry: AgentRegistry, sessions: SessionService, config: Arc<RwLock<AppConfig>>) -> Self {
+    pub fn new(
+        agent_registry: AgentRegistry,
+        sessions: SessionService,
+        config: Arc<RwLock<AppConfig>>,
+        skill_registry: Arc<SkillRegistry>,
+    ) -> Self {
         Self {
             agent_registry,
             sessions,
             config,
+            skill_registry,
         }
     }
 
@@ -159,7 +167,7 @@ impl AgentWorkspaceService {
             tool_guidance: crate::prompt::ToolGuidanceMode::Compact,
         };
         let compiled_prompt =
-            SystemPromptBuilder::from_material(&prompt_material, &turn_material, &default_skill_registry()).build();
+            SystemPromptBuilder::from_material(&prompt_material, &turn_material, &self.skill_registry).build();
         let prompt_version = fingerprint_text(&compiled_prompt);
         let source_revision = source_revision(&reloaded_config).await;
         log::info!(
@@ -613,10 +621,6 @@ impl AgentWorkspaceService {
     }
 }
 
-fn default_skill_registry() -> crate::skill::SkillRegistry {
-    crate::skill::SkillRegistry::new()
-}
-
 fn fingerprint_text(value: &str) -> String {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
@@ -869,7 +873,8 @@ mod tests {
             llm_id: "cloud_gpt4o".to_string(),
             enable_project_developer_prompt: true,
         });
-        let service = AgentWorkspaceService::new(registry, sessions, config);
+        let service =
+            AgentWorkspaceService::new(registry, sessions, config, Arc::new(crate::skill::SkillRegistry::new()));
 
         let response = service
             .inspect_agent("developer", &session.id)

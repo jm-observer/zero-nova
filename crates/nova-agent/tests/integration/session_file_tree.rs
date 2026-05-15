@@ -3,7 +3,7 @@ use nova_agent::agent_catalog::AgentDescriptor;
 use nova_agent::app::agent_workspace_service::AgentWorkspaceService;
 use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
-use nova_agent::AgentRegistry;
+use nova_agent::{AgentRegistry, SkillRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +30,10 @@ fn build_config() -> Arc<RwLock<AppConfig>> {
     Arc::new(RwLock::new(AppConfig::new(PathBuf::from("."))))
 }
 
+fn empty_skill_registry() -> Arc<SkillRegistry> {
+    Arc::new(SkillRegistry::new())
+}
+
 #[tokio::test]
 async fn list_session_file_tree_returns_sorted_entries_for_root() -> Result<()> {
     let data = tempdir()?;
@@ -46,7 +50,7 @@ async fn list_session_file_tree_returns_sorted_entries_for_root() -> Result<()> 
         .create(Some("tree".to_string()), "agent-a".to_string(), String::new())
         .await?;
     sessions.set_project_dir(&session.id, project.path()).await?;
-    let service = AgentWorkspaceService::new(build_registry(), sessions, build_config());
+    let service = AgentWorkspaceService::new(build_registry(), sessions, build_config(), empty_skill_registry());
 
     let response = service.list_session_file_tree(&session.id, None).await?;
     let names = response.entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>();
@@ -67,7 +71,7 @@ async fn list_session_file_tree_rejects_outside_path() -> Result<()> {
         .create(Some("tree".to_string()), "agent-a".to_string(), String::new())
         .await?;
     sessions.set_project_dir(&session.id, project.path()).await?;
-    let service = AgentWorkspaceService::new(build_registry(), sessions, build_config());
+    let service = AgentWorkspaceService::new(build_registry(), sessions, build_config(), empty_skill_registry());
 
     let err = service
         .list_session_file_tree(&session.id, Some("../secret".to_string()))

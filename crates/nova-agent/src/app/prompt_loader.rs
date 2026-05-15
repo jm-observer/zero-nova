@@ -124,7 +124,18 @@ impl PromptMaterialLoader {
             return None;
         }
         let path = self.prompts_dir.join("workflow-stages.md");
-        let prompts = WorkflowStagePrompts::load_from_file_async(&path).await.ok()?;
+        let prompts = match WorkflowStagePrompts::load_from_file_async(&path).await {
+            Ok(prompts) => prompts,
+            Err(err) => {
+                log::warn!(
+                    "Failed to load workflow prompt stage '{}' from {:?}: {}",
+                    stage,
+                    path,
+                    err
+                );
+                return None;
+            }
+        };
         prompts.render(stage, vars)
     }
 }
@@ -241,6 +252,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_agent_prompt_errors_when_explicit_file_is_missing() {
+        let dir = tempdir().unwrap();
+        let loader = PromptMaterialLoader {
+            config_dir: dir.path().to_path_buf(),
+            prompts_dir: dir.path().join("prompts"),
+            project_context_file: None,
+            developer_prompt_files: vec![],
+        };
+        let mut spec = test_agent_spec();
+        spec.prompt_file = Some("missing.md".to_string());
+
+        let err = loader.load_agent_prompt(&spec).await.unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("Failed to read prompt_file for agent 'demo'"));
+        assert!(message.contains("missing.md"));
+    }
+
+    #[tokio::test]
     async fn load_turn_material_respects_flags_and_idle_workflow() {
         let dir = tempdir().unwrap();
         let project_dir = dir.path().join("project");
@@ -286,5 +315,34 @@ mod tests {
             .unwrap_or_default()
             .contains("### Source: AGENTS.md"));
         assert_eq!(enabled.active_skill.as_deref(), Some("skill-a"));
+    }
+
+    #[tokio::test]
+    async fn load_turn_material_loads_non_idle_workflow_stage() {
+        let dir = tempdir().unwrap();
+        let prompts_dir = dir.path().join("prompts");
+        tokio::fs::create_dir_all(&prompts_dir).await.unwrap();
+        tokio::fs::write(
+            prompts_dir.join("workflow-stages.md"),
+            "## review\n\n```md\nReview {{active_agent}} changes.\n```",
+        )
+        .await
+        .unwrap();
+
+        let loader = PromptMaterialLoader {
+            config_dir: dir.path().to_path_buf(),
+            prompts_dir,
+            project_context_file: None,
+            developer_prompt_files: vec![],
+        };
+        let mut vars = HashMap::new();
+        vars.insert("active_agent".to_string(), "Developer".to_string());
+
+        let material = loader
+            .load_turn_material(None, Some("review"), None, vars, false)
+            .await
+            .unwrap();
+
+        assert_eq!(material.workflow_prompt.as_deref(), Some("Review Developer changes."));
     }
 }

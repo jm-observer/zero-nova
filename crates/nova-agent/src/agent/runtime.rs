@@ -258,6 +258,13 @@ impl<C: LlmClient> AgentRuntime<C> {
         })
     }
 
+    /// 预解析本轮输入会激活的 skill id，供调用方在构建 system prompt 前注入 active skill 内容。
+    pub fn resolve_active_skill_id(&self, input: &str, current_history: &[Message]) -> Result<Option<String>> {
+        Ok(self
+            .decide_active_skill(input, current_history)?
+            .map(|active_skill| active_skill.skill_id))
+    }
+
     /// 运行 turn 并使用 `TurnContext`。
     ///
     /// 接收已经通过 `prepare_turn()` 准备好的上下文，
@@ -449,10 +456,13 @@ mod tests {
     use crate::prompt::TrimmerConfig;
     use crate::provider::types::{ProviderRequestContext, ToolDefinition};
     use crate::provider::{LlmClient, ModelConfig, StreamReceiver};
+    use crate::skill::{SkillPackage, SkillRegistry, ToolPolicy};
     use crate::tool::ToolRegistry;
     use anyhow::Result;
     use async_trait::async_trait;
     use std::collections::HashSet;
+    use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
 
     struct NoopClient;
@@ -546,5 +556,31 @@ mod tests {
         let output = runtime.compact_tool_output("Read", false, raw);
         assert!(output.contains("[Tool output compacted]"));
         assert!(std::str::from_utf8(output.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn resolve_active_skill_id_matches_input_before_prompt_build() {
+        let mut runtime = build_runtime(HashSet::new());
+        let mut registry = SkillRegistry::new();
+        registry
+            .extend_packages(vec![SkillPackage {
+                id: "demo".to_string(),
+                slug: "demo".to_string(),
+                display_name: "Demo".to_string(),
+                description: "demo skill".to_string(),
+                instructions: "demo instructions".to_string(),
+                tool_policy: ToolPolicy::InheritAll,
+                sticky: false,
+                aliases: vec!["d".to_string()],
+                examples: vec![],
+                source_path: PathBuf::from("demo"),
+                compat_mode: false,
+            }])
+            .unwrap();
+        runtime.skill_registry = Some(Arc::new(registry));
+
+        let active_skill = runtime.resolve_active_skill_id("/d run this", &[]).unwrap();
+
+        assert_eq!(active_skill.as_deref(), Some("demo"));
     }
 }

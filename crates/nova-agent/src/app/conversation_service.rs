@@ -317,12 +317,13 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         turn_vars.insert("workflow_stage".to_string(), "idle".to_string());
         turn_vars.insert("pending_interaction".to_string(), "none".to_string());
         turn_vars.insert("active_agent".to_string(), agent_descriptor.display_name.clone());
+        let active_skill_id = self.agent.resolve_active_skill_id(input, history_for_turn.as_ref())?;
 
         let turn_material = prompt_loader
             .load_turn_material(
                 project_dir.as_deref(),
                 Some("idle"),
-                None,
+                active_skill_id,
                 turn_vars,
                 agent_descriptor.enable_project_developer_prompt,
             )

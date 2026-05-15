@@ -8,14 +8,15 @@ use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    ProjectInstructionProfile, PromptMaterial, SkillInjectionMode, SystemPromptBuilder, ToolGuidanceMode,
+    ProjectInstructionProfile, PromptConstructionRequest, PromptExtraSections, SkillInjectionMode, SystemPromptBuilder,
+    ToolGuidanceMode,
 };
 use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use nova_protocol::observability::{TurnUsage, UsageCompleteness, UsageSource};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -44,6 +45,7 @@ pub trait TurnPromptMaterialLoader: Send + Sync {
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
+    #[allow(dead_code)]
     fn parse_project_instruction_profile(raw: &str) -> ProjectInstructionProfile {
         match raw {
             "analysis" => ProjectInstructionProfile::Analysis,
@@ -63,6 +65,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         }
     }
 
+    #[allow(dead_code)]
     fn parse_tool_guidance(raw: &str) -> ToolGuidanceMode {
         match raw {
             "full" => ToolGuidanceMode::Full,
@@ -350,38 +353,38 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         let mut env =
             crate::prompt::EnvironmentSnapshot::collect(&self.agent.config.config_dir, project_dir.as_deref()).await;
         env.model_id = Some(execution_binding.model_config.model.clone());
-        let mut turn_vars = HashMap::new();
-        turn_vars.insert("workflow_stage".to_string(), "idle".to_string());
-        turn_vars.insert("pending_interaction".to_string(), "none".to_string());
-        turn_vars.insert("active_agent".to_string(), agent_descriptor.display_name.clone());
+        let mut context_overrides = HashMap::new();
+        context_overrides.insert("workflow_stage".to_string(), "idle".to_string());
+        context_overrides.insert("pending_interaction".to_string(), "none".to_string());
+        context_overrides.insert("active_agent".to_string(), agent_descriptor.display_name.clone());
         let active_skill_id = self.agent.resolve_active_skill_id(input, history_for_turn.as_ref())?;
 
-        let turn_material = self
-            .turn_prompt_loader
-            .load_turn_material(
-                project_dir.as_deref(),
-                Some("idle"),
-                active_skill_id,
-                turn_vars,
-                agent_descriptor.enable_project_developer_prompt,
-            )
-            .await?;
-        if let Some(content) = &turn_material.developer_project_prompt {
-            let file_count = content.matches("### Source:").count();
-            log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
-        }
+        // 使用统一构建管道：构建 PromptConstructionRequest → build_from_request
+        let injection_mode = if compaction.enabled {
+            Self::parse_skill_injection(compaction.skill_injection.as_str())
+        } else {
+            SkillInjectionMode::Full
+        };
 
-        let prompt_material = PromptMaterial {
-            agent_id: agent_descriptor.id.clone(),
-            agent_prompt: system_prompt_base,
-            agent_catalog: None,
-            environment_snapshot: Some(env.clone()),
+        let prepared_tool_context = self
+            .agent
+            .prepare_turn(input, history_for_turn.clone(), String::new())
+            .await?;
+        let visible_tool_names: HashSet<String> = prepared_tool_context
+            .tool_definitions
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect();
+        let request = PromptConstructionRequest {
+            base_material_id: agent_descriptor.id.clone(),
+            base_prompt: system_prompt_base.clone(),
+            skill_id: active_skill_id.clone(),
+            injection_mode,
             initial_template_vars: agent_descriptor.initial_template_vars.clone(),
-            skill_injection_mode: if compaction.enabled {
-                Self::parse_skill_injection(compaction.skill_injection.as_str())
-            } else {
-                SkillInjectionMode::Full
-            },
+            context_overrides: context_overrides.clone(),
+            original_base_user_message: Some(input.to_string()),
+            tool_definitions: Arc::new(prepared_tool_context.tool_definitions.clone()),
+            visible_tool_names: Arc::new(visible_tool_names),
             project_instruction_profile: if compaction.enabled {
                 Self::parse_project_instruction_profile(compaction.project_instruction_profile.as_str())
             } else {
@@ -392,11 +395,42 @@ impl<C: LlmClient + 'static> ConversationService<C> {
             } else {
                 ToolGuidanceMode::Full
             },
+            agent_catalog: None,
         };
-        let empty_skill_registry = crate::skill::SkillRegistry::new();
-        let skill_registry = self.agent.skill_registry.as_deref().unwrap_or(&empty_skill_registry);
-        let system_prompt =
-            SystemPromptBuilder::from_material(&prompt_material, &turn_material, skill_registry).build();
+
+        // 额外 sections：保留旧的 turn_prompt_loader 调用以获取 developer/project/workflow sections
+        let turn_material = self
+            .turn_prompt_loader
+            .load_turn_material(
+                project_dir.as_deref(),
+                Some("idle"),
+                active_skill_id.clone(),
+                context_overrides,
+                agent_descriptor.enable_project_developer_prompt,
+            )
+            .await?;
+        if let Some(ref content) = turn_material.developer_project_prompt {
+            let file_count = content.matches("### Source:").count();
+            log::info!("Loaded developer project prompt for turn: {} files matched", file_count);
+        }
+
+        let extra_sections = PromptExtraSections {
+            system_prompt_base: Some(system_prompt_base),
+            developer_project_prompt: turn_material.developer_project_prompt,
+            project_context: turn_material.project_context,
+            workflow_prompt: turn_material.workflow_prompt,
+            environment_snapshot: Some(env.clone()),
+        };
+
+        let fallback_skill_registry = crate::skill::SkillRegistry::new();
+        let skill_registry = self.agent.skill_registry.as_deref().unwrap_or(&fallback_skill_registry);
+        let name_overrides: HashMap<String, String> = HashMap::new();
+        let system_prompt = SystemPromptBuilder::default().build_from_request(
+            &request,
+            &name_overrides,
+            skill_registry,
+            extra_sections,
+        );
         let turn_ctx = self.agent.prepare_turn(input, history_for_turn, system_prompt).await?;
 
         // Phase C: Capture snapshot

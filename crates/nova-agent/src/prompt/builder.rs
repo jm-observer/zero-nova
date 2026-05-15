@@ -2,12 +2,14 @@ use crate::config::AgentSpec;
 use crate::prompt::context::EnvironmentSnapshot;
 use crate::prompt::templates::{TemplateContext, BEHAVIOR_GUARDS};
 use crate::prompt::types::{
-    AgentCatalogEntry, NamedSection, ProjectInstructionProfile, PromptMaterial, PromptPriority, PromptSectionSize,
-    SectionName, SkillInjectionMode, ToolGuidanceMode, ToolSize, TurnPromptMaterial,
+    AgentCatalogEntry, NamedSection, ProjectInstructionProfile, PromptConstructionRequest, PromptExtraSections,
+    PromptMaterial, PromptPriority, PromptSectionSize, SectionName, SkillInjectionMode, ToolGuidanceMode, ToolSize,
+    TurnPromptMaterial,
 };
 use crate::provider::types::ToolDefinition;
 use crate::skill::SkillRegistry;
 use crate::tool::ToolRegistry;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct SystemPromptBuilder {
@@ -152,7 +154,12 @@ impl SystemPromptBuilder {
         self.add_section(SectionName::Environment, env.to_prompt_text(), PromptPriority::High)
     }
 
-    fn with_tool_definitions_internal(mut self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
+    fn with_tool_definitions_internal(
+        mut self,
+        definitions: &[ToolDefinition],
+        visible_tool_names: &std::collections::HashSet<String>,
+        mode: ToolGuidanceMode,
+    ) -> Self {
         let mut tool_desc = String::new();
         for def in definitions {
             match mode {
@@ -165,9 +172,7 @@ impl SystemPromptBuilder {
             }
         }
 
-        let tool_info_visible = definitions
-            .iter()
-            .any(|definition| definition.name == crate::tool::builtin::tool_info::TOOL_NAME);
+        let tool_info_visible = visible_tool_names.contains(crate::tool::builtin::tool_info::TOOL_NAME);
         if !definitions.is_empty() && tool_info_visible {
             tool_desc.push_str("---\n\n**Tool parameter lookup**: If you need exact parameters, field types, required/default/enum values, or nested object structures, call the `ToolInfo` tool first. Do not guess tool parameters based on experience.\n\n");
         }
@@ -221,7 +226,9 @@ impl SystemPromptBuilder {
     }
 
     pub fn with_tool_definitions(self, definitions: &[ToolDefinition], mode: ToolGuidanceMode) -> Self {
-        self.with_tool_definitions_internal(definitions, mode)
+        let visible_tool_names: std::collections::HashSet<String> =
+            definitions.iter().map(|definition| definition.name.clone()).collect();
+        self.with_tool_definitions_internal(definitions, &visible_tool_names, mode)
     }
 
     pub fn size_report(&self, large_section_chars: usize) -> Vec<PromptSectionSize> {
@@ -314,6 +321,107 @@ impl SystemPromptBuilder {
         }
 
         builder
+    }
+
+    /// 根据构造请求构建 prompt（统一的主入口）。
+    ///
+    /// 这是所有 Agent（包括主 Agent 和子 Agent）构建 system prompt 的统一方式。
+    /// 取代之前的"双轨制"实现。
+    ///
+    /// 额外参数用于包含 turn-specific sections（developer_project_prompt, project_context,
+    /// workflow_prompt, environment_snapshot）。如果 `build_from_request` 的未来版本需要
+    /// 这些字段，可以将它们移动到 `PromptConstructionRequest` 中。
+    pub fn build_from_request(
+        &self,
+        request: &PromptConstructionRequest,
+        name_overrides: &HashMap<String, String>,
+        skill_registry: &SkillRegistry,
+        extra_sections: PromptExtraSections,
+    ) -> String {
+        let mut builder = Self::new();
+
+        // 1. Base section — 构建基础 prompt（合并 template vars）
+        let mut template_vars = request.initial_template_vars.clone();
+        template_vars.extend(request.context_overrides.clone());
+
+        // 优先使用 extra_sections 中的 system_prompt_base，否则使用请求自带的 base prompt。
+        let base_prompt = if let Some(ref base) = extra_sections.system_prompt_base {
+            if !base.is_empty() {
+                base.clone()
+            } else if !request.base_prompt.is_empty() {
+                request.base_prompt.clone()
+            } else if let Some(name) = name_overrides.get(&request.base_material_id) {
+                name.clone()
+            } else {
+                format!("Agent task: {}", request.base_material_id)
+            }
+        } else if !request.base_prompt.is_empty() {
+            request.base_prompt.clone()
+        } else if let Some(name) = name_overrides.get(&request.base_material_id) {
+            name.clone()
+        } else {
+            format!("Agent task: {}", request.base_material_id)
+        };
+
+        let rendered_prompt = if template_vars.is_empty() {
+            base_prompt.clone()
+        } else {
+            TemplateContext::render(&base_prompt, &template_vars)
+        };
+        if !rendered_prompt.is_empty() {
+            builder = builder.base_section(&rendered_prompt);
+        }
+
+        // 2. Behavior guards
+        builder = builder.behavior_guards_section();
+
+        // 3. Skill section — 根据 injection_mode 注入技能
+        let skill_prompt = match request.injection_mode {
+            SkillInjectionMode::Catalog => skill_registry.generate_catalog_prompt(),
+            SkillInjectionMode::ActiveFull => skill_registry.generate_contextual_prompt(request.skill_id.as_deref()),
+            SkillInjectionMode::Full => skill_registry.generate_full_prompt(),
+        };
+        if !skill_prompt.is_empty() {
+            builder = builder.skill_section(&skill_prompt);
+        }
+
+        // 4. 额外 sections（来自 TurnPromptMaterial / PromptMaterial）
+        if let Some(ref content) = extra_sections.developer_project_prompt {
+            builder = builder.developer_project_prompt_section(filter_project_instruction_by_profile(
+                content,
+                request.project_instruction_profile,
+            ));
+        }
+
+        if let Some(ref content) = extra_sections.project_context {
+            builder = builder.project_context_section(content);
+        }
+
+        if let Some(ref env) = extra_sections.environment_snapshot {
+            builder = builder.environment_snapshot(env);
+        }
+
+        if let Some(ref catalog) = request.agent_catalog {
+            if !catalog.is_empty() {
+                builder = builder.agent_catalog_section(catalog);
+            }
+        }
+
+        if let Some(ref content) = extra_sections.workflow_prompt {
+            if !content.is_empty() {
+                builder = builder.workflow_section(content);
+            }
+        }
+
+        // 5. Tool guidance section
+        builder = builder.with_tool_definitions_internal(
+            &request.tool_definitions,
+            request.visible_tool_names.as_ref(),
+            request.tool_guidance,
+        );
+
+        // 6. Build and return
+        builder.build()
     }
 
     pub fn build(&self) -> String {
@@ -572,5 +680,84 @@ mod tests {
         assert!(output.contains("## Available Skills"));
         assert!(output.contains("context"));
         assert!(output.contains("workflow"));
+    }
+
+    #[test]
+    fn build_from_request_matches_from_material_semantics() {
+        let mut skills = SkillRegistry::new();
+        skills.packages.push(SkillPackage {
+            id: "skill-a".to_string(),
+            slug: "skill-a".to_string(),
+            display_name: "Skill A".to_string(),
+            description: "desc".to_string(),
+            instructions: "instruction".to_string(),
+            tool_policy: ToolPolicy::InheritAll,
+            sticky: false,
+            aliases: vec![],
+            examples: vec![],
+            source_path: PathBuf::from("skill-a"),
+            compat_mode: false,
+        });
+
+        let mut initial_vars = HashMap::new();
+        initial_vars.insert("name".to_string(), "base".to_string());
+        initial_vars.insert("override".to_string(), "from_base".to_string());
+
+        let mut turn_vars = HashMap::new();
+        turn_vars.insert("override".to_string(), "from_turn".to_string());
+
+        let tool_definitions = vec![ToolDefinition {
+            name: "ToolInfo".to_string(),
+            description: "lookup".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }];
+        let visible_tool_names = std::collections::HashSet::from(["ToolInfo".to_string()]);
+
+        let material = PromptMaterial {
+            agent_id: "agent-a".to_string(),
+            agent_prompt: "Hello {{name}} {{override}}".to_string(),
+            agent_catalog: Some("catalog".to_string()),
+            environment_snapshot: None,
+            initial_template_vars: initial_vars.clone(),
+            skill_injection_mode: SkillInjectionMode::Catalog,
+            project_instruction_profile: ProjectInstructionProfile::Code,
+            tool_guidance: ToolGuidanceMode::Compact,
+        };
+        let turn_material = TurnPromptMaterial {
+            developer_project_prompt: Some("## 基本行为\nA\n## 计划与设计文档\nB".to_string()),
+            project_context: Some("context".to_string()),
+            workflow_prompt: Some("workflow".to_string()),
+            turn_template_vars: turn_vars.clone(),
+            active_skill: None,
+        };
+        let extra_sections = PromptExtraSections {
+            system_prompt_base: None,
+            developer_project_prompt: turn_material.developer_project_prompt.clone(),
+            project_context: turn_material.project_context.clone(),
+            workflow_prompt: turn_material.workflow_prompt.clone(),
+            environment_snapshot: material.environment_snapshot.clone(),
+        };
+        let request = PromptConstructionRequest {
+            base_material_id: material.agent_id.clone(),
+            base_prompt: material.agent_prompt.clone(),
+            skill_id: None,
+            injection_mode: material.skill_injection_mode,
+            initial_template_vars: material.initial_template_vars.clone(),
+            context_overrides: turn_material.turn_template_vars.clone(),
+            original_base_user_message: None,
+            tool_definitions: std::sync::Arc::new(tool_definitions),
+            visible_tool_names: std::sync::Arc::new(visible_tool_names),
+            project_instruction_profile: material.project_instruction_profile,
+            tool_guidance: material.tool_guidance,
+            agent_catalog: material.agent_catalog.clone(),
+        };
+
+        let from_material_output = SystemPromptBuilder::from_material(&material, &turn_material, &skills)
+            .with_tool_definitions(request.tool_definitions.as_ref(), material.tool_guidance)
+            .build();
+        let from_request_output =
+            SystemPromptBuilder::default().build_from_request(&request, &HashMap::new(), &skills, extra_sections);
+
+        assert_eq!(from_request_output, from_material_output);
     }
 }

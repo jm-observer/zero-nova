@@ -239,6 +239,7 @@ pub fn build_request(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::build_request;
     use crate::provider::ModelConfig;

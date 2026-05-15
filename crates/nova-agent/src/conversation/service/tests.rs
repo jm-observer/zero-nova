@@ -883,7 +883,7 @@ async fn load_session_index_only_loads_metadata_until_history_requested() -> Res
         .ensure_session_history_loaded(&session.id)
         .await?
         .expect("session should load history");
-    assert!(loaded.history.read().await.len() >= 1);
+    assert!(!loaded.history.read().await.is_empty());
     Ok(())
 }
 
@@ -926,8 +926,8 @@ async fn ensure_session_history_loaded_deduplicates_concurrent_cold_loads() -> R
     let loaded_a = a.await??.expect("session should load");
     let loaded_b = b.await??.expect("session should load");
 
-    assert!(loaded_a.history.read().await.len() >= 1);
-    assert!(loaded_b.history.read().await.len() >= 1);
+    assert!(!loaded_a.history.read().await.is_empty());
+    assert!(!loaded_b.history.read().await.is_empty());
     assert!(rebuilt_service.cache.is_history_loaded(&session.id).await);
     Ok(())
 }

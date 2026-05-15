@@ -231,6 +231,83 @@ impl ActiveSkillState {
 }
 
 // ---------------------------------------------------------------------------
+//  PromptExtraSections — 传递给 build_from_request 的额外 sections
+// ---------------------------------------------------------------------------
+
+/// 传递给 `SystemPromptBuilder::build_from_request()` 的可选额外 sections。
+///
+/// 这些 section 来自 `TurnPromptMaterial`，在子 Agent 场景中可能不包含
+/// （因为主 Agent 已经注入了相关的上下文）。
+#[derive(Debug, Clone, Default)]
+pub struct PromptExtraSections {
+    /// System prompt base（用于构造 base section 的内容）
+    pub system_prompt_base: Option<String>,
+    /// Developer project prompt（来自 TurnPromptMaterial）
+    pub developer_project_prompt: Option<String>,
+    /// Project context（来自 TurnPromptMaterial）
+    pub project_context: Option<String>,
+    /// Workflow prompt（来自 TurnPromptMaterial）
+    pub workflow_prompt: Option<String>,
+    /// Environment snapshot（来自 PromptMaterial）
+    pub environment_snapshot: Option<super::context::EnvironmentSnapshot>,
+}
+
+// ---------------------------------------------------------------------------
+//  PromptConstructionRequest — Plan 2 (统一构建指令)
+// ---------------------------------------------------------------------------
+
+/// 用于统一构建主 Agent 和子 Agent prompt 的请求对象。
+///
+/// 取代之前的"双轨制" — 主 Agent 和子 Agent 现在通过同一个
+/// `SystemPromptBuilder::build_from_request()` 方法构建 prompt。
+#[derive(Debug, Clone)]
+pub struct PromptConstructionRequest {
+    /// 基础 prompt 材料的标识符（对应 AgentSpec.prompt_file 或实际内容）
+    pub base_material_id: String,
+    /// 基础 prompt 模板原文
+    pub base_prompt: String,
+    /// 要注入的 skill ID（可选）
+    pub skill_id: Option<String>,
+    /// skill 注入模式
+    pub injection_mode: SkillInjectionMode,
+    /// 初始模板变量（来自 agent descriptor / prompt material）
+    pub initial_template_vars: HashMap<String, String>,
+    /// 上下文变量覆盖（会覆盖 initial_template_vars）
+    pub context_overrides: HashMap<String, String>,
+    /// 原始基础用户消息（用于生成 system prompt）
+    pub original_base_user_message: Option<String>,
+    /// 工具定义（可能由 skill 覆盖）
+    pub tool_definitions: Arc<Vec<ToolDefinition>>,
+    /// 可见工具名称（用于 ToolInfo 可见性过滤）
+    pub visible_tool_names: Arc<HashSet<String>>,
+    /// 项目指令裁剪策略
+    pub project_instruction_profile: ProjectInstructionProfile,
+    /// 工具说明展示策略
+    pub tool_guidance: ToolGuidanceMode,
+    /// Agent catalog 内容
+    pub agent_catalog: Option<String>,
+}
+
+impl Default for PromptConstructionRequest {
+    fn default() -> Self {
+        Self {
+            base_material_id: String::new(),
+            base_prompt: String::new(),
+            skill_id: None,
+            injection_mode: SkillInjectionMode::Catalog,
+            initial_template_vars: HashMap::new(),
+            context_overrides: HashMap::new(),
+            original_base_user_message: None,
+            tool_definitions: Arc::new(Vec::new()),
+            visible_tool_names: Arc::new(HashSet::new()),
+            project_instruction_profile: ProjectInstructionProfile::Auto,
+            tool_guidance: ToolGuidanceMode::Compact,
+            agent_catalog: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  Agent Catalog Entry — Plan 1
 // ---------------------------------------------------------------------------
 

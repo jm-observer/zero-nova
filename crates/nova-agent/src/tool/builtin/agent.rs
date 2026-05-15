@@ -2,14 +2,16 @@ use crate::agent::AgentRuntime;
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
-use crate::prompt::{template_vars, SystemPromptBuilder};
+use crate::prompt::{
+    template_vars, PromptConstructionRequest, PromptExtraSections, SkillInjectionMode, SystemPromptBuilder,
+};
 use crate::provider::openai_compat::OpenAiCompatClient;
-use crate::provider::ModelConfig;
+use crate::provider::{types::ToolDefinition, ModelConfig};
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -22,8 +24,22 @@ pub struct AgentTool {
     config_store: Arc<RwLock<AppConfig>>,
     agent_types: HashMap<String, AgentSpec>,
     primary_agent_type: String,
+    #[allow(dead_code)]
     prompt_loader: Arc<dyn AgentPromptLoader>,
     subagent_runtime_factory: Arc<dyn SubagentRuntimeFactory>,
+}
+
+struct PromptRequestInputs {
+    base_prompt: String,
+    prompt: String,
+    active_skill_id: Option<String>,
+    initial_template_vars: HashMap<String, String>,
+    context_overrides: HashMap<String, String>,
+    tool_definitions: Vec<ToolDefinition>,
+    visible_tool_names: HashSet<String>,
+    project_instruction_profile: crate::prompt::ProjectInstructionProfile,
+    tool_guidance: crate::prompt::ToolGuidanceMode,
+    agent_catalog: Option<String>,
 }
 
 #[async_trait]
@@ -155,6 +171,60 @@ impl AgentTool {
             .unwrap_or_else(|| "nova".to_string())
     }
 
+    /// 构建 PromptConstructionRequest（统一构建指令）。
+    ///
+    /// 这是新的 prompt 构建入口，取代之前的"双轨制"实现。
+    /// AgentTool 不再需要手动拼接字符串，而是传递构建指令给 SystemPromptBuilder。
+    fn build_request_from_params(
+        &self,
+        spec: &AgentSpec,
+        inputs: PromptRequestInputs,
+        primary_tool_def: Option<&RegisteredToolDefinition>,
+    ) -> PromptConstructionRequest {
+        self.build_request_from_params_internal(spec, inputs, primary_tool_def)
+    }
+
+    /// 内部实现：构造 PromptConstructionRequest。
+    fn build_request_from_params_internal(
+        &self,
+        spec: &AgentSpec,
+        inputs: PromptRequestInputs,
+        primary_tool_def: Option<&RegisteredToolDefinition>,
+    ) -> PromptConstructionRequest {
+        // 构造基础指令
+        let base_material_id = if let Some(ref pf) = spec.prompt_file {
+            pf.clone()
+        } else {
+            format!("agent-{}", spec.id)
+        };
+
+        PromptConstructionRequest {
+            base_material_id,
+            base_prompt: inputs.base_prompt,
+            skill_id: inputs.active_skill_id,
+            injection_mode: crate::prompt::SkillInjectionMode::Catalog,
+            initial_template_vars: inputs.initial_template_vars,
+            context_overrides: inputs.context_overrides,
+            original_base_user_message: Some(inputs.prompt),
+            tool_definitions: Arc::new(if inputs.tool_definitions.is_empty() {
+                primary_tool_def
+                    .into_iter()
+                    .map(|def| ToolDefinition {
+                        name: def.name.clone(),
+                        description: def.description.clone(),
+                        input_schema: def.input_schema.clone(),
+                    })
+                    .collect()
+            } else {
+                inputs.tool_definitions
+            }),
+            visible_tool_names: Arc::new(inputs.visible_tool_names),
+            project_instruction_profile: inputs.project_instruction_profile,
+            tool_guidance: inputs.tool_guidance,
+            agent_catalog: inputs.agent_catalog,
+        }
+    }
+
     fn resolve_agent_spec<'a>(&'a self, requested_type: Option<&str>) -> Result<(&'a AgentSpec, Vec<String>)> {
         let requested_type = requested_type.map(str::trim).filter(|value| !value.is_empty());
         if let Some(agent_type) = requested_type {
@@ -185,6 +255,8 @@ impl AgentTool {
         prompt: &str,
         subagent_type: Option<&str>,
         model_override: Option<&str>,
+        skill_id: Option<String>,
+        injection_mode: crate::prompt::SkillInjectionMode,
         context: Option<ToolContext>,
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
@@ -231,7 +303,10 @@ impl AgentTool {
             .prompt_loader
             .load_agent_material(spec, Some(environment.clone()), prompt_template_vars.clone())
             .await?;
-        let active_skill_id = runtime.resolve_active_skill_id(prompt, &[])?;
+
+        // 使用新的统一构建管道：构建 PromptConstructionRequest → build_from_request
+        // 优先使用传入的 skill_id，否则从输入中解析
+        let resolved_skill_id = skill_id.or_else(|| runtime.resolve_active_skill_id(prompt, &[]).ok().flatten());
         let workflow_stage = prompt_template_vars
             .get(template_vars::WORKFLOW_STAGE)
             .map(String::as_str);
@@ -240,15 +315,54 @@ impl AgentTool {
             .load_turn_material(
                 project_dir.as_deref(),
                 workflow_stage,
-                active_skill_id,
+                resolved_skill_id.clone(),
                 prompt_template_vars.clone(),
                 spec.enable_project_developer_prompt,
             )
             .await?;
-        let empty_skill_registry = crate::skill::SkillRegistry::new();
-        let skill_registry = runtime.skill_registry.as_deref().unwrap_or(&empty_skill_registry);
-        let system_prompt =
-            SystemPromptBuilder::from_material(&prompt_material, &turn_material, skill_registry).build();
+        let tool_definitions = runtime.tools().tool_definitions_async().await;
+        let visible_tool_names: HashSet<String> = tool_definitions.iter().map(|tool| tool.name.clone()).collect();
+
+        let request = self.build_request_from_params(
+            spec,
+            PromptRequestInputs {
+                base_prompt: prompt_material.agent_prompt.clone(),
+                prompt: prompt.to_string(),
+                active_skill_id: resolved_skill_id.clone(),
+                initial_template_vars: prompt_material.initial_template_vars.clone(),
+                context_overrides: prompt_template_vars.clone(),
+                tool_definitions,
+                visible_tool_names,
+                project_instruction_profile: prompt_material.project_instruction_profile,
+                tool_guidance: prompt_material.tool_guidance,
+                agent_catalog: prompt_material.agent_catalog.clone(),
+            },
+            None,
+        );
+
+        // 更新 request 中的 skill_id 和 injection_mode
+        let final_request = PromptConstructionRequest {
+            skill_id: resolved_skill_id,
+            injection_mode,
+            ..request
+        };
+
+        let name_overrides: HashMap<String, String> = HashMap::new();
+        let extra_sections = PromptExtraSections {
+            system_prompt_base: None,
+            developer_project_prompt: turn_material.developer_project_prompt,
+            project_context: turn_material.project_context,
+            workflow_prompt: turn_material.workflow_prompt,
+            environment_snapshot: prompt_material.environment_snapshot.clone(),
+        };
+        let fallback_skill_registry = crate::skill::SkillRegistry::new();
+        let skill_registry = runtime.skill_registry.as_deref().unwrap_or(&fallback_skill_registry);
+        let system_prompt = SystemPromptBuilder::default().build_from_request(
+            &final_request,
+            &name_overrides,
+            skill_registry,
+            extra_sections,
+        );
 
         let start_time = Instant::now();
         let (tx, mut rx) = mpsc::channel(100);
@@ -396,6 +510,16 @@ impl Tool for AgentTool {
                         "type": "string",
                         "description": "ID of the execution stage this agent belongs to. Required in orchestration mode."
                     },
+                    "skill_id": {
+                        "type": "string",
+                        "description": "Optional skill ID to inject into the sub-agent's system prompt. If specified, the agent will start with this skill active."
+                    },
+                    "injection_mode": {
+                        "type": "string",
+                        "enum": ["catalog", "active_full", "full"],
+                        "default": "catalog",
+                        "description": "Skill injection mode for the sub-agent. Controls how skill instructions are included in the system prompt."
+                    },
                     "output_format": {
                         "type": "string",
                         "enum": ["full", "summary"],
@@ -440,6 +564,16 @@ impl Tool for AgentTool {
             let plan_id = input["parent_plan_id"].as_str().unwrap_or("unknown-plan").to_string();
             let stage_id = input["stage_id"].as_str().unwrap_or("unknown-stage").to_string();
             let output_format = input["output_format"].as_str().unwrap_or("full").to_string();
+            let skill_id = input["skill_id"].as_str().map(ToString::to_string);
+            let injection_mode: SkillInjectionMode = input["injection_mode"]
+                .as_str()
+                .and_then(|s| match s {
+                    "catalog" => Some(SkillInjectionMode::Catalog),
+                    "active_full" => Some(SkillInjectionMode::ActiveFull),
+                    "full" => Some(SkillInjectionMode::Full),
+                    _ => None,
+                })
+                .unwrap_or(SkillInjectionMode::Catalog);
             let this = self.clone();
             let response_agent_id = agent_id.clone();
             let response_stage_id = stage_id.clone();
@@ -466,6 +600,8 @@ impl Tool for AgentTool {
                         &prompt_owned,
                         selected_agent_type_owned.as_deref(),
                         model_override_owned.as_deref(),
+                        skill_id,
+                        injection_mode,
                         Some(ctx),
                     )
                     .await;
@@ -510,8 +646,27 @@ impl Tool for AgentTool {
             });
         }
 
+        // 解析前台调用传入的 skill 参数
+        let skill_id = input["skill_id"].as_str().map(ToString::to_string);
+        let injection_mode: SkillInjectionMode = input["injection_mode"]
+            .as_str()
+            .and_then(|s| match s {
+                "catalog" => Some(SkillInjectionMode::Catalog),
+                "active_full" => Some(SkillInjectionMode::ActiveFull),
+                "full" => Some(SkillInjectionMode::Full),
+                _ => None,
+            })
+            .unwrap_or(SkillInjectionMode::Catalog);
+
         let (final_assistant_msg, duration_ms, run_warnings) = self
-            .run_subagent(prompt, selected_agent_type, model_override, context.clone())
+            .run_subagent(
+                prompt,
+                selected_agent_type,
+                model_override,
+                skill_id,
+                injection_mode,
+                context.clone(),
+            )
             .await?;
         warnings.extend(run_warnings);
 
@@ -532,9 +687,12 @@ impl Tool for AgentTool {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentTool;
+    use super::{AgentTool, PromptRequestInputs};
     use crate::config::{AgentSpec, AppConfig, ConfiguredAgentModel, GatewayConfig};
+    use crate::prompt::{ProjectInstructionProfile, ToolGuidanceMode};
+    use crate::provider::types::ToolDefinition;
     use serde_json::json;
+    use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
     fn build_tool() -> AgentTool {
@@ -625,5 +783,49 @@ mod tests {
             "subagent_type": "developer"
         });
         assert_eq!(AgentTool::selected_agent_type(&input), Some("developer"));
+    }
+
+    #[test]
+    fn build_request_from_params_preserves_prompt_and_guidance_inputs() {
+        let tool = build_tool();
+        let spec = tool.agent_types.get("developer").unwrap();
+        let mut initial_template_vars = HashMap::new();
+        initial_template_vars.insert("base".to_string(), "value".to_string());
+        let mut context_overrides = HashMap::new();
+        context_overrides.insert("active_agent".to_string(), "Developer".to_string());
+        let tool_definitions = vec![ToolDefinition {
+            name: "ToolInfo".to_string(),
+            description: "lookup tool".to_string(),
+            input_schema: json!({"type": "object"}),
+        }];
+        let visible_tool_names = HashSet::from(["ToolInfo".to_string()]);
+
+        let request = tool.build_request_from_params(
+            spec,
+            PromptRequestInputs {
+                base_prompt: "base prompt".to_string(),
+                prompt: "user prompt".to_string(),
+                active_skill_id: Some("skill-a".to_string()),
+                initial_template_vars: initial_template_vars.clone(),
+                context_overrides: context_overrides.clone(),
+                tool_definitions: tool_definitions.clone(),
+                visible_tool_names: visible_tool_names.clone(),
+                project_instruction_profile: ProjectInstructionProfile::Code,
+                tool_guidance: ToolGuidanceMode::Compact,
+                agent_catalog: Some("catalog".to_string()),
+            },
+            None,
+        );
+
+        assert_eq!(request.base_prompt, "base prompt");
+        assert_eq!(request.initial_template_vars, initial_template_vars);
+        assert_eq!(request.context_overrides, context_overrides);
+        assert_eq!(request.project_instruction_profile, ProjectInstructionProfile::Code);
+        assert_eq!(request.tool_guidance, ToolGuidanceMode::Compact);
+        assert_eq!(request.agent_catalog.as_deref(), Some("catalog"));
+        assert_eq!(request.tool_definitions.len(), tool_definitions.len());
+        assert_eq!(request.tool_definitions[0].name, tool_definitions[0].name);
+        assert_eq!(request.tool_definitions[0].description, tool_definitions[0].description);
+        assert_eq!(request.visible_tool_names.as_ref(), &visible_tool_names);
     }
 }

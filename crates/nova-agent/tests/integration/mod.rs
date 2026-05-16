@@ -8,3 +8,4 @@ pub mod session_project_lineage;
 pub mod tool_read;
 pub mod loop_guard_e2e;
 pub mod context_headers;
+pub mod orchestration;

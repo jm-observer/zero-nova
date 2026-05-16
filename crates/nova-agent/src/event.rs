@@ -57,6 +57,8 @@ pub enum AgentEvent {
     },
     /// A background task was completed.
     BackgroundTaskComplete { id: String, name: String },
+    /// Orchestration progress event (typed, replaces string-based SystemLog for orchestration).
+    OrchestrationProgress { kind: String, payload: serde_json::Value },
     /// A skill was loaded.
     SkillLoaded { skill_name: String },
     /// Skill was activated during a turn.

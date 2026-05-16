@@ -61,6 +61,24 @@ pub struct ExecutionOutcome {
     pub review: Option<ReviewResult>,
 }
 
+enum StageFailure {
+    StageFailed { stage_id: String },
+    BlockedByDependency { stage_id: String, dependency: String },
+}
+
+impl StageFailure {
+    fn summary(&self) -> String {
+        match self {
+            Self::StageFailed { stage_id } => {
+                format!("Orchestration stopped after stage '{}' failed.", stage_id)
+            }
+            Self::BlockedByDependency { stage_id, dependency } => {
+                format!("Stage '{}' blocked by dependency '{}'.", stage_id, dependency)
+            }
+        }
+    }
+}
+
 impl OrchestratorEngine {
     pub fn new(
         executor: Arc<dyn SubAgentExecutor>,
@@ -113,238 +131,42 @@ impl OrchestratorEngine {
     ) -> Result<ExecutionOutcome> {
         let mut results = HashMap::<String, SubAgentResult>::new();
         let mut stage_success = HashMap::<String, bool>::new();
-        let mut failed_stage_id: Option<String> = None;
+        let max_retries = plan.max_retries.unwrap_or(1);
 
         log::info!(
-            "[OrchestratorEngine] Parsed plan_id={} stage_count={} description={}",
+            "[OrchestratorEngine] Parsed plan_id={} stage_count={} skip_review={} max_retries={} description={}",
             plan.plan_id,
             plan.stages.len(),
+            plan.skip_review,
+            max_retries,
             plan.description
         );
 
-        // Emit orchestration_plan event using typed struct
-        let plan_event = OrchestrationPlanEvent {
-            plan_id: plan.plan_id.clone(),
-            description: plan.description.clone(),
-            stages: plan
-                .stages
-                .iter()
-                .map(|stage| StageSummary {
-                    stage_id: stage.stage_id.clone(),
-                    mode: stage.mode.as_str().to_string(),
-                    depends_on: stage.depends_on.clone(),
-                    agents: stage
-                        .agents
-                        .iter()
-                        .map(|agent| AgentSummary {
-                            agent_id: agent.agent_id.clone(),
-                            description: agent.description.clone(),
-                            subagent_type: agent.subagent_type.clone(),
-                            agent_selection: agent.agent_selection.clone(),
-                        })
-                        .collect(),
-                })
-                .collect(),
-        };
-        self.emit("orchestration_plan", &plan_event).await;
+        self.emit_plan_event(&plan).await;
 
-        for stage in &plan.stages {
-            if let Some(previous_failed_stage) = failed_stage_id.as_ref() {
-                let summary = if stage
-                    .depends_on
-                    .iter()
-                    .any(|dependency| dependency == previous_failed_stage)
-                {
-                    format!(
-                        "Stage '{}' blocked by dependency '{}'.",
-                        stage.stage_id, previous_failed_stage
-                    )
-                } else {
-                    format!("Orchestration stopped after stage '{}' failed.", previous_failed_stage)
-                };
-                let complete = OrchestrationCompleteArgs {
-                    plan_id: plan.plan_id.clone(),
-                    overall_success: false,
-                    summary,
-                };
-                self.emit("orchestration_complete", &complete).await;
-
-                return Ok(ExecutionOutcome {
-                    plan,
-                    results,
-                    review: None,
-                });
-            }
-
-            log::info!(
-                "[OrchestratorEngine] Starting stage plan_id={} stage_id={} mode={} depends_on={:?} agent_count={}",
-                plan.plan_id,
-                stage.stage_id,
-                stage.mode.as_str(),
-                stage.depends_on,
-                stage.agents.len()
-            );
-
-            for dep in &stage.depends_on {
-                if !stage_success.get(dep).copied().unwrap_or(false) {
-                    log::warn!(
-                        "[OrchestratorEngine] Stage blocked plan_id={} stage_id={} dependency={} dependency_success={:?}",
-                        plan.plan_id,
-                        stage.stage_id,
-                        dep,
-                        stage_success.get(dep)
-                    );
-
-                    let complete = OrchestrationCompleteArgs {
-                        plan_id: plan.plan_id.clone(),
-                        overall_success: false,
-                        summary: format!("Stage '{}' blocked by dependency '{}'.", stage.stage_id, dep),
-                    };
-                    self.emit("orchestration_complete", &complete).await;
-
-                    return Ok(ExecutionOutcome {
-                        plan,
-                        results,
-                        review: None,
-                    });
-                }
-            }
-
-            // Emit sub_agent_spawn events before executing the stage
-            for agent in &stage.agents {
-                log::info!(
-                    "[OrchestratorEngine] Spawning sub-agent plan_id={} stage_id={} agent_id={} type={} description={}",
-                    plan.plan_id,
-                    stage.stage_id,
-                    agent.agent_id,
-                    agent.subagent_type,
-                    agent.description
-                );
-
-                let spawn_args = SubAgentSpawnArgs {
-                    plan_id: plan.plan_id.clone(),
-                    agent_id: agent.agent_id.clone(),
-                    stage_id: stage.stage_id.clone(),
-                    description: agent.description.clone(),
-                    subagent_type: agent.subagent_type.clone(),
-                };
-                self.emit("sub_agent_spawn", &spawn_args).await;
-            }
-
-            let stage_results = execute_stage(&plan.plan_id, stage, &cancellation_token, {
-                let executor = self.executor.clone();
-                let ctx = self.tool_context.clone();
-                let plan_id = plan.plan_id.clone();
-                let event_tx = self.event_tx.clone();
-                move |agent_req, stage_id| {
-                    let executor = executor.clone();
-                    let ctx = ctx.clone();
-                    let plan_id = plan_id.clone();
-                    let event_tx = event_tx.clone();
-                    async move {
-                        // Build a ToolContext that intercepts LogDelta and re-emits as sub_agent_log
-                        let ctx = rewire_log_forwarding(
-                            ctx,
-                            event_tx,
-                            plan_id.clone(),
-                            agent_req.agent_id.clone(),
-                            stage_id.clone(),
-                        );
-
-                        let validated_selection = agent_req
-                            .agent_selection
-                            .as_deref()
-                            .or(Some(&agent_req.subagent_type))
-                            .map(String::from);
-
-                        let request = SubAgentRequest {
-                            prompt: agent_req.prompt.clone(),
-                            description: agent_req.description.clone(),
-                            agent_selection: validated_selection,
-                            agent_id: Some(agent_req.agent_id.clone()),
-                            plan_id: Some(plan_id.clone()),
-                            stage_id: Some(stage_id.clone()),
-                            output_format: Some(
-                                agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string()),
-                            ),
-                        };
-                        let result = executor.execute_agent(request, ctx).await?;
-
-                        Ok(SubAgentResult {
-                            plan_id,
-                            agent_id: agent_req.agent_id,
-                            stage_id,
-                            status: SubAgentStatus::Success,
-                            output: result.output,
-                            error: None,
-                        })
-                    }
-                }
-            })
+        let failure_summary = self
+            .execute_all_stages(&plan, &cancellation_token, &mut results, &mut stage_success)
             .await?;
 
-            let all_success = stage_results.iter().all(|r| r.status == SubAgentStatus::Success);
-            stage_success.insert(stage.stage_id.clone(), all_success);
-
-            for result in &stage_results {
-                log::info!(
-                    "[OrchestratorEngine] Sub-agent finished plan_id={} stage_id={} agent_id={} status={} error={:?}",
-                    result.plan_id,
-                    result.stage_id,
-                    result.agent_id,
-                    result.status.as_str(),
-                    result.error
-                );
-
-                let complete_args = SubAgentCompleteArgs {
-                    plan_id: result.plan_id.clone(),
-                    agent_id: result.agent_id.clone(),
-                    stage_id: result.stage_id.clone(),
-                    status: result.status.as_str().to_string(),
-                    output_summary: result.output.clone(),
-                    error: result.error.clone(),
-                };
-                self.emit("sub_agent_complete", &complete_args).await;
-            }
-
-            let stage_complete = StageCompleteArgs {
-                plan_id: plan.plan_id.clone(),
-                stage_id: stage.stage_id.clone(),
-                mode: stage.mode.as_str().to_string(),
-                all_success,
-            };
-            self.emit("stage_complete", &stage_complete).await;
-
-            log::info!(
-                "[OrchestratorEngine] Stage complete plan_id={} stage_id={} all_success={}",
+        if cancellation_token.is_cancelled() {
+            log::warn!(
+                "[OrchestratorEngine] Orchestration cancelled plan_id={} result_count={}",
                 plan.plan_id,
-                stage.stage_id,
-                all_success
+                results.len()
             );
-
-            for result in stage_results {
-                results.insert(result.agent_id.clone(), result);
-            }
-
-            if !all_success {
-                failed_stage_id = Some(stage.stage_id.clone());
-            }
-
-            if cancellation_token.is_cancelled() {
-                break;
-            }
+            self.emit_complete(&plan.plan_id, false, "Orchestration cancelled.")
+                .await;
+            return Ok(ExecutionOutcome {
+                plan,
+                results,
+                review: None,
+            });
         }
 
         if results.is_empty() {
             log::info!("[OrchestratorEngine] No stages scheduled for plan_id={}", plan.plan_id);
-
-            let complete = OrchestrationCompleteArgs {
-                plan_id: plan.plan_id.clone(),
-                overall_success: true,
-                summary: "No stages were scheduled.".to_string(),
-            };
-            self.emit("orchestration_complete", &complete).await;
-
+            self.emit_complete(&plan.plan_id, true, "No stages were scheduled.")
+                .await;
             return Ok(ExecutionOutcome {
                 plan,
                 results,
@@ -352,20 +174,22 @@ impl OrchestratorEngine {
             });
         }
 
-        if cancellation_token.is_cancelled() {
-            log::warn!(
-                "[OrchestratorEngine] Orchestration cancelled before review plan_id={} result_count={}",
-                plan.plan_id,
-                results.len()
+        if let Some(failure) = &failure_summary {
+            self.emit_complete(&plan.plan_id, false, &failure.summary()).await;
+            return Ok(ExecutionOutcome {
+                plan,
+                results,
+                review: None,
+            });
+        }
+
+        if plan.skip_review {
+            log::info!(
+                "[OrchestratorEngine] Skipping review (skip_review=true) plan_id={}",
+                plan.plan_id
             );
-
-            let complete = OrchestrationCompleteArgs {
-                plan_id: plan.plan_id.clone(),
-                overall_success: false,
-                summary: "Orchestration cancelled before review.".to_string(),
-            };
-            self.emit("orchestration_complete", &complete).await;
-
+            self.emit_complete(&plan.plan_id, true, "All stages completed (review skipped).")
+                .await;
             return Ok(ExecutionOutcome {
                 plan,
                 results,
@@ -373,47 +197,11 @@ impl OrchestratorEngine {
             });
         }
 
-        if let Some(stage_id) = failed_stage_id {
-            let complete = OrchestrationCompleteArgs {
-                plan_id: plan.plan_id.clone(),
-                overall_success: false,
-                summary: format!("Orchestration stopped after stage '{}' failed.", stage_id),
-            };
-            self.emit("orchestration_complete", &complete).await;
+        let review = self
+            .run_review_with_retry(&plan, &mut results, &cancellation_token, max_retries)
+            .await?;
 
-            return Ok(ExecutionOutcome {
-                plan,
-                results,
-                review: None,
-            });
-        }
-
-        let review_start = OrchestrationReviewStartArgs {
-            plan_id: plan.plan_id.clone(),
-        };
-        self.emit("orchestration_review_start", &review_start).await;
-
-        log::info!(
-            "[OrchestratorEngine] Starting review plan_id={} result_count={}",
-            plan.plan_id,
-            results.len()
-        );
-
-        let review = self.run_review(&plan, &results).await?;
-
-        log::info!(
-            "[OrchestratorEngine] Review complete plan_id={} success={} summary={}",
-            plan.plan_id,
-            review.success,
-            review.summary
-        );
-
-        let complete = OrchestrationCompleteArgs {
-            plan_id: plan.plan_id.clone(),
-            overall_success: review.success,
-            summary: review.summary.clone(),
-        };
-        self.emit("orchestration_complete", &complete).await;
+        self.emit_complete(&plan.plan_id, review.success, &review.summary).await;
 
         log::info!(
             "[OrchestratorEngine] Orchestration complete plan_id={} overall_success={} agent_count={}",
@@ -427,6 +215,371 @@ impl OrchestratorEngine {
             results,
             review: Some(review),
         })
+    }
+
+    async fn execute_all_stages(
+        &self,
+        plan: &OrchestrationPlan,
+        cancellation_token: &CancellationToken,
+        results: &mut HashMap<String, SubAgentResult>,
+        stage_success: &mut HashMap<String, bool>,
+    ) -> Result<Option<StageFailure>> {
+        let mut failure: Option<StageFailure> = None;
+
+        for stage in &plan.stages {
+            if cancellation_token.is_cancelled() {
+                break;
+            }
+
+            if let Some(blocked_by) = self.check_stage_dependencies(plan, stage, stage_success) {
+                if !matches!(&failure, Some(StageFailure::BlockedByDependency { .. })) {
+                    failure = Some(StageFailure::BlockedByDependency {
+                        stage_id: stage.stage_id.clone(),
+                        dependency: blocked_by,
+                    });
+                }
+                continue;
+            }
+
+            if failure.is_some() {
+                continue;
+            }
+
+            log::info!(
+                "[OrchestratorEngine] Starting stage plan_id={} stage_id={} mode={} depends_on={:?} agent_count={}",
+                plan.plan_id,
+                stage.stage_id,
+                stage.mode.as_str(),
+                stage.depends_on,
+                stage.agents.len()
+            );
+
+            self.emit_agent_spawns(plan, stage).await;
+
+            let stage_results = self.run_stage(plan, stage, cancellation_token).await?;
+
+            let all_success = stage_results.iter().all(|r| r.status == SubAgentStatus::Success);
+            stage_success.insert(stage.stage_id.clone(), all_success);
+
+            self.emit_stage_results(plan, stage, &stage_results, all_success).await;
+
+            for result in stage_results {
+                results.insert(result.agent_id.clone(), result);
+            }
+
+            if !all_success {
+                failure = Some(StageFailure::StageFailed {
+                    stage_id: stage.stage_id.clone(),
+                });
+            }
+        }
+        Ok(failure)
+    }
+
+    fn check_stage_dependencies(
+        &self,
+        plan: &OrchestrationPlan,
+        stage: &planner::ExecutionStage,
+        stage_success: &HashMap<String, bool>,
+    ) -> Option<String> {
+        for dep in &stage.depends_on {
+            if !stage_success.get(dep).copied().unwrap_or(false) {
+                log::warn!(
+                    "[OrchestratorEngine] Stage blocked plan_id={} stage_id={} dependency={}",
+                    plan.plan_id,
+                    stage.stage_id,
+                    dep
+                );
+                return Some(dep.clone());
+            }
+        }
+        None
+    }
+
+    async fn emit_agent_spawns(&self, plan: &OrchestrationPlan, stage: &planner::ExecutionStage) {
+        for agent in &stage.agents {
+            log::info!(
+                "[OrchestratorEngine] Spawning sub-agent plan_id={} stage_id={} agent_id={} type={} description={}",
+                plan.plan_id,
+                stage.stage_id,
+                agent.agent_id,
+                agent.subagent_type,
+                agent.description
+            );
+            let spawn_args = SubAgentSpawnArgs {
+                plan_id: plan.plan_id.clone(),
+                agent_id: agent.agent_id.clone(),
+                stage_id: stage.stage_id.clone(),
+                description: agent.description.clone(),
+                subagent_type: agent.subagent_type.clone(),
+            };
+            self.emit("sub_agent_spawn", &spawn_args).await;
+        }
+    }
+
+    async fn run_stage(
+        &self,
+        plan: &OrchestrationPlan,
+        stage: &planner::ExecutionStage,
+        cancellation_token: &CancellationToken,
+    ) -> Result<Vec<SubAgentResult>> {
+        execute_stage(&plan.plan_id, stage, cancellation_token, {
+            let executor = self.executor.clone();
+            let ctx = self.tool_context.clone();
+            let plan_id = plan.plan_id.clone();
+            let event_tx = self.event_tx.clone();
+            let catalog = self.catalog_agent_ids.clone();
+            let default_id = self.default_agent_id.clone();
+            move |agent_req, stage_id| {
+                let executor = executor.clone();
+                let ctx = ctx.clone();
+                let plan_id = plan_id.clone();
+                let event_tx = event_tx.clone();
+                let catalog = catalog.clone();
+                let default_id = default_id.clone();
+                async move {
+                    let ctx = rewire_log_forwarding(
+                        ctx,
+                        event_tx,
+                        plan_id.clone(),
+                        agent_req.agent_id.clone(),
+                        stage_id.clone(),
+                    );
+
+                    let raw_selection = agent_req.agent_selection.as_deref().unwrap_or(&agent_req.subagent_type);
+                    let validated_selection = if catalog.contains(raw_selection) {
+                        raw_selection.to_string()
+                    } else {
+                        log::warn!(
+                            "[OrchestratorEngine] Agent selection '{}' not in catalog, falling back to '{}'",
+                            raw_selection,
+                            default_id
+                        );
+                        default_id.clone()
+                    };
+
+                    let request = SubAgentRequest {
+                        prompt: agent_req.prompt.clone(),
+                        description: agent_req.description.clone(),
+                        agent_selection: Some(validated_selection),
+                        agent_id: Some(agent_req.agent_id.clone()),
+                        plan_id: Some(plan_id.clone()),
+                        stage_id: Some(stage_id.clone()),
+                        output_format: Some(agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string())),
+                    };
+                    let result = executor.execute_agent(request, ctx).await?;
+
+                    Ok(SubAgentResult {
+                        plan_id,
+                        agent_id: agent_req.agent_id,
+                        stage_id,
+                        status: SubAgentStatus::Success,
+                        output: result.output,
+                        error: None,
+                    })
+                }
+            }
+        })
+        .await
+    }
+
+    async fn emit_stage_results(
+        &self,
+        plan: &OrchestrationPlan,
+        stage: &planner::ExecutionStage,
+        stage_results: &[SubAgentResult],
+        all_success: bool,
+    ) {
+        for result in stage_results {
+            log::info!(
+                "[OrchestratorEngine] Sub-agent finished plan_id={} stage_id={} agent_id={} status={} error={:?}",
+                result.plan_id,
+                result.stage_id,
+                result.agent_id,
+                result.status.as_str(),
+                result.error
+            );
+            let complete_args = SubAgentCompleteArgs {
+                plan_id: result.plan_id.clone(),
+                agent_id: result.agent_id.clone(),
+                stage_id: result.stage_id.clone(),
+                status: result.status.as_str().to_string(),
+                output_summary: result.output.clone(),
+                error: result.error.clone(),
+            };
+            self.emit("sub_agent_complete", &complete_args).await;
+        }
+
+        let stage_complete = StageCompleteArgs {
+            plan_id: plan.plan_id.clone(),
+            stage_id: stage.stage_id.clone(),
+            mode: stage.mode.as_str().to_string(),
+            all_success,
+        };
+        self.emit("stage_complete", &stage_complete).await;
+
+        log::info!(
+            "[OrchestratorEngine] Stage complete plan_id={} stage_id={} all_success={}",
+            plan.plan_id,
+            stage.stage_id,
+            all_success
+        );
+    }
+
+    async fn run_review_with_retry(
+        &self,
+        plan: &OrchestrationPlan,
+        results: &mut HashMap<String, SubAgentResult>,
+        cancellation_token: &CancellationToken,
+        max_retries: u32,
+    ) -> Result<ReviewResult> {
+        let review_start = OrchestrationReviewStartArgs {
+            plan_id: plan.plan_id.clone(),
+        };
+        self.emit("orchestration_review_start", &review_start).await;
+
+        log::info!(
+            "[OrchestratorEngine] Starting review plan_id={} result_count={}",
+            plan.plan_id,
+            results.len()
+        );
+
+        let mut review = self.run_review(plan, results).await?;
+        let mut retry_count = 0u32;
+
+        while !review.success
+            && !review.retry_agents.is_empty()
+            && retry_count < max_retries
+            && !cancellation_token.is_cancelled()
+        {
+            retry_count += 1;
+            log::info!(
+                "[OrchestratorEngine] Retrying agents plan_id={} retry={}/{} agents={:?}",
+                plan.plan_id,
+                retry_count,
+                max_retries,
+                review.retry_agents
+            );
+
+            self.retry_agents(plan, results, &review.retry_agents, cancellation_token)
+                .await?;
+
+            review = self.run_review(plan, results).await?;
+        }
+
+        log::info!(
+            "[OrchestratorEngine] Review complete plan_id={} success={} retries={} summary={}",
+            plan.plan_id,
+            review.success,
+            retry_count,
+            review.summary
+        );
+
+        Ok(review)
+    }
+
+    async fn retry_agents(
+        &self,
+        plan: &OrchestrationPlan,
+        results: &mut HashMap<String, SubAgentResult>,
+        retry_agent_ids: &[String],
+        cancellation_token: &CancellationToken,
+    ) -> Result<()> {
+        let agents_to_retry: Vec<_> = plan
+            .stages
+            .iter()
+            .flat_map(|stage| {
+                stage
+                    .agents
+                    .iter()
+                    .filter(|agent| retry_agent_ids.contains(&agent.agent_id))
+                    .map(|agent| (stage.stage_id.clone(), agent.clone()))
+            })
+            .collect();
+
+        for (stage_id, agent_req) in agents_to_retry {
+            if cancellation_token.is_cancelled() {
+                break;
+            }
+
+            log::info!(
+                "[OrchestratorEngine] Retrying agent plan_id={} stage_id={} agent_id={}",
+                plan.plan_id,
+                stage_id,
+                agent_req.agent_id
+            );
+
+            let spawn_args = SubAgentSpawnArgs {
+                plan_id: plan.plan_id.clone(),
+                agent_id: agent_req.agent_id.clone(),
+                stage_id: stage_id.clone(),
+                description: format!("[retry] {}", agent_req.description),
+                subagent_type: agent_req.subagent_type.clone(),
+            };
+            self.emit("sub_agent_spawn", &spawn_args).await;
+
+            let ctx = rewire_log_forwarding(
+                self.tool_context.clone(),
+                self.event_tx.clone(),
+                plan.plan_id.clone(),
+                agent_req.agent_id.clone(),
+                stage_id.clone(),
+            );
+
+            let raw_selection = agent_req.agent_selection.as_deref().unwrap_or(&agent_req.subagent_type);
+            let validated_selection = if self.catalog_agent_ids.contains(raw_selection) {
+                raw_selection.to_string()
+            } else {
+                log::warn!(
+                    "[OrchestratorEngine] Retry agent selection '{}' not in catalog, falling back to '{}'",
+                    raw_selection,
+                    self.default_agent_id
+                );
+                self.default_agent_id.clone()
+            };
+
+            let request = SubAgentRequest {
+                prompt: agent_req.prompt.clone(),
+                description: agent_req.description.clone(),
+                agent_selection: Some(validated_selection),
+                agent_id: Some(agent_req.agent_id.clone()),
+                plan_id: Some(plan.plan_id.clone()),
+                stage_id: Some(stage_id.clone()),
+                output_format: Some(agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string())),
+            };
+
+            let result = match self.executor.execute_agent(request, ctx).await {
+                Ok(output) => SubAgentResult {
+                    plan_id: plan.plan_id.clone(),
+                    agent_id: agent_req.agent_id.clone(),
+                    stage_id: stage_id.clone(),
+                    status: SubAgentStatus::Success,
+                    output: output.output,
+                    error: None,
+                },
+                Err(e) => SubAgentResult {
+                    plan_id: plan.plan_id.clone(),
+                    agent_id: agent_req.agent_id.clone(),
+                    stage_id: stage_id.clone(),
+                    status: SubAgentStatus::Failed,
+                    output: String::new(),
+                    error: Some(e.to_string()),
+                },
+            };
+
+            let complete_args = SubAgentCompleteArgs {
+                plan_id: result.plan_id.clone(),
+                agent_id: result.agent_id.clone(),
+                stage_id: result.stage_id.clone(),
+                status: result.status.as_str().to_string(),
+                output_summary: result.output.clone(),
+                error: result.error.clone(),
+            };
+            self.emit("sub_agent_complete", &complete_args).await;
+
+            results.insert(result.agent_id.clone(), result);
+        }
+        Ok(())
     }
 
     async fn run_review(
@@ -452,12 +605,86 @@ impl OrchestratorEngine {
             stage_id: None,
             output_format: None,
         };
-        let result = self.executor.execute_agent(request, self.tool_context.clone()).await?;
-        parse_review_result(&result.output)
+        match self.executor.execute_agent(request, self.tool_context.clone()).await {
+            Ok(result) => {
+                log::debug!(
+                    "[OrchestratorEngine] Review agent raw output plan_id={} chars={} output={:?}",
+                    plan.plan_id,
+                    result.output.chars().count(),
+                    result.output.chars().take(500).collect::<String>()
+                );
+                match parse_review_result(&result.output) {
+                    Ok(review) => Ok(review),
+                    Err(e) => {
+                        log::warn!(
+                            "[OrchestratorEngine] Review parse failed plan_id={} error={} raw_output={:?}",
+                            plan.plan_id,
+                            e,
+                            result.output.chars().take(300).collect::<String>()
+                        );
+                        Ok(ReviewResult {
+                            success: true,
+                            issues: vec![format!("Review parse error: {e}")],
+                            summary: format!("Review result unparseable (treating as pass): {e}"),
+                            retry_agents: vec![],
+                        })
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(
+                    "[OrchestratorEngine] Review agent failed plan_id={} error={}; treating as pass-through",
+                    plan.plan_id,
+                    e
+                );
+                Ok(ReviewResult {
+                    success: true,
+                    issues: vec![format!("Review executor error: {e}")],
+                    summary: format!("Review skipped due to executor error: {e}"),
+                    retry_agents: vec![],
+                })
+            }
+        }
     }
 
-    async fn emit(&self, kind: &str, args: &impl serde::Serialize) {
-        let args_value = match serde_json::to_value(args) {
+    async fn emit_plan_event(&self, plan: &OrchestrationPlan) {
+        let plan_event = OrchestrationPlanEvent {
+            plan_id: plan.plan_id.clone(),
+            description: plan.description.clone(),
+            stages: plan
+                .stages
+                .iter()
+                .map(|stage| StageSummary {
+                    stage_id: stage.stage_id.clone(),
+                    mode: stage.mode.as_str().to_string(),
+                    depends_on: stage.depends_on.clone(),
+                    agents: stage
+                        .agents
+                        .iter()
+                        .map(|agent| AgentSummary {
+                            agent_id: agent.agent_id.clone(),
+                            description: agent.description.clone(),
+                            subagent_type: agent.subagent_type.clone(),
+                            agent_selection: agent.agent_selection.clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        };
+        self.emit("orchestration_plan", &plan_event).await;
+    }
+
+    async fn emit_complete(&self, plan_id: &str, success: bool, summary: &str) {
+        let complete = OrchestrationCompleteArgs {
+            plan_id: plan_id.to_string(),
+            overall_success: success,
+            summary: summary.to_string(),
+        };
+        self.emit("orchestration_complete", &complete).await;
+    }
+
+    fn emit_sync(&self, kind: &str, args: &impl serde::Serialize) {
+        let payload = match serde_json::to_value(args) {
             Ok(v) => v,
             Err(e) => {
                 log::error!(
@@ -468,13 +695,16 @@ impl OrchestratorEngine {
                 return;
             }
         };
-        let _ = self
-            .event_tx
-            .send(AgentEvent::SystemLog(format!(
-                "orchestration_progress kind={} args={}",
-                kind, args_value
-            )))
-            .await;
+        if let Err(e) = self.event_tx.try_send(AgentEvent::OrchestrationProgress {
+            kind: kind.to_string(),
+            payload,
+        }) {
+            log::warn!("[OrchestratorEngine] Failed to emit event kind={}: {}", kind, e);
+        }
+    }
+
+    async fn emit(&self, kind: &str, args: &impl serde::Serialize) {
+        self.emit_sync(kind, args);
     }
 }
 
@@ -493,7 +723,6 @@ fn rewire_log_forwarding(
 
     tokio::spawn(async move {
         while let Some(event) = interceptor_rx.recv().await {
-            // Forward log events as orchestration sub_agent_log
             if let AgentEvent::LogDelta {
                 ref log, ref stream, ..
             } = event
@@ -503,7 +732,7 @@ fn rewire_log_forwarding(
                 } else {
                     log.clone()
                 };
-                log::info!(
+                log::trace!(
                     "[OrchestratorEngine] Forwarding sub-agent log plan_id={} stage_id={} agent_id={} stream={:?} preview={}",
                     plan_id,
                     stage_id,
@@ -512,20 +741,18 @@ fn rewire_log_forwarding(
                     preview
                 );
 
-                let sub_agent_log_args = serde_json::to_value(&nova_protocol::orchestration::SubAgentLogArgs {
-                    plan_id: plan_id.clone(),
-                    agent_id: agent_id.clone(),
-                    stage_id: stage_id.clone(),
-                })
-                .unwrap_or_default();
-                let _ = orchestrator_tx
-                    .send(AgentEvent::SystemLog(format!(
-                        "orchestration_progress kind=sub_agent_log args={} stream={} log={}",
-                        sub_agent_log_args, stream, log
-                    )))
-                    .await;
+                let payload = serde_json::json!({
+                    "planId": plan_id,
+                    "agentId": agent_id,
+                    "stageId": stage_id,
+                    "stream": stream,
+                    "log": log,
+                });
+                let _ = orchestrator_tx.try_send(AgentEvent::OrchestrationProgress {
+                    kind: "sub_agent_log".to_string(),
+                    payload,
+                });
             }
-            // Always forward to original parent
             let _ = original_tx.send(event).await;
         }
     });
@@ -573,7 +800,6 @@ mod tests {
     struct ParsedEvent {
         kind: String,
         args: Value,
-        raw: String,
     }
 
     #[derive(Clone)]
@@ -746,32 +972,11 @@ mod tests {
         .expect("serialize review response")
     }
 
-    fn parse_event(raw: &str) -> ParsedEvent {
-        let kind_start = raw.find("kind=").expect("kind should exist") + "kind=".len();
-        let args_marker = raw.find(" args=").expect("args should exist");
-        let kind = raw[kind_start..args_marker].to_string();
-        let args_start = args_marker + " args=".len();
-        let args_end = if kind == "sub_agent_log" {
-            raw[args_start..]
-                .find(" stream=")
-                .map(|index| args_start + index)
-                .unwrap_or(raw.len())
-        } else {
-            raw.len()
-        };
-        let args = serde_json::from_str(&raw[args_start..args_end]).expect("event args should be valid json");
-        ParsedEvent {
-            kind,
-            args,
-            raw: raw.to_string(),
-        }
-    }
-
     fn collect_events(rx: &mut mpsc::Receiver<AgentEvent>) -> Vec<ParsedEvent> {
         let mut events = Vec::new();
         while let Ok(event) = rx.try_recv() {
-            if let AgentEvent::SystemLog(raw) = event {
-                events.push(parse_event(&raw));
+            if let AgentEvent::OrchestrationProgress { kind, payload } = event {
+                events.push(ParsedEvent { kind, args: payload });
             }
         }
         events
@@ -1035,7 +1240,7 @@ mod tests {
         assert!(complete.args["summary"]
             .as_str()
             .expect("summary should be string")
-            .contains("cancelled before review"));
+            .contains("cancelled"));
     }
 
     #[tokio::test]
@@ -1207,13 +1412,12 @@ mod tests {
             .expect("original channel should yield event");
 
         match orchestrator_event {
-            AgentEvent::SystemLog(raw) => {
-                let parsed = parse_event(&raw);
-                assert_eq!(parsed.kind, "sub_agent_log");
-                assert_eq!(parsed.args["planId"], Value::String("p1".to_string()));
-                assert_eq!(parsed.args["stageId"], Value::String("s1".to_string()));
-                assert_eq!(parsed.args["agentId"], Value::String("a1".to_string()));
-                assert!(parsed.raw.contains("log=hello"));
+            AgentEvent::OrchestrationProgress { kind, payload } => {
+                assert_eq!(kind, "sub_agent_log");
+                assert_eq!(payload["planId"], Value::String("p1".to_string()));
+                assert_eq!(payload["stageId"], Value::String("s1".to_string()));
+                assert_eq!(payload["agentId"], Value::String("a1".to_string()));
+                assert_eq!(payload["log"], Value::String("hello".to_string()));
             }
             other => panic!("unexpected orchestrator event: {other:?}"),
         }

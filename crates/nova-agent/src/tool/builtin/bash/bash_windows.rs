@@ -32,24 +32,12 @@ impl PowerShellBackend {
     }
 
     pub(super) fn build_command(&self, command_str: &str) -> Command {
-        // 使用 Tokio Command 以支持异步
         let mut cmd = Command::new(&self.executable);
-        if self.executable == "powershell" {
-            // Windows PowerShell 5.x 需要额外设置编码
-            let wrapped = format!(
-                "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $PSDefaultParameterValues['*:Encoding'] = 'utf8'; {}",
-                command_str
-            );
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
-        } else {
-            cmd.args([
-                "-NoProfile",      // 跳过配置文件加载，加速启动
-                "-NonInteractive", // 非交互模式
-                "-Command",        // 执行命令字符串
-                command_str,
-            ]);
-        }
-        // 强制 UTF-8 输出
+        let wrapped = format!(
+            "$OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; {}",
+            command_str
+        );
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &wrapped]);
         cmd.env("PYTHONIOENCODING", "utf-8");
         cmd
     }

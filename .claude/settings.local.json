@@ -5,7 +5,12 @@
       "Bash(cargo --version)",
       "Bash(rustc --version)",
       "Bash(git worktree *)",
-      "Bash(cargo tree *)"
+      "Bash(cargo tree *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo test *)",
+      "Bash(git stash *)",
+      "Bash(git add *)"
     ]
   }
 }

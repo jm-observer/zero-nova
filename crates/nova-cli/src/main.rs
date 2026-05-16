@@ -591,6 +591,11 @@ impl EventPrinter {
                 AgentEvent::SkillExited { skill_id, .. } => {
                     println!("\n{}", format!("[skill exited] {skill_id}").yellow());
                 }
+                AgentEvent::OrchestrationProgress { kind, payload } => {
+                    if self.verbose {
+                        println!("\n{}", format!("[orchestration: {kind}] {payload}").bright_black());
+                    }
+                }
             },
         }
     }

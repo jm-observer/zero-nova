@@ -24,7 +24,7 @@ impl OrchestrateTaskTool {
             "properties": {
                 "plan": {
                     "type": "object",
-                    "description": "完整编排计划（多 Agent 模式）。与 prompt 互斥。包含 planId, description, stages 字段"
+                    "description": "完整编排计划（多 Agent 模式）。与 prompt 互斥。结构: {planId: string, description: string, skipReview?: boolean, stages: [{stageId: string, mode: \"parallel\"|\"serial\", dependsOn?: [stageId...], agents: [{agentId: string, description: string, prompt: string, agentSelection?: string, outputFormat?: string}]}]}"
                 },
                 "prompt": {
                     "type": "string",
@@ -51,6 +51,8 @@ fn build_shorthand_plan(prompt: &str, description: &str, agent_selection: Option
     OrchestrationPlan {
         plan_id: format!("shorthand-{}", ts),
         description: description.to_string(),
+        skip_review: true,
+        max_retries: None,
         stages: vec![ExecutionStage {
             stage_id: "s1".to_string(),
             mode: StageMode::Parallel,
@@ -73,7 +75,7 @@ impl Tool for OrchestrateTaskTool {
     fn definition(&self) -> RegisteredToolDefinition {
         RegisteredToolDefinition {
             name: "OrchestrateTask".to_string(),
-            description: "Execute a multi-agent orchestration plan, or run a single agent task in shorthand mode."
+            description: "Execute a multi-agent orchestration plan, or run a single agent task in shorthand mode. IMPORTANT: Call only ONCE per user request. Do NOT retry if the first call returns overallSuccess=true."
                 .to_string(),
             input_schema: Self::input_schema(),
             defer_loading: false,
@@ -96,7 +98,12 @@ impl Tool for OrchestrateTaskTool {
         }
 
         let plan = if let Some(plan_value) = input.get("plan") {
-            let raw: OrchestrationPlan = serde_json::from_value(plan_value.clone()).context("Invalid plan object")?;
+            let raw: OrchestrationPlan = serde_json::from_value(plan_value.clone()).map_err(|e| {
+                anyhow::anyhow!(
+                    "Invalid plan object: {}. Expected structure: {{planId, description, stages: [{{stageId, mode: \"parallel\"|\"serial\", dependsOn?: [], agents: [{{agentId, description, prompt}}]}}]}}",
+                    e
+                )
+            })?;
             planner::validate_and_sort(raw)?
         } else if let Some(prompt) = input.get("prompt").and_then(Value::as_str) {
             let desc = input.get("description").and_then(Value::as_str).unwrap_or("Agent task");
@@ -117,7 +124,7 @@ impl Tool for OrchestrateTaskTool {
         let outcome = engine
             .execute_plan(plan, cancellation_token)
             .await
-            .context("Failed to execute orchestration plan")?;
+            .map_err(|e| anyhow::anyhow!("Orchestration execution failed: {:#}", e))?;
 
         log::info!(
             "[OrchestrateTaskTool] Execution finished plan_id={} stage_count={} result_count={} review_present={}",
@@ -227,7 +234,7 @@ mod tests {
     #[tokio::test]
     async fn shorthand_mode_constructs_single_agent_plan() {
         let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
-        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
+        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(64);
 
         let result = tool
             .execute(
@@ -239,12 +246,17 @@ mod tests {
             )
             .await;
 
-        // Without real subagent services this will fail at run_subagent, which is expected.
-        // The plan construction itself succeeds (verified by the error NOT being about plan parsing).
-        let err_msg = result.err().expect("should fail without services").to_string();
+        // Without real subagent services the agent execution fails gracefully.
+        // The scheduler catches the error and reports stage failure (not a hard error).
+        let output = result.expect("shorthand plan should not hard-fail");
         assert!(
-            !err_msg.contains("plan") && !err_msg.contains("prompt"),
-            "error should be about execution, not input parsing: {err_msg}"
+            output.content.contains("shorthand-"),
+            "output should contain the plan id"
+        );
+        assert!(
+            output.content.contains("\"overallSuccess\": false"),
+            "should report failure without crashing: {}",
+            output.content
         );
     }
 

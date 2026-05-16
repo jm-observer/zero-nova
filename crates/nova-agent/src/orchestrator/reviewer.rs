@@ -36,14 +36,64 @@ pub fn build_review_prompt(plan_description: &str, results: &HashMap<String, Sub
     }
 
     format!(
-        "你是 Review Agent。目标：{}\n\n{}\n\n请返回 JSON：{{\"success\":true/false,\"issues\":[...],\"summary\":\"...\",\"retryAgents\":[...]}}",
+        r#"你是 Review Agent。目标：{}
+
+以下是各 Agent 的执行结果：
+
+{}
+
+请严格只返回一个 JSON 对象，不要返回任何其它文字、Markdown 或解释。格式如下：
+{{"success":true,"issues":[],"summary":"一句话总结","retryAgents":[]}}
+
+字段说明：
+- success: 所有 Agent 是否达成目标（bool）
+- issues: 发现的问题列表（string[]），无问题则为空数组
+- summary: 一句话总结（string）
+- retryAgents: 需要重试的 agentId 列表（string[]），无需重试则为空数组
+
+再次强调：只输出 JSON，不要输出任何其它内容。"#,
         plan_description,
         summaries.join("\n\n---\n\n")
     )
 }
 
 pub fn parse_review_result(raw: &str) -> Result<ReviewResult> {
-    serde_json::from_str(raw).context("failed to parse review result JSON")
+    let trimmed = raw.trim();
+    if let Ok(result) = serde_json::from_str::<ReviewResult>(trimmed) {
+        return Ok(result);
+    }
+    if let Some(json_str) = extract_json_object(trimmed) {
+        if let Ok(result) = serde_json::from_str::<ReviewResult>(json_str) {
+            return Ok(result);
+        }
+    }
+    serde_json::from_str(trimmed).context("failed to parse review result JSON")
+}
+
+fn extract_json_object(text: &str) -> Option<&str> {
+    let start = text.find('{')?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape_next = false;
+    for (i, ch) in text[start..].char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string => escape_next = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&text[start..start + i + 1]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -183,6 +233,37 @@ mod tests {
     fn review_prompt_empty_results() {
         let prompt = build_review_prompt("no results", &HashMap::new());
         assert!(prompt.contains("你是 Review Agent。目标：no results"));
-        assert!(prompt.contains("请返回 JSON"));
+        assert!(prompt.contains("只输出 JSON"));
+    }
+
+    #[test]
+    fn parse_review_result_extracts_json_from_mixed_output() {
+        let raw = r#"Here is my review:
+
+{"success": true, "issues": [], "retryAgents": [], "summary": "All tasks completed."}
+
+Hope this helps!"#;
+        let result = parse_review_result(raw).expect("should extract JSON from mixed output");
+        assert!(result.success);
+        assert_eq!(result.summary, "All tasks completed.");
+    }
+
+    #[test]
+    fn parse_review_result_handles_leading_whitespace() {
+        let raw = r#"
+
+  {"success": false, "issues": ["file missing"], "retryAgents": ["a1"], "summary": "Partial."}
+"#;
+        let result = parse_review_result(raw).expect("should handle whitespace");
+        assert!(!result.success);
+        assert_eq!(result.retry_agents, vec!["a1"]);
+    }
+
+    #[test]
+    fn parse_review_result_handles_code_fence() {
+        let raw = "```json\n{\"success\": true, \"issues\": [], \"retryAgents\": [], \"summary\": \"OK\"}\n```";
+        let result = parse_review_result(raw).expect("should extract from code fence");
+        assert!(result.success);
+        assert_eq!(result.summary, "OK");
     }
 }

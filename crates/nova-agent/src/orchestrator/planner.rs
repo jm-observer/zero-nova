@@ -7,6 +7,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 pub struct OrchestrationPlan {
     pub plan_id: String,
     pub description: String,
+    #[serde(default)]
+    pub skip_review: bool,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
     pub stages: Vec<ExecutionStage>,
 }
 

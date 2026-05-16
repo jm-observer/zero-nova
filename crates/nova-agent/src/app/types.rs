@@ -193,6 +193,16 @@ impl From<AgentEvent> for AppEvent {
                 from_skill, to_skill, ..
             } => AppEvent::SkillSwitched { from_skill, to_skill },
             AgentEvent::SkillExited { skill_id, .. } => AppEvent::SkillExited { skill_id },
+            AgentEvent::OrchestrationProgress { kind, payload } => {
+                let log = payload.get("log").and_then(|v| v.as_str()).map(String::from);
+                let stream = payload.get("stream").and_then(|v| v.as_str()).map(String::from);
+                AppEvent::OrchestrationProgress {
+                    kind,
+                    args: payload,
+                    log,
+                    stream,
+                }
+            }
         }
     }
 }

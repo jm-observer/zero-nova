@@ -4,28 +4,52 @@ use crate::config::AppConfig;
 use crate::conversation::control::ModelRef;
 use crate::conversation::SessionService;
 use crate::path_resolver::resolve_path_ref;
+use crate::prompt::context::load_developer_project_prompt_async;
 use crate::skill::SkillRegistry;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::*;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
+
+/// Concrete session prompt reload service.
+pub struct ReloadSessionPromptService {
+    developer_prompt_files: Vec<String>,
+}
+
+impl ReloadSessionPromptService {
+    pub fn from_config(config: &AppConfig) -> Self {
+        Self {
+            developer_prompt_files: config.developer_prompt_files.clone(),
+        }
+    }
+
+    pub async fn reload_prompt_base(
+        &self,
+        _session_id: &str,
+        _agent_id: &str,
+        agent_descriptor: crate::agent_catalog::AgentDescriptor,
+        _initial_template_vars: HashMap<String, String>,
+        project_dir: Option<&Path>,
+    ) -> Result<String> {
+        let prompt = if agent_descriptor.enable_project_developer_prompt {
+            load_developer_project_prompt_async(project_dir, &self.developer_prompt_files).await
+        } else {
+            None
+        };
+        Ok(prompt.unwrap_or_default())
+    }
+}
 
 pub struct AgentWorkspaceService {
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
     pub config: Arc<AppConfig>,
     pub skill_registry: Arc<SkillRegistry>,
-    prompt_reload_service: Option<Arc<AppConfig>>,
-}
-
-pub struct ReloadedSessionPrompt {
-    pub prompt_base: String,
-    pub prompt_version: String,
-    pub source_revision: String,
+    prompt_reload_service: Option<Arc<ReloadSessionPromptService>>,
 }
 
 impl AgentWorkspaceService {
@@ -34,7 +58,7 @@ impl AgentWorkspaceService {
         sessions: SessionService,
         config: Arc<AppConfig>,
         skill_registry: Arc<SkillRegistry>,
-        prompt_reload_service: Option<Arc<AppConfig>>,
+        prompt_reload_service: Option<Arc<ReloadSessionPromptService>>,
     ) -> Self {
         Self {
             agent_registry,
@@ -136,15 +160,15 @@ impl AgentWorkspaceService {
             .as_ref()
             .context("Session prompt reload service is not configured")?;
 
-        // Call load_turn_material on the reload service as a stand-in for reload functionality
-        let turn_material = reloaded_service.load_turn_material(
-            project_dir.as_deref(),
-            None,
-            None,
-            agent_descriptor.initial_template_vars.clone(),
-            false,
-        )?;
-        let reloaded_prompt_base = turn_material.developer_project_prompt.unwrap_or_default();
+        let reloaded_prompt_base = reloaded_service
+            .reload_prompt_base(
+                session_id,
+                &agent_id,
+                agent_descriptor.clone(),
+                agent_descriptor.initial_template_vars.clone(),
+                project_dir.as_deref(),
+            )
+            .await?;
         let prompt_version = "1".to_string();
         let source_revision = String::new();
         log::info!(

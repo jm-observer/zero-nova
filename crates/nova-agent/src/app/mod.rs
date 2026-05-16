@@ -1,7 +1,5 @@
-pub mod agent_registry_snapshot;
 pub mod agent_workspace_service;
 pub mod application;
-pub mod config_snapshot;
 pub mod conversation_service;
 pub mod snapshot_assembler;
 pub mod types;

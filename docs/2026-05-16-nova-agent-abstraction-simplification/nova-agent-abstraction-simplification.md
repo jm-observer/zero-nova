@@ -54,9 +54,9 @@ tool::builtin::bash / web_search
 
 | Plan | 描述 | 依赖关系 | 执行顺序 | 状态 |
 | --- | --- | --- | --- | --- |
-| Plan 1 | 收缩 `app` 层的 snapshot / loader / reloader 抽象，恢复直接依赖 | 无 | 1 | 待开始 |
-| Plan 2 | 收缩 `AgentTool` 与 built-in wiring 的扩展点，移除默认失败的占位实现 | Plan 1 | 2 | 待开始 |
-| Plan 3 | 将 `bash` / `web_search` 的封闭后端集合改为 enum 表达 | Plan 1 | 3 | 待开始 |
+| Plan 1 | 收缩 `app` 层的 snapshot / loader / reloader 抽象，恢复直接依赖 | 无 | 1 | 已完成 |
+| Plan 2 | 收缩 `AgentTool` 与 built-in wiring 的扩展点，移除默认失败的占位实现 | Plan 1 | 2 | 已完成 |
+| Plan 3 | 将 `bash` / `web_search` 的封闭后端集合改为 enum 表达 | Plan 1 | 3 | 已完成 |
 
 执行顺序说明：
 

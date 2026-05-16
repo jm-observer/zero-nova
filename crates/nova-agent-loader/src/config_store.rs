@@ -1,7 +1,6 @@
 use anyhow::Result;
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use nova_agent::app::ConfigSnapshot;
 use nova_agent_config::AppConfig;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -81,18 +80,6 @@ impl ConfigStore {
         for listener in listeners {
             listener.on_config_changed(arc.clone()).await?;
         }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl ConfigSnapshot for ConfigStore {
-    async fn current(&self) -> Arc<AppConfig> {
-        ConfigStore::current(self).await
-    }
-
-    async fn apply(&self, next: AppConfig) -> Result<()> {
-        let _ = ConfigStore::apply(self, next).await?;
         Ok(())
     }
 }

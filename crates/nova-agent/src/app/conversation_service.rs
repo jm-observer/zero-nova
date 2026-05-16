@@ -7,6 +7,8 @@ use crate::conversation::SessionService;
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
+    context::{load_developer_project_prompt_async, load_project_context_with_config_async},
+    workflow::WorkflowStagePrompts,
     ProjectInstructionProfile, PromptConstructionRequest, PromptExtraSections, SkillInjectionMode, SystemPromptBuilder,
     ToolGuidanceMode,
 };
@@ -21,13 +23,87 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+/// Concrete turn prompt loading service for conversation turns.
+#[derive(Clone)]
+pub struct TurnPromptService {
+    prompts_dir: PathBuf,
+    project_context_file: Option<PathBuf>,
+    developer_prompt_files: Vec<String>,
+}
+
+impl TurnPromptService {
+    pub fn from_config(config: &AppConfig) -> Self {
+        Self {
+            prompts_dir: config.prompts_dir(),
+            project_context_file: config.project_context_file(),
+            developer_prompt_files: config.developer_prompt_files.clone(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self {
+            prompts_dir: PathBuf::new(),
+            project_context_file: None,
+            developer_prompt_files: Vec::new(),
+        }
+    }
+
+    pub async fn load_turn_material(
+        &self,
+        project_dir: Option<&Path>,
+        workflow_stage: Option<&str>,
+        active_skill: Option<String>,
+        turn_vars: HashMap<String, String>,
+        enable_developer_prompt: bool,
+    ) -> Result<crate::prompt::TurnPromptMaterial> {
+        let developer_project_prompt = if enable_developer_prompt {
+            load_developer_project_prompt_async(project_dir, &self.developer_prompt_files).await
+        } else {
+            None
+        };
+        let project_context =
+            load_project_context_with_config_async(project_dir, self.project_context_file.as_deref()).await;
+        let workflow_prompt = self.load_workflow_prompt(workflow_stage, &turn_vars).await;
+
+        Ok(crate::prompt::TurnPromptMaterial {
+            developer_project_prompt,
+            project_context,
+            workflow_prompt,
+            turn_template_vars: turn_vars,
+            active_skill,
+        })
+    }
+
+    async fn load_workflow_prompt(&self, stage: Option<&str>, vars: &HashMap<String, String>) -> Option<String> {
+        let stage = stage?;
+        if stage == "idle" {
+            return None;
+        }
+        let path = self.prompts_dir.join("workflow-stages.md");
+        let prompts = match WorkflowStagePrompts::load_from_file_async(&path).await {
+            Ok(prompts) => prompts,
+            Err(err) => {
+                log::warn!(
+                    "Failed to load workflow prompt stage '{}' from {:?}: {}",
+                    stage,
+                    path,
+                    err
+                );
+                return None;
+            }
+        };
+        prompts.render(stage, vars)
+    }
+}
+
 /// 核心会话业务服务
 pub struct ConversationService<C: LlmClient> {
     pub agent: AgentRuntime<C>,
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
     pub config: Arc<AppConfig>,
-    turn_prompt_loader: Arc<AppConfig>,
+    turn_prompt_service: TurnPromptService,
 }
 
 impl<C: LlmClient + 'static> ConversationService<C> {
@@ -64,14 +140,14 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         agent_registry: AgentRegistry,
         sessions: SessionService,
         config: Arc<AppConfig>,
-        turn_prompt_loader: Arc<AppConfig>,
+        turn_prompt_service: TurnPromptService,
     ) -> Self {
         Self {
             agent,
             agent_registry,
             sessions,
             config: config.clone(),
-            turn_prompt_loader,
+            turn_prompt_service,
         }
     }
 
@@ -364,13 +440,16 @@ impl<C: LlmClient + 'static> ConversationService<C> {
         };
 
         // 额外 sections：保留旧的 turn_prompt_loader 调用以获取 developer/project/workflow sections
-        let turn_material = self.turn_prompt_loader.load_turn_material(
-            project_dir.as_deref(),
-            Some("idle"),
-            active_skill_id.clone(),
-            context_overrides,
-            agent_descriptor.enable_project_developer_prompt,
-        )?;
+        let turn_material = self
+            .turn_prompt_service
+            .load_turn_material(
+                project_dir.as_deref(),
+                Some("idle"),
+                active_skill_id.clone(),
+                context_overrides,
+                agent_descriptor.enable_project_developer_prompt,
+            )
+            .await?;
         if let Some(ref content) = turn_material.developer_project_prompt {
             let file_count = content.matches("### Source:").count();
             log::info!("Loaded developer project prompt for turn: {} files matched", file_count);

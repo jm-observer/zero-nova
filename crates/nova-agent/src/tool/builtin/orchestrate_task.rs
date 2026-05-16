@@ -112,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn orchestrate_task_requires_tool_context() {
-        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_unconfigured(test_config())));
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
 
         let error = tool
             .execute(
@@ -131,7 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn orchestrate_task_accepts_minimal_valid_plan() {
-        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_unconfigured(test_config())));
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
         let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
 
         let output = tool

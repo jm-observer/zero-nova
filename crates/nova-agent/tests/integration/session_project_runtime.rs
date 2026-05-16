@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use nova_agent::app::ConversationService;
+use nova_agent::app::conversation_service::TurnPromptService;
 use nova_agent::config::AppConfig;
 use nova_agent::conversation::{SessionCache, SessionService, SqliteManager, SqliteSessionRepository};
 use nova_agent::message::ContentBlock;
@@ -455,8 +456,8 @@ fn build_conversation_service<C: LlmClient + 'static>(
             runtime,
             registry,
             sessions.clone(),
-            AppConfig::new(data_dir.to_path_buf()),
-            Arc::new(AppConfig::new(prompts_dir.to_path_buf())),
+            Arc::new(AppConfig::new(data_dir.to_path_buf())),
+            TurnPromptService::empty(),
         ),
         sessions,
     )

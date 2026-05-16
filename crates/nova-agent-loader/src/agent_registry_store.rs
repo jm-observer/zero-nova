@@ -1,6 +1,5 @@
 use arc_swap::ArcSwap;
 use nova_agent::agent_catalog::AgentRegistry;
-use nova_agent::app::AgentRegistrySnapshot;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -18,10 +17,8 @@ impl AgentRegistryStore {
     pub fn replace(&self, next: AgentRegistry) {
         self.registry.store(Arc::new(next));
     }
-}
 
-impl AgentRegistrySnapshot for AgentRegistryStore {
-    fn current(&self) -> AgentRegistry {
+    pub fn current(&self) -> AgentRegistry {
         self.registry.load_full().as_ref().clone()
     }
 }

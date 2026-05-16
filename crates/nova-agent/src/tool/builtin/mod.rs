@@ -18,11 +18,6 @@ use crate::skill::SkillRegistry;
 use crate::tool::{ProjectDirService, ToolRegistry};
 use std::sync::Arc;
 
-/// Wiring parameters for built-in tools that require subagent execution capabilities.
-pub struct BuiltinToolWiring {
-    pub services: Option<agent::AgentToolServices>,
-}
-
 /// Registers all built-in tools into the provided `ToolRegistry`.
 pub fn register_builtin_tools(
     registry: &ToolRegistry,
@@ -41,7 +36,7 @@ pub fn register_builtin_tools(
         tool_whitelist,
         project_dir_service,
         http_clients,
-        BuiltinToolWiring { services: None },
+        None,
     );
 }
 
@@ -54,7 +49,7 @@ pub fn register_builtin_tools_with_services(
     tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
-    wiring: BuiltinToolWiring,
+    agent_services: Option<agent::AgentToolServices>,
 ) {
     register_builtin_tools_inner(
         registry,
@@ -64,7 +59,7 @@ pub fn register_builtin_tools_with_services(
         tool_whitelist,
         project_dir_service,
         http_clients,
-        wiring,
+        agent_services,
     );
 }
 
@@ -76,11 +71,11 @@ fn register_builtin_tools_inner(
     tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
-    wiring: BuiltinToolWiring,
+    agent_services: Option<agent::AgentToolServices>,
 ) {
     let shared_agent_tool =
         if is_tool_enabled(tool_whitelist, "Agent") || is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
-            Some(Arc::new(agent::AgentTool::new(config.clone(), wiring.services)))
+            Some(Arc::new(agent::AgentTool::new(config.clone(), agent_services)))
         } else {
             None
         };

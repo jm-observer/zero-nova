@@ -12,4 +12,6 @@ pub use config_store::ConfigStore;
 pub use descriptor_factory::{AgentDescriptorFactory, AgentMaterialInputs};
 pub use prompt_loader::{PromptLoaderConfig, PromptMaterialLoader};
 pub use skill_adapter::{convert_loaded_skills, load_skills};
-pub use subagent_factory::LoaderSubagentRuntimeFactory;
+pub use subagent_factory::{
+    build_agent_prompt_service, build_reload_session_prompt_service, build_subagent_runtime_builder,
+};

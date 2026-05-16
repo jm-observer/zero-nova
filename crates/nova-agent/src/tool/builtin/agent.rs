@@ -3,12 +3,15 @@ use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{
-    template_vars, PromptConstructionRequest, PromptExtraSections, SkillInjectionMode, SystemPromptBuilder,
+    context::{load_developer_project_prompt_async, load_project_context_with_config_async},
+    template_vars,
+    workflow::WorkflowStagePrompts,
+    PromptConstructionRequest, PromptExtraSections, SkillInjectionMode, SystemPromptBuilder,
 };
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::provider::{types::ToolDefinition, ModelConfig};
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -18,11 +21,274 @@ use tokio::sync::mpsc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
 
+/// Concrete subagent prompt service.
+#[derive(Clone)]
+pub struct SubagentPromptService {
+    prompts_dir: PathBuf,
+    project_context_file: Option<PathBuf>,
+    developer_prompt_files: Vec<String>,
+}
+
+impl SubagentPromptService {
+    pub fn from_config(config: &AppConfig) -> Self {
+        Self {
+            prompts_dir: config.prompts_dir(),
+            project_context_file: config.project_context_file(),
+            developer_prompt_files: config.developer_prompt_files.clone(),
+        }
+    }
+
+    pub async fn load_agent_material(
+        &self,
+        spec: &AgentSpec,
+        env: Option<crate::prompt::EnvironmentSnapshot>,
+        template_vars: HashMap<String, String>,
+    ) -> Result<crate::prompt::PromptMaterial> {
+        let agent_prompt = self.load_agent_prompt(spec).await?;
+        Ok(crate::prompt::PromptMaterial {
+            agent_id: spec.id.clone(),
+            agent_prompt,
+            agent_catalog: None,
+            environment_snapshot: env,
+            initial_template_vars: template_vars,
+            skill_injection_mode: SkillInjectionMode::Catalog,
+            project_instruction_profile: crate::prompt::ProjectInstructionProfile::Auto,
+            tool_guidance: crate::prompt::ToolGuidanceMode::Compact,
+        })
+    }
+
+    pub async fn load_turn_material(
+        &self,
+        project_dir: Option<&Path>,
+        workflow_stage: Option<&str>,
+        active_skill: Option<String>,
+        turn_vars: HashMap<String, String>,
+        enable_developer_prompt: bool,
+    ) -> Result<crate::prompt::TurnPromptMaterial> {
+        let developer_project_prompt = if enable_developer_prompt {
+            load_developer_project_prompt_async(project_dir, &self.developer_prompt_files).await
+        } else {
+            None
+        };
+        let project_context =
+            load_project_context_with_config_async(project_dir, self.project_context_file.as_deref()).await;
+        let workflow_prompt = self.load_workflow_prompt(workflow_stage, &turn_vars).await;
+
+        Ok(crate::prompt::TurnPromptMaterial {
+            developer_project_prompt,
+            project_context,
+            workflow_prompt,
+            turn_template_vars: turn_vars,
+            active_skill,
+        })
+    }
+
+    async fn load_agent_prompt(&self, spec: &AgentSpec) -> Result<String> {
+        if spec.prompt_file.is_some() && spec.prompt_inline.is_some() {
+            anyhow::bail!(
+                "Agent '{}' has both prompt_file and prompt_inline configured; only one is allowed",
+                spec.id
+            );
+        }
+
+        if let Some(file) = &spec.prompt_file {
+            let prompt_path = self.prompts_dir.join(file);
+            let content = tokio::fs::read_to_string(&prompt_path)
+                .await
+                .map_err(anyhow::Error::from)
+                .with_context(|| format!("Failed to read prompt_file for agent '{}': {:?}", spec.id, prompt_path))?;
+            return Ok(content);
+        }
+
+        if let Some(inline) = &spec.prompt_inline {
+            return Ok(inline.clone());
+        }
+
+        if let Some(legacy) = &spec.system_prompt_template {
+            log::warn!(
+                "Agent '{}' uses legacy system_prompt_template. This field is deprecated; use prompt_file/prompt_inline.",
+                spec.id
+            );
+            return Ok(legacy.clone());
+        }
+
+        let default_file = format!("agent-{}.md", spec.id);
+        let prompt_path = self.prompts_dir.join(&default_file);
+        match tokio::fs::read_to_string(&prompt_path).await {
+            Ok(content) => Ok(content),
+            Err(err) => {
+                log::warn!(
+                    "Default prompt file {:?} not found for agent '{}': {}",
+                    prompt_path,
+                    spec.id,
+                    err
+                );
+                Ok(String::new())
+            }
+        }
+    }
+
+    async fn load_workflow_prompt(&self, stage: Option<&str>, vars: &HashMap<String, String>) -> Option<String> {
+        let stage = stage?;
+        if stage == "idle" {
+            return None;
+        }
+        let path = self.prompts_dir.join("workflow-stages.md");
+        let prompts = match WorkflowStagePrompts::load_from_file_async(&path).await {
+            Ok(prompts) => prompts,
+            Err(err) => {
+                log::warn!(
+                    "Failed to load workflow prompt stage '{}' from {:?}: {}",
+                    stage,
+                    path,
+                    err
+                );
+                return None;
+            }
+        };
+        prompts.render(stage, vars)
+    }
+}
+
+/// Concrete subagent runtime builder service.
+#[derive(Clone)]
+pub struct SubagentRuntimeBuilder {
+    config: Arc<AppConfig>,
+}
+
+impl SubagentRuntimeBuilder {
+    pub fn new(config: Arc<AppConfig>) -> Self {
+        Self { config }
+    }
+
+    pub async fn build_runtime(
+        &self,
+        spec: &AgentSpec,
+        binding: &crate::config::ResolvedAgentBinding,
+        model_override: Option<&str>,
+        context: Option<&ToolContext>,
+        project_dir: Option<&Path>,
+        environment: crate::prompt::EnvironmentSnapshot,
+    ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)> {
+        let config = self.config.clone();
+        let model_override = model_override.map(str::to_string);
+        let context = context.cloned();
+
+        let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
+            config.providers.clone(),
+            binding.provider_id.clone(),
+            crate::network::build_provider_client()?,
+            config.outbound_context_headers.enabled,
+        );
+
+        let sub_registry = crate::tool::ToolRegistry::new();
+        if let Some(ctx) = context.as_ref() {
+            if let (Some(task_store), Some(skill_registry)) = (ctx.task_store.as_ref(), ctx.skill_registry.as_ref()) {
+                let http_clients = crate::network::HttpClients::new()?;
+                crate::tool::builtin::register_builtin_tools(
+                    &sub_registry,
+                    &config,
+                    task_store.clone(),
+                    skill_registry.clone(),
+                    spec.tool_whitelist.as_deref(),
+                    Arc::new(UnavailableSubagentProjectDirService),
+                    &http_clients,
+                );
+            }
+        }
+
+        let mut model_config = ModelConfig {
+            provider: Some(binding.provider_id.clone()),
+            model: spec.model_config.model.clone(),
+            max_tokens: spec.model_config.max_tokens.unwrap_or(binding.model_config.max_tokens),
+            temperature: Some(spec.model_config.temperature),
+            top_p: Some(spec.model_config.top_p),
+            thinking_budget: None,
+            reasoning_effort: None,
+            max_tokens_field: binding.model_config.max_tokens_field.clone(),
+            extra_body: binding.model_config.extra_body.clone(),
+        };
+        if let Some(model_override) = model_override.as_deref() {
+            model_config.model = model_override.to_string();
+        }
+
+        let agent_config = crate::agent::AgentConfig {
+            max_iterations: config.gateway.max_iterations,
+            model_config: model_config.clone(),
+            tool_timeout: std::time::Duration::from_secs(config.gateway.subagent_timeout_secs),
+            max_tokens: config.gateway.max_tokens,
+            trimmer: crate::prompt::TrimmerConfig {
+                context_window: config.gateway.trimmer.context_window,
+                output_reserve: config.gateway.trimmer.output_reserve,
+                min_recent_messages: config.gateway.trimmer.min_recent_messages,
+                enable_summary: false,
+            },
+            config_dir: config.config_dir.clone(),
+            prompts_dir: config.prompts_dir(),
+            project_context_file: config.project_context_file(),
+            initial_env_snapshot: Some(environment),
+            loop_guard: crate::loop_guard::LoopGuardConfig {
+                enabled: config.gateway.loop_guard.enabled,
+                max_consecutive_duplicate_tool_calls: config.gateway.loop_guard.max_consecutive_duplicate_tool_calls,
+                max_stalled_iterations: config.gateway.loop_guard.max_stalled_iterations,
+                duplicate_read_mode: if config.gateway.loop_guard.duplicate_read_mode == "warn_only" {
+                    crate::loop_guard::DuplicateReadMode::WarnOnly
+                } else {
+                    crate::loop_guard::DuplicateReadMode::WarnThenReject
+                },
+                iteration_trim_ratio: config.gateway.loop_guard.iteration_trim_ratio,
+            },
+            prompt_diagnostics: crate::agent::PromptDiagnosticsConfig {
+                enabled: config.gateway.prompt_diagnostics.enabled,
+                large_section_chars: config.gateway.prompt_diagnostics.large_section_chars,
+                large_message_chars: config.gateway.prompt_diagnostics.large_message_chars,
+                large_tool_result_chars: config.gateway.prompt_diagnostics.large_tool_result_chars,
+            },
+            tool_result_compaction: crate::agent::ToolResultCompactionConfig {
+                enabled: config.gateway.tool_result_compaction.enabled,
+                max_chars: config.gateway.tool_result_compaction.max_chars,
+                head_chars: config.gateway.tool_result_compaction.head_chars,
+                tail_chars: config.gateway.tool_result_compaction.tail_chars,
+                disable_for_tools: config
+                    .gateway
+                    .tool_result_compaction
+                    .disable_for_tools
+                    .iter()
+                    .map(|name| name.to_ascii_lowercase())
+                    .collect(),
+            },
+        };
+
+        let mut runtime = AgentRuntime::new(client, sub_registry, agent_config);
+        if let Some(ctx) = context.as_ref() {
+            runtime.task_store = ctx.task_store.clone();
+            runtime.skill_registry = ctx.skill_registry.clone();
+            runtime.read_files = ctx.read_files.clone();
+        }
+
+        let _ = project_dir;
+        Ok((runtime, model_config))
+    }
+}
+
+struct UnavailableSubagentProjectDirService;
+
+#[async_trait]
+impl crate::tool::ProjectDirService for UnavailableSubagentProjectDirService {
+    async fn get_project_dir(&self, _session_id: &str) -> Result<Option<PathBuf>> {
+        anyhow::bail!("Project directory management is unavailable in subagent runtime")
+    }
+
+    async fn set_project_dir(&self, _session_id: &str, _project_dir: PathBuf) -> Result<PathBuf> {
+        anyhow::bail!("Project directory management is unavailable in subagent runtime")
+    }
+}
+
 /// Services required by `AgentTool` to spawn subagents.
 #[derive(Clone)]
 pub struct AgentToolServices {
-    pub prompt_loader: Arc<dyn AgentPromptLoader>,
-    pub runtime_builder: Arc<dyn SubagentRuntimeFactory>,
+    pub prompt_service: SubagentPromptService,
+    pub runtime_builder: SubagentRuntimeBuilder,
 }
 
 /// Tool to spawn a subagent for specialized task execution.
@@ -45,37 +311,6 @@ struct PromptRequestInputs {
     project_instruction_profile: crate::prompt::ProjectInstructionProfile,
     tool_guidance: crate::prompt::ToolGuidanceMode,
     agent_catalog: Option<String>,
-}
-
-#[async_trait]
-pub trait SubagentRuntimeFactory: Send + Sync {
-    async fn build_runtime(
-        &self,
-        spec: &AgentSpec,
-        binding: &crate::config::ResolvedAgentBinding,
-        model_override: Option<&str>,
-        context: Option<&ToolContext>,
-        project_dir: Option<&Path>,
-        environment: crate::prompt::EnvironmentSnapshot,
-    ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)>;
-}
-
-#[async_trait]
-pub trait AgentPromptLoader: Send + Sync {
-    async fn load_agent_material(
-        &self,
-        spec: &AgentSpec,
-        env: Option<crate::prompt::EnvironmentSnapshot>,
-        template_vars: HashMap<String, String>,
-    ) -> Result<crate::prompt::PromptMaterial>;
-    async fn load_turn_material(
-        &self,
-        project_dir: Option<&Path>,
-        workflow_stage: Option<&str>,
-        active_skill: Option<String>,
-        turn_vars: HashMap<String, String>,
-        enable_developer_prompt: bool,
-    ) -> Result<crate::prompt::TurnPromptMaterial>;
 }
 
 impl AgentTool {
@@ -107,8 +342,9 @@ impl AgentTool {
         }
     }
 
-    /// Constructor without subagent services — useful when only metadata methods are needed.
-    pub fn new_unconfigured(config: AppConfig) -> Self {
+    /// Constructor without subagent services — used by tests and metadata-only wiring.
+    #[cfg(test)]
+    pub(crate) fn new_without_subagent_services(config: AppConfig) -> Self {
         Self::new(config, None)
     }
 
@@ -257,7 +493,7 @@ impl AgentTool {
         prompt_template_vars.insert(template_vars::PENDING_INTERACTION.to_string(), "none".to_string());
         prompt_template_vars.insert(template_vars::ACTIVE_AGENT.to_string(), spec.display_name.clone());
         let prompt_material = services
-            .prompt_loader
+            .prompt_service
             .load_agent_material(spec, Some(environment.clone()), prompt_template_vars.clone())
             .await?;
 
@@ -268,7 +504,7 @@ impl AgentTool {
             .get(template_vars::WORKFLOW_STAGE)
             .map(String::as_str);
         let turn_material = services
-            .prompt_loader
+            .prompt_service
             .load_turn_material(
                 project_dir.as_deref(),
                 workflow_stage,
@@ -697,7 +933,7 @@ mod tests {
             ],
             ..GatewayConfig::default()
         };
-        AgentTool::new_unconfigured(config)
+        AgentTool::new_without_subagent_services(config)
     }
 
     #[test]

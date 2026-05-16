@@ -1,5 +1,5 @@
 use crate::event::AgentEvent;
-use crate::skill::{Skill, SkillRegistry};
+use crate::skill::SkillRegistry;
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::Result;
 use async_trait::async_trait;
@@ -44,25 +44,27 @@ impl Tool for SkillTool {
             .ok_or_else(|| anyhow::anyhow!("Missing 'skill'"))?;
         let args = input["args"].as_str().filter(|value| !value.trim().is_empty());
 
-        // Find skill in registry
-        let skill = self.registry.skills.iter().find(|s| s.name == skill_name);
-
-        if let Some(s) = skill {
+        if let Some(skill) = self.registry.find_by_name(skill_name) {
             if let Some(ctx) = &context {
                 let _ = ctx
                     .event_tx
                     .send(AgentEvent::SkillLoaded {
-                        skill_name: skill_name.to_string(),
+                        skill_name: skill.id.clone(),
                     })
                     .await;
             }
 
             Ok(ToolOutput {
-                content: format_skill_output(s, args),
+                content: format_skill_output(skill.display_name.as_str(), skill.instructions.as_str(), args),
                 is_error: false,
             })
         } else {
-            let available: Vec<String> = self.registry.skills.iter().map(|s| s.name.clone()).collect();
+            let available: Vec<String> = self
+                .registry
+                .all_candidates()
+                .into_iter()
+                .map(|skill| skill.id.clone())
+                .collect();
             Ok(ToolOutput {
                 content: format!(
                     "Skill '{}' not found. Available skills: {}",
@@ -75,12 +77,12 @@ impl Tool for SkillTool {
     }
 }
 
-fn format_skill_output(skill: &Skill, args: Option<&str>) -> String {
+fn format_skill_output(skill_name: &str, instructions: &str, args: Option<&str>) -> String {
     match args {
         Some(args) => format!(
             "Skill '{}' loaded.\nArguments: {}\n\nInstructions:\n\n{}",
-            skill.name, args, skill.body
+            skill_name, args, instructions
         ),
-        None => format!("Skill '{}' loaded. Instructions:\n\n{}", skill.name, skill.body),
+        None => format!("Skill '{}' loaded. Instructions:\n\n{}", skill_name, instructions),
     }
 }

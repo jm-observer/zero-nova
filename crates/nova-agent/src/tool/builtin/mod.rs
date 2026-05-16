@@ -97,48 +97,21 @@ async fn register_builtin_tools_inner(
         )))
         .await;
 
+    registry
+        .register(Box::new(skill::SkillTool::new(skill_registry.clone())))
+        .await;
+    registry
+        .register(Box::new(task::TaskCreateTool::new(task_store.clone())))
+        .await;
+    registry
+        .register(Box::new(task::TaskListTool::new(task_store.clone())))
+        .await;
+    registry
+        .register(Box::new(task::TaskUpdateTool::new(task_store.clone())))
+        .await;
+
     // ToolInfo is always registered as a loaded tool (schema lookup infrastructure)
     registry.register(Box::new(tool_info::ToolInfoTool {})).await;
-
-    let skill_registry_for_skill = skill_registry.clone();
-    registry
-        .register_deferred(
-            "Skill".to_string(),
-            "Loads and injects specialized skills into the current session.".to_string(),
-            skill::SkillTool::input_schema(),
-            Box::new(move || Arc::new(skill::SkillTool::new(skill_registry_for_skill.clone()))),
-        )
-        .await;
-
-    let task_store_for_create = task_store.clone();
-    registry
-        .register_deferred(
-            "TaskCreate".to_string(),
-            "Creates a new task in the session's task store.".to_string(),
-            task::TaskCreateTool::input_schema(),
-            Box::new(move || Arc::new(task::TaskCreateTool::new(task_store_for_create.clone()))),
-        )
-        .await;
-
-    let task_store_for_list = task_store.clone();
-    registry
-        .register_deferred(
-            "TaskList".to_string(),
-            "Lists all tasks in the session's task store.".to_string(),
-            task::TaskListTool::input_schema(),
-            Box::new(move || Arc::new(task::TaskListTool::new(task_store_for_list.clone()))),
-        )
-        .await;
-
-    let task_store_for_update = task_store;
-    registry
-        .register_deferred(
-            "TaskUpdate".to_string(),
-            "Updates an existing task.".to_string(),
-            task::TaskUpdateTool::input_schema(),
-            Box::new(move || Arc::new(task::TaskUpdateTool::new(task_store_for_update.clone()))),
-        )
-        .await;
 }
 
 #[cfg(test)]
@@ -185,6 +158,10 @@ mod tests {
             "Write",
             "Edit",
             "Agent",
+            "Skill",
+            "TaskCreate",
+            "TaskList",
+            "TaskUpdate",
             "WebSearch",
             "WebFetch",
             "ProjectManager",
@@ -198,12 +175,6 @@ mod tests {
             );
         }
 
-        for tool_name in ["Skill", "TaskCreate", "TaskList", "TaskUpdate"] {
-            assert!(
-                registry.tool_metadata(tool_name).await.is_some(),
-                "tool '{}' should be present in runtime metadata",
-                tool_name
-            );
-        }
+        assert!(registry.tool_metadata("Skill").await.is_some());
     }
 }

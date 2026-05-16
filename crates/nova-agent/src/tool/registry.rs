@@ -94,9 +94,6 @@ pub trait Tool: Send + Sync {
 }
 
 /// Registry for storing and accessing tools.
-///
-/// Uses `tokio::sync::Mutex` so that tool registration and resolution can occur
-/// in async contexts without blocking child tasks.
 pub struct ToolRegistry {
     state: Mutex<RegistryState>,
     snapshot: RwLock<Arc<RegistrySnapshot>>,
@@ -307,7 +304,10 @@ impl ToolRegistry {
         }
         let _ = self.refresh_snapshot_locked_async(&guard).await;
     }
-    /// Registers a deferred tool.
+    /// Registers a tool through a compatibility entry point kept for old callers.
+    ///
+    /// Deferred tool semantics have been removed; this now eagerly instantiates and
+    /// registers the tool as a normal loaded tool.
     pub async fn register_deferred(
         &self,
         name: String,
@@ -319,7 +319,10 @@ impl ToolRegistry {
             .await;
     }
 
-    /// Registers a deferred tool with a specific category.
+    /// Registers a tool through a compatibility entry point kept for old callers.
+    ///
+    /// Deferred tool semantics have been removed; `category` is ignored and the tool
+    /// is registered immediately as a normal loaded tool.
     pub async fn register_deferred_with_category(
         &self,
         name: String,
@@ -328,30 +331,15 @@ impl ToolRegistry {
         factory: Box<dyn Fn() -> Arc<dyn Tool> + Send + Sync>,
         category: DeferredToolCategory,
     ) {
+        let _ = (name, description, input_schema, category);
+        let tool = factory();
         let mut state = self.lock_state_async().await;
-        state.deferred.push(DeferredToolEntry {
-            name,
-            description,
-            input_schema,
-            factory,
-            category,
-        });
+        state.tools.push(tool);
         let _ = self.refresh_snapshot_locked_async(&state).await;
     }
-    /// Returns the definitions of all registered tools, including deferred ones as stubs.
+    /// Returns the definitions of all registered tools.
     pub async fn tool_definitions(&self) -> Vec<ProviderToolDefinition> {
-        let snapshot = self.lock_snapshot_async().await;
-        let mut defs = snapshot.loaded_provider_definitions.clone();
-        if !snapshot.deferred_representations.is_empty() {
-            let d = builtin::tool_search::tool_definition();
-            defs.push(ProviderToolDefinition {
-                name: d.name,
-                description: d.description,
-                input_schema: d.input_schema,
-            });
-        }
-
-        defs
+        self.lock_snapshot_async().await.loaded_provider_definitions.clone()
     }
 
     pub async fn loaded_definitions(&self) -> Vec<RegisteredToolDefinition> {
@@ -560,10 +548,6 @@ impl ToolRegistry {
         mut input: serde_json::Value,
         context: Option<ToolContext>,
     ) -> anyhow::Result<ToolOutput> {
-        if name == builtin::tool_search::TOOL_NAME {
-            return builtin::tool_search::execute(self, input).await;
-        }
-
         if name == builtin::tool_info::TOOL_NAME {
             let definition = builtin::tool_info::tool_definition();
             if let Err(error_output) = crate::tool::schema_validation::validate_input_against_schema(
@@ -650,10 +634,7 @@ impl Default for ToolRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DeferredResolveOutcome, DeferredToolCategory, RegisteredToolDefinition, Tool, ToolContext, ToolOutput,
-        ToolRegistry,
-    };
+    use super::{DeferredToolCategory, RegisteredToolDefinition, Tool, ToolContext, ToolOutput, ToolRegistry};
     use crate::prompt::EnvironmentSnapshot;
     use anyhow::Result;
     use serde_json::{json, Value};
@@ -720,7 +701,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_search_can_load_deferred_tool() {
+    async fn register_deferred_now_registers_loaded_tool_immediately() {
         let registry = ToolRegistry::new();
         registry
             .register_deferred(
@@ -731,11 +712,6 @@ mod tests {
             )
             .await;
 
-        let search_output = registry
-            .execute("ToolSearch", json!({"query": "select:DeferredTool"}), None)
-            .await
-            .unwrap();
-        assert!(search_output.content.contains("Loaded tool: DeferredTool"));
         assert!(registry.has_loaded_tool("DeferredTool").await);
     }
 
@@ -870,7 +846,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_deferred_async_returns_factory_failed_and_keeps_retryable() {
+    #[should_panic(expected = "factory failed")]
+    async fn register_deferred_factory_panics_propagate_to_caller() {
         let registry = ToolRegistry::new();
         registry
             .register_deferred_with_category(
@@ -881,18 +858,11 @@ mod tests {
                 DeferredToolCategory::System,
             )
             .await;
-
-        let first = registry.resolve_deferred_with_outcome("PanicFactory").await;
-        assert!(matches!(first, DeferredResolveOutcome::FactoryFailed { .. }));
-
-        let deferred = registry.deferred_definitions().await;
-        assert!(deferred.iter().any(|d| d.name == "PanicFactory"));
     }
 
     #[tokio::test]
-    async fn load_deferred_by_category_returns_structured_outcome() {
+    async fn register_deferred_compat_path_registers_loaded_tools() {
         let registry = ToolRegistry::new();
-        let panic_counter = Arc::new(AtomicUsize::new(0));
         registry
             .register_deferred_with_category(
                 "TaskA".to_string(),
@@ -905,31 +875,20 @@ mod tests {
         registry
             .register_deferred_with_category(
                 "TaskB".to_string(),
-                "panic".to_string(),
+                "ok".to_string(),
                 json!({"type":"object"}),
-                Box::new({
-                    let panic_counter = panic_counter.clone();
-                    move || {
-                        panic_counter.fetch_add(1, Ordering::SeqCst);
-                        panic!("taskb factory failed");
-                    }
-                }),
+                Box::new(|| Arc::new(StaticTool { name: "TaskB" })),
                 DeferredToolCategory::Task,
             )
             .await;
 
-        let outcome = registry
-            .load_deferred_by_category(&DeferredToolCategory::Task, true)
-            .await;
-        assert_eq!(outcome.requested, 2);
-        assert_eq!(outcome.loaded, 1);
-        assert_eq!(outcome.failed, 1);
-        assert_eq!(panic_counter.load(Ordering::SeqCst), 1);
+        assert!(registry.has_loaded_tool("TaskA").await);
+        assert!(registry.has_loaded_tool("TaskB").await);
     }
 
     #[tokio::test]
-    async fn concurrent_resolve_same_tool_executes_factory_once() {
-        let registry = Arc::new(ToolRegistry::new());
+    async fn register_deferred_factory_executes_once_per_registration() {
+        let registry = ToolRegistry::new();
         let factory_counter = Arc::new(AtomicUsize::new(0));
 
         registry
@@ -948,32 +907,8 @@ mod tests {
             )
             .await;
 
-        let mut tasks = Vec::new();
-        for _ in 0..100 {
-            let registry = registry.clone();
-            tasks.push(tokio::spawn(async move {
-                registry.resolve_deferred_with_outcome("ConcurrentTool").await
-            }));
-        }
-
-        let mut loaded = 0usize;
-        let mut already_loaded = 0usize;
-        let mut not_found = 0usize;
-        let mut failed = 0usize;
-        for task in tasks {
-            match task.await.unwrap() {
-                DeferredResolveOutcome::Loaded => loaded += 1,
-                DeferredResolveOutcome::AlreadyLoaded => already_loaded += 1,
-                DeferredResolveOutcome::NotFound => not_found += 1,
-                DeferredResolveOutcome::FactoryFailed { .. } => failed += 1,
-            }
-        }
-
         assert_eq!(factory_counter.load(Ordering::SeqCst), 1);
-        assert_eq!(loaded, 1);
-        assert_eq!(already_loaded, 99);
-        assert_eq!(not_found, 0);
-        assert_eq!(failed, 0);
+        assert!(registry.has_loaded_tool("ConcurrentTool").await);
     }
 
     #[tokio::test]
@@ -1000,7 +935,7 @@ mod tests {
             reads.push(tokio::spawn(async move {
                 let _ = registry.tool_definitions().await;
                 let _ = registry.get_turn_view(true, true, true).await;
-                let _ = registry.deferred_definitions().await;
+                let _ = registry.loaded_definitions().await;
             }));
         }
         for read in reads {
@@ -1013,12 +948,9 @@ mod tests {
         for i in 0..200 {
             let registry = registry.clone();
             mixed.push(tokio::spawn(async move {
-                if i % 10 == 0 {
-                    let _ = registry.resolve_deferred_with_outcome("DeferredTask0").await;
-                } else {
-                    let _ = registry.tool_definitions().await;
-                    let _ = registry.get_turn_view(true, true, true).await;
-                }
+                let _ = i;
+                let _ = registry.tool_definitions().await;
+                let _ = registry.get_turn_view(true, true, true).await;
             }));
         }
         for task in mixed {
@@ -1048,7 +980,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_metadata_returns_deferred_tool() {
+    async fn tool_metadata_marks_register_deferred_tools_as_loaded() {
         let registry = ToolRegistry::new();
         registry
             .register_deferred_with_category(
@@ -1064,14 +996,14 @@ mod tests {
         assert!(meta.is_some());
         let meta = meta.unwrap();
         assert_eq!(meta.name, "DeferredTool");
-        assert!(!meta.loaded);
-        assert!(meta.deferred);
-        assert_eq!(meta.category, Some(DeferredToolCategory::Task));
+        assert!(meta.loaded);
+        assert!(!meta.deferred);
+        assert_eq!(meta.category, None);
         assert!(meta.input_schema.is_object());
     }
 
     #[tokio::test]
-    async fn tool_metadata_loaded_takes_priority_over_deferred() {
+    async fn tool_metadata_for_duplicate_name_is_loaded() {
         let registry = ToolRegistry::new();
         registry.register(Box::new(StaticTool { name: "SameName" })).await;
         registry
@@ -1098,7 +1030,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_tool_metadata_includes_loaded_and_deferred() {
+    async fn all_tool_metadata_includes_register_deferred_tools_as_loaded() {
         let registry = ToolRegistry::new();
         registry.register(Box::new(StaticTool { name: "Bash" })).await;
         registry.register(Box::new(StaticTool { name: "Read" })).await;
@@ -1118,8 +1050,9 @@ mod tests {
         assert!(names.contains(&"Read"));
         assert!(names.contains(&"DeferredTool"));
         assert_eq!(metas.len(), 3);
-        let deferred = metas.into_iter().find(|meta| meta.name == "DeferredTool").unwrap();
-        assert_eq!(deferred.category, Some(DeferredToolCategory::Skill));
+        let deferred_tool = metas.into_iter().find(|meta| meta.name == "DeferredTool").unwrap();
+        assert!(deferred_tool.loaded);
+        assert!(!deferred_tool.deferred);
     }
 
     #[tokio::test]

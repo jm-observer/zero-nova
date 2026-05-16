@@ -16,6 +16,7 @@
 - 所有 agent 共享同一套 skill registry
 - 所有 agent 共享同一套已注册 tool 集
 - 不再按 agent 或 turn 做工具白名单 / skill-based tool filtering
+- 不再保留 deferred tool / ToolSearch 双态设计，统一使用 loaded tool 模型
 - 保留 agent prompt 差异，仅用于职责偏好表达
 - 仅保留最小运行时安全约束
 
@@ -32,6 +33,7 @@
 - prompt 构建与 skill 注入的职责边界
 - `ToolPolicy` / `CapabilityPolicy` 的语义定义
 - `.nova/prompts/` 与 `.nova/skills/` 中的能力说明文案
+- `ToolRegistry` 与 CLI 中对 loaded/deferred 双态的观测逻辑
 
 ## 取舍
 

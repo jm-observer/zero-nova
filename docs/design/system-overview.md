@@ -20,6 +20,7 @@
 
 - 所有 agent 共享同一套 skill registry。
 - 所有 agent 共享同一套工具注册集合，主 agent 与子 agent 不再通过配置获得不同工具集。
+- 工具系统已收敛为单态 loaded 模型，`Skill`、`Task*` 等工具在 runtime 启动后即可直接可见和调用。
 - turn 级 active skill 仍可影响 prompt 语义与工作流提示，但不再裁剪工具可见性。
 - agent prompt 的职责是表达角色偏好，而不是隔离能力。
 

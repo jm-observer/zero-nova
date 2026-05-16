@@ -375,11 +375,8 @@ async fn print_tools(agent: &AgentRuntime) {
     }
     println!();
     println!("{}", "Turn Tool View:".bold());
-    println!("  - Tool Search: {}", if true { "enabled" } else { "disabled" });
     let loaded = tools.loaded_definitions().await;
-    let deferred = tools.deferred_definitions().await;
     println!("  - Loaded tools: {}", loaded.len());
-    println!("  - Deferred tools: {}", deferred.len());
 }
 
 /// Prints the list of available skills.
@@ -449,11 +446,9 @@ async fn print_status(agent: &AgentRuntime) {
     println!();
     println!("  Tool Capabilities:");
     println!(
-        "    - Always enabled tools: {}",
+        "    - Registered tools: {}",
         agent.tools().tool_definitions().await.len()
     );
-    let deferred = agent.tools().deferred_definitions().await;
-    println!("    - Deferred tools: {}", deferred.len());
 }
 
 async fn snapshot_tasks(task_store: &TaskStoreHandle) -> Vec<nova_agent::tool::builtin::task::Task> {

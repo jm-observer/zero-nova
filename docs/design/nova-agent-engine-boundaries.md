@@ -27,11 +27,11 @@
 
 ## ToolRegistry
 
-`ToolRegistry` 是运行时内的工具索引与 deferred tool 管理器，当前基线如下：
+`ToolRegistry` 是运行时内的工具索引，当前基线如下：
 
 - 对外公共接口只提供异步方法。
-- 工具注册、deferred tool 注册、工具定义读取、turn tool view 读取都必须通过 `await` 调用。
-- registry 内部仍维护 loaded/deferred snapshot，但该实现细节不再通过同步 API 暴露给外部调用方。
+- 工具注册、工具定义读取、turn tool view 读取都必须通过 `await` 调用。
+- registry 只维护单一 loaded 工具集合，不再区分 deferred tool、按需 load 或 ToolSearch 注入入口。
 - 根 runtime 与子 agent runtime 使用同一套工具注册规则，不再存在 agent 级工具白名单分叉。
 
 这样做的目的是消除在 Tokio 运行时内对同步自旋锁辅助函数的依赖，避免出现同步与异步两套公共调用约定。

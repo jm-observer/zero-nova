@@ -193,7 +193,8 @@ impl SubagentRuntimeBuilder {
                     spec.tool_whitelist.as_deref(),
                     Arc::new(UnavailableSubagentProjectDirService),
                     &http_clients,
-                );
+                )
+                .await;
             }
         }
 
@@ -513,7 +514,7 @@ impl AgentTool {
                 spec.enable_project_developer_prompt,
             )
             .await?;
-        let tool_definitions = runtime.tools().tool_definitions_async().await;
+        let tool_definitions = runtime.tools().tool_definitions().await;
         let visible_tool_names: HashSet<String> = tool_definitions.iter().map(|tool| tool.name.clone()).collect();
 
         let request = self.build_request_from_params(

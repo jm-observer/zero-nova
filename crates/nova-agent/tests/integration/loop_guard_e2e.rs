@@ -203,7 +203,9 @@ fn build_runtime_with_loop_guard<C: LlmClient>(
 #[tokio::test]
 async fn test_stalled_iteration_aborts_turn() {
     let tools = ToolRegistry::new();
-    tools.register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)));
+    tools
+        .register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)))
+        .await;
     let mut runtime = build_runtime_with_loop_guard(
         StalledClient,
         10,
@@ -235,7 +237,9 @@ async fn test_stalled_iteration_aborts_turn() {
 #[tokio::test]
 async fn test_duplicate_tool_call_rejected() {
     let tools = ToolRegistry::new();
-    tools.register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)));
+    tools
+        .register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)))
+        .await;
 
     let mut runtime = build_runtime(
         DuplicateToolClient {
@@ -269,7 +273,9 @@ async fn test_duplicate_tool_call_rejected() {
 #[tokio::test]
 async fn duplicate_tool_rejection_is_fed_back_before_stall_abort() {
     let tools = ToolRegistry::new();
-    tools.register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)));
+    tools
+        .register(Box::new(nova_agent::tool::builtin::read::ReadTool::new(None)))
+        .await;
 
     let call_count = Arc::new(AtomicUsize::new(0));
     let mut runtime = build_runtime(

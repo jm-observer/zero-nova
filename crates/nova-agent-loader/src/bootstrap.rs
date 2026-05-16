@@ -73,7 +73,8 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
             prompt_service: agent_prompt_service,
             runtime_builder,
         }),
-    );
+    )
+    .await;
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -234,7 +235,8 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplica
             prompt_service: agent_prompt_service,
             runtime_builder,
         }),
-    );
+    )
+    .await;
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,

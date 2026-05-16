@@ -289,44 +289,12 @@ impl ToolRegistry {
         }
     }
 
-    fn lock_state_sync(&self) -> tokio::sync::MutexGuard<'_, RegistryState> {
-        loop {
-            if let Ok(guard) = self.state.try_lock() {
-                return guard;
-            }
-            std::thread::yield_now();
-        }
-    }
-
     async fn lock_state_async(&self) -> tokio::sync::MutexGuard<'_, RegistryState> {
         self.state.lock().await
     }
 
-    fn lock_snapshot_sync(&self) -> tokio::sync::RwLockReadGuard<'_, Arc<RegistrySnapshot>> {
-        loop {
-            if let Ok(guard) = self.snapshot.try_read() {
-                return guard;
-            }
-            std::thread::yield_now();
-        }
-    }
-
     async fn lock_snapshot_async(&self) -> tokio::sync::RwLockReadGuard<'_, Arc<RegistrySnapshot>> {
         self.snapshot.read().await
-    }
-
-    fn refresh_snapshot_locked_sync(
-        &self,
-        state: &RegistryState,
-    ) -> tokio::sync::RwLockWriteGuard<'_, Arc<RegistrySnapshot>> {
-        let next = Arc::new(RegistrySnapshot::from_state(state));
-        loop {
-            if let Ok(mut snapshot) = self.snapshot.try_write() {
-                *snapshot = next;
-                return snapshot;
-            }
-            std::thread::yield_now();
-        }
     }
 
     async fn refresh_snapshot_locked_async(
@@ -340,32 +308,33 @@ impl ToolRegistry {
     }
 
     /// Registers a single tool.
-    pub fn register(&self, tool: Box<dyn Tool>) {
-        let mut state = self.lock_state_sync();
+    pub async fn register(&self, tool: Box<dyn Tool>) {
+        let mut state = self.lock_state_async().await;
         state.tools.push(Arc::from(tool));
-        let _ = self.refresh_snapshot_locked_sync(&state);
+        let _ = self.refresh_snapshot_locked_async(&state).await;
     }
     /// Registers multiple tools at once.
-    pub fn register_many(&self, tools: Vec<Box<dyn Tool>>) {
-        let mut guard = self.lock_state_sync();
+    pub async fn register_many(&self, tools: Vec<Box<dyn Tool>>) {
+        let mut guard = self.lock_state_async().await;
         for tool in tools {
             guard.tools.push(Arc::from(tool));
         }
-        let _ = self.refresh_snapshot_locked_sync(&guard);
+        let _ = self.refresh_snapshot_locked_async(&guard).await;
     }
     /// Registers a deferred tool.
-    pub fn register_deferred(
+    pub async fn register_deferred(
         &self,
         name: String,
         description: String,
         input_schema: Value,
         factory: Box<dyn Fn() -> Arc<dyn Tool> + Send + Sync>,
     ) {
-        self.register_deferred_with_category(name, description, input_schema, factory, DeferredToolCategory::System);
+        self.register_deferred_with_category(name, description, input_schema, factory, DeferredToolCategory::System)
+            .await;
     }
 
     /// Registers a deferred tool with a specific category.
-    pub fn register_deferred_with_category(
+    pub async fn register_deferred_with_category(
         &self,
         name: String,
         description: String,
@@ -373,7 +342,7 @@ impl ToolRegistry {
         factory: Box<dyn Fn() -> Arc<dyn Tool> + Send + Sync>,
         category: DeferredToolCategory,
     ) {
-        let mut state = self.lock_state_sync();
+        let mut state = self.lock_state_async().await;
         state.deferred.push(DeferredToolEntry {
             name,
             description,
@@ -381,25 +350,10 @@ impl ToolRegistry {
             factory,
             category,
         });
-        let _ = self.refresh_snapshot_locked_sync(&state);
+        let _ = self.refresh_snapshot_locked_async(&state).await;
     }
     /// Returns the definitions of all registered tools, including deferred ones as stubs.
-    pub fn tool_definitions(&self) -> Vec<ProviderToolDefinition> {
-        let snapshot = self.lock_snapshot_sync();
-        let mut defs = snapshot.loaded_provider_definitions.clone();
-        if !snapshot.deferred_representations.is_empty() {
-            let d = builtin::tool_search::tool_definition();
-            defs.push(ProviderToolDefinition {
-                name: d.name,
-                description: d.description,
-                input_schema: d.input_schema,
-            });
-        }
-
-        defs
-    }
-
-    pub async fn tool_definitions_async(&self) -> Vec<ProviderToolDefinition> {
+    pub async fn tool_definitions(&self) -> Vec<ProviderToolDefinition> {
         let snapshot = self.lock_snapshot_async().await;
         let mut defs = snapshot.loaded_provider_definitions.clone();
         if !snapshot.deferred_representations.is_empty() {
@@ -414,16 +368,8 @@ impl ToolRegistry {
         defs
     }
 
-    pub fn loaded_definitions(&self) -> Vec<RegisteredToolDefinition> {
-        self.lock_snapshot_sync().loaded_definitions.clone()
-    }
-
-    pub async fn loaded_definitions_async(&self) -> Vec<RegisteredToolDefinition> {
+    pub async fn loaded_definitions(&self) -> Vec<RegisteredToolDefinition> {
         self.lock_snapshot_async().await.loaded_definitions.clone()
-    }
-
-    pub fn deferred_definitions_snapshot(&self) -> Vec<RegisteredToolDefinition> {
-        self.lock_snapshot_sync().deferred_definitions.clone()
     }
 
     pub async fn has_loaded_tool(&self, name: &str) -> bool {
@@ -470,41 +416,7 @@ impl ToolRegistry {
     /// 对 LLM 可见的工具包括：
     /// - 已加载的 `loaded` 工具
     /// - 根据 capability policy 过滤后的 `deferred` 工具
-    pub fn get_turn_view(
-        &self,
-        tool_search_enabled: bool,
-        skill_tool_enabled: bool,
-        task_tools_enabled: bool,
-    ) -> TurnToolView {
-        let snapshot = self.lock_snapshot_sync();
-        let loaded = snapshot.loaded_provider_definitions.clone();
-        let mut deferred: Vec<_> = snapshot
-            .deferred_representations
-            .iter()
-            .filter(|entry| {
-                // 如果 task_tools_enabled=false，则过滤掉 Task 类别的 deferred 工具。
-                if !task_tools_enabled && matches!(entry.category, DeferredToolCategory::Task) {
-                    return false;
-                }
-                true
-            })
-            .cloned()
-            .collect();
-
-        if tool_search_enabled {
-            deferred.push(tool_search_representation());
-        }
-
-        TurnToolView {
-            loaded,
-            deferred,
-            tool_search_enabled,
-            skill_tool_enabled,
-            task_tools_enabled,
-        }
-    }
-
-    pub async fn get_turn_view_async(
+    pub async fn get_turn_view(
         &self,
         tool_search_enabled: bool,
         skill_tool_enabled: bool,
@@ -537,8 +449,9 @@ impl ToolRegistry {
         }
     }
 
-    pub fn filter_deferred_by_policy(&self, policy: &CapabilityPolicy) -> Vec<DeferredToolRepresentation> {
-        self.lock_snapshot_sync()
+    pub async fn filter_deferred_by_policy(&self, policy: &CapabilityPolicy) -> Vec<DeferredToolRepresentation> {
+        self.lock_snapshot_async()
+            .await
             .deferred_representations
             .iter()
             .filter(|entry| {
@@ -552,8 +465,9 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub fn deferred_tools_by_category(&self, category: &DeferredToolCategory) -> Vec<DeferredToolRepresentation> {
-        self.lock_snapshot_sync()
+    pub async fn deferred_tools_by_category(&self, category: &DeferredToolCategory) -> Vec<DeferredToolRepresentation> {
+        self.lock_snapshot_async()
+            .await
             .deferred_representations
             .iter()
             .filter(|entry| &entry.category == category)
@@ -824,7 +738,7 @@ mod tests {
     #[tokio::test]
     async fn execute_supports_legacy_tool_names() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(StaticTool { name: "Bash" }));
+        registry.register(Box::new(StaticTool { name: "Bash" })).await;
 
         let output = registry.execute("bash", json!({}), None).await.unwrap();
         assert_eq!(output.content, "Bash");
@@ -833,12 +747,14 @@ mod tests {
     #[tokio::test]
     async fn tool_search_can_load_deferred_tool() {
         let registry = ToolRegistry::new();
-        registry.register_deferred(
-            "DeferredTool".to_string(),
-            "Useful deferred tool".to_string(),
-            json!({"type": "object"}),
-            Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
-        );
+        registry
+            .register_deferred(
+                "DeferredTool".to_string(),
+                "Useful deferred tool".to_string(),
+                json!({"type": "object"}),
+                Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
+            )
+            .await;
 
         let search_output = registry
             .execute("ToolSearch", json!({"query": "select:DeferredTool"}), None)
@@ -851,16 +767,18 @@ mod tests {
     #[tokio::test]
     async fn execute_rejects_unknown_fields_by_schema() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(SchemaTool {
-            name: "SchemaRead",
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "file_path": { "type": "string" }
-                },
-                "required": ["file_path"]
-            }),
-        }));
+        registry
+            .register(Box::new(SchemaTool {
+                name: "SchemaRead",
+                schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" }
+                    },
+                    "required": ["file_path"]
+                }),
+            }))
+            .await;
 
         let output = registry
             .execute(
@@ -881,16 +799,18 @@ mod tests {
     #[tokio::test]
     async fn execute_rejects_missing_required_fields_by_schema() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(SchemaTool {
-            name: "SchemaWrite",
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "file_path": { "type": "string" }
-                },
-                "required": ["file_path"]
-            }),
-        }));
+        registry
+            .register(Box::new(SchemaTool {
+                name: "SchemaWrite",
+                schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" }
+                    },
+                    "required": ["file_path"]
+                }),
+            }))
+            .await;
 
         let output = registry.execute("SchemaWrite", json!({}), None).await.unwrap();
 
@@ -901,17 +821,19 @@ mod tests {
     #[tokio::test]
     async fn execute_rejects_type_mismatch_by_schema() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(SchemaTool {
-            name: "SchemaBash",
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string" },
-                    "timeout_ms": { "type": "integer" }
-                },
-                "required": ["command"]
-            }),
-        }));
+        registry
+            .register(Box::new(SchemaTool {
+                name: "SchemaBash",
+                schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string" },
+                        "timeout_ms": { "type": "integer" }
+                    },
+                    "required": ["command"]
+                }),
+            }))
+            .await;
 
         let output = registry
             .execute(
@@ -932,7 +854,7 @@ mod tests {
     #[tokio::test]
     async fn relative_file_tool_path_requires_project_dir_when_session_has_none() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(StaticTool { name: "Read" }));
+        registry.register(Box::new(StaticTool { name: "Read" })).await;
         let (event_tx, _event_rx) = mpsc::channel(1);
         let output = registry
             .execute(
@@ -975,13 +897,15 @@ mod tests {
     #[tokio::test]
     async fn resolve_deferred_async_returns_factory_failed_and_keeps_retryable() {
         let registry = ToolRegistry::new();
-        registry.register_deferred_with_category(
-            "PanicFactory".to_string(),
-            "panic".to_string(),
-            json!({"type":"object"}),
-            Box::new(|| panic!("factory failed")),
-            DeferredToolCategory::System,
-        );
+        registry
+            .register_deferred_with_category(
+                "PanicFactory".to_string(),
+                "panic".to_string(),
+                json!({"type":"object"}),
+                Box::new(|| panic!("factory failed")),
+                DeferredToolCategory::System,
+            )
+            .await;
 
         let first = registry.resolve_deferred_with_outcome("PanicFactory").await;
         assert!(matches!(first, DeferredResolveOutcome::FactoryFailed { .. }));
@@ -994,26 +918,30 @@ mod tests {
     async fn load_deferred_by_category_returns_structured_outcome() {
         let registry = ToolRegistry::new();
         let panic_counter = Arc::new(AtomicUsize::new(0));
-        registry.register_deferred_with_category(
-            "TaskA".to_string(),
-            "ok".to_string(),
-            json!({"type":"object"}),
-            Box::new(|| Arc::new(StaticTool { name: "TaskA" })),
-            DeferredToolCategory::Task,
-        );
-        registry.register_deferred_with_category(
-            "TaskB".to_string(),
-            "panic".to_string(),
-            json!({"type":"object"}),
-            Box::new({
-                let panic_counter = panic_counter.clone();
-                move || {
-                    panic_counter.fetch_add(1, Ordering::SeqCst);
-                    panic!("taskb factory failed");
-                }
-            }),
-            DeferredToolCategory::Task,
-        );
+        registry
+            .register_deferred_with_category(
+                "TaskA".to_string(),
+                "ok".to_string(),
+                json!({"type":"object"}),
+                Box::new(|| Arc::new(StaticTool { name: "TaskA" })),
+                DeferredToolCategory::Task,
+            )
+            .await;
+        registry
+            .register_deferred_with_category(
+                "TaskB".to_string(),
+                "panic".to_string(),
+                json!({"type":"object"}),
+                Box::new({
+                    let panic_counter = panic_counter.clone();
+                    move || {
+                        panic_counter.fetch_add(1, Ordering::SeqCst);
+                        panic!("taskb factory failed");
+                    }
+                }),
+                DeferredToolCategory::Task,
+            )
+            .await;
 
         let outcome = registry
             .load_deferred_by_category(&DeferredToolCategory::Task, true)
@@ -1029,19 +957,21 @@ mod tests {
         let registry = Arc::new(ToolRegistry::new());
         let factory_counter = Arc::new(AtomicUsize::new(0));
 
-        registry.register_deferred_with_category(
-            "ConcurrentTool".to_string(),
-            "concurrency".to_string(),
-            json!({"type":"object"}),
-            Box::new({
-                let factory_counter = factory_counter.clone();
-                move || {
-                    factory_counter.fetch_add(1, Ordering::SeqCst);
-                    Arc::new(StaticTool { name: "ConcurrentTool" })
-                }
-            }),
-            DeferredToolCategory::System,
-        );
+        registry
+            .register_deferred_with_category(
+                "ConcurrentTool".to_string(),
+                "concurrency".to_string(),
+                json!({"type":"object"}),
+                Box::new({
+                    let factory_counter = factory_counter.clone();
+                    move || {
+                        factory_counter.fetch_add(1, Ordering::SeqCst);
+                        Arc::new(StaticTool { name: "ConcurrentTool" })
+                    }
+                }),
+                DeferredToolCategory::System,
+            )
+            .await;
 
         let mut tasks = Vec::new();
         for _ in 0..100 {
@@ -1077,13 +1007,15 @@ mod tests {
         let registry = Arc::new(ToolRegistry::new());
         for i in 0..40 {
             let tool_name = format!("DeferredTask{i}");
-            registry.register_deferred_with_category(
-                tool_name.clone(),
-                format!("tool-{i}"),
-                json!({"type":"object","properties":{"v":{"type":"integer"}}}),
-                Box::new(move || Arc::new(StaticTool { name: "DeferredTask0" })),
-                DeferredToolCategory::Task,
-            );
+            registry
+                .register_deferred_with_category(
+                    tool_name.clone(),
+                    format!("tool-{i}"),
+                    json!({"type":"object","properties":{"v":{"type":"integer"}}}),
+                    Box::new(move || Arc::new(StaticTool { name: "DeferredTask0" })),
+                    DeferredToolCategory::Task,
+                )
+                .await;
         }
 
         let read_start = Instant::now();
@@ -1091,8 +1023,8 @@ mod tests {
         for _ in 0..500 {
             let registry = registry.clone();
             reads.push(tokio::spawn(async move {
-                let _ = registry.tool_definitions();
-                let _ = registry.get_turn_view(true, true, true);
+                let _ = registry.tool_definitions().await;
+                let _ = registry.get_turn_view(true, true, true).await;
                 let _ = registry.deferred_definitions().await;
             }));
         }
@@ -1109,8 +1041,8 @@ mod tests {
                 if i % 10 == 0 {
                     let _ = registry.resolve_deferred_with_outcome("DeferredTask0").await;
                 } else {
-                    let _ = registry.tool_definitions();
-                    let _ = registry.get_turn_view(true, true, true);
+                    let _ = registry.tool_definitions().await;
+                    let _ = registry.get_turn_view(true, true, true).await;
                 }
             }));
         }
@@ -1129,7 +1061,7 @@ mod tests {
     #[tokio::test]
     async fn tool_metadata_returns_loaded_tool() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(StaticTool { name: "Bash" }));
+        registry.register(Box::new(StaticTool { name: "Bash" })).await;
 
         let meta = registry.tool_metadata("Bash").await;
         assert!(meta.is_some());
@@ -1143,13 +1075,15 @@ mod tests {
     #[tokio::test]
     async fn tool_metadata_returns_deferred_tool() {
         let registry = ToolRegistry::new();
-        registry.register_deferred_with_category(
-            "DeferredTool".to_string(),
-            "deferred description".to_string(),
-            json!({"type": "object", "properties": {"key": {"type": "string"}}}),
-            Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
-            DeferredToolCategory::Task,
-        );
+        registry
+            .register_deferred_with_category(
+                "DeferredTool".to_string(),
+                "deferred description".to_string(),
+                json!({"type": "object", "properties": {"key": {"type": "string"}}}),
+                Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
+                DeferredToolCategory::Task,
+            )
+            .await;
 
         let meta = registry.tool_metadata("DeferredTool").await;
         assert!(meta.is_some());
@@ -1164,13 +1098,15 @@ mod tests {
     #[tokio::test]
     async fn tool_metadata_loaded_takes_priority_over_deferred() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(StaticTool { name: "SameName" }));
-        registry.register_deferred(
-            "SameName".to_string(),
-            "deferred version".to_string(),
-            json!({"type": "object"}),
-            Box::new(|| Arc::new(StaticTool { name: "SameName" })),
-        );
+        registry.register(Box::new(StaticTool { name: "SameName" })).await;
+        registry
+            .register_deferred(
+                "SameName".to_string(),
+                "deferred version".to_string(),
+                json!({"type": "object"}),
+                Box::new(|| Arc::new(StaticTool { name: "SameName" })),
+            )
+            .await;
 
         let meta = registry.tool_metadata("SameName").await;
         assert!(meta.is_some());
@@ -1189,15 +1125,17 @@ mod tests {
     #[tokio::test]
     async fn all_tool_metadata_includes_loaded_and_deferred() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(StaticTool { name: "Bash" }));
-        registry.register(Box::new(StaticTool { name: "Read" }));
-        registry.register_deferred_with_category(
-            "DeferredTool".to_string(),
-            "deferred".to_string(),
-            json!({"type": "object"}),
-            Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
-            DeferredToolCategory::Skill,
-        );
+        registry.register(Box::new(StaticTool { name: "Bash" })).await;
+        registry.register(Box::new(StaticTool { name: "Read" })).await;
+        registry
+            .register_deferred_with_category(
+                "DeferredTool".to_string(),
+                "deferred".to_string(),
+                json!({"type": "object"}),
+                Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
+                DeferredToolCategory::Skill,
+            )
+            .await;
 
         let metas = registry.all_tool_metadata().await;
         let names: Vec<&str> = metas.iter().map(|m| m.name.as_str()).collect();

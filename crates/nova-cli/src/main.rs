@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
             run_oneshot(&agent, &final_system_prompt, &prompt, cli.verbose, cli.output_format).await?
         }
         Command::Tools => {
-            print_tools(&agent);
+            print_tools(&agent).await;
         }
         Command::McpTest { cmd } => test_mcp(&cmd).await?,
     }
@@ -218,7 +218,7 @@ async fn run_repl(
                 continue;
             }
             "/tools" => {
-                print_tools(agent);
+                print_tools(agent).await;
                 continue;
             }
             "/skills" => {
@@ -373,17 +373,17 @@ async fn run_oneshot(
 }
 
 /// Prints the list of available tools.
-fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
+async fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
     let tools = agent.tools();
     println!("{}", "Registered Tools:".bold());
-    for def in tools.tool_definitions() {
+    for def in tools.tool_definitions().await {
         println!("- {}: {}", def.name, def.description);
     }
     println!();
     println!("{}", "Turn Tool View:".bold());
     println!("  - Tool Search: {}", if true { "enabled" } else { "disabled" });
-    let loaded = tools.loaded_definitions();
-    let deferred = tools.deferred_definitions_snapshot();
+    let loaded = tools.loaded_definitions().await;
+    let deferred = tools.deferred_definitions().await;
     println!("  - Loaded tools: {}", loaded.len());
     println!("  - Deferred tools: {}", deferred.len());
 }
@@ -454,8 +454,11 @@ async fn print_status(agent: &AgentRuntime<impl LlmClient>) {
 
     println!();
     println!("  Tool Capabilities:");
-    println!("    - Always enabled tools: {}", agent.tools().tool_definitions().len());
-    let deferred = agent.tools().deferred_definitions_snapshot();
+    println!(
+        "    - Always enabled tools: {}",
+        agent.tools().tool_definitions().await.len()
+    );
+    let deferred = agent.tools().deferred_definitions().await;
     println!("    - Deferred tools: {}", deferred.len());
 }
 

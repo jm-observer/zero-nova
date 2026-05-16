@@ -132,8 +132,8 @@ impl<C: LlmClient> AgentRuntime<C> {
     }
 
     /// Registers a new tool with the registry.
-    pub fn register_tool(&self, tool: Box<dyn Tool>) {
-        self.tools.register(tool);
+    pub async fn register_tool(&self, tool: Box<dyn Tool>) {
+        self.tools.register(tool).await;
     }
 
     /// Returns a reference to the tool registry.
@@ -380,7 +380,7 @@ impl<C: LlmClient> AgentRuntime<C> {
         capability_policy: &CapabilityPolicy,
         active_skill: &Option<ActiveSkillState>,
     ) -> Vec<ToolDefinition> {
-        let mut tools = self.tools.tool_definitions_async().await;
+        let mut tools = self.tools.tool_definitions().await;
         let tool_info = tools
             .iter()
             .find(|tool| tool.name == crate::tool::builtin::tool_info::TOOL_NAME)

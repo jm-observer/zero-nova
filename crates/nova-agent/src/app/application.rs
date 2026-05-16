@@ -168,6 +168,10 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
         config_snapshot_cache.store(Arc::new(snapshot_value));
         Ok(())
     }
+
+    fn voice_not_implemented<T>() -> Result<T> {
+        anyhow::bail!("voice not implemented")
+    }
 }
 
 #[async_trait]
@@ -591,23 +595,14 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         &self,
         _req: &nova_protocol::voice::VoiceTranscribeRequest,
     ) -> Result<nova_protocol::voice::VoiceTranscribeResponse> {
-        todo!()
-        // self.voice_service
-        //     .transcribe(
-        //         req.session_id.as_deref(),
-        //         &req.audio_base64,
-        //         &req.audio_format,
-        //         req.language.as_deref(),
-        //     )
-        //     .await
+        Self::voice_not_implemented()
     }
 
     async fn voice_tts(
         &self,
         _req: &nova_protocol::voice::VoiceTtsRequest,
     ) -> Result<nova_protocol::voice::VoiceTtsResponse> {
-        todo!()
-        // self.voice_service.synthesize(&req.text, req.voice.as_deref()).await
+        Self::voice_not_implemented()
     }
 }
 
@@ -797,5 +792,25 @@ mod tests {
             .and_then(|v| v.as_bool())
             .unwrap();
         assert!(!final_snapshot_voice);
+    }
+
+    #[test]
+    fn voice_transcribe_returns_not_implemented_error() {
+        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::voice_not_implemented::<
+            nova_protocol::voice::VoiceTranscribeResponse,
+        >();
+
+        let error = result.expect_err("voice transcribe should return explicit error");
+        assert!(error.to_string().contains("voice not implemented"));
+    }
+
+    #[test]
+    fn voice_tts_returns_not_implemented_error() {
+        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::voice_not_implemented::<
+            nova_protocol::voice::VoiceTtsResponse,
+        >();
+
+        let error = result.expect_err("voice tts should return explicit error");
+        assert!(error.to_string().contains("voice not implemented"));
     }
 }

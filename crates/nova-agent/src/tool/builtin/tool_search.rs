@@ -96,7 +96,8 @@ async fn handle_selection(registry: &ToolRegistry, raw_selection: &str) -> Strin
 async fn handle_search(registry: &ToolRegistry, query: &str, max_results: usize) -> String {
     let query_lower = query.to_lowercase();
     let matches: Vec<String> = registry
-        .deferred_definitions_snapshot()
+        .deferred_definitions()
+        .await
         .into_iter()
         .filter(|definition| {
             definition.name.to_lowercase().contains(&query_lower)

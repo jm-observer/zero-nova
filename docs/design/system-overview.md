@@ -1,0 +1,20 @@
+# System Overview
+
+## 概要
+
+当前 `zero-nova` workspace 由以下几类模块组成：
+
+- `crates/nova-agent`：核心 Agent 运行时、工具系统、会话与应用层门面。
+- `crates/nova-agent-loader`：负责从配置装配 `nova-agent` 的运行时与应用实例。
+- `crates/nova-gateway-core` / `crates/nova-server`：将应用层能力暴露给网关与传输层。
+- `crates/nova-cli`：本地 CLI 调试入口。
+
+## 模块索引
+
+- `docs/design/nova-agent-engine-boundaries.md`
+  说明 `nova-agent` 中运行时、工具注册表、应用层门面与网关边界的稳定职责。
+
+## 当前约束
+
+- 工具系统的公共注册与读取接口统一为异步方法，调用方必须在异步上下文中完成工具注册、列举和工具视图读取。
+- 应用层语音能力在未接入真实 STT/TTS 服务前，允许暴露 capability 状态，但执行请求必须返回显式错误，不能 panic。

@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn tool_info_returns_metadata_for_loaded_tool() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(TestTool { name: "Bash" }));
+        registry.register(Box::new(TestTool { name: "Bash" })).await;
 
         let output = execute(
             &registry,
@@ -332,7 +332,7 @@ mod tests {
     #[tokio::test]
     async fn tool_info_returns_summary_without_schema() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(TestTool { name: "Read" }));
+        registry.register(Box::new(TestTool { name: "Read" })).await;
 
         let output = execute(
             &registry,
@@ -362,7 +362,7 @@ mod tests {
     #[tokio::test]
     async fn tool_info_reports_not_found() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(TestTool { name: "Bash" }));
+        registry.register(Box::new(TestTool { name: "Bash" })).await;
 
         let output = execute(
             &registry,
@@ -391,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn tool_info_rejects_invisible_tools() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(TestTool { name: "Bash" }));
+        registry.register(Box::new(TestTool { name: "Bash" })).await;
 
         let output = execute(
             &registry,
@@ -448,8 +448,8 @@ mod tests {
     #[tokio::test]
     async fn tool_info_queries_multiple_tools() {
         let registry = ToolRegistry::new();
-        registry.register(Box::new(TestTool { name: "Bash" }));
-        registry.register(Box::new(TestTool { name: "Read" }));
+        registry.register(Box::new(TestTool { name: "Bash" })).await;
+        registry.register(Box::new(TestTool { name: "Read" })).await;
 
         let output = execute(
             &registry,

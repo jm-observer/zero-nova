@@ -148,9 +148,9 @@ async fn turn_prompt_shows_project_not_set_and_skips_project_context() {
 #[tokio::test]
 async fn file_tools_require_project_for_relative_paths_but_allow_absolute_paths() {
     let registry = ToolRegistry::new();
-    registry.register(Box::new(ReadTool::new(None)));
-    registry.register(Box::new(WriteTool::new(None)));
-    registry.register(Box::new(EditTool::new(None)));
+    registry.register(Box::new(ReadTool::new(None))).await;
+    registry.register(Box::new(WriteTool::new(None))).await;
+    registry.register(Box::new(EditTool::new(None))).await;
 
     let temp = tempdir().expect("create tempdir");
     let file_path = temp.path().join("absolute.txt");
@@ -241,7 +241,7 @@ async fn prepare_turn_exposes_project_manager_by_default() {
     let sessions = SessionService::new(Arc::new(SessionCache::new()), repository);
 
     let tools = ToolRegistry::new();
-    tools.register(Box::new(ProjectManagerTool::new(Arc::new(sessions))));
+    tools.register(Box::new(ProjectManagerTool::new(Arc::new(sessions)))).await;
 
     let runtime = AgentRuntime::new(
         NoopClient,
@@ -312,7 +312,7 @@ async fn inherited_project_dir_is_used_by_prompt_and_relative_tool_execution() {
         .expect("write project file");
 
     let tools = ToolRegistry::new();
-    tools.register(Box::new(ReadTool::new(None)));
+    tools.register(Box::new(ReadTool::new(None))).await;
 
     let manager = SqliteManager::new(data_dir.path()).await.expect("create sqlite manager");
     let repository = SqliteSessionRepository::new(manager.pool.clone());

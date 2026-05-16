@@ -78,7 +78,6 @@ async fn register_builtin_tools_inner(
     registry.register(Box::new(read::ReadTool::new(None))).await;
     registry.register(Box::new(write::WriteTool::new(None))).await;
     registry.register(Box::new(edit::EditTool::new(None))).await;
-    registry.register(Box::new((*shared_agent_tool).clone())).await;
     registry
         .register(Box::new(web_search::WebSearchTool::with_client(
             &config.search,
@@ -157,7 +156,6 @@ mod tests {
             "Read",
             "Write",
             "Edit",
-            "Agent",
             "Skill",
             "TaskCreate",
             "TaskList",

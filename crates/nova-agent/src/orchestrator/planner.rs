@@ -62,7 +62,11 @@ fn default_subagent_type() -> String {
 }
 
 pub fn parse_and_validate(plan_json: &str) -> Result<OrchestrationPlan> {
-    let mut plan: OrchestrationPlan = serde_json::from_str(plan_json)?;
+    let plan: OrchestrationPlan = serde_json::from_str(plan_json)?;
+    validate_and_sort(plan)
+}
+
+pub fn validate_and_sort(mut plan: OrchestrationPlan) -> Result<OrchestrationPlan> {
     if plan.plan_id.trim().is_empty() {
         bail!("plan_id cannot be empty");
     }

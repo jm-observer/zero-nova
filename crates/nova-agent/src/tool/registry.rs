@@ -564,7 +564,6 @@ impl ToolRegistry {
             "bash" => "Bash",
             "read_file" => "Read",
             "write_file" => "Write",
-            "spawn_subagent" => "Agent",
             "web_fetch" => "WebFetch",
             "web_search" => "WebSearch",
             other => other,

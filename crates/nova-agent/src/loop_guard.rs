@@ -163,16 +163,6 @@ pub fn build_tool_call_signature(tool_name: &str, input: &Value) -> ToolCallSign
             canonical.insert("command".to_string(), Value::String(command.clone()));
             None
         }
-        "Agent" => {
-            copy_if_present(input, &mut canonical, "subagent_type");
-            if let Some(prompt) = input.get("prompt").and_then(Value::as_str) {
-                canonical.insert("prompt_hash".to_string(), Value::String(hash_text(prompt).to_string()));
-            }
-            input
-                .get("subagent_type")
-                .and_then(Value::as_str)
-                .map(|s| s.trim().to_string())
-        }
         _ => {
             canonical.insert("input".to_string(), normalize_json(input));
             None

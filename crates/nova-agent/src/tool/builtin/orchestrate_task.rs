@@ -1,3 +1,4 @@
+use crate::orchestrator::planner::{self, AgentRequest, ExecutionStage, OrchestrationPlan, StageMode};
 use crate::orchestrator::{OrchestratorEngine, SubAgentExecutor};
 use crate::tool::builtin::agent::AgentTool;
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
@@ -21,13 +22,49 @@ impl OrchestrateTaskTool {
         json!({
             "type": "object",
             "properties": {
-                "planJson": {
+                "plan": {
+                    "type": "object",
+                    "description": "完整编排计划（多 Agent 模式）。与 prompt 互斥。包含 planId, description, stages 字段"
+                },
+                "prompt": {
                     "type": "string",
-                    "description": "符合 OrchestrationPlan 协议的 JSON 字符串"
+                    "description": "快捷模式：单 Agent 任务的 prompt。与 plan 互斥"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "快捷模式：3-5 词任务描述"
+                },
+                "agentSelection": {
+                    "type": "string",
+                    "description": "快捷模式：可选的 agent 类型选择"
                 }
-            },
-            "required": ["planJson"]
+            }
         })
+    }
+}
+
+fn build_shorthand_plan(prompt: &str, description: &str, agent_selection: Option<String>) -> OrchestrationPlan {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    OrchestrationPlan {
+        plan_id: format!("shorthand-{}", ts),
+        description: description.to_string(),
+        stages: vec![ExecutionStage {
+            stage_id: "s1".to_string(),
+            mode: StageMode::Parallel,
+            depends_on: vec![],
+            agents: vec![AgentRequest {
+                agent_id: "a1".to_string(),
+                subagent_type: "nova".to_string(),
+                agent_selection,
+                description: description.to_string(),
+                prompt: prompt.to_string(),
+                context_files: vec![],
+                output_format: Some("full".to_string()),
+            }],
+        }],
     }
 }
 
@@ -36,34 +73,49 @@ impl Tool for OrchestrateTaskTool {
     fn definition(&self) -> RegisteredToolDefinition {
         RegisteredToolDefinition {
             name: "OrchestrateTask".to_string(),
-            description: "Execute a validated multi-agent orchestration plan.".to_string(),
+            description: "Execute a multi-agent orchestration plan, or run a single agent task in shorthand mode."
+                .to_string(),
             input_schema: Self::input_schema(),
             defer_loading: false,
         }
     }
 
     async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
-        let plan_json = input
-            .get("planJson")
-            .and_then(Value::as_str)
-            .context("Missing 'planJson'")?;
-        log::info!(
-            "[OrchestrateTaskTool] Received orchestration request plan_json_chars={}",
-            plan_json.chars().count()
-        );
-
         let tool_context = context.context("OrchestrateTask requires tool context")?;
 
-        // Use cancellation token from parent context if available, otherwise create a new one.
         let cancellation_token = tool_context
             .cancellation_token
             .clone()
             .unwrap_or_else(CancellationToken::new);
 
+        let has_plan = input.get("plan").is_some();
+        let has_prompt = input.get("prompt").and_then(Value::as_str).is_some();
+
+        if has_plan && has_prompt {
+            anyhow::bail!("'plan' and 'prompt' are mutually exclusive");
+        }
+
+        let plan = if let Some(plan_value) = input.get("plan") {
+            let raw: OrchestrationPlan = serde_json::from_value(plan_value.clone()).context("Invalid plan object")?;
+            planner::validate_and_sort(raw)?
+        } else if let Some(prompt) = input.get("prompt").and_then(Value::as_str) {
+            let desc = input.get("description").and_then(Value::as_str).unwrap_or("Agent task");
+            let agent_selection = input.get("agentSelection").and_then(Value::as_str).map(String::from);
+            build_shorthand_plan(prompt, desc, agent_selection)
+        } else {
+            anyhow::bail!("Either 'plan' (object) or 'prompt' (string) must be provided");
+        };
+
+        log::info!(
+            "[OrchestrateTaskTool] Received orchestration request plan_id={} stage_count={}",
+            plan.plan_id,
+            plan.stages.len()
+        );
+
         let executor: Arc<dyn SubAgentExecutor> = self.agent_tool.clone();
         let engine = OrchestratorEngine::new(executor, tool_context.event_tx.clone(), Some(tool_context));
         let outcome = engine
-            .execute_plan(plan_json, cancellation_token)
+            .execute_plan(plan, cancellation_token)
             .await
             .context("Failed to execute orchestration plan")?;
 
@@ -107,6 +159,32 @@ mod tests {
         AppConfig::new("D:/config".into())
     }
 
+    fn test_context(event_tx: mpsc::Sender<AgentEvent>) -> ToolContext {
+        ToolContext {
+            event_tx,
+            tool_use_id: "tool-1".to_string(),
+            session_id: "session-1".to_string(),
+            task_store: None,
+            skill_registry: None,
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            turn_read_state: None,
+            environment: Some(EnvironmentSnapshot {
+                config_dir: "D:/config".to_string(),
+                project_dir: None,
+                platform: "windows".to_string(),
+                shell: "powershell".to_string(),
+                git_branch: None,
+                git_status_summary: None,
+                recent_commits: None,
+                model_id: None,
+                current_date: "2026-05-16".to_string(),
+            }),
+            shared_environment: None,
+            cancellation_token: None,
+            visible_tool_names: Arc::new(HashSet::new()),
+        }
+    }
+
     #[tokio::test]
     async fn orchestrate_task_requires_tool_context() {
         let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
@@ -114,55 +192,93 @@ mod tests {
         let error = tool
             .execute(
                 serde_json::json!({
-                    "planJson": "{\"planId\":\"p1\",\"description\":\"d\",\"stages\":[]}"
+                    "plan": {"planId": "p1", "description": "d", "stages": []}
                 }),
                 None,
             )
             .await;
 
         assert!(error.is_err(), "missing context should fail");
-        let error = error.err().expect("error should exist");
-
-        assert!(error.to_string().contains("requires tool context"));
+        assert!(error
+            .err()
+            .expect("error should exist")
+            .to_string()
+            .contains("requires tool context"));
     }
 
     #[tokio::test]
-    async fn orchestrate_task_accepts_minimal_valid_plan() {
+    async fn full_plan_mode_accepts_minimal_valid_plan() {
         let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
         let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
 
         let output = tool
             .execute(
                 serde_json::json!({
-                    "planJson": "{\"planId\":\"p1\",\"description\":\"d\",\"stages\":[]}"
+                    "plan": {"planId": "p1", "description": "d", "stages": []}
                 }),
-                Some(ToolContext {
-                    event_tx,
-                    tool_use_id: "tool-1".to_string(),
-                    session_id: "session-1".to_string(),
-                    task_store: None,
-                    skill_registry: None,
-                    read_files: Arc::new(Mutex::new(HashSet::new())),
-                    turn_read_state: None,
-                    environment: Some(EnvironmentSnapshot {
-                        config_dir: "D:/config".to_string(),
-                        project_dir: None,
-                        platform: "windows".to_string(),
-                        shell: "powershell".to_string(),
-                        git_branch: None,
-                        git_status_summary: None,
-                        recent_commits: None,
-                        model_id: None,
-                        current_date: "2026-05-06".to_string(),
-                    }),
-                    shared_environment: None,
-                    cancellation_token: None,
-                    visible_tool_names: Arc::new(std::collections::HashSet::new()),
-                }),
+                Some(test_context(event_tx)),
             )
             .await
             .expect("empty plan should succeed without sub-agents");
 
         assert!(output.content.contains("\"planId\": \"p1\""));
+    }
+
+    #[tokio::test]
+    async fn shorthand_mode_constructs_single_agent_plan() {
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
+        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
+
+        let result = tool
+            .execute(
+                serde_json::json!({
+                    "prompt": "do something",
+                    "description": "test task"
+                }),
+                Some(test_context(event_tx)),
+            )
+            .await;
+
+        // Without real subagent services this will fail at run_subagent, which is expected.
+        // The plan construction itself succeeds (verified by the error NOT being about plan parsing).
+        let err_msg = result.err().expect("should fail without services").to_string();
+        assert!(
+            !err_msg.contains("plan") && !err_msg.contains("prompt"),
+            "error should be about execution, not input parsing: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_and_prompt_mutually_exclusive() {
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
+        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
+
+        let error = tool
+            .execute(
+                serde_json::json!({
+                    "plan": {"planId": "p1", "description": "d", "stages": []},
+                    "prompt": "also this"
+                }),
+                Some(test_context(event_tx)),
+            )
+            .await;
+
+        assert!(error.is_err());
+        assert!(error
+            .err()
+            .expect("error should exist")
+            .to_string()
+            .contains("mutually exclusive"));
+    }
+
+    #[tokio::test]
+    async fn missing_both_plan_and_prompt_fails() {
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
+        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(4);
+
+        let error = tool.execute(serde_json::json!({}), Some(test_context(event_tx))).await;
+
+        assert!(error.is_err());
+        assert!(error.err().expect("error should exist").to_string().contains("Either"));
     }
 }

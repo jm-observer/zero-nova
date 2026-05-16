@@ -3,25 +3,42 @@ pub mod reviewer;
 pub mod scheduler;
 
 use crate::event::AgentEvent;
-use crate::tool::{ToolContext, ToolOutput};
-use anyhow::{anyhow, Result};
+use crate::tool::ToolContext;
+use anyhow::Result;
 use async_trait::async_trait;
 use nova_protocol::orchestration::{
     AgentSummary, OrchestrationCompleteArgs, OrchestrationPlanEvent, OrchestrationReviewStartArgs, StageCompleteArgs,
     StageSummary, SubAgentCompleteArgs, SubAgentSpawnArgs,
 };
-use planner::{parse_and_validate, OrchestrationPlan};
+use planner::OrchestrationPlan;
 use reviewer::{build_review_prompt, parse_review_result, ReviewResult};
 use scheduler::{execute_stage, SubAgentResult, SubAgentStatus};
-use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Debug, Clone)]
+pub struct SubAgentRequest {
+    pub prompt: String,
+    pub description: String,
+    pub agent_selection: Option<String>,
+    pub agent_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub stage_id: Option<String>,
+    pub output_format: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubAgentOutput {
+    pub output: String,
+    pub duration_ms: u128,
+    pub warnings: Vec<String>,
+}
+
 #[async_trait]
 pub trait SubAgentExecutor: Send + Sync {
-    async fn execute_agent(&self, input: serde_json::Value, context: Option<ToolContext>) -> Result<ToolOutput>;
+    async fn execute_agent(&self, request: SubAgentRequest, context: Option<ToolContext>) -> Result<SubAgentOutput>;
 
     fn catalog_agent_ids(&self) -> HashSet<String>;
 
@@ -89,16 +106,11 @@ impl OrchestratorEngine {
         }
     }
 
-    pub fn parse_plan(&self, plan_json: &str) -> Result<OrchestrationPlan> {
-        parse_and_validate(plan_json)
-    }
-
     pub async fn execute_plan(
         &self,
-        plan_json: &str,
+        plan: OrchestrationPlan,
         cancellation_token: CancellationToken,
     ) -> Result<ExecutionOutcome> {
-        let plan = self.parse_plan(plan_json)?;
         let mut results = HashMap::<String, SubAgentResult>::new();
         let mut stage_success = HashMap::<String, bool>::new();
         let mut failed_stage_id: Option<String> = None;
@@ -239,37 +251,31 @@ impl OrchestratorEngine {
                             stage_id.clone(),
                         );
 
-                        let output = executor
-                            .execute_agent(
-                                json!({
-                                    "prompt": agent_req.prompt,
-                                    "description": agent_req.description,
-                                    "subagent_type": agent_req.subagent_type,
-                                    "agent_selection": agent_req.agent_selection.clone(),
-                                    "run_in_background": false,
-                                    "agent_id": agent_req.agent_id,
-                                    "parent_plan_id": plan_id,
-                                    "stage_id": stage_id,
-                                    "output_format": agent_req.output_format.unwrap_or_else(|| "summary".to_string())
-                                }),
-                                ctx,
-                            )
-                            .await?;
+                        let validated_selection = agent_req
+                            .agent_selection
+                            .as_deref()
+                            .or(Some(&agent_req.subagent_type))
+                            .map(String::from);
 
-                        let parsed: serde_json::Value = serde_json::from_str(&output.content)
-                            .map_err(|e| anyhow!("failed to parse sub-agent output: {}", e))?;
-                        let content = parsed
-                            .get("output")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string();
+                        let request = SubAgentRequest {
+                            prompt: agent_req.prompt.clone(),
+                            description: agent_req.description.clone(),
+                            agent_selection: validated_selection,
+                            agent_id: Some(agent_req.agent_id.clone()),
+                            plan_id: Some(plan_id.clone()),
+                            stage_id: Some(stage_id.clone()),
+                            output_format: Some(
+                                agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string()),
+                            ),
+                        };
+                        let result = executor.execute_agent(request, ctx).await?;
 
                         Ok(SubAgentResult {
                             plan_id,
                             agent_id: agent_req.agent_id,
                             stage_id,
                             status: SubAgentStatus::Success,
-                            output: content,
+                            output: result.output,
                             error: None,
                         })
                     }
@@ -436,26 +442,18 @@ impl OrchestratorEngine {
             results.len()
         );
 
-        let output = self
-            .executor
-            .execute_agent(
-                json!({
-                    "prompt": prompt,
-                    "description": "Review orchestration outputs",
-                    "subagent_type": "Reviewer",
-                    "agent_selection": "Reviewer",
-                    "run_in_background": false,
-                }),
-                self.tool_context.clone(),
-            )
-            .await?;
-
-        let parsed: serde_json::Value = serde_json::from_str(&output.content)?;
-        let raw_review = parsed
-            .get("output")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("missing review output content"))?;
-        parse_review_result(raw_review)
+        let review_agent_id = self.review_agent_id();
+        let request = SubAgentRequest {
+            prompt,
+            description: "Review orchestration outputs".to_string(),
+            agent_selection: Some(review_agent_id),
+            agent_id: None,
+            plan_id: None,
+            stage_id: None,
+            output_format: None,
+        };
+        let result = self.executor.execute_agent(request, self.tool_context.clone()).await?;
+        parse_review_result(&result.output)
     }
 
     async fn emit(&self, kind: &str, args: &impl serde::Serialize) {
@@ -540,11 +538,12 @@ fn rewire_log_forwarding(
 
 #[cfg(test)]
 mod tests {
-    use super::{rewire_log_forwarding, OrchestratorEngine, SubAgentExecutor};
+    use super::{rewire_log_forwarding, OrchestratorEngine, SubAgentExecutor, SubAgentOutput, SubAgentRequest};
     use crate::event::AgentEvent;
+    use crate::orchestrator::planner;
     use crate::orchestrator::scheduler::SubAgentStatus;
     use crate::prompt::EnvironmentSnapshot;
-    use crate::tool::{ToolContext, ToolOutput};
+    use crate::tool::ToolContext;
     use anyhow::{anyhow, Result};
     use async_trait::async_trait;
     use serde_json::{json, Value};
@@ -587,8 +586,12 @@ mod tests {
 
     #[async_trait]
     impl SubAgentExecutor for MockExecutor {
-        async fn execute_agent(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
-            let key = request_key(&input);
+        async fn execute_agent(
+            &self,
+            request: SubAgentRequest,
+            _context: Option<ToolContext>,
+        ) -> Result<SubAgentOutput> {
+            let key = request_key(&request);
             if let Some((cancel_key, token)) = &self.cancel_on_key {
                 if key == *cancel_key {
                     token.cancel();
@@ -596,14 +599,16 @@ mod tests {
             }
 
             match self.responses.get(&key) {
-                Some(Ok(output)) => Ok(ToolOutput {
-                    content: serde_json::to_string(&json!({ "output": output })).expect("serialize mock output"),
-                    is_error: false,
+                Some(Ok(output)) => Ok(SubAgentOutput {
+                    output: output.clone(),
+                    duration_ms: 0,
+                    warnings: vec![],
                 }),
                 Some(Err(message)) => Err(anyhow!(message.clone())),
-                None => Ok(ToolOutput {
-                    content: serde_json::to_string(&json!({ "output": "" })).expect("serialize empty mock output"),
-                    is_error: false,
+                None => Ok(SubAgentOutput {
+                    output: String::new(),
+                    duration_ms: 0,
+                    warnings: vec![],
                 }),
             }
         }
@@ -617,22 +622,20 @@ mod tests {
         }
     }
 
-    fn request_key(input: &Value) -> String {
-        let reviewer_selected = input["agent_selection"]
-            .as_str()
+    fn request_key(request: &SubAgentRequest) -> String {
+        let reviewer_selected = request
+            .agent_selection
+            .as_deref()
             .map(|value| value.eq_ignore_ascii_case("reviewer"))
-            .unwrap_or(false)
-            || input["subagent_type"]
-                .as_str()
-                .map(|value| value.eq_ignore_ascii_case("reviewer"))
-                .unwrap_or(false);
+            .unwrap_or(false);
         if reviewer_selected {
             return "reviewer".to_string();
         }
 
-        input["agent_id"]
-            .as_str()
-            .or_else(|| input["description"].as_str())
+        request
+            .agent_id
+            .as_deref()
+            .or(Some(request.description.as_str()))
             .unwrap_or_default()
             .to_string()
     }
@@ -803,6 +806,11 @@ mod tests {
         }
     }
 
+    fn parse_plan(stages: Vec<StageSpec>) -> crate::orchestrator::planner::OrchestrationPlan {
+        let plan_json = build_plan_json(stages);
+        planner::parse_and_validate(&plan_json).expect("plan should parse")
+    }
+
     #[test]
     fn validate_agent_selection_known_agent() {
         let executor = build_executor(HashMap::new(), &["nova", "developer"], "nova");
@@ -840,28 +848,6 @@ mod tests {
         assert_eq!(engine.review_agent_id(), "nova");
     }
 
-    #[test]
-    fn parse_plan_valid() {
-        let executor = build_executor(HashMap::new(), &["nova"], "nova");
-        let (engine, _event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![
-            stage("s1", "parallel", vec![], vec![agent("a1")]),
-            stage("s2", "serial", vec!["s1"], vec![agent("a2")]),
-        ]);
-
-        let plan = engine.parse_plan(&plan_json).expect("plan should parse");
-        assert_eq!(plan.plan_id, "p1");
-        assert_eq!(plan.stages.len(), 2);
-    }
-
-    #[test]
-    fn parse_plan_invalid() {
-        let executor = build_executor(HashMap::new(), &["nova"], "nova");
-        let (engine, _event_rx, _context) = build_engine(executor);
-
-        assert!(engine.parse_plan("not valid json").is_err());
-    }
-
     #[tokio::test]
     async fn single_stage_parallel_all_success() {
         let mut responses = HashMap::new();
@@ -873,10 +859,10 @@ mod tests {
         );
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![stage("s1", "parallel", vec![], vec![agent("a1"), agent("a2")])]);
+        let plan = parse_plan(vec![stage("s1", "parallel", vec![], vec![agent("a1"), agent("a2")])]);
 
         let outcome = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should succeed");
 
@@ -911,10 +897,10 @@ mod tests {
         );
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![stage("s1", "serial", vec![], vec![agent("a1"), agent("a2")])]);
+        let plan = parse_plan(vec![stage("s1", "serial", vec![], vec![agent("a1"), agent("a2")])]);
 
         let outcome = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should succeed");
 
@@ -939,13 +925,13 @@ mod tests {
         responses.insert("reviewer".to_string(), Ok(review_response(true, "Looks good.")));
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![
+        let plan = parse_plan(vec![
             stage("s1", "parallel", vec![], vec![agent("a1")]),
             stage("s2", "serial", vec!["s1"], vec![agent("a2")]),
         ]);
 
         let outcome = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should succeed");
 
@@ -973,13 +959,13 @@ mod tests {
         responses.insert("a1".to_string(), Err("boom".to_string()));
         let executor = build_executor(responses, &["nova"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![
+        let plan = parse_plan(vec![
             stage("s1", "parallel", vec![], vec![agent("a1")]),
             stage("s2", "serial", vec!["s1"], vec![agent("a2")]),
         ]);
 
         let outcome = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should finish");
 
@@ -1003,13 +989,13 @@ mod tests {
         responses.insert("a2".to_string(), Err("fail".to_string()));
         let executor = build_executor(responses, &["nova"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![
+        let plan = parse_plan(vec![
             stage("s1", "parallel", vec![], vec![agent("a1"), agent("a2")]),
             stage("s2", "serial", vec!["s1"], vec![agent("a3")]),
         ]);
 
         let outcome = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should finish");
 
@@ -1035,10 +1021,10 @@ mod tests {
         responses.insert("a1".to_string(), Ok("output-a1".to_string()));
         let executor = build_executor_with_cancellation(responses, &["nova"], "nova", "a1", token.clone());
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
+        let plan = parse_plan(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
 
         let outcome = engine
-            .execute_plan(&plan_json, token)
+            .execute_plan(plan, token)
             .await
             .expect("execute plan should finish");
 
@@ -1056,15 +1042,18 @@ mod tests {
     async fn empty_plan_no_stages() {
         let executor = build_executor(HashMap::new(), &["nova"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = serde_json::to_string(&json!({
-            "planId": "test",
-            "description": "empty",
-            "stages": []
-        }))
-        .expect("serialize empty plan");
+        let plan = planner::parse_and_validate(
+            &serde_json::to_string(&json!({
+                "planId": "test",
+                "description": "empty",
+                "stages": []
+            }))
+            .expect("serialize empty plan"),
+        )
+        .expect("plan should parse");
 
         let outcome = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should succeed");
 
@@ -1086,10 +1075,10 @@ mod tests {
         responses.insert("reviewer".to_string(), Ok(review_response(true, "All good.")));
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = build_plan_json(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
+        let plan = parse_plan(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
 
         let _ = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should succeed");
 
@@ -1114,26 +1103,29 @@ mod tests {
         responses.insert("reviewer".to_string(), Ok(review_response(true, "All good.")));
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
-        let plan_json = serde_json::to_string(&json!({
-            "planId": "p1",
-            "description": "ids",
-            "stages": [{
-                "stageId": "s1",
-                "mode": "parallel",
-                "dependsOn": [],
-                "agents": [{
-                    "agentId": "a1",
-                    "description": "task-a1",
-                    "subagentType": "nova",
-                    "agentSelection": "nova",
-                    "prompt": "do work"
+        let plan = planner::parse_and_validate(
+            &serde_json::to_string(&json!({
+                "planId": "p1",
+                "description": "ids",
+                "stages": [{
+                    "stageId": "s1",
+                    "mode": "parallel",
+                    "dependsOn": [],
+                    "agents": [{
+                        "agentId": "a1",
+                        "description": "task-a1",
+                        "subagentType": "nova",
+                        "agentSelection": "nova",
+                        "prompt": "do work"
+                    }]
                 }]
-            }]
-        }))
-        .expect("serialize plan");
+            }))
+            .expect("serialize plan"),
+        )
+        .expect("plan should parse");
 
         let _ = engine
-            .execute_plan(&plan_json, CancellationToken::new())
+            .execute_plan(plan, CancellationToken::new())
             .await
             .expect("execute plan should succeed");
 

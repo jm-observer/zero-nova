@@ -11,10 +11,9 @@ use crate::prompt::{
 };
 use crate::provider::openai_compat::OpenAiCompatClient;
 use crate::provider::{types::ToolDefinition, ModelConfig};
-use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
+use crate::tool::{RegisteredToolDefinition, ToolContext};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -315,13 +314,6 @@ struct PromptRequestInputs {
 }
 
 impl AgentTool {
-    fn selected_agent_type(input: &Value) -> Option<&str> {
-        input["agent_selection"]
-            .as_str()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| input["subagent_type"].as_str().filter(|value| !value.trim().is_empty()))
-    }
-
     /// Main constructor. Provide `services` when the tool will be used for subagent execution.
     pub fn new(config: AppConfig, services: Option<AgentToolServices>) -> Self {
         let mut agent_types = HashMap::new();
@@ -662,227 +654,34 @@ impl AgentTool {
 }
 
 #[async_trait]
-impl Tool for AgentTool {
-    fn definition(&self) -> RegisteredToolDefinition {
-        let catalog_hint = crate::prompt::build_agent_catalog_hint(
-            &self.agent_types.values().cloned().collect::<Vec<_>>(),
-            &self.primary_agent_type,
-        );
-
-        RegisteredToolDefinition {
-            name: "Agent".to_string(),
-            description:
-                "Spawn a specialized agent to perform a task. Supports multiple agent types and isolated execution."
-                    .to_string()
-                    + "\n\n"
-                    + &catalog_hint,
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "prompt": { "type": "string", "description": "Specific task for the agent to perform" },
-                    "description": { "type": "string", "description": "3-5 word summary of what the agent is doing" },
-                    "subagent_type": {
-                        "type": "string",
-                        "description": "DEPRECATED: Registered agent id to execute this subtask with (e.g., 'nova', 'developer'). Unknown values fall back to the primary agent."
-                    },
-                    "agent_selection": {
-                        "type": "string",
-                        "description": "Agent ID from the catalog to execute this subtask with. Takes precedence over subagent_type."
-                    },
-                    "run_in_background": { "type": "boolean", "default": false, "description": "Whether to run the agent in the background" },
-                    "isolation": { "type": "string", "enum": ["none", "worktree"], "default": "none", "description": "Isolation mode for the agent" },
-                    "model": { "type": "string", "description": "Optional model override" },
-                    "agent_id": {
-                        "type": "string",
-                        "description": "Unique identifier for this agent within the current orchestration plan (e.g. 'agent-1'). Required in orchestration mode."
-                    },
-                    "parent_plan_id": {
-                        "type": "string",
-                        "description": "ID of the orchestration plan this agent belongs to. Required in orchestration mode."
-                    },
-                    "stage_id": {
-                        "type": "string",
-                        "description": "ID of the execution stage this agent belongs to. Required in orchestration mode."
-                    },
-                    "skill_id": {
-                        "type": "string",
-                        "description": "Optional skill ID to inject into the sub-agent's system prompt. If specified, the agent will start with this skill active."
-                    },
-                    "injection_mode": {
-                        "type": "string",
-                        "enum": ["catalog", "active_full", "full"],
-                        "default": "catalog",
-                        "description": "Skill injection mode for the sub-agent. Controls how skill instructions are included in the system prompt."
-                    },
-                    "output_format": {
-                        "type": "string",
-                        "enum": ["full", "summary"],
-                        "default": "full",
-                        "description": "In 'summary' mode the agent returns a structured summary only, reducing context usage for the Review Agent."
-                    }
-                },
-                "required": ["prompt", "description"]
-            }),
-            defer_loading: false,
-        }
-    }
-
-    async fn execute(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
-        let prompt = input["prompt"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'prompt'"))?;
-        let description = input["description"].as_str().unwrap_or("Executing task");
-        let selected_agent_type = Self::selected_agent_type(&input);
-        let run_in_background = input["run_in_background"].as_bool().unwrap_or(false);
-        let isolation = input["isolation"].as_str().unwrap_or("none");
-        let model_override = input["model"].as_str();
-        let mut warnings = Vec::new();
-
-        if isolation == "worktree" {
-            warnings
-                .push("worktree isolation is not implemented yet; the agent ran in the current workspace.".to_string());
-        }
-
-        log::info!(
-            "[Agent] Starting {} agent: {}. Model: {:?}",
-            selected_agent_type.unwrap_or("default"),
-            description,
-            model_override
-        );
-
-        if run_in_background {
-            let Some(ctx) = context.clone() else {
-                anyhow::bail!("run_in_background requires tool context");
-            };
-            let agent_id = input["agent_id"].as_str().unwrap_or("background-agent").to_string();
-            let plan_id = input["parent_plan_id"].as_str().unwrap_or("unknown-plan").to_string();
-            let stage_id = input["stage_id"].as_str().unwrap_or("unknown-stage").to_string();
-            let output_format = input["output_format"].as_str().unwrap_or("full").to_string();
-            let skill_id = input["skill_id"].as_str().map(ToString::to_string);
-            let injection_mode: SkillInjectionMode = input["injection_mode"]
-                .as_str()
-                .and_then(|s| match s {
-                    "catalog" => Some(SkillInjectionMode::Catalog),
-                    "active_full" => Some(SkillInjectionMode::ActiveFull),
-                    "full" => Some(SkillInjectionMode::Full),
-                    _ => None,
-                })
-                .unwrap_or(SkillInjectionMode::Catalog);
-            let this = self.clone();
-            let response_agent_id = agent_id.clone();
-            let response_stage_id = stage_id.clone();
-            let prompt_owned = prompt.to_string();
-            let selected_agent_type_owned = selected_agent_type.map(ToString::to_string);
-            let model_override_owned = model_override.map(ToString::to_string);
-            let description_owned = description.to_string();
-            let parent_tx = ctx.event_tx.clone();
-
-            tokio::spawn(async move {
-                let _ = parent_tx
-                    .send(AgentEvent::SystemLog(format!(
-                        "orchestration_progress kind=sub_agent_spawn planId={} agentId={} stageId={} subagentType={} description={}",
-                        plan_id,
-                        agent_id,
-                        stage_id,
-                        selected_agent_type_owned.as_deref().unwrap_or("default"),
-                        description_owned
-                    )))
-                    .await;
-
-                let run = this
-                    .run_subagent(
-                        &prompt_owned,
-                        selected_agent_type_owned.as_deref(),
-                        model_override_owned.as_deref(),
-                        skill_id,
-                        injection_mode,
-                        Some(ctx),
-                    )
-                    .await;
-
-                let completion_event = match run {
-                    Ok((output, _duration, run_warnings)) => {
-                        let output_summary = if output_format == "summary" {
-                            output.chars().take(500).collect::<String>()
-                        } else {
-                            output
-                        };
-                        if !run_warnings.is_empty() {
-                            log::warn!(
-                                "[Agent] Background subagent {} completed with warnings: {:?}",
-                                agent_id,
-                                run_warnings
-                            );
-                        }
-                        AgentEvent::SystemLog(format!(
-                            "orchestration_progress kind=sub_agent_complete planId={} agentId={} stageId={} status=success error=<none> outputSummary={}",
-                            plan_id,
-                            agent_id,
-                            stage_id,
-                            output_summary
-                        ))
-                    }
-                    Err(err) => AgentEvent::SystemLog(format!(
-                        "orchestration_progress kind=sub_agent_complete planId={} agentId={} stageId={} status=failed error={}",
-                        plan_id, agent_id, stage_id, err
-                    )),
-                };
-                let _ = parent_tx.send(completion_event).await;
-            });
-
-            return Ok(ToolOutput {
-                content: serde_json::to_string_pretty(&json!({
-                    "status": "started",
-                    "agent_id": response_agent_id,
-                    "stage_id": response_stage_id,
-                }))?,
-                is_error: false,
-            });
-        }
-
-        // 解析前台调用传入的 skill 参数
-        let skill_id = input["skill_id"].as_str().map(ToString::to_string);
-        let injection_mode: SkillInjectionMode = input["injection_mode"]
-            .as_str()
-            .and_then(|s| match s {
-                "catalog" => Some(SkillInjectionMode::Catalog),
-                "active_full" => Some(SkillInjectionMode::ActiveFull),
-                "full" => Some(SkillInjectionMode::Full),
-                _ => None,
-            })
-            .unwrap_or(SkillInjectionMode::Catalog);
-
-        let (final_assistant_msg, duration_ms, run_warnings) = self
+impl SubAgentExecutor for AgentTool {
+    async fn execute_agent(
+        &self,
+        request: crate::orchestrator::SubAgentRequest,
+        context: Option<ToolContext>,
+    ) -> Result<crate::orchestrator::SubAgentOutput> {
+        let (output, duration_ms, warnings) = self
             .run_subagent(
-                prompt,
-                selected_agent_type,
-                model_override,
-                skill_id,
-                injection_mode,
-                context.clone(),
+                &request.prompt,
+                request.agent_selection.as_deref(),
+                None,
+                None,
+                SkillInjectionMode::Catalog,
+                context,
             )
             .await?;
-        warnings.extend(run_warnings);
 
-        let output_json = json!({
-            "output": final_assistant_msg,
-            "usage": {
-                "duration_ms": duration_ms,
-            },
-            "warnings": warnings,
-        });
+        let output = if request.output_format.as_deref() == Some("summary") {
+            output.chars().take(500).collect::<String>()
+        } else {
+            output
+        };
 
-        Ok(ToolOutput {
-            content: serde_json::to_string_pretty(&output_json)?,
-            is_error: false,
+        Ok(crate::orchestrator::SubAgentOutput {
+            output,
+            duration_ms,
+            warnings,
         })
-    }
-}
-
-#[async_trait]
-impl SubAgentExecutor for AgentTool {
-    async fn execute_agent(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
-        self.execute(input, context).await
     }
 
     fn catalog_agent_ids(&self) -> HashSet<String> {
@@ -973,23 +772,6 @@ mod tests {
         let (spec, warnings) = tool.resolve_agent_spec(None).unwrap();
         assert_eq!(spec.id, "nova");
         assert!(warnings.is_empty());
-    }
-
-    #[test]
-    fn selected_agent_type_prefers_agent_selection() {
-        let input = json!({
-            "agent_selection": "feature-developer",
-            "subagent_type": "nova"
-        });
-        assert_eq!(AgentTool::selected_agent_type(&input), Some("feature-developer"));
-    }
-
-    #[test]
-    fn selected_agent_type_falls_back_to_subagent_type() {
-        let input = json!({
-            "subagent_type": "developer"
-        });
-        assert_eq!(AgentTool::selected_agent_type(&input), Some("developer"));
     }
 
     #[test]

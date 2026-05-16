@@ -401,13 +401,13 @@ impl LlmClient for NoopClient {
     }
 }
 
-fn build_conversation_service<C: LlmClient + 'static>(
+fn build_conversation_service(
     tools: ToolRegistry,
     sessions: SessionService,
     data_dir: &std::path::Path,
     prompts_dir: &std::path::Path,
-    client: C,
-) -> (ConversationService<C>, SessionService) {
+    client: impl LlmClient + 'static,
+) -> (ConversationService, SessionService) {
     let mut registry = AgentRegistry::new(agent_descriptor("agent-a"));
     registry.register(agent_descriptor("agent-b"));
 

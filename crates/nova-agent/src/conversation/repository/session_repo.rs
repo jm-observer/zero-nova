@@ -2,7 +2,7 @@ use super::{parse_session_row, SessionRow, SqliteSessionRepository};
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::Result;
 use log::warn;
-use sqlx::Row;
+use sqlx::{Acquire, Row};
 
 impl SqliteSessionRepository {
     pub async fn save_session(
@@ -206,6 +206,17 @@ impl SqliteSessionRepository {
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<()> {
-        crate::conversation::storage::sqlite_tx::delete_session_with_messages(&self.pool, id).await
+        let mut conn = self.pool.acquire().await?;
+        let mut tx = conn.begin().await?;
+        sqlx::query("DELETE FROM messages WHERE session_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM sessions WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 }

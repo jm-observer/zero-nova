@@ -57,8 +57,8 @@ pub struct TurnWithContextRequest<'a> {
 }
 
 /// Runtime for the zero-nova agent.
-pub struct AgentRuntime<C: LlmClient> {
-    client: C,
+pub struct AgentRuntime {
+    client: Box<dyn LlmClient>,
     tools: ToolRegistry,
     pub config: AgentConfig,
     pub task_store: Option<TaskStoreHandle>,
@@ -112,11 +112,11 @@ pub struct ToolResultCompactionConfig {
     pub disable_for_tools: HashSet<String>,
 }
 
-impl<C: LlmClient> AgentRuntime<C> {
+impl AgentRuntime {
     /// Creates a new `AgentRuntime` instance.
-    pub fn new(client: C, tools: ToolRegistry, config: AgentConfig) -> Self {
+    pub fn new(client: impl LlmClient + 'static, tools: ToolRegistry, config: AgentConfig) -> Self {
         Self {
-            client,
+            client: Box::new(client),
             tools,
             config,
             task_store: None,
@@ -480,7 +480,7 @@ mod tests {
         }
     }
 
-    fn build_runtime(disable_for_tools: HashSet<String>) -> AgentRuntime<NoopClient> {
+    fn build_runtime(disable_for_tools: HashSet<String>) -> AgentRuntime {
         AgentRuntime::new(
             NoopClient,
             ToolRegistry::new(),

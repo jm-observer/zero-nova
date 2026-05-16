@@ -1,10 +1,10 @@
 use channel_core::ResponseSink;
-use nova_agent::app::AgentApplication;
+use nova_agent::app::AgentApplicationImpl;
 use nova_protocol::voice::{VoiceCapability, VoiceErrorCode, VoiceErrorPayload};
 use nova_protocol::{GatewayMessage, MessageEnvelope, VoiceTranscribeRequest, VoiceTtsRequest};
 
 pub async fn handle_voice_capabilities(
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -33,7 +33,7 @@ pub async fn handle_voice_capabilities(
 
 pub async fn handle_voice_transcribe(
     payload: VoiceTranscribeRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -64,7 +64,7 @@ pub async fn handle_voice_transcribe(
 
 pub async fn handle_voice_tts(
     payload: VoiceTtsRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {

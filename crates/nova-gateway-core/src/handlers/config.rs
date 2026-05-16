@@ -1,12 +1,12 @@
 use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use log::{error, info};
-use nova_agent::app::AgentApplication;
+use nova_agent::app::AgentApplicationImpl;
 use nova_protocol::{GatewayMessage, MessageEnvelope, SuccessResponse};
 use serde_json::Value;
 
 pub async fn handle_config_get(
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -34,7 +34,7 @@ pub async fn handle_config_get(
 
 pub async fn handle_config_update(
     payload: Value,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {

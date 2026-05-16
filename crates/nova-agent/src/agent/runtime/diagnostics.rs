@@ -2,7 +2,6 @@ use super::AgentRuntime;
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::{PromptSectionSize, SystemPromptBuilder, ToolSize};
 use crate::provider::types::ToolDefinition;
-use crate::provider::LlmClient;
 
 #[derive(Debug, Clone)]
 struct MessageSize {
@@ -16,7 +15,7 @@ struct MessageSize {
     is_large: bool,
 }
 
-impl<C: LlmClient> AgentRuntime<C> {
+impl AgentRuntime {
     pub(super) fn log_prompt_diagnostics(&self, builder: &SystemPromptBuilder, tool_definitions: &[ToolDefinition]) {
         let cfg = &self.config.prompt_diagnostics;
         if !cfg.enabled {

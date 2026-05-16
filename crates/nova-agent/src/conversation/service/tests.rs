@@ -3,40 +3,9 @@ use super::SessionService;
 use crate::conversation::cache::SessionCache;
 use crate::conversation::control::{TitleSource, TitleState, TitleStatus};
 use crate::conversation::sqlite_manager::SqliteManager;
-use crate::conversation::title_generator::{TitleGenerationError, TitleGenerator};
 use anyhow::Result;
 use std::sync::Arc;
 use tempfile::tempdir;
-
-struct MockTitleGenerator {
-    mode: MockTitleMode,
-}
-
-enum MockTitleMode {
-    #[allow(dead_code)]
-    Success(String),
-    RetryableError(String),
-    Timeout,
-}
-
-#[async_trait::async_trait]
-impl TitleGenerator for MockTitleGenerator {
-    async fn generate_title(&self, _user_texts: &[String]) -> Result<String, TitleGenerationError> {
-        match &self.mode {
-            MockTitleMode::Success(title) => Ok(title.clone()),
-            MockTitleMode::RetryableError(message) => {
-                Err(TitleGenerationError::Retryable(anyhow::anyhow!(message.clone())))
-            }
-            MockTitleMode::Timeout => {
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    super::TITLE_GENERATION_TIMEOUT_MS + 100,
-                ))
-                .await;
-                Ok("late".to_string())
-            }
-        }
-    }
-}
 
 #[test]
 fn merge_skill_bindings_is_idempotent_and_deduplicates_by_skill_id() {
@@ -428,108 +397,6 @@ async fn title_generation_waits_for_third_message_when_chars_not_enough() -> Res
         assert_eq!(title_state.attempt_count, 1);
         assert_eq!(title_state.status, crate::conversation::control::TitleStatus::Succeeded);
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn title_generation_retryable_error_marks_failed_and_increments_attempt() -> Result<()> {
-    let dir = tempdir()?;
-    let manager = SqliteManager::new(dir.path()).await?;
-    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
-    let service = SessionService::new_with_title_generator(
-        Arc::new(SessionCache::new()),
-        repository,
-        Arc::new(MockTitleGenerator {
-            mode: MockTitleMode::RetryableError("network".to_string()),
-        }),
-    );
-    let session = service
-        .create_for_agent(None, "agent-1".to_string(), String::new(), None)
-        .await?;
-
-    service
-        .append_message(
-            &session.id,
-            crate::message::Role::User,
-            vec![crate::message::ContentBlock::Text {
-                text: "我想做一个桌面端任务调度工具".to_string(),
-            }],
-            None,
-        )
-        .await?;
-    service
-        .append_message(
-            &session.id,
-            crate::message::Role::User,
-            vec![crate::message::ContentBlock::Text {
-                text: "要支持重试队列并且按项目分类展示".to_string(),
-            }],
-            None,
-        )
-        .await?;
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let title_state = session.title_state.read().await;
-    assert_eq!(title_state.status, TitleStatus::Failed);
-    assert_eq!(title_state.attempt_count, 1);
-    assert!(title_state
-        .last_error
-        .as_deref()
-        .unwrap_or_default()
-        .contains("retryable"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn title_generation_timeout_marks_failed_without_blocking_append() -> Result<()> {
-    let dir = tempdir()?;
-    let manager = SqliteManager::new(dir.path()).await?;
-    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
-    let service = SessionService::new_with_title_generator(
-        Arc::new(SessionCache::new()),
-        repository,
-        Arc::new(MockTitleGenerator {
-            mode: MockTitleMode::Timeout,
-        }),
-    );
-    let session = service
-        .create_for_agent(None, "agent-1".to_string(), String::new(), None)
-        .await?;
-
-    service
-        .append_message(
-            &session.id,
-            crate::message::Role::User,
-            vec![crate::message::ContentBlock::Text {
-                text: "我想做一个桌面端任务调度工具".to_string(),
-            }],
-            None,
-        )
-        .await?;
-    let started = std::time::Instant::now();
-    service
-        .append_message(
-            &session.id,
-            crate::message::Role::User,
-            vec![crate::message::ContentBlock::Text {
-                text: "要支持重试队列并且按项目分类展示".to_string(),
-            }],
-            None,
-        )
-        .await?;
-    assert!(started.elapsed() < std::time::Duration::from_millis(500));
-    tokio::time::sleep(std::time::Duration::from_millis(
-        super::TITLE_GENERATION_TIMEOUT_MS + 200,
-    ))
-    .await;
-
-    let title_state = session.title_state.read().await;
-    assert_eq!(title_state.status, TitleStatus::Failed);
-    assert!(title_state
-        .last_error
-        .as_deref()
-        .unwrap_or_default()
-        .contains("timeout"));
     Ok(())
 }
 

@@ -12,7 +12,6 @@ use crate::prompt::{
     ProjectInstructionProfile, PromptConstructionRequest, PromptExtraSections, SkillInjectionMode, SystemPromptBuilder,
     ToolGuidanceMode,
 };
-use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use nova_protocol::observability::{TurnUsage, UsageCompleteness, UsageSource};
@@ -98,15 +97,15 @@ impl TurnPromptService {
 }
 
 /// 核心会话业务服务
-pub struct ConversationService<C: LlmClient> {
-    pub agent: AgentRuntime<C>,
+pub struct ConversationService {
+    pub agent: AgentRuntime,
     pub agent_registry: AgentRegistry,
     pub sessions: SessionService,
     pub config: Arc<AppConfig>,
     turn_prompt_service: TurnPromptService,
 }
 
-impl<C: LlmClient + 'static> ConversationService<C> {
+impl ConversationService {
     #[allow(dead_code)]
     fn parse_project_instruction_profile(raw: &str) -> ProjectInstructionProfile {
         match raw {
@@ -136,7 +135,7 @@ impl<C: LlmClient + 'static> ConversationService<C> {
     }
 
     pub fn new(
-        agent: AgentRuntime<C>,
+        agent: AgentRuntime,
         agent_registry: AgentRegistry,
         sessions: SessionService,
         config: Arc<AppConfig>,

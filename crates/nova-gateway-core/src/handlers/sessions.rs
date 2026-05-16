@@ -2,7 +2,7 @@ use crate::bridge::{app_message_to_protocol, app_session_to_protocol};
 use crate::handlers::system::send_general_error;
 use channel_core::ResponseSink;
 use log::error;
-use nova_agent::app::AgentApplication;
+use nova_agent::app::AgentApplicationImpl;
 use nova_protocol::{
     observability, session::SuccessResponse as SessionSuccessResponse, GatewayMessage, MessageEnvelope,
     SessionCopyRequest, SessionCreateRequest, SessionCreateResponse, SessionIdPayload, SessionsListResponse,
@@ -10,7 +10,7 @@ use nova_protocol::{
 };
 
 pub async fn handle_sessions_list(
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -33,7 +33,7 @@ pub async fn handle_sessions_list(
 
 pub async fn handle_session_get(
     session_id: String,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -65,7 +65,7 @@ pub async fn handle_session_get(
 
 pub async fn handle_session_create(
     payload: SessionCreateRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -88,7 +88,7 @@ pub async fn handle_session_create(
 
 pub async fn handle_session_delete(
     payload: SessionIdPayload,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -110,7 +110,7 @@ pub async fn handle_session_delete(
 
 pub async fn handle_session_copy(
     payload: SessionCopyRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -142,7 +142,7 @@ pub async fn handle_session_copy(
 
 pub async fn handle_session_runtime(
     session_id: String,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -162,7 +162,7 @@ pub async fn handle_session_runtime(
 }
 
 pub async fn handle_provider_health(
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -183,7 +183,7 @@ pub async fn handle_provider_health(
 
 pub async fn handle_session_prompt_preview(
     payload: observability::PromptPreviewRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -207,7 +207,7 @@ pub async fn handle_session_prompt_preview(
 
 pub async fn handle_session_system_prompt_reload(
     payload: observability::SessionSystemPromptReloadRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -228,7 +228,7 @@ pub async fn handle_session_system_prompt_reload(
 
 pub async fn handle_session_tools(
     session_id: String,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -249,7 +249,7 @@ pub async fn handle_session_tools(
 
 pub async fn handle_session_file_tree_list(
     payload: observability::SessionFileTreeRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -273,7 +273,7 @@ pub async fn handle_session_file_tree_list(
 
 pub async fn handle_session_skill_bindings(
     session_id: String,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -294,7 +294,7 @@ pub async fn handle_session_skill_bindings(
 
 pub async fn handle_session_memory_hits(
     payload: observability::SessionMemoryHitsRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -315,7 +315,7 @@ pub async fn handle_session_memory_hits(
 
 pub async fn handle_session_model_override(
     payload: observability::SessionModelOverrideRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -337,7 +337,7 @@ pub async fn handle_session_model_override(
 
 pub async fn handle_session_token_usage(
     session_id: String,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -358,7 +358,7 @@ pub async fn handle_session_token_usage(
 
 pub async fn handle_session_token_usage_detail(
     payload: observability::SessionTokenUsageDetailRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -382,7 +382,7 @@ pub async fn handle_session_token_usage_detail(
 
 pub async fn handle_session_runs(
     payload: observability::SessionRunsRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -403,7 +403,7 @@ pub async fn handle_session_runs(
 
 pub async fn handle_run_detail(
     payload: observability::RunDetailRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -421,7 +421,7 @@ pub async fn handle_run_detail(
 
 pub async fn handle_run_control(
     payload: observability::RunControlRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -442,7 +442,7 @@ pub async fn handle_run_control(
 
 pub async fn handle_session_artifacts(
     payload: observability::SessionArtifactsRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -463,7 +463,7 @@ pub async fn handle_session_artifacts(
 
 pub async fn handle_permission_pending(
     payload: observability::PermissionPendingRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -484,7 +484,7 @@ pub async fn handle_permission_pending(
 
 pub async fn handle_permission_respond(
     payload: observability::PermissionRespondRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -505,7 +505,7 @@ pub async fn handle_permission_respond(
 
 pub async fn handle_audit_logs(
     payload: observability::AuditLogsRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -523,7 +523,7 @@ pub async fn handle_audit_logs(
 
 pub async fn handle_diagnostics_current(
     payload: observability::DiagnosticsCurrentRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {
@@ -544,7 +544,7 @@ pub async fn handle_diagnostics_current(
 
 pub async fn handle_workspace_restore(
     _payload: observability::WorkspaceRestoreRequest,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {

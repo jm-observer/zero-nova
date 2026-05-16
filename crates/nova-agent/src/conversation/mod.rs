@@ -5,8 +5,6 @@ pub mod repository;
 pub mod service;
 pub mod session;
 pub mod sqlite_manager;
-pub mod storage;
-pub mod title_generator;
 
 pub use crate::message::{ContentBlock, Message, Role};
 pub use cache::SessionCache;

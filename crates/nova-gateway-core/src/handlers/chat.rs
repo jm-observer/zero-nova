@@ -3,14 +3,14 @@ use crate::handlers::system::send_general_error;
 use crate::PushCenter;
 use channel_core::ResponseSink;
 use log::{debug, trace};
-use nova_agent::app::AgentApplication;
+use nova_agent::app::AgentApplicationImpl;
 use nova_protocol::{ChatCompletePayload, ChatPayload, GatewayMessage, MessageEnvelope, SessionIdPayload, Usage};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub async fn handle_chat(
     payload: ChatPayload,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
     peer_id: &str,
@@ -153,7 +153,7 @@ pub async fn handle_chat(
 
 pub async fn handle_chat_stop(
     payload: SessionIdPayload,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     request_id: String,
 ) {

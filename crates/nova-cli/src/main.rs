@@ -10,7 +10,6 @@ use nova_agent::agent::AgentRuntime;
 use nova_agent::event::AgentEvent;
 use nova_agent::mcp::client::McpClient;
 use nova_agent::message::{ContentBlock, Message, Role};
-use nova_agent::provider::LlmClient;
 use nova_agent::tool::builtin::task::TaskStoreHandle;
 use nova_agent::tool::UnavailableProjectDirService;
 use nova_agent_config::AppConfig;
@@ -175,12 +174,7 @@ async fn main() -> Result<()> {
 }
 
 /// Runs the REPL loop for interactive chat.
-async fn run_repl(
-    agent: &mut AgentRuntime<impl LlmClient>,
-    system_prompt: &str,
-    verbose: bool,
-    format: OutputFormat,
-) -> Result<()> {
+async fn run_repl(agent: &mut AgentRuntime, system_prompt: &str, verbose: bool, format: OutputFormat) -> Result<()> {
     let mut rl = rustyline::Editor::<(), FileHistory>::new()?;
     let mut history: Vec<Message> = Vec::new();
 
@@ -324,7 +318,7 @@ async fn run_repl(
 
 /// Executes a one-shot interaction with the given prompt.
 async fn run_oneshot(
-    agent: &AgentRuntime<impl LlmClient>,
+    agent: &AgentRuntime,
     system_prompt: &str,
     user_input: &str,
     verbose: bool,
@@ -373,7 +367,7 @@ async fn run_oneshot(
 }
 
 /// Prints the list of available tools.
-async fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
+async fn print_tools(agent: &AgentRuntime) {
     let tools = agent.tools();
     println!("{}", "Registered Tools:".bold());
     for def in tools.tool_definitions().await {
@@ -389,7 +383,7 @@ async fn print_tools(agent: &AgentRuntime<impl LlmClient>) {
 }
 
 /// Prints the list of available skills.
-fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
+fn print_skills(agent: &AgentRuntime) {
     if let Some(skill_registry) = &agent.skill_registry {
         println!("{}", "Available Skills:".bold());
         let candidates = skill_registry.all_candidates();
@@ -409,7 +403,7 @@ fn print_skills(agent: &AgentRuntime<impl LlmClient>) {
 }
 
 /// Prints the task status.
-async fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
+async fn print_tasks(agent: &AgentRuntime) {
     if let Some(task_store) = &agent.task_store {
         let tasks = snapshot_tasks(task_store).await;
         if tasks.is_empty() {
@@ -435,7 +429,7 @@ async fn print_tasks(agent: &AgentRuntime<impl LlmClient>) {
 }
 
 /// Prints the overall status (skill/agent/tool-policy).
-async fn print_status(agent: &AgentRuntime<impl LlmClient>) {
+async fn print_status(agent: &AgentRuntime) {
     println!("{}", "Overall Status:".bold());
     println!();
 

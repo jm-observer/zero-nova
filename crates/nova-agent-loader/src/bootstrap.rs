@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use nova_agent::agent::{AgentConfig, AgentRuntime, PromptDiagnosticsConfig, ToolResultCompactionConfig};
 use nova_agent::agent_catalog::AgentRegistry;
 use nova_agent::app::agent_workspace_service::AgentWorkspaceService;
-use nova_agent::app::application::{AgentApplication, AgentApplicationImpl};
+use nova_agent::app::application::AgentApplicationImpl;
 use nova_agent::app::conversation_service::{ConversationService, TurnPromptService};
 use nova_agent::conversation::repository::SqliteSessionRepository;
 use nova_agent::conversation::sqlite_manager::SqliteManager;
@@ -36,7 +36,7 @@ struct ConfigSnapshotCacheUpdater {
 }
 
 pub struct BuiltAgentRuntime {
-    pub runtime: AgentRuntime<OpenAiCompatClient>,
+    pub runtime: AgentRuntime,
     pub agent_registry: AgentRegistry,
     pub skill_registry: Arc<SkillRegistry>,
 }
@@ -197,7 +197,7 @@ impl ConfigListener for ConfigSnapshotCacheUpdater {
     }
 }
 
-pub async fn build_application(config: AppConfig) -> Result<Arc<dyn AgentApplication>> {
+pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplicationImpl>> {
     warn_unused_gateway_sections(&config).await?;
 
     let skill_packages = load_skills(config.skills_dir().as_path(), &[]).await?;

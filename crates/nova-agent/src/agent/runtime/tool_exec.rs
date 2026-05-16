@@ -7,7 +7,7 @@ use crate::loop_guard::{
 use crate::message::{ContentBlock, Message, Role};
 use crate::prompt::EnvironmentSnapshot;
 use crate::provider::types::{ProviderRequestContext, StopReason, ToolDefinition, Usage};
-use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent};
+use crate::provider::{ModelConfig, ProviderStreamEvent};
 use crate::tool::read_cache::TurnReadState;
 use crate::tool::ToolContext;
 use anyhow::Result;
@@ -43,7 +43,7 @@ pub(super) struct ExecuteTurnLoopRequest<'a> {
     pub model_config: &'a ModelConfig,
 }
 
-impl<C: LlmClient> AgentRuntime<C> {
+impl AgentRuntime {
     /// 执行一组工具调用并返回格式化结果。
     pub(super) async fn execute_tool_calls(&self, req: ExecuteToolCallsRequest<'_>) -> Result<Vec<ContentBlock>> {
         let ExecuteToolCallsRequest {

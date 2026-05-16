@@ -3,10 +3,8 @@ use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use crate::agent::TurnResult;
 use crate::config::AppConfig;
 use crate::message::Role;
-use crate::provider::LlmClient;
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
-use async_trait::async_trait;
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -15,111 +13,9 @@ use tokio::sync::mpsc;
 mod skill_binding_diff;
 use skill_binding_diff::should_emit_skill_bindings_updated;
 
-#[async_trait]
-pub trait AgentApplication: Send + Sync {
-    async fn session_exists(&self, session_id: &str) -> Result<bool>;
-    async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<TurnResult>;
-    async fn stop_turn(&self, session_id: &str) -> Result<()>;
-
-    async fn list_sessions(&self) -> Result<Vec<AppSession>>;
-    async fn session_messages(&self, session_id: &str) -> Result<Vec<AppMessage>>;
-    async fn create_session(&self, title: Option<String>, agent_id: String) -> Result<AppSession>;
-    async fn delete_session(&self, session_id: &str) -> Result<bool>;
-    async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession>;
-
-    async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgentSwitch>;
-    async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf>;
-    async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>>;
-    fn list_agents(&self) -> Vec<AppAgent>;
-    fn get_agent(&self, agent_id: &str) -> Option<AppAgent>;
-
-    async fn config_snapshot(&self) -> Result<Value>;
-    async fn update_config(&self, payload: Value) -> Result<()>;
-
-    async fn on_connect(&self) -> Result<Vec<AppEvent>>;
-    async fn on_disconnect(&self, conn_id: &str);
-
-    // --- Observability & Control (Plan 1 & 2) ---
-    async fn inspect_agent(
-        &self,
-        agent_id: &str,
-        session_id: &str,
-    ) -> Result<nova_protocol::observability::AgentInspectResponse>;
-    async fn get_session_runtime(
-        &self,
-        session_id: &str,
-    ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot>;
-    async fn preview_session_prompt(
-        &self,
-        session_id: &str,
-        message_id: Option<String>,
-    ) -> Result<nova_protocol::observability::PromptPreviewSnapshot>;
-    async fn reload_session_system_prompt(
-        &self,
-        session_id: &str,
-    ) -> Result<nova_protocol::observability::SessionSystemPromptReloadResponse>;
-    async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse>;
-    async fn list_session_file_tree(
-        &self,
-        session_id: &str,
-        relative_path: Option<String>,
-    ) -> Result<nova_protocol::observability::SessionFileTreeResponse>;
-    async fn list_session_skill_bindings(
-        &self,
-        session_id: &str,
-    ) -> Result<nova_protocol::observability::SessionSkillBindingsResponse>;
-    async fn get_session_memory_hits(
-        &self,
-        session_id: &str,
-        turn_id: Option<String>,
-    ) -> Result<nova_protocol::observability::SessionMemoryHitsResponse>;
-    async fn override_session_model(
-        &self,
-        session_id: &str,
-        req: nova_protocol::observability::SessionModelOverrideRequest,
-    ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot>;
-    async fn get_session_token_usage(
-        &self,
-        session_id: &str,
-    ) -> Result<nova_protocol::observability::SessionTokenUsageResponse>;
-    async fn get_session_token_usage_detail(
-        &self,
-        session_id: &str,
-        limit: u32,
-        before_turn_id: Option<&str>,
-    ) -> Result<nova_protocol::observability::SessionTokenUsageDetailResponse>;
-
-    // --- Plan 2: Execution Records & Control ---
-    async fn list_session_runs(&self, session_id: &str) -> Result<nova_protocol::observability::SessionRunsResponse>;
-    async fn get_run_detail(&self, run_id: &str) -> Result<nova_protocol::observability::RunRecord>;
-    async fn control_run(&self, run_id: &str, req: nova_protocol::observability::RunControlRequest) -> Result<()>;
-    async fn list_session_artifacts(
-        &self,
-        session_id: &str,
-    ) -> Result<nova_protocol::observability::SessionArtifactsResponse>;
-    async fn list_pending_permissions(
-        &self,
-        session_id: Option<&str>,
-    ) -> Result<nova_protocol::observability::PermissionPendingResponse>;
-    async fn respond_to_permission(&self, req: nova_protocol::observability::PermissionRespondRequest) -> Result<()>;
-    async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse>;
-    async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse>;
-    async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse>;
-    async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse>;
-    async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse>;
-    async fn voice_transcribe(
-        &self,
-        req: &nova_protocol::voice::VoiceTranscribeRequest,
-    ) -> Result<nova_protocol::voice::VoiceTranscribeResponse>;
-    async fn voice_tts(
-        &self,
-        req: &nova_protocol::voice::VoiceTtsRequest,
-    ) -> Result<nova_protocol::voice::VoiceTtsResponse>;
-}
-
 /// Agent 应用门面实现
-pub struct AgentApplicationImpl<C: LlmClient> {
-    conversation_service: ConversationService<C>,
+pub struct AgentApplicationImpl {
+    conversation_service: ConversationService,
     workspace_service: super::agent_workspace_service::AgentWorkspaceService,
     config: Arc<AppConfig>,
     config_inner: ArcSwap<AppConfig>,
@@ -128,9 +24,9 @@ pub struct AgentApplicationImpl<C: LlmClient> {
     // voice_service: VoiceService,
 }
 
-impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
+impl AgentApplicationImpl {
     pub fn new(
-        conversation_service: ConversationService<C>,
+        conversation_service: ConversationService,
         workspace_service: super::agent_workspace_service::AgentWorkspaceService,
         config: Arc<AppConfig>,
         config_snapshot_cache: Arc<ArcSwap<Value>>,
@@ -174,13 +70,17 @@ impl<C: LlmClient + 'static> AgentApplicationImpl<C> {
     }
 }
 
-#[async_trait]
-impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
-    async fn session_exists(&self, session_id: &str) -> Result<bool> {
+impl AgentApplicationImpl {
+    pub async fn session_exists(&self, session_id: &str) -> Result<bool> {
         Ok(self.conversation_service.sessions.get(session_id).await?.is_some())
     }
 
-    async fn start_turn(&self, session_id: &str, input: &str, sender: mpsc::Sender<AppEvent>) -> Result<TurnResult> {
+    pub async fn start_turn(
+        &self,
+        session_id: &str,
+        input: &str,
+        sender: mpsc::Sender<AppEvent>,
+    ) -> Result<TurnResult> {
         let before_skill_bindings = self
             .workspace_service
             .list_session_skill_bindings(session_id)
@@ -243,11 +143,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         Ok(turn_result)
     }
 
-    async fn stop_turn(&self, session_id: &str) -> Result<()> {
+    pub async fn stop_turn(&self, session_id: &str) -> Result<()> {
         self.conversation_service.stop_turn(session_id).await
     }
 
-    async fn list_sessions(&self) -> Result<Vec<AppSession>> {
+    pub async fn list_sessions(&self) -> Result<Vec<AppSession>> {
         let summaries = self.conversation_service.sessions.list_sorted().await;
         Ok(summaries
             .into_iter()
@@ -262,7 +162,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .collect())
     }
 
-    async fn session_messages(&self, session_id: &str) -> Result<Vec<AppMessage>> {
+    pub async fn session_messages(&self, session_id: &str) -> Result<Vec<AppMessage>> {
         let session = self
             .conversation_service
             .sessions
@@ -288,7 +188,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         Ok(app_messages)
     }
 
-    async fn create_session(&self, title: Option<String>, agent_id: String) -> Result<AppSession> {
+    pub async fn create_session(&self, title: Option<String>, agent_id: String) -> Result<AppSession> {
         let system_prompt = self
             .conversation_service
             .agent_registry
@@ -329,11 +229,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         })
     }
 
-    async fn delete_session(&self, session_id: &str) -> Result<bool> {
+    pub async fn delete_session(&self, session_id: &str) -> Result<bool> {
         self.conversation_service.sessions.delete(session_id).await
     }
 
-    async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession> {
+    pub async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession> {
         let session = self
             .conversation_service
             .sessions
@@ -358,7 +258,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         })
     }
 
-    async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgentSwitch> {
+    pub async fn switch_agent(&self, session_id: &str, agent_id: &str) -> Result<AppAgentSwitch> {
         let (agent, session) = self.conversation_service.switch_agent(session_id, agent_id).await?;
         let agent = AppAgent {
             id: agent.id.clone(),
@@ -377,17 +277,17 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         Ok(AppAgentSwitch { agent, session })
     }
 
-    async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf> {
+    pub async fn set_project_dir(&self, session_id: &str, project_dir: PathBuf) -> Result<PathBuf> {
         self.conversation_service
             .set_project_dir(session_id, &project_dir)
             .await
     }
 
-    async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>> {
+    pub async fn get_project_dir(&self, session_id: &str) -> Result<Option<PathBuf>> {
         self.conversation_service.get_project_dir(session_id).await
     }
 
-    fn list_agents(&self) -> Vec<AppAgent> {
+    pub fn list_agents(&self) -> Vec<AppAgent> {
         self.conversation_service
             .agent_registry
             .list()
@@ -400,7 +300,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .collect()
     }
 
-    fn get_agent(&self, agent_id: &str) -> Option<AppAgent> {
+    pub fn get_agent(&self, agent_id: &str) -> Option<AppAgent> {
         self.conversation_service
             .agent_registry
             .get(agent_id)
@@ -411,11 +311,11 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             })
     }
 
-    async fn config_snapshot(&self) -> Result<Value> {
+    pub async fn config_snapshot(&self) -> Result<Value> {
         Self::serialize_config_snapshot(&self.config)
     }
 
-    async fn update_config(&self, payload: Value) -> Result<()> {
+    pub async fn update_config(&self, payload: Value) -> Result<()> {
         let new_config = Self::write_config_file(&self.config_path, payload).await?;
         // store the new AppConfig for service access
         let new_arc = Arc::new(new_config);
@@ -426,18 +326,18 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         Ok(())
     }
 
-    async fn on_connect(&self) -> Result<Vec<AppEvent>> {
+    pub async fn on_connect(&self) -> Result<Vec<AppEvent>> {
         Ok(vec![AppEvent::Welcome {
             require_auth: false,
             setup_required: false,
         }])
     }
 
-    async fn on_disconnect(&self, _conn_id: &str) {}
+    pub async fn on_disconnect(&self, _conn_id: &str) {}
 
     // --- Observability & Control Implementation ---
 
-    async fn inspect_agent(
+    pub async fn inspect_agent(
         &self,
         agent_id: &str,
         session_id: &str,
@@ -445,14 +345,14 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         self.workspace_service.inspect_agent(agent_id, session_id).await
     }
 
-    async fn get_session_runtime(
+    pub async fn get_session_runtime(
         &self,
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionRuntimeSnapshot> {
         self.workspace_service.get_session_runtime(session_id).await
     }
 
-    async fn preview_session_prompt(
+    pub async fn preview_session_prompt(
         &self,
         session_id: &str,
         message_id: Option<String>,
@@ -462,18 +362,21 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await
     }
 
-    async fn reload_session_system_prompt(
+    pub async fn reload_session_system_prompt(
         &self,
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionSystemPromptReloadResponse> {
         self.workspace_service.reload_session_system_prompt(session_id).await
     }
 
-    async fn list_session_tools(&self, session_id: &str) -> Result<nova_protocol::observability::SessionToolsResponse> {
+    pub async fn list_session_tools(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionToolsResponse> {
         self.workspace_service.list_session_tools(session_id).await
     }
 
-    async fn list_session_file_tree(
+    pub async fn list_session_file_tree(
         &self,
         session_id: &str,
         relative_path: Option<String>,
@@ -483,14 +386,14 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await
     }
 
-    async fn list_session_skill_bindings(
+    pub async fn list_session_skill_bindings(
         &self,
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionSkillBindingsResponse> {
         self.workspace_service.list_session_skill_bindings(session_id).await
     }
 
-    async fn get_session_memory_hits(
+    pub async fn get_session_memory_hits(
         &self,
         session_id: &str,
         turn_id: Option<String>,
@@ -500,7 +403,7 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
             .await
     }
 
-    async fn override_session_model(
+    pub async fn override_session_model(
         &self,
         session_id: &str,
         req: nova_protocol::observability::SessionModelOverrideRequest,
@@ -508,14 +411,14 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         self.workspace_service.override_session_model(session_id, req).await
     }
 
-    async fn get_session_token_usage(
+    pub async fn get_session_token_usage(
         &self,
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionTokenUsageResponse> {
         self.workspace_service.get_session_token_usage(session_id).await
     }
 
-    async fn get_session_token_usage_detail(
+    pub async fn get_session_token_usage_detail(
         &self,
         session_id: &str,
         limit: u32,
@@ -528,54 +431,60 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
 
     // --- Plan 2: Execution Records & Control Implementation ---
 
-    async fn list_session_runs(&self, session_id: &str) -> Result<nova_protocol::observability::SessionRunsResponse> {
+    pub async fn list_session_runs(
+        &self,
+        session_id: &str,
+    ) -> Result<nova_protocol::observability::SessionRunsResponse> {
         self.workspace_service.list_session_runs(session_id).await
     }
 
-    async fn get_run_detail(&self, run_id: &str) -> Result<nova_protocol::observability::RunRecord> {
+    pub async fn get_run_detail(&self, run_id: &str) -> Result<nova_protocol::observability::RunRecord> {
         self.workspace_service.get_run_detail(run_id).await
     }
 
-    async fn control_run(&self, run_id: &str, req: nova_protocol::observability::RunControlRequest) -> Result<()> {
+    pub async fn control_run(&self, run_id: &str, req: nova_protocol::observability::RunControlRequest) -> Result<()> {
         self.workspace_service.control_run(run_id, req).await
     }
 
-    async fn list_session_artifacts(
+    pub async fn list_session_artifacts(
         &self,
         session_id: &str,
     ) -> Result<nova_protocol::observability::SessionArtifactsResponse> {
         self.workspace_service.list_session_artifacts(session_id).await
     }
 
-    async fn list_pending_permissions(
+    pub async fn list_pending_permissions(
         &self,
         session_id: Option<&str>,
     ) -> Result<nova_protocol::observability::PermissionPendingResponse> {
         self.workspace_service.list_pending_permissions(session_id).await
     }
 
-    async fn respond_to_permission(&self, req: nova_protocol::observability::PermissionRespondRequest) -> Result<()> {
+    pub async fn respond_to_permission(
+        &self,
+        req: nova_protocol::observability::PermissionRespondRequest,
+    ) -> Result<()> {
         self.workspace_service.respond_to_permission(req).await
     }
 
-    async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse> {
+    pub async fn list_audit_logs(&self, session_id: &str) -> Result<nova_protocol::observability::AuditLogsResponse> {
         self.workspace_service.list_audit_logs(session_id).await
     }
 
-    async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse> {
+    pub async fn get_diagnostics(&self, session_id: &str) -> Result<nova_protocol::observability::DiagnosticsResponse> {
         self.workspace_service.get_diagnostics(session_id).await
     }
 
-    async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse> {
+    pub async fn restore_workspace(&self) -> Result<nova_protocol::observability::WorkspaceRestoreResponse> {
         self.workspace_service.restore_workspace().await
     }
 
-    async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse> {
+    pub async fn get_provider_health(&self) -> Result<nova_protocol::observability::ProviderHealthSnapshotResponse> {
         let config = self.config.clone();
         crate::provider::health::collect_provider_health(&config).await
     }
 
-    async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {
+    pub async fn voice_capabilities(&self) -> Result<nova_protocol::voice::VoiceCapabilitiesResponse> {
         let config = self.config.clone();
         Ok(nova_protocol::voice::VoiceCapabilitiesResponse {
             stt: nova_protocol::voice::VoiceCapabilityStatus {
@@ -591,14 +500,14 @@ impl<C: LlmClient + 'static> AgentApplication for AgentApplicationImpl<C> {
         })
     }
 
-    async fn voice_transcribe(
+    pub async fn voice_transcribe(
         &self,
         _req: &nova_protocol::voice::VoiceTranscribeRequest,
     ) -> Result<nova_protocol::voice::VoiceTranscribeResponse> {
         Self::voice_not_implemented()
     }
 
-    async fn voice_tts(
+    pub async fn voice_tts(
         &self,
         _req: &nova_protocol::voice::VoiceTtsRequest,
     ) -> Result<nova_protocol::voice::VoiceTtsResponse> {
@@ -669,11 +578,7 @@ mod tests {
         let mut config = AppConfig::new(PathBuf::from("."));
         config.voice.enabled = false;
 
-        let snapshot =
-            AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::serialize_config_snapshot(
-                &config,
-            )
-            .unwrap();
+        let snapshot = AgentApplicationImpl::serialize_config_snapshot(&config).unwrap();
 
         assert_eq!(snapshot, serde_json::to_value(&config).unwrap());
     }
@@ -693,11 +598,7 @@ mod tests {
         let cache = ArcSwap::from_pointee(json!({ "seed": true }));
         let path = PathBuf::from("target/test-data/plan3-parse-error.toml");
 
-        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::write_config_file(
-            &path,
-            json!({ "providers": 1 }),
-        )
-        .await;
+        let result = AgentApplicationImpl::write_config_file(&path, json!({ "providers": 1 })).await;
 
         let error = result.expect_err("invalid payload should fail");
         assert!(error.to_string().contains("Failed to parse config update payload"));
@@ -716,11 +617,7 @@ mod tests {
         target.voice.enabled = false;
         let payload = serde_json::to_value(&target).unwrap();
 
-        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::write_config_file(
-            &invalid_path,
-            payload,
-        )
-        .await;
+        let result = AgentApplicationImpl::write_config_file(&invalid_path, payload).await;
         assert!(result.is_err());
 
         assert!(initial.voice.enabled);
@@ -742,20 +639,10 @@ mod tests {
         let writer_cache = Arc::clone(&cache);
         let writer_path = config_path.clone();
         let writer = tokio::spawn(async move {
-            tokio::time::timeout(
-                UPDATE_TIMEOUT,
-                async move {
-                    let new_config = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::write_config_file(
-                        &writer_path,
-                        update_payload,
-                    )
-                    .await?;
-                    AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::update_config_snapshot_cache(
-                        &writer_cache,
-                        &new_config,
-                    )
-                },
-            )
+            tokio::time::timeout(UPDATE_TIMEOUT, async move {
+                let new_config = AgentApplicationImpl::write_config_file(&writer_path, update_payload).await?;
+                AgentApplicationImpl::update_config_snapshot_cache(&writer_cache, &new_config)
+            })
             .await
             .expect("update timeout")
             .expect("update must succeed");
@@ -796,9 +683,7 @@ mod tests {
 
     #[test]
     fn voice_transcribe_returns_not_implemented_error() {
-        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::voice_not_implemented::<
-            nova_protocol::voice::VoiceTranscribeResponse,
-        >();
+        let result = AgentApplicationImpl::voice_not_implemented::<nova_protocol::voice::VoiceTranscribeResponse>();
 
         let error = result.expect_err("voice transcribe should return explicit error");
         assert!(error.to_string().contains("voice not implemented"));
@@ -806,9 +691,7 @@ mod tests {
 
     #[test]
     fn voice_tts_returns_not_implemented_error() {
-        let result = AgentApplicationImpl::<crate::provider::openai_compat::OpenAiCompatClient>::voice_not_implemented::<
-            nova_protocol::voice::VoiceTtsResponse,
-        >();
+        let result = AgentApplicationImpl::voice_not_implemented::<nova_protocol::voice::VoiceTtsResponse>();
 
         let error = result.expect_err("voice tts should return explicit error");
         assert!(error.to_string().contains("voice not implemented"));

@@ -4,7 +4,7 @@ use crate::{
 };
 use channel_core::ResponseSink;
 use log::{trace, warn};
-use nova_agent::app::AgentApplication;
+use nova_agent::app::AgentApplicationImpl;
 use nova_protocol::{GatewayMessage, MessageEnvelope};
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub async fn dispatch(
     msg: GatewayMessage,
     peer_id: &str,
-    app: &dyn AgentApplication,
+    app: &AgentApplicationImpl,
     outbound_tx: ResponseSink<GatewayMessage>,
     push_center: Arc<PushCenter>,
 ) {

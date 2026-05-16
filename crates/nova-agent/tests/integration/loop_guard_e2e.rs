@@ -153,15 +153,15 @@ impl LlmClient for DuplicateThenRecoverClient {
     }
 }
 
-fn build_runtime<C: LlmClient>(client: C, max_iterations: usize) -> AgentRuntime<C> {
+fn build_runtime(client: impl LlmClient + 'static, max_iterations: usize) -> AgentRuntime {
     build_runtime_with_loop_guard(client, max_iterations, LoopGuardConfig::default())
 }
 
-fn build_runtime_with_loop_guard<C: LlmClient>(
-    client: C,
+fn build_runtime_with_loop_guard(
+    client: impl LlmClient + 'static,
     max_iterations: usize,
     loop_guard: LoopGuardConfig,
-) -> AgentRuntime<C> {
+) -> AgentRuntime {
     let config = AgentConfig {
         max_iterations,
         model_config: ModelConfig {

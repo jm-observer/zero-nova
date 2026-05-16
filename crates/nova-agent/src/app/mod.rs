@@ -7,7 +7,7 @@ pub mod voice_service;
 
 pub use agent_workspace_service::AgentWorkspaceService;
 
-pub use application::{AgentApplication, AgentApplicationImpl};
+pub use application::AgentApplicationImpl;
 pub use conversation_service::ConversationService;
 pub use types::{AppAgent, AppEvent, AppMessage, AppSession};
 pub use voice_service::VoiceService;
@@ -16,4 +16,3 @@ pub use voice_service::VoiceService;
 pub use crate::conversation::SessionService;
 pub use crate::event::AgentEvent;
 pub use crate::message::ContentBlock;
-pub use crate::provider::LlmClient;

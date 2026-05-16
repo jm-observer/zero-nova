@@ -13,7 +13,6 @@ mod write;
 
 use super::cache::SessionCache;
 use super::repository::SqliteSessionRepository;
-use super::title_generator::{RuleBasedTitleGenerator, TitleGenerator};
 use crate::tool::ProjectDirService;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -42,25 +41,15 @@ const DEFAULT_SESSION_TITLE: &str = "未命名会话";
 pub struct SessionService {
     cache: Arc<SessionCache>,
     repository: SqliteSessionRepository,
-    title_generator: Arc<dyn TitleGenerator + Send + Sync>,
     /// De-duplicates concurrent cold loads for the same session id.
     loading: Arc<RwLock<LoadingWaiters>>,
 }
 
 impl SessionService {
     pub fn new(cache: Arc<SessionCache>, repository: SqliteSessionRepository) -> Self {
-        Self::new_with_title_generator(cache, repository, Arc::new(RuleBasedTitleGenerator))
-    }
-
-    pub fn new_with_title_generator(
-        cache: Arc<SessionCache>,
-        repository: SqliteSessionRepository,
-        title_generator: Arc<dyn TitleGenerator + Send + Sync>,
-    ) -> Self {
         Self {
             cache,
             repository,
-            title_generator,
             loading: Arc::new(RwLock::new(HashMap::new())),
         }
     }

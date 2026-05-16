@@ -169,7 +169,7 @@ impl SubagentRuntimeBuilder {
         context: Option<&ToolContext>,
         project_dir: Option<&Path>,
         environment: crate::prompt::EnvironmentSnapshot,
-    ) -> Result<(AgentRuntime<OpenAiCompatClient>, ModelConfig)> {
+    ) -> Result<(AgentRuntime, ModelConfig)> {
         let config = self.config.clone();
         let model_override = model_override.map(str::to_string);
         let context = context.cloned();

@@ -243,7 +243,7 @@ async fn latest_session_lookup_remains_isolated_between_agents() {
 fn build_conversation_service(
     sessions: SessionService,
     data_dir: &std::path::Path,
-) -> ConversationService<MockClient> {
+) -> ConversationService {
     let mut registry = AgentRegistry::new(agent_descriptor("agent-a"));
     registry.register(agent_descriptor("agent-b"));
     registry.register(agent_descriptor("agent-c"));

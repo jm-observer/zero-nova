@@ -55,7 +55,11 @@ impl SubAgentExecutor for MockExecutor {
         {
             "reviewer".to_string()
         } else {
-            if request.agent_id.is_empty() { request.description.clone() } else { request.agent_id.clone() }
+            if request.agent_id.is_empty() {
+                request.description.clone()
+            } else {
+                request.agent_id.clone()
+            }
         };
 
         match self.responses.get(&key) {
@@ -245,10 +249,7 @@ async fn retry_agents_actually_retried_on_review_failure() {
                 });
             }
 
-            self.call_log
-                .lock()
-                .unwrap()
-                .push(request.agent_id.clone());
+            self.call_log.lock().unwrap().push(request.agent_id.clone());
 
             Ok(SubAgentOutput {
                 output: "retried output".to_string(),

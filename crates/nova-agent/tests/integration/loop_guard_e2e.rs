@@ -219,7 +219,7 @@ async fn test_stalled_iteration_aborts_turn() {
     let (tx, mut rx) = mpsc::channel(100);
 
     let _res = runtime
-        .run_turn(&[], "hello", "session_1", None, None, tx, None)
+        .run_turn(&[], "hello", "session_1", "test-agent", None, tx, None)
         .await
         .unwrap();
 
@@ -251,7 +251,7 @@ async fn test_duplicate_tool_call_rejected() {
     let (tx, mut rx) = mpsc::channel(100);
 
     let _res = runtime
-        .run_turn(&[], "hello", "session_1", None, None, tx, None)
+        .run_turn(&[], "hello", "session_1", "test-agent", None, tx, None)
         .await
         .unwrap();
 
@@ -288,7 +288,7 @@ async fn duplicate_tool_rejection_is_fed_back_before_stall_abort() {
     let (tx, mut rx) = mpsc::channel(100);
 
     let res = runtime
-        .run_turn(&[], "hello", "session_1", None, None, tx, None)
+        .run_turn(&[], "hello", "session_1", "test-agent", None, tx, None)
         .await
         .unwrap();
 

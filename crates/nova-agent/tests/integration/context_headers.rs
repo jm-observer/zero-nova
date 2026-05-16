@@ -57,7 +57,7 @@ async fn create_mock_server_with_capture(
     (mock_server, captured)
 }
 
-fn make_context(session_id: Option<String>, agent_id: Option<String>) -> ProviderRequestContext {
+fn make_context(session_id: Option<String>, agent_id: String) -> ProviderRequestContext {
     ProviderRequestContext { session_id, agent_id }
 }
 
@@ -66,7 +66,7 @@ async fn header_透传开启且字段齐全() -> Result<()> {
     let (mock_server, captured) = create_mock_server_with_capture().await;
     let client =
         OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), mock_server.uri(), true);
-    let ctx = make_context(Some("sess-123".to_string()), Some("agent-456".to_string()));
+    let ctx = make_context(Some("sess-123".to_string()), "agent-456".to_string());
 
     let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
 
@@ -82,7 +82,7 @@ async fn header_透传开启且单字段缺失() -> Result<()> {
     let (mock_server, captured) = create_mock_server_with_capture().await;
     let client =
         OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), mock_server.uri(), true);
-    let ctx = make_context(Some("sess-123".to_string()), None);
+    let ctx = make_context(Some("sess-123".to_string()), String::new());
 
     let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
 
@@ -98,7 +98,7 @@ async fn header_透传关闭且字段齐全() -> Result<()> {
     let (mock_server, captured) = create_mock_server_with_capture().await;
     let client =
         OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), mock_server.uri(), false);
-    let ctx = make_context(Some("sess-123".to_string()), Some("agent-456".to_string()));
+    let ctx = make_context(Some("sess-123".to_string()), "agent-456".to_string());
 
     let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
 
@@ -120,7 +120,7 @@ async fn 并发请求中header与session一一对应() -> Result<()> {
         handles.push(tokio::spawn(async move {
             let client = OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), base_url, true);
             let session = format!("sess-{i}");
-            let ctx = make_context(Some(session.clone()), Some("agent-001".to_string()));
+            let ctx = make_context(Some(session.clone()), "agent-001".to_string());
             let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
             Ok::<String, anyhow::Error>(session)
         }));
@@ -159,7 +159,7 @@ async fn 上游返回4xx时错误链路可观测() {
         mock_server.uri(),
         true,
     );
-    let ctx = make_context(Some("sess-123".to_string()), Some("agent-456".to_string()));
+    let ctx = make_context(Some("sess-123".to_string()), "agent-456".to_string());
     let result = client.stream(&[], &[], &ModelConfig::default(), &ctx).await;
 
     assert!(result.is_err());

@@ -23,7 +23,7 @@ pub struct SubAgentRequest {
     pub prompt: String,
     pub description: String,
     pub agent_selection: Option<String>,
-    pub agent_id: Option<String>,
+    pub agent_id: String,
     pub plan_id: Option<String>,
     pub stage_id: Option<String>,
     pub output_format: Option<String>,
@@ -362,7 +362,7 @@ impl OrchestratorEngine {
                         prompt: agent_req.prompt.clone(),
                         description: agent_req.description.clone(),
                         agent_selection: Some(validated_selection),
-                        agent_id: Some(agent_req.agent_id.clone()),
+                        agent_id: format!("sub_{}", agent_req.agent_id),
                         plan_id: Some(plan_id.clone()),
                         stage_id: Some(stage_id.clone()),
                         output_format: Some(agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string())),
@@ -542,7 +542,7 @@ impl OrchestratorEngine {
                 prompt: agent_req.prompt.clone(),
                 description: agent_req.description.clone(),
                 agent_selection: Some(validated_selection),
-                agent_id: Some(agent_req.agent_id.clone()),
+                agent_id: format!("sub_{}", agent_req.agent_id),
                 plan_id: Some(plan.plan_id.clone()),
                 stage_id: Some(stage_id.clone()),
                 output_format: Some(agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string())),
@@ -599,8 +599,8 @@ impl OrchestratorEngine {
         let request = SubAgentRequest {
             prompt,
             description: "Review orchestration outputs".to_string(),
-            agent_selection: Some(review_agent_id),
-            agent_id: None,
+            agent_selection: Some(review_agent_id.clone()),
+            agent_id: format!("sub_{}", review_agent_id),
             plan_id: None,
             stage_id: None,
             output_format: None,
@@ -858,12 +858,11 @@ mod tests {
             return "reviewer".to_string();
         }
 
-        request
-            .agent_id
-            .as_deref()
-            .or(Some(request.description.as_str()))
-            .unwrap_or_default()
-            .to_string()
+        if request.agent_id.is_empty() {
+            request.description.clone()
+        } else {
+            request.agent_id.clone()
+        }
     }
 
     fn build_executor(
@@ -1056,8 +1055,8 @@ mod tests {
     #[tokio::test]
     async fn single_stage_parallel_all_success() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
-        responses.insert("a2".to_string(), Ok("output-a2".to_string()));
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("sub_a2".to_string(), Ok("output-a2".to_string()));
         responses.insert(
             "reviewer".to_string(),
             Ok(review_response(true, "All agents completed successfully.")),
@@ -1094,8 +1093,8 @@ mod tests {
     #[tokio::test]
     async fn single_stage_serial_all_success() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
-        responses.insert("a2".to_string(), Ok("output-a2".to_string()));
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("sub_a2".to_string(), Ok("output-a2".to_string()));
         responses.insert(
             "reviewer".to_string(),
             Ok(review_response(true, "All agents completed successfully.")),
@@ -1125,8 +1124,8 @@ mod tests {
     #[tokio::test]
     async fn two_stage_serial_dependency() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
-        responses.insert("a2".to_string(), Ok("output-a2".to_string()));
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("sub_a2".to_string(), Ok("output-a2".to_string()));
         responses.insert("reviewer".to_string(), Ok(review_response(true, "Looks good.")));
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
@@ -1161,7 +1160,7 @@ mod tests {
     #[tokio::test]
     async fn dependency_failure_blocks_downstream() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Err("boom".to_string()));
+        responses.insert("sub_a1".to_string(), Err("boom".to_string()));
         let executor = build_executor(responses, &["nova"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
         let plan = parse_plan(vec![
@@ -1190,8 +1189,8 @@ mod tests {
     #[tokio::test]
     async fn partial_stage_failure_stops_orchestration() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
-        responses.insert("a2".to_string(), Err("fail".to_string()));
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("sub_a2".to_string(), Err("fail".to_string()));
         let executor = build_executor(responses, &["nova"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
         let plan = parse_plan(vec![
@@ -1223,8 +1222,8 @@ mod tests {
     async fn cancellation_before_review() {
         let token = CancellationToken::new();
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
-        let executor = build_executor_with_cancellation(responses, &["nova"], "nova", "a1", token.clone());
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
+        let executor = build_executor_with_cancellation(responses, &["nova"], "nova", "sub_a1", token.clone());
         let (engine, mut event_rx, _context) = build_engine(executor);
         let plan = parse_plan(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
 
@@ -1276,7 +1275,7 @@ mod tests {
     #[tokio::test]
     async fn event_sequence_single_stage() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
         responses.insert("reviewer".to_string(), Ok(review_response(true, "All good.")));
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);
@@ -1304,7 +1303,7 @@ mod tests {
     #[tokio::test]
     async fn event_args_contain_correct_ids() {
         let mut responses = HashMap::new();
-        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
         responses.insert("reviewer".to_string(), Ok(review_response(true, "All good.")));
         let executor = build_executor(responses, &["nova", "reviewer"], "nova");
         let (engine, mut event_rx, _context) = build_engine(executor);

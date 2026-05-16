@@ -55,7 +55,7 @@ impl SubAgentExecutor for MockExecutor {
         {
             "reviewer".to_string()
         } else {
-            request.agent_id.clone().unwrap_or_else(|| request.description.clone())
+            if request.agent_id.is_empty() { request.description.clone() } else { request.agent_id.clone() }
         };
 
         match self.responses.get(&key) {
@@ -130,7 +130,7 @@ async fn plan_parse_error_includes_details() {
 #[tokio::test]
 async fn skip_review_completes_without_reviewer_call() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Ok("done".to_string()));
+    responses.insert("sub_a1".to_string(), Ok("done".to_string()));
 
     let executor = MockExecutor::new(responses);
     let call_count = executor.call_count.clone();
@@ -169,7 +169,7 @@ async fn skip_review_completes_without_reviewer_call() {
 #[tokio::test]
 async fn retry_agents_are_re_executed() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Ok("partial output".to_string()));
+    responses.insert("sub_a1".to_string(), Ok("partial output".to_string()));
     responses.insert("reviewer".to_string(), Ok(review_json(true, "Good after retry.", &[])));
 
     let executor = MockExecutor::new(responses);
@@ -248,7 +248,7 @@ async fn retry_agents_actually_retried_on_review_failure() {
             self.call_log
                 .lock()
                 .unwrap()
-                .push(request.agent_id.clone().unwrap_or_default());
+                .push(request.agent_id.clone());
 
             Ok(SubAgentOutput {
                 output: "retried output".to_string(),
@@ -299,13 +299,13 @@ async fn retry_agents_actually_retried_on_review_failure() {
 
     let log = call_log.lock().unwrap();
     assert_eq!(log.len(), 2, "a1 should be called twice (initial + retry)");
-    assert!(log.iter().all(|id| id == "a1"));
+    assert!(log.iter().all(|id| id == "sub_a1"));
 }
 
 #[tokio::test]
 async fn dependency_failure_emits_blocked_message() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Err("boom".to_string()));
+    responses.insert("sub_a1".to_string(), Err("boom".to_string()));
 
     let executor = MockExecutor::new(responses).with_catalog(&["nova"]);
     let (engine, mut rx) = build_engine(executor);
@@ -343,9 +343,9 @@ async fn dependency_failure_emits_blocked_message() {
 #[tokio::test]
 async fn parallel_stage_all_success_with_review() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Ok("output-a1".to_string()));
-    responses.insert("a2".to_string(), Ok("output-a2".to_string()));
-    responses.insert("a3".to_string(), Ok("output-a3".to_string()));
+    responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
+    responses.insert("sub_a2".to_string(), Ok("output-a2".to_string()));
+    responses.insert("sub_a3".to_string(), Ok("output-a3".to_string()));
     responses.insert(
         "reviewer".to_string(),
         Ok(review_json(true, "All 3 agents succeeded.", &[])),
@@ -392,7 +392,7 @@ async fn parallel_stage_all_success_with_review() {
 #[tokio::test]
 async fn orchestration_progress_events_are_typed() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Ok("ok".to_string()));
+    responses.insert("sub_a1".to_string(), Ok("ok".to_string()));
     responses.insert("reviewer".to_string(), Ok(review_json(true, "Good.", &[])));
 
     let executor = MockExecutor::new(responses);
@@ -570,7 +570,7 @@ async fn max_retries_zero_means_no_retry() {
 #[tokio::test]
 async fn review_executor_failure_does_not_crash_orchestration() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+    responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
     responses.insert("reviewer".to_string(), Err("LLM provider unavailable".to_string()));
 
     let executor = MockExecutor::new(responses);
@@ -612,7 +612,7 @@ async fn review_executor_failure_does_not_crash_orchestration() {
 #[tokio::test]
 async fn review_parse_failure_does_not_crash_orchestration() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+    responses.insert("sub_a1".to_string(), Ok("output-a1".to_string()));
     // Reviewer returns non-JSON output (e.g. LLM hallucinated markdown instead of JSON)
     responses.insert(
         "reviewer".to_string(),
@@ -733,7 +733,7 @@ async fn unknown_agent_selection_falls_back_to_default() {
 #[tokio::test]
 async fn cascade_dependency_blocking_reports_correct_stage() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Err("stage 1 failure".to_string()));
+    responses.insert("sub_a1".to_string(), Err("stage 1 failure".to_string()));
 
     let executor = MockExecutor::new(responses).with_catalog(&["nova"]);
     let call_count = executor.call_count.clone();
@@ -777,7 +777,7 @@ async fn cascade_dependency_blocking_reports_correct_stage() {
 #[tokio::test]
 async fn stage_failure_without_dependents_reports_stage_failed() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Err("something broke".to_string()));
+    responses.insert("sub_a1".to_string(), Err("something broke".to_string()));
 
     let executor = MockExecutor::new(responses).with_catalog(&["nova"]);
     let (engine, mut rx) = build_engine(executor);
@@ -905,8 +905,8 @@ async fn error_message_propagates_through_orchestrate_tool() {
 #[tokio::test]
 async fn independent_stages_at_same_level_both_execute() {
     let mut responses = HashMap::new();
-    responses.insert("a1".to_string(), Err("s1 failed".to_string()));
-    responses.insert("a2".to_string(), Ok("s2 done".to_string()));
+    responses.insert("sub_a1".to_string(), Err("s1 failed".to_string()));
+    responses.insert("sub_a2".to_string(), Ok("s2 done".to_string()));
 
     let executor = MockExecutor::new(responses).with_catalog(&["nova"]);
     let call_count = executor.call_count.clone();

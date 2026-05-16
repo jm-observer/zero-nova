@@ -2,6 +2,7 @@ use crate::agent::AgentRuntime;
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
+use crate::orchestrator::SubAgentExecutor;
 use crate::prompt::{
     context::{load_developer_project_prompt_async, load_project_context_with_config_async},
     template_vars,
@@ -876,6 +877,21 @@ impl Tool for AgentTool {
             content: serde_json::to_string_pretty(&output_json)?,
             is_error: false,
         })
+    }
+}
+
+#[async_trait]
+impl SubAgentExecutor for AgentTool {
+    async fn execute_agent(&self, input: Value, context: Option<ToolContext>) -> Result<ToolOutput> {
+        self.execute(input, context).await
+    }
+
+    fn catalog_agent_ids(&self) -> HashSet<String> {
+        AgentTool::catalog_agent_ids(self)
+    }
+
+    fn default_agent_id(&self) -> String {
+        AgentTool::default_agent_id(self)
     }
 }
 

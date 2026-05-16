@@ -12,9 +12,10 @@
 ## 模块索引
 
 - `docs/design/nova-agent-engine-boundaries.md`
-  说明 `nova-agent` 中运行时、工具注册表、应用层门面与网关边界的稳定职责。
+  说明 `nova-agent` 中运行时、工具注册表、应用层门面、orchestrator 与网关边界的稳定职责。
 
 ## 当前约束
 
 - 工具系统的公共注册与读取接口统一为异步方法，调用方必须在异步上下文中完成工具注册、列举和工具视图读取。
+- orchestration 执行层通过 `SubAgentExecutor` trait 与具体子代理执行器解耦，便于注入 mock 并保持外部入口稳定。
 - 应用层语音能力在未接入真实 STT/TTS 服务前，允许暴露 capability 状态，但执行请求必须返回显式错误，不能 panic。

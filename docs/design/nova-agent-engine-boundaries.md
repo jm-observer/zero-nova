@@ -7,6 +7,7 @@
 - `AgentRuntime`
 - `ToolRegistry`
 - `AgentApplication`
+- `OrchestratorEngine`
 
 ## AgentRuntime
 
@@ -35,3 +36,12 @@
 - `voice_capabilities` 可以报告当前配置层声明的能力状态。
 - `voice_transcribe` 与 `voice_tts` 在真实语音服务未接线前，必须返回显式错误 `voice not implemented`。
 - 禁止在未实现路径使用 `todo!()` 或其他 panic 行为，因为网关会直接分发真实请求到该接口。
+
+## OrchestratorEngine
+
+`OrchestratorEngine` 负责解析 orchestration plan、调度 stage 执行、汇总子代理结果并驱动 review 阶段。当前稳定边界如下：
+
+- engine 不再直接依赖 `AgentTool` 具体类型，而是依赖 `SubAgentExecutor` trait。
+- `SubAgentExecutor` 必须同时提供子代理执行入口、catalog agent id 集合以及默认 agent id。
+- 生产环境由 `AgentTool` 实现该 trait；测试环境允许注入 mock executor，避免 orchestration 测试依赖真实 LLM 或完整子代理运行时。
+- `OrchestrateTaskTool` 仍作为外部入口负责构造 engine，现有外部可观测行为保持不变。

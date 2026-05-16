@@ -3,9 +3,9 @@ pub mod reviewer;
 pub mod scheduler;
 
 use crate::event::AgentEvent;
-use crate::tool::builtin::agent::AgentTool;
-use crate::tool::{Tool, ToolContext};
+use crate::tool::{ToolContext, ToolOutput};
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use nova_protocol::orchestration::{
     AgentSummary, OrchestrationCompleteArgs, OrchestrationPlanEvent, OrchestrationReviewStartArgs, StageCompleteArgs,
     StageSummary, SubAgentCompleteArgs, SubAgentSpawnArgs,
@@ -14,17 +14,26 @@ use planner::{parse_and_validate, OrchestrationPlan};
 use reviewer::{build_review_prompt, parse_review_result, ReviewResult};
 use scheduler::{execute_stage, SubAgentResult, SubAgentStatus};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+#[async_trait]
+pub trait SubAgentExecutor: Send + Sync {
+    async fn execute_agent(&self, input: serde_json::Value, context: Option<ToolContext>) -> Result<ToolOutput>;
+
+    fn catalog_agent_ids(&self) -> HashSet<String>;
+
+    fn default_agent_id(&self) -> String;
+}
+
 pub struct OrchestratorEngine {
-    agent_tool: Arc<AgentTool>,
+    executor: Arc<dyn SubAgentExecutor>,
     event_tx: mpsc::Sender<AgentEvent>,
     tool_context: Option<ToolContext>,
     /// Catalog 中已注册的 agent ID 集合（用于验证 LLM 的 agent 选择）。
-    catalog_agent_ids: std::sync::Arc<std::collections::HashSet<String>>,
+    catalog_agent_ids: Arc<HashSet<String>>,
     /// 默认 agent ID（用于 fallback）。
     default_agent_id: String,
 }
@@ -37,16 +46,15 @@ pub struct ExecutionOutcome {
 
 impl OrchestratorEngine {
     pub fn new(
-        agent_tool: Arc<AgentTool>,
+        executor: Arc<dyn SubAgentExecutor>,
         event_tx: mpsc::Sender<AgentEvent>,
         tool_context: Option<ToolContext>,
     ) -> Self {
-        // 从 AgentTool 中提取 catalog 信息
-        let catalog_agent_ids = Arc::new(agent_tool.catalog_agent_ids());
-        let default_agent_id = agent_tool.default_agent_id();
+        let catalog_agent_ids = Arc::new(executor.catalog_agent_ids());
+        let default_agent_id = executor.default_agent_id();
 
         Self {
-            agent_tool,
+            executor,
             event_tx,
             tool_context,
             catalog_agent_ids,
@@ -184,12 +192,12 @@ impl OrchestratorEngine {
             }
 
             let stage_results = execute_stage(&plan.plan_id, stage, &cancellation_token, {
-                let tool = self.agent_tool.clone();
+                let executor = self.executor.clone();
                 let ctx = self.tool_context.clone();
                 let plan_id = plan.plan_id.clone();
                 let event_tx = self.event_tx.clone();
                 move |agent_req, stage_id| {
-                    let tool = tool.clone();
+                    let executor = executor.clone();
                     let ctx = ctx.clone();
                     let plan_id = plan_id.clone();
                     let event_tx = event_tx.clone();
@@ -203,8 +211,8 @@ impl OrchestratorEngine {
                             stage_id.clone(),
                         );
 
-                        let output = tool
-                            .execute(
+                        let output = executor
+                            .execute_agent(
                                 json!({
                                     "prompt": agent_req.prompt,
                                     "description": agent_req.description,
@@ -382,8 +390,8 @@ impl OrchestratorEngine {
         );
 
         let output = self
-            .agent_tool
-            .execute(
+            .executor
+            .execute_agent(
                 json!({
                     "prompt": prompt,
                     "description": "Review orchestration outputs",

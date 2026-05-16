@@ -1,4 +1,4 @@
-use crate::orchestrator::OrchestratorEngine;
+use crate::orchestrator::{OrchestratorEngine, SubAgentExecutor};
 use crate::tool::builtin::agent::AgentTool;
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{Context, Result};
@@ -60,11 +60,8 @@ impl Tool for OrchestrateTaskTool {
             .clone()
             .unwrap_or_else(CancellationToken::new);
 
-        let engine = OrchestratorEngine::new(
-            self.agent_tool.clone(),
-            tool_context.event_tx.clone(),
-            Some(tool_context),
-        );
+        let executor: Arc<dyn SubAgentExecutor> = self.agent_tool.clone();
+        let engine = OrchestratorEngine::new(executor, tool_context.event_tx.clone(), Some(tool_context));
         let outcome = engine
             .execute_plan(plan_json, cancellation_token)
             .await

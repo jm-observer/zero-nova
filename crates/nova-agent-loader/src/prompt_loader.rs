@@ -175,7 +175,6 @@ mod tests {
             prompt_file: None,
             prompt_inline: None,
             system_prompt_template: None,
-            tool_whitelist: None,
             model_config: ConfiguredAgentModel {
                 model: "gpt-test".to_string(),
                 temperature: 0.0,

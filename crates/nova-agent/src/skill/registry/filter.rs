@@ -120,40 +120,15 @@ impl SkillRegistry {
         self.packages.iter().find(|p| p.id == skill_id || p.slug == skill_id)
     }
 
-    /// 根据 SkillPolicy 生成当前轮次的 CapabilityPolicy。
+    /// 根据 skill 命中结果生成当前轮次的 CapabilityPolicy。
     pub fn policy_from_skill(&self, skill_id: &str) -> CapabilityPolicy {
         let mut policy = CapabilityPolicy {
             source: PolicySource::ActiveSkill,
             ..CapabilityPolicy::default()
         };
 
-        if let Some(pkg) = self.find_package_by_id(skill_id) {
-            match &pkg.tool_policy {
-                ToolPolicy::InheritAll => {
-                    // 全部继承，不需要额外调整
-                }
-                ToolPolicy::AllowList(tools) | ToolPolicy::AllowListWithDeferred(tools) => {
-                    let base_tool_names: std::collections::HashSet<&str> =
-                        ["Bash", "Read", "Write", "Edit"].iter().cloned().collect();
-
-                    // 白名单中的基础工具保留在 always_enabled
-                    policy.always_enabled_tools = tools
-                        .iter()
-                        .filter(|t| base_tool_names.contains(t.as_str()))
-                        .cloned()
-                        .collect();
-
-                    // 白名单中的非基础工具放入 deferred
-                    policy.deferred_tools = tools
-                        .iter()
-                        .filter(|t| !base_tool_names.contains(t.as_str()))
-                        .cloned()
-                        .collect();
-
-                    // AllowListWithDeferred 保留 ToolSearch
-                    policy.tool_search_enabled = matches!(&pkg.tool_policy, ToolPolicy::AllowListWithDeferred(_));
-                }
-            }
+        if self.find_package_by_id(skill_id).is_none() {
+            policy.source = PolicySource::Default;
         }
 
         policy
@@ -215,7 +190,7 @@ impl SkillRegistry {
         None
     }
 
-    /// 根据工具策略生成 Tool 视图（裁剪后的工具集合）。
+    /// 根据工具策略生成 Tool 视图（仅供展示，不再用于 turn 级工具裁剪）。
     pub fn get_tool_view(&self, skill_id: &str) -> Vec<String> {
         let mut tools = vec![
             "Bash".to_string(),

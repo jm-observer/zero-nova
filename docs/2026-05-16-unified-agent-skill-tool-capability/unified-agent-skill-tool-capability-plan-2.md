@@ -82,11 +82,10 @@ pub struct CapabilityPolicy {
 
 ## 完成条件
 
-- [ ] turn 级 skill tool filtering 已移除
-- [ ] active skill 不再改变本轮工具集合
-- [ ] `CapabilityPolicy` 已收敛或删除工具开关职责
-- [ ] 测试覆盖 active skill 前后工具可见性一致
-- [ ] `cargo clippy --workspace -- -D warnings` 通过
-- [ ] `cargo fmt --check --all` 通过
-- [ ] `cargo test --workspace` 通过
-
+- [x] turn 级 skill tool filtering 已移除
+- [x] active skill 不再改变本轮工具集合
+- [x] `CapabilityPolicy` 已收敛或删除工具开关职责
+- [x] 测试覆盖 active skill 前后工具可见性一致
+- [x] `cargo clippy --workspace -- -D warnings` 通过
+- [x] `cargo fmt --check --all` 通过
+- [x] `cargo test --workspace` 通过

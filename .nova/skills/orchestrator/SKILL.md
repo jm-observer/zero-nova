@@ -39,6 +39,8 @@ tools:
 
 ## 输出格式
 
+当前系统中的 agent 共享统一的 skills 和 tools。该 skill 的职责是提供编排工作流和计划格式约束，而不是通过 skill 自身缩小工具范围。
+
 分析完成后，调用 `OrchestrateTask` 工具，`planJson` 字段包含以下格式 JSON：
 
 ```json
@@ -157,6 +159,7 @@ Review Agent 会收到每个子 Agent 的输出摘要，并判断：
 ## 失败处理
 
 若 `OrchestrateTask` 解析失败或执行失败，系统会返回明确错误；不要假设存在自动降级路径。
+不要依赖“当前 agent 是否可见某些工具”来决定是否编排；是否编排应只取决于任务结构和工作流需要。
 
 ## 示例对话
 

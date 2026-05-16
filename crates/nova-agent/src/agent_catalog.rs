@@ -18,7 +18,6 @@ pub struct AgentDescriptor {
     pub system_prompt_template: String,                 // 完整构建后的提示词（用于旧路径或初始会话）
     pub system_prompt_base: String,                     // 基础提示词模板（用于新路径下的 prepare_turn）
     pub initial_template_vars: HashMap<String, String>, // 初始模板变量
-    pub tool_whitelist: Option<Vec<String>>,            // None = 全部工具
     pub model_config: Option<AgentModelOverride>,       // None = 使用默认
     pub provider_id: String,
     pub llm_id: String,
@@ -92,7 +91,6 @@ mod tests {
             system_prompt_template: "You are OpenClaw".to_string(),
             system_prompt_base: "You are OpenClaw".to_string(),
             initial_template_vars: HashMap::new(),
-            tool_whitelist: None,
             model_config: None,
             provider_id: "openai_compat".to_string(),
             llm_id: "gpt_oss_primary".to_string(),

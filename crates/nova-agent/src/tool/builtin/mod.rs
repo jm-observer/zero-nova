@@ -24,7 +24,6 @@ pub async fn register_builtin_tools(
     config: &AppConfig,
     task_store: task::TaskStoreHandle,
     skill_registry: Arc<SkillRegistry>,
-    tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
 ) {
@@ -33,7 +32,6 @@ pub async fn register_builtin_tools(
         config,
         task_store,
         skill_registry,
-        tool_whitelist,
         project_dir_service,
         http_clients,
         None,
@@ -47,7 +45,6 @@ pub async fn register_builtin_tools_with_services(
     config: &AppConfig,
     task_store: task::TaskStoreHandle,
     skill_registry: Arc<SkillRegistry>,
-    tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
     agent_services: Option<agent::AgentToolServices>,
@@ -57,7 +54,6 @@ pub async fn register_builtin_tools_with_services(
         config,
         task_store,
         skill_registry,
-        tool_whitelist,
         project_dir_service,
         http_clients,
         agent_services,
@@ -70,157 +66,79 @@ async fn register_builtin_tools_inner(
     config: &AppConfig,
     task_store: task::TaskStoreHandle,
     skill_registry: Arc<SkillRegistry>,
-    tool_whitelist: Option<&[String]>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
     agent_services: Option<agent::AgentToolServices>,
 ) {
-    let shared_agent_tool =
-        if is_tool_enabled(tool_whitelist, "Agent") || is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
-            Some(Arc::new(agent::AgentTool::new(config.clone(), agent_services)))
-        } else {
-            None
-        };
+    let shared_agent_tool = Arc::new(agent::AgentTool::new(config.clone(), agent_services));
 
-    if is_tool_enabled(tool_whitelist, "Bash") {
-        registry
-            .register(Box::new(bash::BashTool::new(&config.tool.bash)))
-            .await;
-    }
-    if is_tool_enabled(tool_whitelist, "Read") {
-        registry.register(Box::new(read::ReadTool::new(None))).await;
-    }
-    if is_tool_enabled(tool_whitelist, "Write") {
-        registry.register(Box::new(write::WriteTool::new(None))).await;
-    }
-    if is_tool_enabled(tool_whitelist, "Edit") {
-        registry.register(Box::new(edit::EditTool::new(None))).await;
-    }
-    if is_tool_enabled(tool_whitelist, "Agent") {
-        if let Some(agent_tool) = &shared_agent_tool {
-            registry.register(Box::new((**agent_tool).clone())).await;
-        }
-    }
-    if is_tool_enabled(tool_whitelist, "WebSearch") {
-        registry
-            .register(Box::new(web_search::WebSearchTool::with_client(
-                &config.search,
-                http_clients.web.clone(),
-            )))
-            .await;
-    }
-    if is_tool_enabled(tool_whitelist, "WebFetch") {
-        registry
-            .register(Box::new(web_fetch::WebFetchTool::with_client(http_clients.web.clone())))
-            .await;
-    }
-    if is_tool_enabled(tool_whitelist, "ProjectManager") {
-        registry
-            .register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)))
-            .await;
-    }
-    if is_tool_explicitly_enabled(tool_whitelist, "OrchestrateTask") {
-        if let Some(agent_tool) = &shared_agent_tool {
-            registry
-                .register(Box::new(orchestrate_task::OrchestrateTaskTool::new(agent_tool.clone())))
-                .await;
-        }
-    }
+    registry
+        .register(Box::new(bash::BashTool::new(&config.tool.bash)))
+        .await;
+    registry.register(Box::new(read::ReadTool::new(None))).await;
+    registry.register(Box::new(write::WriteTool::new(None))).await;
+    registry.register(Box::new(edit::EditTool::new(None))).await;
+    registry.register(Box::new((*shared_agent_tool).clone())).await;
+    registry
+        .register(Box::new(web_search::WebSearchTool::with_client(
+            &config.search,
+            http_clients.web.clone(),
+        )))
+        .await;
+    registry
+        .register(Box::new(web_fetch::WebFetchTool::with_client(http_clients.web.clone())))
+        .await;
+    registry
+        .register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)))
+        .await;
+    registry
+        .register(Box::new(orchestrate_task::OrchestrateTaskTool::new(
+            shared_agent_tool.clone(),
+        )))
+        .await;
 
     // ToolInfo is always registered as a loaded tool (schema lookup infrastructure)
     registry.register(Box::new(tool_info::ToolInfoTool {})).await;
 
     let skill_registry_for_skill = skill_registry.clone();
-    if is_tool_enabled(tool_whitelist, "Skill") {
-        registry
-            .register_deferred(
-                "Skill".to_string(),
-                "Loads and injects specialized skills into the current session.".to_string(),
-                skill::SkillTool::input_schema(),
-                Box::new(move || Arc::new(skill::SkillTool::new(skill_registry_for_skill.clone()))),
-            )
-            .await;
-    }
+    registry
+        .register_deferred(
+            "Skill".to_string(),
+            "Loads and injects specialized skills into the current session.".to_string(),
+            skill::SkillTool::input_schema(),
+            Box::new(move || Arc::new(skill::SkillTool::new(skill_registry_for_skill.clone()))),
+        )
+        .await;
 
     let task_store_for_create = task_store.clone();
-    if is_tool_enabled(tool_whitelist, "TaskCreate") {
-        registry
-            .register_deferred(
-                "TaskCreate".to_string(),
-                "Creates a new task in the session's task store.".to_string(),
-                task::TaskCreateTool::input_schema(),
-                Box::new(move || Arc::new(task::TaskCreateTool::new(task_store_for_create.clone()))),
-            )
-            .await;
-    }
+    registry
+        .register_deferred(
+            "TaskCreate".to_string(),
+            "Creates a new task in the session's task store.".to_string(),
+            task::TaskCreateTool::input_schema(),
+            Box::new(move || Arc::new(task::TaskCreateTool::new(task_store_for_create.clone()))),
+        )
+        .await;
 
     let task_store_for_list = task_store.clone();
-    if is_tool_enabled(tool_whitelist, "TaskList") {
-        registry
-            .register_deferred(
-                "TaskList".to_string(),
-                "Lists all tasks in the session's task store.".to_string(),
-                task::TaskListTool::input_schema(),
-                Box::new(move || Arc::new(task::TaskListTool::new(task_store_for_list.clone()))),
-            )
-            .await;
-    }
+    registry
+        .register_deferred(
+            "TaskList".to_string(),
+            "Lists all tasks in the session's task store.".to_string(),
+            task::TaskListTool::input_schema(),
+            Box::new(move || Arc::new(task::TaskListTool::new(task_store_for_list.clone()))),
+        )
+        .await;
 
     let task_store_for_update = task_store;
-    if is_tool_enabled(tool_whitelist, "TaskUpdate") {
-        registry
-            .register_deferred(
-                "TaskUpdate".to_string(),
-                "Updates an existing task.".to_string(),
-                task::TaskUpdateTool::input_schema(),
-                Box::new(move || Arc::new(task::TaskUpdateTool::new(task_store_for_update.clone()))),
-            )
-            .await;
-    }
-}
-
-/// Legacy tool names that map to their current canonical names.
-/// Kept for backwards compatibility with existing agent configurations.
-fn is_tool_enabled(tool_whitelist: Option<&[String]>, tool_name: &str) -> bool {
-    match tool_whitelist {
-        None => true,
-        Some(whitelist) => {
-            let legacy_aliases = legacy_tool_names(tool_name);
-            whitelist
-                .iter()
-                .any(|name| name == tool_name || legacy_aliases.iter().any(|alias| name == alias))
-        }
-    }
-}
-
-fn is_tool_explicitly_enabled(tool_whitelist: Option<&[String]>, tool_name: &str) -> bool {
-    let Some(whitelist) = tool_whitelist else {
-        return false;
-    };
-
-    let legacy_aliases = legacy_tool_names(tool_name);
-    whitelist
-        .iter()
-        .any(|name| name == tool_name || legacy_aliases.iter().any(|alias| name == alias))
-}
-
-/// Return the set of legacy names that map to the given tool name.
-fn legacy_tool_names(tool_name: &str) -> &'static [&'static str] {
-    match tool_name {
-        "Bash" => &["bash", "shell"],
-        "Read" => &["file_read", "read", "open_file"],
-        "Write" => &["file_write", "write", "create_file"],
-        "Edit" => &["file_edit", "edit"],
-        "Agent" => &["subagent", "agent_sub"],
-        "WebSearch" => &["web_search", "search"],
-        "WebFetch" => &["web_fetch", "fetch"],
-        "Skill" => &["skill"],
-        "TaskCreate" => &["task_create", "create_task"],
-        "TaskList" => &["task_list", "list_tasks"],
-        "TaskUpdate" => &["task_update", "update_task", "task"],
-        "OrchestrateTask" => &["orchestrate_task"],
-        _ => &[],
-    }
+    registry
+        .register_deferred(
+            "TaskUpdate".to_string(),
+            "Updates an existing task.".to_string(),
+            task::TaskUpdateTool::input_schema(),
+            Box::new(move || Arc::new(task::TaskUpdateTool::new(task_store_for_update.clone()))),
+        )
+        .await;
 }
 
 #[cfg(test)]
@@ -233,37 +151,59 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    async fn orchestrate_task_is_hidden_without_explicit_whitelist() {
+    async fn orchestrate_task_is_registered_by_default() {
         let registry = ToolRegistry::new();
         register_builtin_tools(
             &registry,
             &AppConfig::new("D:/config".into()),
             super::task::TaskStoreHandle::new(super::task::TaskStore::default()),
             Arc::new(SkillRegistry::new()),
-            None,
-            Arc::new(UnavailableProjectDirService::new("unavailable")),
-            &HttpClients::new().expect("http clients should build"),
-        )
-        .await;
-
-        assert!(!registry.has_loaded_tool("OrchestrateTask").await);
-    }
-
-    #[tokio::test]
-    async fn orchestrate_task_is_visible_when_whitelisted() {
-        let registry = ToolRegistry::new();
-        let whitelist = vec!["OrchestrateTask".to_string()];
-        register_builtin_tools(
-            &registry,
-            &AppConfig::new("D:/config".into()),
-            super::task::TaskStoreHandle::new(super::task::TaskStore::default()),
-            Arc::new(SkillRegistry::new()),
-            Some(&whitelist),
             Arc::new(UnavailableProjectDirService::new("unavailable")),
             &HttpClients::new().expect("http clients should build"),
         )
         .await;
 
         assert!(registry.has_loaded_tool("OrchestrateTask").await);
+    }
+
+    #[tokio::test]
+    async fn unified_runtime_exposes_shared_tool_set() {
+        let registry = ToolRegistry::new();
+        register_builtin_tools(
+            &registry,
+            &AppConfig::new("D:/config".into()),
+            super::task::TaskStoreHandle::new(super::task::TaskStore::default()),
+            Arc::new(SkillRegistry::new()),
+            Arc::new(UnavailableProjectDirService::new("unavailable")),
+            &HttpClients::new().expect("http clients should build"),
+        )
+        .await;
+
+        for tool_name in [
+            "Bash",
+            "Read",
+            "Write",
+            "Edit",
+            "Agent",
+            "WebSearch",
+            "WebFetch",
+            "ProjectManager",
+            "OrchestrateTask",
+            "ToolInfo",
+        ] {
+            assert!(
+                registry.has_loaded_tool(tool_name).await,
+                "tool '{}' should be loaded in the unified runtime",
+                tool_name
+            );
+        }
+
+        for tool_name in ["Skill", "TaskCreate", "TaskList", "TaskUpdate"] {
+            assert!(
+                registry.tool_metadata(tool_name).await.is_some(),
+                "tool '{}' should be present in runtime metadata",
+                tool_name
+            );
+        }
     }
 }

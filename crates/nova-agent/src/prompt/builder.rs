@@ -551,23 +551,19 @@ pub fn build_agent_catalog_hint(agents: &[AgentSpec], primary_agent_id: &str) ->
         .collect();
     entries.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let mut parts = vec![
-        "## Available Agents (Orchestrator Catalog)".to_string(),
-        String::new(),
-        "When creating or selecting agents for orchestration, use only these IDs:".to_string(),
-        String::new(),
-    ];
+    let agent_list = entries
+        .into_iter()
+        .map(|entry| {
+            let default_note = if entry.is_default { " (default)" } else { "" };
+            format!("`{}`: {}{}", entry.id, entry.display_name, default_note)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
 
-    for entry in entries {
-        let default_note = if entry.is_default { " (default)" } else { "" };
-        parts.push(format!("- `{}`: {}{}", entry.id, entry.display_name, default_note));
-    }
-
-    parts.push(String::new());
-    parts.push("Do NOT use natural language names like 'reviewer', 'coder', or 'researcher'.".to_string());
-    parts.push("If you need a new agent, use the default agent or refer to the full catalog.".to_string());
-
-    parts.join("\n")
+    format!(
+        "Available agent IDs for orchestration: {}. Do NOT use natural language names like 'reviewer', 'coder', or 'researcher'. If unsure, use the default agent.",
+        agent_list
+    )
 }
 
 #[cfg(test)]

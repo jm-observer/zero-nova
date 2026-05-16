@@ -132,15 +132,12 @@ mod tests {
     #[test]
     fn capability_policy_allows_all_tools_by_default() {
         let policy = CapabilityPolicy::default();
-        assert!(policy.tool_search_enabled);
-        assert!(policy.skill_tool_enabled);
-        assert!(policy.agent_tools_enabled);
-        assert!(policy.always_enabled_tools.contains(&"ProjectManager".to_string()));
-        assert!(policy.always_enabled_tools.contains(&"Agent".to_string()));
+        assert_eq!(policy.source, PolicySource::Default);
+        assert!(matches!(policy.file_tool_priority, FileToolPriority::PreferFileTools));
     }
 
     #[test]
-    fn policy_from_skill_allow_list_preserves_base_tools() {
+    fn policy_from_skill_marks_active_skill_source() {
         let mut registry = SkillRegistry::new();
         registry.packages.push(SkillPackage {
             id: "test".to_string(),
@@ -157,35 +154,14 @@ mod tests {
         });
 
         let policy = registry.policy_from_skill("test");
-        // 基础工具应保留在 always_enabled
-        assert!(policy.always_enabled_tools.contains(&"Bash".to_string()));
-        assert!(policy.always_enabled_tools.contains(&"Read".to_string()));
-        // Write 和 Edit 不在白名单中，不应出现
-        assert!(!policy.always_enabled_tools.contains(&"Write".to_string()));
-        // 非基础工具应在 deferred
-        assert!(policy.deferred_tools.contains(&"CustomTool".to_string()));
+        assert_eq!(policy.source, PolicySource::ActiveSkill);
     }
 
     #[test]
-    fn policy_from_skill_allow_list_empty_keeps_no_base_tools() {
-        let mut registry = SkillRegistry::new();
-        registry.packages.push(SkillPackage {
-            id: "test".to_string(),
-            slug: "test".to_string(),
-            display_name: "Test".to_string(),
-            description: "test".to_string(),
-            instructions: "test".to_string(),
-            tool_policy: ToolPolicy::AllowList(vec!["CustomTool".to_string()]),
-            sticky: false,
-            aliases: vec![],
-            examples: vec![],
-            source_path: PathBuf::from("test"),
-            compat_mode: false,
-        });
-
-        let policy = registry.policy_from_skill("test");
-        // 白名单不含基础工具 → always_enabled 应为空
-        assert!(policy.always_enabled_tools.is_empty());
+    fn policy_from_unknown_skill_falls_back_to_default_source() {
+        let registry = SkillRegistry::new();
+        let policy = registry.policy_from_skill("missing");
+        assert_eq!(policy.source, PolicySource::Default);
     }
 
     #[test]

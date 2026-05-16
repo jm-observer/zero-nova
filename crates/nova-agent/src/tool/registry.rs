@@ -252,27 +252,13 @@ pub struct Tiny {
 }
 
 impl TurnToolView {
-    pub fn get_agent_tool_subset(&self, policy: &CapabilityPolicy) -> Tiny {
-        let allowed_tools: Vec<String> =
-            if policy.tool_search_enabled || policy.skill_tool_enabled || policy.task_tools_enabled {
-                let mut tool_names: Vec<String> = self.loaded.iter().map(|t| t.name.clone()).collect();
-                for def in &self.deferred {
-                    let category_match = match policy.task_tools_enabled {
-                        true => true,
-                        false => !matches!(def.category, DeferredToolCategory::Task),
-                    };
-                    if category_match {
-                        tool_names.push(def.name.clone());
-                    }
-                }
-                tool_names
-            } else {
-                self.loaded.iter().map(|t| t.name.clone()).collect()
-            };
+    pub fn get_agent_tool_subset(&self, _policy: &CapabilityPolicy) -> Tiny {
+        let mut allowed_tools: Vec<String> = self.loaded.iter().map(|t| t.name.clone()).collect();
+        allowed_tools.extend(self.deferred.iter().map(|def| def.name.clone()));
 
         Tiny {
             agent_id: String::new(),
-            max_tools: policy.always_enabled_tools.len() + policy.deferred_tools.len(),
+            max_tools: allowed_tools.len(),
             allowed_tools,
         }
     }
@@ -450,19 +436,8 @@ impl ToolRegistry {
     }
 
     pub async fn filter_deferred_by_policy(&self, policy: &CapabilityPolicy) -> Vec<DeferredToolRepresentation> {
-        self.lock_snapshot_async()
-            .await
-            .deferred_representations
-            .iter()
-            .filter(|entry| {
-                // 根据 policy 中的 deferred_tools 白名单进行过滤。
-                if policy.deferred_tools.is_empty() {
-                    return true;
-                }
-                policy.deferred_tools.contains(&entry.name)
-            })
-            .cloned()
-            .collect()
+        let _ = policy;
+        self.lock_snapshot_async().await.deferred_representations.to_vec()
     }
 
     pub async fn deferred_tools_by_category(&self, category: &DeferredToolCategory) -> Vec<DeferredToolRepresentation> {

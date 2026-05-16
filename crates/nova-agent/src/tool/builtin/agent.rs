@@ -191,7 +191,6 @@ impl SubagentRuntimeBuilder {
                     &config,
                     task_store.clone(),
                     skill_registry.clone(),
-                    spec.tool_whitelist.as_deref(),
                     Arc::new(UnavailableSubagentProjectDirService),
                     &http_clients,
                 )
@@ -919,7 +918,6 @@ mod tests {
                     aliases: Vec::new(),
                     prompt_inline: None,
                     system_prompt_template: None,
-                    tool_whitelist: None,
                     model_config: ConfiguredAgentModel {
                         model: "gpt-oss-120b".to_string(),
                         temperature: 0.0,
@@ -938,7 +936,6 @@ mod tests {
                     aliases: Vec::new(),
                     prompt_inline: None,
                     system_prompt_template: None,
-                    tool_whitelist: None,
                     model_config: ConfiguredAgentModel {
                         model: "gpt-oss-120b".to_string(),
                         temperature: 0.0,

@@ -66,7 +66,6 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
         config,
         task_store.clone(),
         skill_registry.clone(),
-        None,
         options.project_dir_service,
         &http_clients,
         Some(nova_agent::tool::builtin::agent::AgentToolServices {
@@ -228,7 +227,6 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
         &config,
         task_store.clone(),
         skill_registry.clone(),
-        None,
         Arc::new(session_service.clone()),
         &http_clients,
         Some(nova_agent::tool::builtin::agent::AgentToolServices {

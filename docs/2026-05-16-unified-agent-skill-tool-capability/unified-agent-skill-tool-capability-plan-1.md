@@ -93,10 +93,9 @@ register_builtin_tools*(..., /* no agent-specific tool whitelist */)
 
 ## 完成条件
 
-- [ ] `tool_whitelist` 不再参与工具注册
-- [ ] 根 runtime 与子 runtime 工具注册路径已统一
-- [ ] 工具注册测试覆盖主 / 子 runtime
-- [ ] `cargo clippy --workspace -- -D warnings` 通过
-- [ ] `cargo fmt --check --all` 通过
-- [ ] `cargo test --workspace` 通过
-
+- [x] `tool_whitelist` 不再参与工具注册
+- [x] 根 runtime 与子 runtime 工具注册路径已统一
+- [x] 工具注册测试覆盖主 / 子 runtime
+- [x] `cargo clippy --workspace -- -D warnings` 通过
+- [x] `cargo fmt --check --all` 通过
+- [x] `cargo test --workspace` 通过

@@ -100,8 +100,10 @@ id = "nova"
 display_name = "Nova"
 description = "默认通用助手"
 aliases = ["助手"]
-provider = "spark-12340"
-llm = "gemma"
+#provider = "spark-12340"
+provider = "spark-8000"
+llm = "qwen3-6-4.6"
+#llm = "gemma"
 prompt_file = "agent-nova.md"
 
 [[gateway.agents]]

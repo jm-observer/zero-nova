@@ -7,7 +7,7 @@ use crate::prompt::{
 };
 use crate::provider::types::{ToolDefinition, Usage};
 use crate::provider::{LlmClient, ModelConfig};
-use crate::skill::{CapabilityPolicy, SkillRegistry, ToolPolicy};
+use crate::skill::{CapabilityPolicy, SkillRegistry};
 use crate::tool::builtin::task::TaskStoreHandle;
 use crate::tool::Tool;
 pub use crate::tool::ToolRegistry;
@@ -222,7 +222,7 @@ impl AgentRuntime {
         // 1. 决定 active skill
         let active_skill = self.decide_active_skill(input, &current_history)?;
 
-        // 2. 根据 active skill 生成 capability policy
+        // 2. 根据 active skill 生成 capability policy（仅保留元数据，不裁剪工具）
         let capability_policy = if let Some(ref as2) = active_skill {
             if let Some(ref sr) = self.skill_registry {
                 sr.policy_from_skill(&as2.skill_id)
@@ -233,8 +233,8 @@ impl AgentRuntime {
             CapabilityPolicy::default()
         };
 
-        // 3. 过滤工具定义
-        let tool_definitions = self.filter_tool_definitions(&capability_policy, &active_skill).await;
+        // 3. 获取统一工具定义集合
+        let tool_definitions = self.filter_tool_definitions().await;
 
         // 4. 裁剪历史（如果 active skill 切换了则裁剪）
         let prompt_diag_builder = SystemPromptBuilder::new().base_section(system_prompt.clone());
@@ -374,51 +374,11 @@ impl AgentRuntime {
         Ok(None)
     }
 
-    /// 过滤工具定义（基于 `CapabilityPolicy` 和 `active skill`）。
-    async fn filter_tool_definitions(
-        &self,
-        capability_policy: &CapabilityPolicy,
-        active_skill: &Option<ActiveSkillState>,
-    ) -> Vec<ToolDefinition> {
-        let mut tools = self.tools.tool_definitions().await;
-        let tool_info = tools
-            .iter()
-            .find(|tool| tool.name == crate::tool::builtin::tool_info::TOOL_NAME)
-            .cloned();
-
-        if let Some(ref skill) = active_skill {
-            if let Some(ref sr) = self.skill_registry {
-                // 情况 A：处于活跃技能中，遵循技能的工具策略
-                if let Some(pkg) = sr.find_package_by_id(&skill.skill_id) {
-                    match &pkg.tool_policy {
-                        ToolPolicy::AllowList(allow_list) | ToolPolicy::AllowListWithDeferred(allow_list) => {
-                            tools.retain(|t| {
-                                allow_list.contains(&t.name) || capability_policy.always_enabled_tools.contains(&t.name)
-                            });
-                        }
-                        ToolPolicy::InheritAll => {
-                            // 继承全部，但仍受限于 CapabilityPolicy 的 always_enabled 范围
-                            tools.retain(|t| capability_policy.always_enabled_tools.contains(&t.name));
-                        }
-                    }
-                }
-            }
-        } else {
-            // 情况 B：无活跃技能，仅显示 CapabilityPolicy 中指定的始终开启工具
-            tools.retain(|t| capability_policy.always_enabled_tools.contains(&t.name));
-        }
-
-        if !tools.is_empty()
-            && !tools
-                .iter()
-                .any(|tool| tool.name == crate::tool::builtin::tool_info::TOOL_NAME)
-        {
-            if let Some(tool_info) = tool_info {
-                tools.push(tool_info);
-            }
-        }
-
-        tools
+    /// 过滤工具定义。
+    ///
+    /// Plan 2 起不再基于 active skill 裁剪当前轮工具集合。
+    async fn filter_tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.tool_definitions().await
     }
 
     /// 裁剪历史（如果 active skill 切换了则裁剪）。

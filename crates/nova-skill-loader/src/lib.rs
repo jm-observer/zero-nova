@@ -170,17 +170,7 @@ fn parse_skill_content(path: &Path, content: String) -> Result<LoadedCompatSkill
 
     let frontmatter = parts[1];
     let body = parts[2..].join("---");
-    let mut name = String::new();
-    let mut description = String::new();
-
-    for line in frontmatter.lines() {
-        let line = line.trim();
-        if let Some(stripped) = line.strip_prefix("name:") {
-            name = stripped.trim().trim_matches('"').to_string();
-        } else if let Some(stripped) = line.strip_prefix("description:") {
-            description = stripped.trim().trim_matches('"').to_string();
-        }
-    }
+    let (name, description) = parse_frontmatter(frontmatter);
 
     let fallback_name = fallback_skill_name(skill_dir);
     let compat_mode = name.is_empty();
@@ -191,6 +181,51 @@ fn parse_skill_content(path: &Path, content: String) -> Result<LoadedCompatSkill
         path: skill_dir.to_path_buf(),
         compat_mode,
     })
+}
+
+fn parse_frontmatter(frontmatter: &str) -> (String, String) {
+    let mut name = String::new();
+    let mut description = String::new();
+    let lines: Vec<&str> = frontmatter.lines().collect();
+    let mut index = 0;
+
+    while index < lines.len() {
+        let raw_line = lines[index];
+        let line = raw_line.trim();
+        if let Some(stripped) = line.strip_prefix("name:") {
+            name = stripped.trim().trim_matches('"').to_string();
+            index += 1;
+            continue;
+        }
+
+        if let Some(stripped) = line.strip_prefix("description:") {
+            let raw_value = stripped.trim();
+            if matches!(raw_value, ">" | "|") {
+                let mut continuation = Vec::new();
+                index += 1;
+                while index < lines.len() {
+                    let next_raw = lines[index];
+                    let next_trimmed = next_raw.trim();
+                    if next_raw.starts_with(' ') || next_raw.starts_with('\t') || next_trimmed.is_empty() {
+                        if !next_trimmed.is_empty() {
+                            continuation.push(next_trimmed.to_string());
+                        }
+                        index += 1;
+                        continue;
+                    }
+                    break;
+                }
+                description = continuation.join(" ");
+                continue;
+            }
+
+            description = raw_value.trim_matches('"').to_string();
+        }
+
+        index += 1;
+    }
+
+    (name, description)
 }
 
 fn to_skill_package(skill: &LoadedCompatSkill) -> LoadedSkillPackage {
@@ -293,4 +328,26 @@ fn fallback_skill_name(path: &Path) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("unknown")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_frontmatter_supports_folded_multiline_description() {
+        let frontmatter = r#"
+name: orchestrator
+description: >
+  多 Agent 编排器。将复杂任务分解为 DAG，并行/串行调度子 Agent 执行，
+  最后由 Review Agent 评审。
+"#;
+
+        let (name, description) = parse_frontmatter(frontmatter);
+        assert_eq!(name, "orchestrator");
+        assert_eq!(
+            description,
+            "多 Agent 编排器。将复杂任务分解为 DAG，并行/串行调度子 Agent 执行， 最后由 Review Agent 评审。"
+        );
+    }
 }

@@ -840,7 +840,6 @@ mod tests {
             prompt_file: None,
             prompt_inline: None,
             system_prompt_template: None,
-            tool_whitelist: None,
             model_config: ConfiguredAgentModel {
                 model: "gpt-4o".to_string(),
                 temperature: 0.3,
@@ -857,7 +856,6 @@ mod tests {
             system_prompt_template: String::new(),
             system_prompt_base: String::new(),
             initial_template_vars: HashMap::new(),
-            tool_whitelist: None,
             model_config: None,
             provider_id: "cloud".to_string(),
             llm_id: "cloud_gpt4o".to_string(),

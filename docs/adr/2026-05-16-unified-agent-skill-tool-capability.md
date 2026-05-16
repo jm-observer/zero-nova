@@ -19,6 +19,11 @@
 - 保留 agent prompt 差异，仅用于职责偏好表达
 - 仅保留最小运行时安全约束
 
+进一步约束：
+
+- skill prompt 只表达工作流建议和使用规则，不再暗示工具白名单语义
+- agent prompt 只表达角色偏好，不再暗示能力缺失或专属能力
+
 ## 影响范围
 
 - `gateway.agents` 配置模型
@@ -26,6 +31,7 @@
 - `prepare_turn()` 与 active skill 处理逻辑
 - prompt 构建与 skill 注入的职责边界
 - `ToolPolicy` / `CapabilityPolicy` 的语义定义
+- `.nova/prompts/` 与 `.nova/skills/` 中的能力说明文案
 
 ## 取舍
 
@@ -44,6 +50,11 @@
 ## 文档同步
 
 需要更新：
+
+- `docs/design/system-overview.md`
+- `docs/design/nova-agent-engine-boundaries.md`
+
+已同步：
 
 - `docs/design/system-overview.md`
 - `docs/design/nova-agent-engine-boundaries.md`

@@ -155,8 +155,6 @@ struct RawAgentSpec {
     #[serde(default)]
     system_prompt_template: Option<String>,
     #[serde(default)]
-    tool_whitelist: Option<Vec<String>>,
-    #[serde(default)]
     model_config: Option<ConfiguredAgentModel>,
     #[serde(default)]
     pub enable_project_developer_prompt: bool,
@@ -264,7 +262,6 @@ impl RawAppConfig {
                 prompt_file: agent.prompt_file,
                 prompt_inline: agent.prompt_inline,
                 system_prompt_template: None,
-                tool_whitelist: agent.tool_whitelist,
                 model_config,
                 enable_project_developer_prompt: agent.enable_project_developer_prompt,
             });

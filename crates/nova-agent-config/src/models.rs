@@ -365,7 +365,6 @@ pub struct AgentSpec {
     pub prompt_inline: Option<String>,
     #[serde(default)]
     pub system_prompt_template: Option<String>,
-    pub tool_whitelist: Option<Vec<String>>,
     pub model_config: ConfiguredAgentModel,
     /// 是否启用开发项目提示词读取。
     #[serde(default)]

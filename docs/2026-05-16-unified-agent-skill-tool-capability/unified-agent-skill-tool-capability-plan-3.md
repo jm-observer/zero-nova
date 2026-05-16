@@ -79,12 +79,11 @@ Prompt 语义契约：
 
 ## 完成条件
 
-- [ ] agent prompt 已收敛为职责偏好语义
-- [ ] skill 文案不再依赖工具白名单假设
-- [ ] 长期设计资产已更新
-- [ ] ADR 已新增
-- [ ] 统一能力模型回归测试通过
-- [ ] `cargo clippy --workspace -- -D warnings` 通过
-- [ ] `cargo fmt --check --all` 通过
-- [ ] `cargo test --workspace` 通过
-
+- [x] agent prompt 已收敛为职责偏好语义
+- [x] skill 文案不再依赖工具白名单假设
+- [x] 长期设计资产已更新
+- [x] ADR 已新增
+- [x] 统一能力模型回归测试通过
+- [x] `cargo clippy --workspace -- -D warnings` 通过
+- [x] `cargo fmt --check --all` 通过
+- [x] `cargo test --workspace` 通过

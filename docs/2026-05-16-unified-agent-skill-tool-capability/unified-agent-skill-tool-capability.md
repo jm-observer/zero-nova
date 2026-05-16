@@ -48,9 +48,9 @@
 
 | Plan | 描述 | 依赖 | 顺序 | 状态 |
 |------|------|------|------|------|
-| Plan 1 | 移除 agent 级和子 agent 级工具白名单路径，统一根 runtime 与子 runtime 的工具注册模型 | 无 | 1 | 待开始 |
-| Plan 2 | 删除 turn 级 skill tool 过滤逻辑，将 active skill 收敛为 prompt / metadata 概念，不再裁剪工具集 | Plan 1 | 2 | 待开始 |
-| Plan 3 | 收敛 prompt 与 skill 行为规则，保留角色差异但统一能力语义，并补齐测试与长期设计资产 | Plan 1, Plan 2 | 3 | 待开始 |
+| Plan 1 | 移除 agent 级和子 agent 级工具白名单路径，统一根 runtime 与子 runtime 的工具注册模型 | 无 | 1 | 已完成 |
+| Plan 2 | 删除 turn 级 skill tool 过滤逻辑，将 active skill 收敛为 prompt / metadata 概念，不再裁剪工具集 | Plan 1 | 2 | 已完成 |
+| Plan 3 | 收敛 prompt 与 skill 行为规则，保留角色差异但统一能力语义，并补齐测试与长期设计资产 | Plan 1, Plan 2 | 3 | 已完成 |
 
 ## 风险与待定项
 
@@ -61,4 +61,3 @@
 - 长期设计资产预计至少需要更新：
   - `docs/design/system-overview.md`
   - `docs/design/nova-agent-engine-boundaries.md`
-

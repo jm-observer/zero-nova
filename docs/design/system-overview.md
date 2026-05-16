@@ -14,6 +14,20 @@
 - `docs/design/nova-agent-engine-boundaries.md`
   说明 `nova-agent` 中运行时、工具注册表、应用层门面、orchestrator 与网关边界的稳定职责。
 
+## 能力统一基线
+
+当前 Agent / Skill / Tool 机制的稳定基线如下：
+
+- 所有 agent 共享同一套 skill registry。
+- 所有 agent 共享同一套工具注册集合，主 agent 与子 agent 不再通过配置获得不同工具集。
+- turn 级 active skill 仍可影响 prompt 语义与工作流提示，但不再裁剪工具可见性。
+- agent prompt 的职责是表达角色偏好，而不是隔离能力。
+
+这意味着系统中的“能力”与“职责”已拆分：
+
+- 能力由统一注册和统一 skill 装载提供。
+- 职责由 agent prompt、skill prompt 和工作流规则表达。
+
 ## 当前约束
 
 - 工具系统的公共注册与读取接口统一为异步方法，调用方必须在异步上下文中完成工具注册、列举和工具视图读取。

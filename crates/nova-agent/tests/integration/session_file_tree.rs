@@ -19,7 +19,6 @@ fn build_registry() -> AgentRegistry {
         system_prompt_template: String::new(),
         system_prompt_base: String::new(),
         initial_template_vars: HashMap::new(),
-        tool_whitelist: None,
         model_config: None,
         provider_id: "openai_compat".to_string(),
         llm_id: "gpt_oss_primary".to_string(),

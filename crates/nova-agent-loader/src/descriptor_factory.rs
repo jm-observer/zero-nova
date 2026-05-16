@@ -49,7 +49,6 @@ impl AgentDescriptorFactory {
             system_prompt_template,
             system_prompt_base: prompt_material.agent_prompt,
             initial_template_vars: material_inputs.initial_template_vars,
-            tool_whitelist: spec.tool_whitelist.clone(),
             model_config: Some(spec.model_config.clone().into()),
             provider_id: binding.provider_id.clone(),
             llm_id: binding

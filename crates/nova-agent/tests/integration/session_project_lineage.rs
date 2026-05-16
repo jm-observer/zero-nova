@@ -306,7 +306,6 @@ fn agent_descriptor(id: &str) -> AgentDescriptor {
         system_prompt_template: format!("system prompt for {}", id),
         system_prompt_base: format!("system prompt for {}", id),
         initial_template_vars: HashMap::new(),
-        tool_whitelist: None,
         model_config: None,
         provider_id: "openai_compat".to_string(),
         llm_id: "gpt_oss_primary".to_string(),

@@ -1,0 +1,491 @@
+{
+  "max_completion_tokens": 8192,
+  "messages": [
+    {
+      "content": "## Identity & Role\n\n你是 Nova Developer，一个面向开发任务的子代理。\n\n你负责在编排流程中处理实现、修改、修复、补测试等工程任务。你的目标不是重新拆解任务，而是在给定范围内直接落地。\n\n# 语言\n\n- 使用中文与用户交流。技术术语可保留英文。\n\n# 核心职责\n\n- 优先完成代码实现、缺陷修复、局部重构和测试补充\n- 严格遵守分配给你的文件范围和任务目标\n- 在完成修改后执行必要验证，并返回清晰的修改摘要与验证结果\n- 你与其他 agent 共享同一套 skills 和 tools。你的角色差异只体现在更偏向直接落地开发任务，不体现在能力集合隔离上。\n\n# 工作方式\n\n1. 先读取相关文件，理解当前实现意图，再开始修改\n2. 保持改动小而聚焦，不混入无关重构\n3. 信息不足时明确指出阻塞点，不自行脑补需求\n4. 若发现分配范围外的问题，只在结果中标注，不顺手扩散修改\n5. 当任务天然需要多 Agent 编排时，可以使用共享的编排能力；当任务可以直接完成时，优先直接落地，不为使用编排而编排\n\n# 搜索与命令约束\n\n- 读取单个本地文件内容时，优先使用 `Read` 工具；不要默认使用 `Bash` 执行 `Get-Content`、`type`、`cat` 等仅用于读取文件内容的命令\n- 搜索文本、符号、文件时优先使用 `rg` / `rg --files`，不要默认使用全仓 `Get-ChildItem -Recurse`\n- 进行仓库搜索时，默认排除高噪音和大体积目录，如 `target/`、`node_modules/`、`.git/`、构建产物目录\n- 仅在确有必要时才递归扫描整个仓库；若目标范围可推断，应先缩小到相关目录或文件类型\n- 搜索命令应尽量关闭颜色输出并避免无关高亮，例如优先使用 `rg --color never`\n- 若必须使用 PowerShell 管道搜索，也应显式排除上述大目录，避免将海量路径名或构建产物写入工具输出\n\n# 工程约束\n\n- 应用日志使用 `log` 宏，禁止用 `println!` 输出应用日志\n- 优先使用 `tokio` 异步能力，禁止在异步上下文引入阻塞操作\n- `lib.rs` 及业务模块禁止使用 `.unwrap()` / `.expect()`，应使用 `anyhow::Result` 和 `?`\n- 优先复用现有实现和已有依赖，不为单次任务引入无必要抽象\n- 注释只解释“为什么”，避免复述代码字面含义\n\n# 交付要求\n\n- 输出中说明改了哪些文件、解决了什么问题\n- 说明执行了哪些验证，以及结果是否通过\n- 若验证未通过，明确列出失败点和当前判断\n\n# 命令兼容性约束（ripgrep）\n- 使用 `rg`（ripgrep）按文件类型过滤时，必须使用 `-g` / `--glob`，例如：`rg -n \"token\" -g \"*.ts\" deskapp/src`。\n- 禁止生成 `rg --include \"*.ts\" ...` 这类命令；`--include` 不是 ripgrep 的有效参数，会报 `unrecognized flag --include`。\n- 若需排除目录/文件，使用 `-g \"!pattern\"`，例如：`-g \"!node_modules/**\"`。\n- 在不确定参数时，先生成最小可执行命令（如 `rg -n \"kw\" path`），再逐步增加 `-g` 约束，避免一次性拼接无效参数。\n\n# Windows PowerShell 输出编码约束\n- 在 Windows PowerShell 中执行包含中文输出的命令前，应显式设置 UTF-8 输出编码：`[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new()`。\n- 避免将原生命令输出直接接入可能重编码文本的 PowerShell 管道（如 `rg ... | Select-Object -First 50`）；需要限制结果数量时，优先使用工具自身参数或纯文本方式，例如 `rg -n \"kw\" path -m 50`。\n- 看到 `stdout_encoding: lossy` 或输出中出现 `�` 时，禁止直接判断源码文件乱码；必须先用显式 UTF-8 重新读取目标文件或重新执行命令验证。\n- 排查编码问题时，应区分“文件内容编码”和“终端/工具捕获 stdout 的解码”；只有在 UTF-8 读取文件本身也异常时，才能认为文件内容可能损坏。\n\n\n---\n\n## Behavior Constraints\n\n## CRITICAL: Action Consistency\n- You are a physical entity with real-world capabilities.\n- If you state that you are going to perform an action (e.g., \"running a command\", \"writing a file\", \"searching the web\"), you MUST generate the corresponding tool_use block in the SAME response.\n- NEVER claim you are doing something \"in the background\" or \"internally\" without an actual tool call.\n- Textual confirmation of an action is only valid AFTER the tool has been invoked.\n\n---\n\n## Available Skills\n\n### Available Skills\n\n- **competitive-deploy** (`competitive-deploy`): 解析部署方案文档，逐个竞品执行环境部署与测试。当用户给一个部署/测试方案，方案里面包含一个或多个竞品需要部署（通常是 docker 环境、git 仓库、hf 模型下载、python 脚本等），该 skill 负责提取每个竞品的部署步骤，使用 bash 命令逐一执行，并验证结果。适用于用户说\"部署方案\"、\"部署测试\"、\"竞品部署\"、\"部署计划\"、\"部署流程\"、\"帮我把这些竞品部署起来\"等场景。\n- **orchestrator** (`orchestrator`): 多 Agent 编排器。将复杂任务分解为 DAG，并行/串行调度子 Agent 执行， 最后由 Review Agent 评审。当任务需要多个独立子 Agent 协作时使用。\n- **skill-creator** (`skill-creator`): Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.\n\nUse `/skill-<name>` to activate a skill.\n\n---\n\n## Developer Project Instructions\n\n### Source: AI.md\n# 搜索与命令约束\n\n## 搜索工具使用\n\n- 搜索文本、符号、文件时优先使用 `rg` / `rg --files`。\n- 按文件类型过滤时使用 `-g` / `--glob`，例如：`rg -n \"token\" -g \"*.rs\" crates`。\n- 排除目录或文件时使用 `-g \"!pattern\"`。\n\n## `rg` 参数语义\n\n- 查找：`rg \"<pattern>\" <path>`。\n- 替换：`rg \"<pattern>\" <path> -r \"<replacement>\"`。\n- 非替换场景禁止使用 `-r`。\n\n## 命令执行防错\n\n- 发送工具调用前先做参数自检：是否缺少必填参数，是否包含与当前意图冲突的 flag。\n- 若命令返回“flag 缺少参数”或“未知参数”错误，下一次调用必须先修正命令本身，再继续后续步骤。\n\n## Windows PowerShell 编码\n\n- 在 Windows PowerShell 中输出中文前，显式设置 UTF-8 输出编码。\n\n---\n\n## Environment\n\nConfig directory: D:\\\\git\\\\zero-nova\\\\.nova\nProject directory: \\\\?\\D:\\git\\zero-nova\nPlatform: windows\nShell: pwsh\nDate: 2026-05-16\nGit branch: main\nGit status: 11 changed files\n\nRecent commits:\n7d27e65 fix and doc\n3d26c21 fix and doc\n147efe7 fix and doc\n8b546ce Expand orchestration module tests\nc5cca05 Add orchestrator engine tests\nModel: Huihui-Qwen3.6-35B-A3B-Claude\n\n---\n\n## Tool Capabilities\n\n- `Bash`: Execute a shell command (using pwsh). Returns stdout, stderr and exit code. On Windows PowerShell, prefer PowerShell syntax such as `Get-ChildItem -Force` instead of Unix flags like `-la`.\n- `Read`: Read the contents of a file. Supports paging, PDF (placeholder), and images.\n- `Write`: Write content to a file. Requires the file to have been read first if it exists.\n- `Edit`: Performs exact string replacements in files. Best for precise modifications.\n- `WebSearch`: Search the web via Tavily. Results are optimized for LLM consumption.\n- `WebFetch`: Fetch a URL and extract its text content. Useful for reading web pages or documentation.\n- `ProjectManager`: Gets or changes the current session project directory. Use this when the user asks to switch the project or working directory.\n- `OrchestrateTask`: Execute a multi-agent orchestration plan, or run a single agent task in shorthand mode.\n- `Skill`: Loads and injects specialized skills into the current session.\n- `TaskCreate`: Creates a new task in the session's task store.\n- `TaskList`: Lists all tasks in the session's task store.\n- `TaskUpdate`: Updates an existing task.\n- `ToolInfo`: Retrieve complete metadata for one or more tools, including full input schema and required parameters.\n---\n\n**Tool parameter lookup**: If you need exact parameters, field types, required/default/enum values, or nested object structures, call the `ToolInfo` tool first. Do not guess tool parameters based on experience.\n\n",
+      "role": "system"
+    },
+    {
+      "content": "/orchestrator 在项目根目录的 tmp/test-output/ 下并行创建 3 个独立的文本文件：\n\ntmp/test-output/hello.txt - 内容为 \"Hello from Agent A\"\ntmp/test-output/world.txt - 内容为 \"World from Agent B\"\ntmp/test-output/foo.txt - 内容为 \"Foo from Agent C\"",
+      "role": "user"
+    },
+    {
+      "content": "\n\n我来使用 orchestrator 创建一个并行任务编排，同时创建 3 个文本文件。\n\n",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"action\":\"set\",\"path\":\"D:\\\\git\\\\zero-nova\"}",
+            "name": "ProjectManager"
+          },
+          "id": "call_e5020a48ebe14190b78d013d",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Project directory changed to: \\\\?\\D:\\git\\zero-nova\nDirectory exists: yes\nAffected tools: Bash (CWD), Read/Write/Edit (relative path base)",
+      "role": "tool",
+      "tool_call_id": "call_e5020a48ebe14190b78d013d"
+    },
+    {
+      "content": "\n\n",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"plan\":{\"description\":\"并行创建 3 个文本文件到 tmp/test-output/\",\"planId\":\"parallel-file-create-001\",\"stages\":[{\"agents\":[{\"agentId\":\"agent-a\",\"dependsOn\":[],\"prompt\":\"在 D:\\\\git\\\\zero-nova\\\\tmp\\\\test-output\\\\hello.txt 创建文件，内容为 'Hello from Agent A'，使用 PowerShell Set-Content 命令\",\"type\":\"bash\"},{\"agentId\":\"agent-b\",\"dependsOn\":[],\"prompt\":\"在 D:\\\\git\\\\zero-nova\\\\tmp\\\\test-output\\\\world.txt 创建文件，内容为 'World from Agent B'，使用 PowerShell Set-Content 命令\",\"type\":\"bash\"},{\"agentId\":\"agent-c\",\"dependsOn\":[],\"prompt\":\"在 D:\\\\git\\\\zero-nova\\\\tmp\\\\test-output\\\\foo.txt 创建文件，内容为 'Foo from Agent C'，使用 PowerShell Set-Content 命令\",\"type\":\"bash\"}],\"description\":\"并行创建 3 个文件\",\"stageId\":\"create-files\"},{\"agents\":[{\"agentId\":\"verifier\",\"dependsOn\":[\"agent-a\",\"agent-b\",\"agent-c\"],\"prompt\":\"验证 tmp\\\\test-output\\\\ 目录下 hello.txt、world.txt、foo.txt 三个文件是否存在，并读取它们的内容确认正确性\",\"type\":\"bash\"}],\"description\":\"验证 3 个文件是否正确创建\",\"parallel\":false,\"stageId\":\"verify-files\"}]}}",
+            "name": "OrchestrateTask"
+          },
+          "id": "call_029ca401323346899d5c68d7",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Internal execution error: Invalid plan object",
+      "role": "tool",
+      "tool_call_id": "call_029ca401323346899d5c68d7"
+    },
+    {
+      "content": "\n\n让我使用更简单的快捷模式来完成这个任务。\n\n",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"description\":\"并行创建3个文本文件\",\"prompt\":\"在 D:\\\\git\\\\zero-nova 项目根目录下并行创建 3 个文本文件：\\n\\n1. tmp/test-output/hello.txt - 内容为 \\\"Hello from Agent A\\\"\\n2. tmp/test-output/world.txt - 内容为 \\\"World from Agent B\\\"  \\n3. tmp/test-output/foo.txt - 内容为 \\\"Foo from Agent C\\\"\\n\\n使用 PowerShell Set-Content 命令创建文件。创建完成后，读取这 3 个文件的内容验证是否正确。\"}",
+            "name": "OrchestrateTask"
+          },
+          "id": "call_355474a3db53493d9aa01e06",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Internal execution error: Failed to execute orchestration plan",
+      "role": "tool",
+      "tool_call_id": "call_355474a3db53493d9aa01e06"
+    },
+    {
+      "content": "\n\n让我直接使用 Bash 命令来完成这个任务。\n\n",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new(); if (-not (Test-Path \\\"tmp\\\\test-output\\\")) { New-Item -ItemType Directory -Path \\\"tmp\\\\test-output\\\" -Force }; Set-Content -Path \\\"tmp\\\\test-output\\\\hello.txt\\\" -Value \\\"Hello from Agent A\\\"; Set-Content -Path \\\"tmp\\\\test-output\\\\world.txt\\\" -Value \\\"World from Agent B\\\"; Set-Content -Path \\\"tmp\\\\test-output\\\\foo.txt\\\" -Value \\\"Foo from Agent C\\\"; Write-Host \\\"Files created successfully\\\"; Get-ChildItem \\\"tmp\\\\test-output\\\\*.txt\\\" | Select-Object Name, Length\",\"description\":\"创建 tmp/test-output 目录并并行创建 3 个文本文件\"}",
+            "name": "Bash"
+          },
+          "id": "call_7393ffebb53341508c290adc",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "exit_code: 0\nstdout_encoding: utf8\nstderr_encoding: utf8\nstdout:\nFiles created successfully\r\n\r\n\u001b[32;1mName              \u001b[0m\u001b[32;1m Length\u001b[0m\r\n\u001b[32;1m----              \u001b[0m \u001b[32;1m------\u001b[0m\r\nconfig-summary.txt     66\r\nfinal-report.txt      132\r\nfoo.txt                18\r\nhello.txt              20\r\nresult.txt             82\r\nslow2.txt              78\r\nslow3.txt            1500\r\nsuccess.txt            17\r\nworld.txt              20\r\n\r\n\nstderr:\n",
+      "role": "tool",
+      "tool_call_id": "call_7393ffebb53341508c290adc"
+    },
+    {
+      "content": "\n\n文件已创建成功。现在验证文件内容：\n\n",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"command\":\"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $OutputEncoding = [System.Text.UTF8Encoding]::new(); Write-Host \\\"=== hello.txt ===\\\"; Get-Content \\\"tmp\\\\test-output\\\\hello.txt\\\"; Write-Host \\\"=== world.txt ===\\\"; Get-Content \\\"tmp\\\\test-output\\\\world.txt\\\"; Write-Host \\\"=== foo.txt ===\\\"; Get-Content \\\"tmp\\\\test-output\\\\foo.txt\\\"\",\"description\":\"验证 3 个文件的内容\"}",
+            "name": "Bash"
+          },
+          "id": "call_a9118ad971da499a8a2a8d1f",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "exit_code: 0\nstdout_encoding: utf8\nstderr_encoding: utf8\nstdout:\n=== hello.txt ===\r\nHello from Agent A\r\n=== world.txt ===\r\nWorld from Agent B\r\n=== foo.txt ===\r\nFoo from Agent C\r\n\nstderr:\n",
+      "role": "tool",
+      "tool_call_id": "call_a9118ad971da499a8a2a8d1f"
+    }
+  ],
+  "model": "Huihui-Qwen3.6-35B-A3B-Claude",
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "temperature": 0.5,
+  "tools": [
+    {
+      "function": {
+        "description": "Execute a shell command (using pwsh). Returns stdout, stderr and exit code. On Windows PowerShell, prefer PowerShell syntax such as `Get-ChildItem -Force` instead of Unix flags like `-la`.",
+        "name": "Bash",
+        "parameters": {
+          "properties": {
+            "command": {
+              "description": "The shell command to execute",
+              "type": "string"
+            },
+            "dangerouslyDisableSandbox": {
+              "description": "Override sandbox mode",
+              "type": "boolean"
+            },
+            "description": {
+              "description": "Clear, concise description of what this command does",
+              "type": "string"
+            },
+            "run_in_background": {
+              "description": "Run in background, return immediately",
+              "type": "boolean"
+            },
+            "timeout_ms": {
+              "description": "Timeout in milliseconds (default 3600000)",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Read the contents of a file. Supports paging, PDF (placeholder), and images.",
+        "name": "Read",
+        "parameters": {
+          "properties": {
+            "file_path": {
+              "description": "The absolute path to the file to read",
+              "type": "string"
+            },
+            "limit": {
+              "default": 2000,
+              "description": "Number of lines to read (default 2000, max 2000)",
+              "type": "integer"
+            },
+            "offset": {
+              "default": 1,
+              "description": "1-based start line. Increase this offset to continue reading later lines.",
+              "type": "integer"
+            },
+            "pages": {
+              "description": "Page range for PDF files (e.g., '1-5') - Currently not implemented",
+              "type": "string"
+            }
+          },
+          "required": [
+            "file_path"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Write content to a file. Requires the file to have been read first if it exists.",
+        "name": "Write",
+        "parameters": {
+          "properties": {
+            "content": {
+              "description": "The content to write to the file",
+              "type": "string"
+            },
+            "file_path": {
+              "description": "The absolute path to the file to write",
+              "type": "string"
+            }
+          },
+          "required": [
+            "file_path",
+            "content"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Performs exact string replacements in files. Best for precise modifications.",
+        "name": "Edit",
+        "parameters": {
+          "properties": {
+            "file_path": {
+              "description": "The absolute path to the file to modify",
+              "type": "string"
+            },
+            "new_string": {
+              "description": "The text to replace it with",
+              "type": "string"
+            },
+            "old_string": {
+              "description": "The text to replace",
+              "type": "string"
+            },
+            "replace_all": {
+              "default": false,
+              "description": "Replace all occurrences. If false, old_string must be unique.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "file_path",
+            "old_string",
+            "new_string"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Search the web via Tavily. Results are optimized for LLM consumption.",
+        "name": "WebSearch",
+        "parameters": {
+          "properties": {
+            "count": {
+              "description": "Number of results (default 5, max 10)",
+              "type": "integer"
+            },
+            "query": {
+              "description": "Search query",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Fetch a URL and extract its text content. Useful for reading web pages or documentation.",
+        "name": "WebFetch",
+        "parameters": {
+          "properties": {
+            "selector": {
+              "description": "Optional CSS selector to extract specific content (e.g. 'article', '.main-content')",
+              "type": "string"
+            },
+            "url": {
+              "description": "URL to fetch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Gets or changes the current session project directory. Use this when the user asks to switch the project or working directory.",
+        "name": "ProjectManager",
+        "parameters": {
+          "properties": {
+            "action": {
+              "description": "The action to perform on the project directory.",
+              "enum": [
+                "get",
+                "set"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "description": "The new project directory path. Required when action is 'set'.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Execute a multi-agent orchestration plan, or run a single agent task in shorthand mode.",
+        "name": "OrchestrateTask",
+        "parameters": {
+          "properties": {
+            "agentSelection": {
+              "description": "快捷模式：可选的 agent 类型选择",
+              "type": "string"
+            },
+            "description": {
+              "description": "快捷模式：3-5 词任务描述",
+              "type": "string"
+            },
+            "plan": {
+              "description": "完整编排计划（多 Agent 模式）。与 prompt 互斥。包含 planId, description, stages 字段",
+              "type": "object"
+            },
+            "prompt": {
+              "description": "快捷模式：单 Agent 任务的 prompt。与 plan 互斥",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Loads and injects specialized skills into the current session.",
+        "name": "Skill",
+        "parameters": {
+          "properties": {
+            "args": {
+              "description": "Optional arguments for the skill",
+              "type": "string"
+            },
+            "skill": {
+              "description": "The name of the skill to load",
+              "type": "string"
+            }
+          },
+          "required": [
+            "skill"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Creates a new task in the session's task store.",
+        "name": "TaskCreate",
+        "parameters": {
+          "properties": {
+            "active_form": {
+              "description": "Present continuous form for spinner display (e.g., 'Compiling code')",
+              "type": "string"
+            },
+            "description": {
+              "description": "What needs to be done",
+              "type": "string"
+            },
+            "metadata": {
+              "description": "Arbitrary metadata",
+              "type": "object"
+            },
+            "subject": {
+              "description": "Brief task title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "subject",
+            "description"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Lists all tasks in the session's task store.",
+        "name": "TaskList",
+        "parameters": {
+          "properties": {},
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Updates an existing task.",
+        "name": "TaskUpdate",
+        "parameters": {
+          "properties": {
+            "active_form": {
+              "type": "string"
+            },
+            "addBlockedBy": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "addBlocks": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": "string"
+            },
+            "id": {
+              "description": "Task ID",
+              "type": "string"
+            },
+            "metadata": {
+              "type": "object"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "pending",
+                "in_progress",
+                "completed",
+                "deleted"
+              ],
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Retrieve complete metadata for one or more tools, including full input schema and required parameters.",
+        "name": "ToolInfo",
+        "parameters": {
+          "properties": {
+            "include_schema": {
+              "default": true,
+              "description": "Whether to include the full input schema in the response.",
+              "type": "boolean"
+            },
+            "tool_names": {
+              "description": "List of tool names to query metadata for.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "tool_names"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    }
+  ]
+}

@@ -36,7 +36,7 @@ pub(super) struct ExecuteTurnLoopRequest<'a> {
     pub visible_tool_names: Arc<std::collections::HashSet<String>>,
     pub iteration_budget: usize,
     pub session_id: &'a str,
-    pub agent_id: Option<&'a str>,
+    pub agent_id: &'a str,
     pub environment: Option<EnvironmentSnapshot>,
     pub event_tx: mpsc::Sender<AgentEvent>,
     pub cancellation_token: Option<CancellationToken>,
@@ -241,7 +241,7 @@ impl AgentRuntime {
                         } else {
                             Some(session_id.to_string())
                         },
-                        agent_id: agent_id.map(|id| id.to_string()),
+                        agent_id: agent_id.to_string(),
                     },
                 )
                 .await

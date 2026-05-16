@@ -4,23 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default)]
 pub struct ProviderRequestContext {
     pub session_id: Option<String>,
-    pub agent_id: Option<String>,
-}
-
-impl ProviderRequestContext {
-    /// 校验 session_id 字段，空白字符串视为无效。
-    ///
-    /// 采用"宽松 + 非空"策略：仅做 trim 检查，特殊字符透传。
-    pub fn validate_session_id(s: &str) -> bool {
-        let trimmed = s.trim();
-        !trimmed.is_empty()
-    }
-
-    /// 校验 agent_id 字段，空白字符串视为无效。
-    pub fn validate_agent_id(s: &str) -> bool {
-        let trimmed = s.trim();
-        !trimmed.is_empty()
-    }
+    pub agent_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

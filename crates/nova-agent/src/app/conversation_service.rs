@@ -524,7 +524,7 @@ impl ConversationService {
                 ctx: turn_ctx,
                 message: user_message,
                 session_id,
-                agent_id: Some(&agent_id),
+                agent_id: &agent_id,
                 environment: Some(env),
                 event_tx,
                 cancellation_token: Some(token),

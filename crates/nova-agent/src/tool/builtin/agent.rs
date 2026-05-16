@@ -438,6 +438,7 @@ impl AgentTool {
         model_override: Option<&str>,
         skill_id: Option<String>,
         injection_mode: crate::prompt::SkillInjectionMode,
+        agent_id: &str,
         context: Option<ToolContext>,
     ) -> Result<(String, u128, Vec<String>)> {
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
@@ -619,7 +620,15 @@ impl AgentTool {
             chrono::Utc::now().timestamp_millis(),
         );
         let result = runtime
-            .run_turn_with_context(turn_ctx, user_message, &session_id, None, Some(environment), tx, None)
+            .run_turn_with_context(
+                turn_ctx,
+                user_message,
+                &session_id,
+                agent_id,
+                Some(environment),
+                tx,
+                None,
+            )
             .await?;
         if let Some(handle) = forwarding_handle {
             handle.await?;
@@ -667,6 +676,7 @@ impl SubAgentExecutor for AgentTool {
                 None,
                 None,
                 SkillInjectionMode::Catalog,
+                &request.agent_id,
                 context,
             )
             .await?;

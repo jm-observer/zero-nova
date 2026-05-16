@@ -164,11 +164,9 @@ impl OpenAiCompatClient {
             }
         }
 
-        if let Some(ref agent_id) = request_context.agent_id {
-            let trimmed = agent_id.trim();
-            if !trimmed.is_empty() {
-                headers.push((HEADER_AGENT_ID.to_string(), trimmed.to_string()));
-            }
+        let trimmed_agent = request_context.agent_id.trim();
+        if !trimmed_agent.is_empty() {
+            headers.push((HEADER_AGENT_ID.to_string(), trimmed_agent.to_string()));
         }
 
         headers
@@ -420,10 +418,10 @@ impl OpenAiCompatStreamReceiver {
 mod tests {
     use super::*;
 
-    fn make_context(session: Option<&str>, agent: Option<&str>) -> ProviderRequestContext {
+    fn make_context(session: Option<&str>, agent: &str) -> ProviderRequestContext {
         ProviderRequestContext {
             session_id: session.map(|s| s.to_string()),
-            agent_id: agent.map(|s| s.to_string()),
+            agent_id: agent.to_string(),
         }
     }
 
@@ -436,7 +434,7 @@ mod tests {
             "http://localhost:8080/v1".to_string(),
             true,
         );
-        let ctx = make_context(Some("sess-123"), Some("agent-456"));
+        let ctx = make_context(Some("sess-123"), "agent-456");
         let headers = client.build_request_headers(&ctx);
 
         assert_eq!(headers.len(), 2);
@@ -451,7 +449,7 @@ mod tests {
             "http://localhost:8080/v1".to_string(),
             false,
         );
-        let ctx = make_context(Some("sess-123"), Some("agent-456"));
+        let ctx = make_context(Some("sess-123"), "agent-456");
         let headers = client.build_request_headers(&ctx);
         assert!(headers.is_empty());
     }
@@ -465,17 +463,17 @@ mod tests {
         );
 
         // 空字符串
-        let ctx = make_context(Some(""), Some(""));
+        let ctx = make_context(Some(""), "");
         let headers = client.build_request_headers(&ctx);
         assert!(headers.is_empty());
 
         // 纯空白
-        let ctx = make_context(Some("  "), Some("\t\n"));
+        let ctx = make_context(Some("  "), "\t\n");
         let headers = client.build_request_headers(&ctx);
         assert!(headers.is_empty());
 
-        // None
-        let ctx = make_context(None, None);
+        // session 为 None，agent 为空
+        let ctx = make_context(None, "");
         let headers = client.build_request_headers(&ctx);
         assert!(headers.is_empty());
     }
@@ -489,14 +487,14 @@ mod tests {
         );
 
         // 只有 session_id
-        let ctx = make_context(Some("sess-123"), None);
+        let ctx = make_context(Some("sess-123"), "");
         let headers = client.build_request_headers(&ctx);
         assert_eq!(headers.len(), 1);
         assert!(headers.iter().any(|(k, _)| k == HEADER_SESSION_ID));
         assert!(!headers.iter().any(|(k, _)| k == HEADER_AGENT_ID));
 
         // 只有 agent_id
-        let ctx = make_context(None, Some("agent-456"));
+        let ctx = make_context(None, "agent-456");
         let headers = client.build_request_headers(&ctx);
         assert_eq!(headers.len(), 1);
         assert!(headers.iter().any(|(k, _)| k == HEADER_AGENT_ID));
@@ -511,7 +509,7 @@ mod tests {
             true,
         );
 
-        let ctx = make_context(Some("  sess-123  "), Some("  agent-456  "));
+        let ctx = make_context(Some("  sess-123  "), "  agent-456  ");
         let headers = client.build_request_headers(&ctx);
 
         assert_eq!(headers.len(), 2);
@@ -523,7 +521,7 @@ mod tests {
     fn test_build_request_headers_default_client() {
         // new() 默认开启 context headers
         let client = OpenAiCompatClient::new("sk-test".to_string(), "http://localhost:8080/v1".to_string());
-        let ctx = make_context(Some("sess-123"), Some("agent-456"));
+        let ctx = make_context(Some("sess-123"), "agent-456");
         let headers = client.build_request_headers(&ctx);
         assert_eq!(headers.len(), 2);
     }
@@ -532,7 +530,7 @@ mod tests {
     fn test_build_request_headers_from_registry() {
         let providers = HashMap::new();
         let client = OpenAiCompatClient::from_registry(providers, "default".to_string());
-        let ctx = make_context(Some("sess-123"), Some("agent-456"));
+        let ctx = make_context(Some("sess-123"), "agent-456");
         let headers = client.build_request_headers(&ctx);
         assert_eq!(headers.len(), 2);
     }
@@ -542,7 +540,7 @@ mod tests {
         let providers = HashMap::new();
         let client =
             OpenAiCompatClient::from_registry_with_context_headers_enabled(providers, "default".to_string(), false);
-        let ctx = make_context(Some("sess-123"), Some("agent-456"));
+        let ctx = make_context(Some("sess-123"), "agent-456");
         let headers = client.build_request_headers(&ctx);
         assert!(headers.is_empty());
     }

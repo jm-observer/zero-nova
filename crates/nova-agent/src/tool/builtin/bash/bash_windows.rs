@@ -92,3 +92,66 @@ pub fn select_shell(config: &BashConfig) -> ShellBackend {
     }
     ShellBackend::Cmd(CmdBackend)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("repo root should exist")
+            .to_path_buf()
+    }
+
+    #[test]
+    fn windows_shell_prefers_pwsh_when_available() {
+        let backend = PowerShellBackend::detect().expect("PowerShell backend should be available on Windows");
+        assert_eq!(
+            backend.name(),
+            "pwsh",
+            "Windows should prefer pwsh over legacy powershell"
+        );
+
+        let config = BashConfig::default();
+        match select_shell(&config) {
+            ShellBackend::PowerShell(selected) => assert_eq!(selected.name(), "pwsh"),
+            ShellBackend::Cmd(_) => panic!("select_shell should not fall back to cmd when pwsh is available"),
+        }
+    }
+
+    #[tokio::test]
+    async fn pwsh_reads_orchestrator_skill_without_mojibake() {
+        let backend = PowerShellBackend::detect().expect("PowerShell backend should be available on Windows");
+        assert_eq!(backend.name(), "pwsh", "test requires pwsh to be selected");
+
+        let skill_path = repo_root()
+            .join(".nova")
+            .join("skills")
+            .join("orchestrator")
+            .join("SKILL.md");
+        let command = format!("Get-Content \"{}\" 2>$null", skill_path.display());
+        let output = backend
+            .build_command(&command)
+            .output()
+            .await
+            .expect("pwsh command should run");
+
+        assert!(
+            output.status.success(),
+            "pwsh should read orchestrator skill successfully"
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("pwsh stdout should be utf8");
+        assert!(
+            stdout.contains("多 Agent 编排器"),
+            "stdout should contain readable Chinese text, got: {stdout}"
+        );
+        assert!(
+            !stdout.contains('\u{FFFD}'),
+            "stdout should not contain replacement characters: {stdout}"
+        );
+    }
+}

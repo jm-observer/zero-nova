@@ -385,9 +385,12 @@ mod tests {
         init_test_logger();
         let stage = build_stage(StageMode::Parallel);
 
-        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
-            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
-        })
+        let results = execute_stage(
+            "plan-1",
+            &stage,
+            &CancellationToken::new(),
+            |agent, stage_id| async move { Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done")) },
+        )
         .await
         .expect("stage should succeed");
 
@@ -405,14 +408,14 @@ mod tests {
             let order = order.clone();
             move |agent, stage_id| {
                 let current = order.fetch_add(1, Ordering::SeqCst);
-            async move {
-                if agent.agent_id == "a1" {
-                    assert_eq!(current, 0);
-                } else {
-                    assert_eq!(current, 1);
+                async move {
+                    if agent.agent_id == "a1" {
+                        assert_eq!(current, 0);
+                    } else {
+                        assert_eq!(current, 1);
+                    }
+                    Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
                 }
-                Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
-            }
             }
         })
         .await
@@ -427,12 +430,17 @@ mod tests {
         init_test_logger();
         let stage = build_stage(StageMode::Serial);
 
-        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
-            if agent.agent_id == "a1" {
-                return Err(anyhow!("error msg"));
-            }
-            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
-        })
+        let results = execute_stage(
+            "plan-1",
+            &stage,
+            &CancellationToken::new(),
+            |agent, stage_id| async move {
+                if agent.agent_id == "a1" {
+                    return Err(anyhow!("error msg"));
+                }
+                Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+            },
+        )
         .await
         .expect("stage should succeed");
 
@@ -473,9 +481,12 @@ mod tests {
         init_test_logger();
         let stage = build_empty_stage(StageMode::Parallel);
 
-        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |_agent, _stage_id| async move {
-            Ok(success_result("plan-1", "stage-1", "unused", "done"))
-        })
+        let results = execute_stage(
+            "plan-1",
+            &stage,
+            &CancellationToken::new(),
+            |_agent, _stage_id| async move { Ok(success_result("plan-1", "stage-1", "unused", "done")) },
+        )
         .await
         .expect("stage should succeed");
 
@@ -487,9 +498,12 @@ mod tests {
         init_test_logger();
         let stage = build_single_agent_stage(StageMode::Parallel);
 
-        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
-            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
-        })
+        let results = execute_stage(
+            "plan-1",
+            &stage,
+            &CancellationToken::new(),
+            |agent, stage_id| async move { Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done")) },
+        )
         .await
         .expect("stage should succeed");
 
@@ -502,9 +516,12 @@ mod tests {
         init_test_logger();
         let stage = build_single_agent_stage(StageMode::Serial);
 
-        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
-            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
-        })
+        let results = execute_stage(
+            "plan-1",
+            &stage,
+            &CancellationToken::new(),
+            |agent, stage_id| async move { Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done")) },
+        )
         .await
         .expect("stage should succeed");
 

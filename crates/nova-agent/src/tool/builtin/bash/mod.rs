@@ -204,10 +204,8 @@ impl Tool for BashTool {
             .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr"))?;
 
-        let mut stdout_buf = String::new();
-        let mut stderr_buf = String::new();
-        let mut stdout_had_lossy = false;
-        let mut stderr_had_lossy = false;
+        let mut stdout_bytes = Vec::new();
+        let mut stderr_bytes = Vec::new();
 
         const LOG_FLUSH_INTERVAL_MS: u128 = 200;
 
@@ -231,10 +229,9 @@ impl Tool for BashTool {
                         match read_res {
                             Ok((0, _)) => stdout_done = true,
                             Ok((_, chunk)) => {
-                                let (decoded, had_lossy) = decode_lossy_with_flag(&chunk);
-                                stdout_had_lossy |= had_lossy;
+                                stdout_bytes.extend_from_slice(&chunk);
+                                let (decoded, _had_lossy) = decode_lossy_with_flag(&chunk);
                                 pending_stdout.push_str(&decoded);
-                                stdout_buf.push_str(&decoded);
 
                                 if last_flush.elapsed().as_millis() >= LOG_FLUSH_INTERVAL_MS {
                                     if let Some(ctx) = &context {
@@ -249,7 +246,7 @@ impl Tool for BashTool {
                                 }
                             }
                             Err(e) => {
-                                stderr_buf.push_str(&format!("Error reading stdout: {}\n", e));
+                                stderr_bytes.extend_from_slice(format!("Error reading stdout: {}\n", e).as_bytes());
                                 stdout_done = true;
                             }
                         }
@@ -261,10 +258,9 @@ impl Tool for BashTool {
                         match read_res {
                             Ok((0, _)) => stderr_done = true,
                             Ok((_, chunk)) => {
-                                let (decoded, had_lossy) = decode_lossy_with_flag(&chunk);
-                                stderr_had_lossy |= had_lossy;
+                                stderr_bytes.extend_from_slice(&chunk);
+                                let (decoded, _had_lossy) = decode_lossy_with_flag(&chunk);
                                 pending_stderr.push_str(&decoded);
-                                stderr_buf.push_str(&decoded);
 
                                 if last_flush.elapsed().as_millis() >= LOG_FLUSH_INTERVAL_MS {
                                     if let Some(ctx) = &context {
@@ -279,7 +275,7 @@ impl Tool for BashTool {
                                 }
                             }
                             Err(e) => {
-                                stderr_buf.push_str(&format!("Error reading stderr: {}\n", e));
+                                stderr_bytes.extend_from_slice(format!("Error reading stderr: {}\n", e).as_bytes());
                                 stderr_done = true;
                             }
                         }
@@ -321,15 +317,15 @@ impl Tool for BashTool {
         match timeout(Duration::from_millis(timeout_ms), read_fut).await {
             Ok(Ok(status)) => {
                 let exit_code = status.code().unwrap_or(-1);
-                let stdout_encoding = if stdout_had_lossy { "lossy" } else { "utf8" };
-                let stderr_encoding = if stderr_had_lossy { "lossy" } else { "utf8" };
+                let (stdout_text, stdout_encoding) = decode_command_output(&stdout_bytes);
+                let (stderr_text, stderr_encoding) = decode_command_output(&stderr_bytes);
                 let content = format!(
                     "exit_code: {}\nstdout_encoding: {}\nstderr_encoding: {}\nstdout:\n{}\nstderr:\n{}",
                     exit_code,
                     stdout_encoding,
                     stderr_encoding,
-                    truncate(&stdout_buf, 100_000),
-                    truncate(&stderr_buf, 10_000)
+                    truncate(&stdout_text, 100_000),
+                    truncate(&stderr_text, 10_000)
                 );
                 Ok(ToolOutput {
                     content,
@@ -342,11 +338,13 @@ impl Tool for BashTool {
             }),
             Err(_) => {
                 let _ = child.kill().await;
+                let (stdout_text, _) = decode_command_output(&stdout_bytes);
+                let (stderr_text, _) = decode_command_output(&stderr_bytes);
                 let content = format!(
                     "Command timed out after {}ms\nstdout so far:\n{}\nstderr so far:\n{}",
                     timeout_ms,
-                    truncate(&stdout_buf, 100_000),
-                    truncate(&stderr_buf, 10_000)
+                    truncate(&stdout_text, 100_000),
+                    truncate(&stderr_text, 10_000)
                 );
                 warn!("{content}");
                 Ok(ToolOutput {
@@ -377,6 +375,39 @@ fn decode_lossy_with_flag(bytes: &[u8]) -> (String, bool) {
     (decoded.into_owned(), had_lossy)
 }
 
+fn decode_command_output(bytes: &[u8]) -> (String, &'static str) {
+    #[cfg(target_os = "windows")]
+    if let Some(decoded) = decode_utf16le(bytes) {
+        return (decoded, "utf16le");
+    }
+
+    if let Ok(decoded) = String::from_utf8(bytes.to_vec()) {
+        return (decoded, "utf8");
+    }
+
+    let (decoded, _) = decode_lossy_with_flag(bytes);
+    (decoded, "lossy")
+}
+
+#[cfg(target_os = "windows")]
+fn decode_utf16le(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < 2 || !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+
+    let zero_byte_count = bytes.iter().filter(|&&byte| byte == 0).count();
+    if zero_byte_count * 4 < bytes.len() {
+        return None;
+    }
+
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+
+    String::from_utf16(&units).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +434,27 @@ mod tests {
         let (decoded_invalid, invalid_lossy) = decode_lossy_with_flag(&invalid);
         assert!(decoded_invalid.contains('\u{FFFD}'));
         assert!(invalid_lossy);
+    }
+
+    #[test]
+    fn decode_command_output_prefers_complete_utf8() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice("多 Agent".as_bytes());
+        let (decoded, encoding) = decode_command_output(&bytes);
+        assert_eq!(decoded, "多 Agent");
+        assert_eq!(encoding, "utf8");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn decode_command_output_supports_utf16le() {
+        let utf16: Vec<u8> = "多 Agent\r\n"
+            .encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect();
+        let (decoded, encoding) = decode_command_output(&utf16);
+        assert_eq!(decoded, "多 Agent\r\n");
+        assert_eq!(encoding, "utf16le");
     }
 
     #[test]

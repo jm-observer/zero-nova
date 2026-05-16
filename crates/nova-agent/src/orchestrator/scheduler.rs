@@ -282,7 +282,8 @@ mod tests {
     use crate::orchestrator::planner::{AgentRequest, ExecutionStage, StageMode};
     use anyhow::anyhow;
     use custom_utils::logger::logger_feature;
-    use std::sync::Once;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Once};
     use tokio_util::sync::CancellationToken;
 
     fn init_test_logger() {
@@ -320,6 +321,197 @@ mod tests {
         }
     }
 
+    fn build_empty_stage(mode: StageMode) -> ExecutionStage {
+        ExecutionStage {
+            stage_id: "stage-1".to_string(),
+            mode,
+            depends_on: vec![],
+            agents: vec![],
+        }
+    }
+
+    fn build_single_agent_stage(mode: StageMode) -> ExecutionStage {
+        ExecutionStage {
+            stage_id: "stage-1".to_string(),
+            mode,
+            depends_on: vec![],
+            agents: vec![AgentRequest {
+                agent_id: "a1".to_string(),
+                subagent_type: "Coder".to_string(),
+                agent_selection: None,
+                description: "first".to_string(),
+                prompt: "p1".to_string(),
+                context_files: vec![],
+                output_format: None,
+            }],
+        }
+    }
+
+    fn success_result(plan_id: &str, stage_id: &str, agent_id: &str, output: &str) -> SubAgentResult {
+        SubAgentResult {
+            plan_id: plan_id.to_string(),
+            agent_id: agent_id.to_string(),
+            stage_id: stage_id.to_string(),
+            status: SubAgentStatus::Success,
+            output: output.to_string(),
+            error: None,
+        }
+    }
+
+    fn failed_result_with_error(plan_id: &str, stage_id: &str, agent_id: &str, error: &str) -> SubAgentResult {
+        SubAgentResult {
+            plan_id: plan_id.to_string(),
+            agent_id: agent_id.to_string(),
+            stage_id: stage_id.to_string(),
+            status: SubAgentStatus::Failed,
+            output: String::new(),
+            error: Some(error.to_string()),
+        }
+    }
+
+    fn cancelled_result(plan_id: &str, stage_id: &str, agent_id: &str) -> SubAgentResult {
+        SubAgentResult {
+            plan_id: plan_id.to_string(),
+            agent_id: agent_id.to_string(),
+            stage_id: stage_id.to_string(),
+            status: SubAgentStatus::Cancelled,
+            output: String::new(),
+            error: Some("cancelled".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn parallel_all_success() {
+        init_test_logger();
+        let stage = build_stage(StageMode::Parallel);
+
+        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
+            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|item| item.status == SubAgentStatus::Success));
+    }
+
+    #[tokio::test]
+    async fn serial_all_success() {
+        init_test_logger();
+        let stage = build_stage(StageMode::Serial);
+        let order = Arc::new(AtomicUsize::new(0));
+
+        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), {
+            let order = order.clone();
+            move |agent, stage_id| {
+                let current = order.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if agent.agent_id == "a1" {
+                    assert_eq!(current, 0);
+                } else {
+                    assert_eq!(current, 1);
+                }
+                Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+            }
+            }
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|item| item.status == SubAgentStatus::Success));
+    }
+
+    #[tokio::test]
+    async fn serial_error_path() {
+        init_test_logger();
+        let stage = build_stage(StageMode::Serial);
+
+        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
+            if agent.agent_id == "a1" {
+                return Err(anyhow!("error msg"));
+            }
+            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert_eq!(results[0].status, SubAgentStatus::Failed);
+        assert!(results[0]
+            .error
+            .as_deref()
+            .expect("error should exist")
+            .contains("error msg"));
+        assert_eq!(results[1].status, SubAgentStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn serial_cancellation_mid_execution() {
+        init_test_logger();
+        let stage = build_stage(StageMode::Serial);
+        let token = CancellationToken::new();
+        let token_for_closure = token.clone();
+
+        let results = execute_stage("plan-1", &stage, &token, move |agent, stage_id| {
+            let token_for_closure = token_for_closure.clone();
+            async move {
+                if agent.agent_id == "a1" {
+                    token_for_closure.cancel();
+                }
+                Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+            }
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert_eq!(results[0].status, SubAgentStatus::Success);
+        assert_eq!(results[1].status, SubAgentStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn empty_stage_zero_agents() {
+        init_test_logger();
+        let stage = build_empty_stage(StageMode::Parallel);
+
+        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |_agent, _stage_id| async move {
+            Ok(success_result("plan-1", "stage-1", "unused", "done"))
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn single_agent_parallel() {
+        init_test_logger();
+        let stage = build_single_agent_stage(StageMode::Parallel);
+
+        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
+            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, SubAgentStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn single_agent_serial() {
+        init_test_logger();
+        let stage = build_single_agent_stage(StageMode::Serial);
+
+        let results = execute_stage("plan-1", &stage, &CancellationToken::new(), |agent, stage_id| async move {
+            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
+        })
+        .await
+        .expect("stage should succeed");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, SubAgentStatus::Success);
+    }
+
     #[tokio::test]
     async fn parallel_stage_preserves_failure_results() {
         init_test_logger();
@@ -332,14 +524,7 @@ mod tests {
                 if agent.agent_id == "a2" {
                     return Err(anyhow!("boom"));
                 }
-                Ok(SubAgentResult {
-                    plan_id: "plan-1".to_string(),
-                    agent_id: agent.agent_id,
-                    stage_id,
-                    status: SubAgentStatus::Success,
-                    output: "done".to_string(),
-                    error: None,
-                })
+                Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
             },
         )
         .await
@@ -361,23 +546,9 @@ mod tests {
             &CancellationToken::new(),
             |agent, stage_id| async move {
                 if agent.agent_id == "a1" {
-                    return Ok(SubAgentResult {
-                        plan_id: "plan-1".to_string(),
-                        agent_id: agent.agent_id,
-                        stage_id,
-                        status: SubAgentStatus::Failed,
-                        output: String::new(),
-                        error: Some("failed".to_string()),
-                    });
+                    return Ok(failed_result_with_error("plan-1", &stage_id, &agent.agent_id, "failed"));
                 }
-                Ok(SubAgentResult {
-                    plan_id: "plan-1".to_string(),
-                    agent_id: agent.agent_id,
-                    stage_id,
-                    status: SubAgentStatus::Success,
-                    output: "done".to_string(),
-                    error: None,
-                })
+                Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
             },
         )
         .await
@@ -396,19 +567,15 @@ mod tests {
         token.cancel();
 
         let results = execute_stage("plan-1", &stage, &token, |agent, stage_id| async move {
-            Ok(SubAgentResult {
-                plan_id: "plan-1".to_string(),
-                agent_id: agent.agent_id,
-                stage_id,
-                status: SubAgentStatus::Success,
-                output: "done".to_string(),
-                error: None,
-            })
+            Ok(success_result("plan-1", &stage_id, &agent.agent_id, "done"))
         })
         .await
         .expect("stage should succeed");
 
         assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|item| item.status == SubAgentStatus::Cancelled));
+        assert_eq!(results[0].status, cancelled_result("plan-1", "stage-1", "a1").status);
+        assert_eq!(results[0].agent_id, "a1");
+        assert_eq!(results[1].status, cancelled_result("plan-1", "stage-1", "a2").status);
+        assert_eq!(results[1].agent_id, "a2");
     }
 }

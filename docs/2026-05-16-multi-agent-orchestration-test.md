@@ -29,7 +29,7 @@
 |------|------|------|------|------|
 | Plan 1 | SubAgentExecutor trait 重构 | 无 | 抽取 trait，改造 Engine 构造函数 | 已完成 |
 | Plan 2 | OrchestratorEngine 测试 | Plan 1 | Engine 层全部测试用例 | 已完成 |
-| Plan 3 | Scheduler / Planner / Reviewer 补全 | 无（与 Plan 1/2 可并行） | 各模块现有测试基础上补全 | 待开始 |
+| Plan 3 | Scheduler / Planner / Reviewer 补全 | 无（与 Plan 1/2 可并行） | 各模块现有测试基础上补全 | 已完成 |
 
 ## 风险与待定项
 

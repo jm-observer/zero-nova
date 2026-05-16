@@ -147,7 +147,71 @@ fn topological_sort(stages: &[ExecutionStage]) -> Result<Vec<ExecutionStage>> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_and_validate;
+    use super::{parse_and_validate, StageMode};
+    use serde_json::json;
+
+    fn plan_json_chain(stage_count: usize) -> String {
+        let stages: Vec<_> = (1..=stage_count)
+            .map(|index| {
+                let stage_id = format!("s{index}");
+                let depends_on = if index == 1 {
+                    Vec::new()
+                } else {
+                    vec![format!("s{}", index - 1)]
+                };
+                json!({
+                    "stageId": stage_id,
+                    "mode": "parallel",
+                    "dependsOn": depends_on,
+                    "agents": [{
+                        "agentId": format!("a{index}"),
+                        "description": format!("task-{index}"),
+                        "prompt": "do it"
+                    }]
+                })
+            })
+            .collect();
+        serde_json::to_string(&json!({
+            "planId": "p1",
+            "description": "chain",
+            "stages": stages
+        }))
+        .expect("plan should serialize")
+    }
+
+    fn plan_json_diamond() -> String {
+        serde_json::to_string(&json!({
+            "planId": "p1",
+            "description": "diamond",
+            "stages": [
+                {
+                    "stageId": "s1",
+                    "mode": "parallel",
+                    "dependsOn": [],
+                    "agents": [{"agentId": "a1", "description": "root", "prompt": "do it"}]
+                },
+                {
+                    "stageId": "s2",
+                    "mode": "parallel",
+                    "dependsOn": ["s1"],
+                    "agents": [{"agentId": "a2", "description": "left", "prompt": "do it"}]
+                },
+                {
+                    "stageId": "s3",
+                    "mode": "serial",
+                    "dependsOn": ["s1"],
+                    "agents": [{"agentId": "a3", "description": "right", "prompt": "do it"}]
+                },
+                {
+                    "stageId": "s4",
+                    "mode": "serial",
+                    "dependsOn": ["s2", "s3"],
+                    "agents": [{"agentId": "a4", "description": "merge", "prompt": "do it"}]
+                }
+            ]
+        }))
+        .expect("plan should serialize")
+    }
 
     #[test]
     fn rejects_unknown_dependency() {
@@ -183,5 +247,89 @@ mod tests {
         }"#;
         let plan = parse_and_validate(json).expect("plan should parse");
         assert_eq!(plan.stages[0].agents[0].subagent_type, "nova");
+    }
+
+    #[test]
+    fn valid_multi_stage_topological_sort() {
+        let plan = parse_and_validate(&plan_json_chain(3)).expect("plan should parse");
+        let stage_ids: Vec<_> = plan.stages.into_iter().map(|stage| stage.stage_id).collect();
+        assert_eq!(stage_ids, vec!["s1", "s2", "s3"]);
+    }
+
+    #[test]
+    fn duplicate_stage_ids_rejected() {
+        let json = r#"{
+          "planId":"p1",
+          "description":"d",
+          "stages":[
+            {"stageId":"s1","mode":"parallel","dependsOn":[],"agents":[]},
+            {"stageId":"s1","mode":"serial","dependsOn":[],"agents":[]}
+          ]
+        }"#;
+        let error = parse_and_validate(json).expect_err("plan should fail");
+        assert!(error.to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn duplicate_agent_ids_rejected() {
+        let json = r#"{
+          "planId":"p1",
+          "description":"d",
+          "stages":[
+            {"stageId":"s1","mode":"parallel","dependsOn":[],"agents":[{"agentId":"a1","description":"one","prompt":"do"}]},
+            {"stageId":"s2","mode":"serial","dependsOn":[],"agents":[{"agentId":"a1","description":"two","prompt":"do"}]}
+          ]
+        }"#;
+        let error = parse_and_validate(json).expect_err("plan should fail");
+        assert!(error.to_string().contains("duplicate agent_id"));
+    }
+
+    #[test]
+    fn empty_plan_id_rejected() {
+        let json = r#"{
+          "planId":"   ",
+          "description":"d",
+          "stages":[]
+        }"#;
+        assert!(parse_and_validate(json).is_err());
+    }
+
+    #[test]
+    fn diamond_dependency_sorts_correctly() {
+        let plan = parse_and_validate(&plan_json_diamond()).expect("plan should parse");
+        let positions: std::collections::HashMap<_, _> = plan
+            .stages
+            .iter()
+            .enumerate()
+            .map(|(index, stage)| (stage.stage_id.as_str(), index))
+            .collect();
+        assert!(positions["s1"] < positions["s2"]);
+        assert!(positions["s1"] < positions["s3"]);
+        assert!(positions["s2"] < positions["s4"]);
+        assert!(positions["s3"] < positions["s4"]);
+    }
+
+    #[test]
+    fn invalid_json_rejected() {
+        assert!(parse_and_validate("{{not json}}").is_err());
+    }
+
+    #[test]
+    fn agent_selection_field_deserialized() {
+        let json = r#"{
+          "planId":"p1",
+          "description":"d",
+          "stages":[
+            {"stageId":"s1","mode":"parallel","dependsOn":[],"agents":[{"agentId":"a1","agentSelection":"developer","description":"task","prompt":"do it"}]}
+          ]
+        }"#;
+        let plan = parse_and_validate(json).expect("plan should parse");
+        assert_eq!(plan.stages[0].agents[0].agent_selection.as_deref(), Some("developer"));
+    }
+
+    #[test]
+    fn stage_mode_as_str() {
+        assert_eq!(StageMode::Parallel.as_str(), "parallel");
+        assert_eq!(StageMode::Serial.as_str(), "serial");
     }
 }

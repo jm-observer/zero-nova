@@ -62,10 +62,9 @@ fn make_context(session_id: Option<String>, agent_id: String) -> ProviderRequest
 }
 
 #[tokio::test]
-async fn header_透传开启且字段齐全() -> Result<()> {
+async fn header_字段齐全时均注入() -> Result<()> {
     let (mock_server, captured) = create_mock_server_with_capture().await;
-    let client =
-        OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), mock_server.uri(), true);
+    let client = OpenAiCompatClient::new("sk-test".to_string(), mock_server.uri());
     let ctx = make_context(Some("sess-123".to_string()), "agent-456".to_string());
 
     let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
@@ -78,10 +77,9 @@ async fn header_透传开启且字段齐全() -> Result<()> {
 }
 
 #[tokio::test]
-async fn header_透传开启且单字段缺失() -> Result<()> {
+async fn header_空agent_id不注入() -> Result<()> {
     let (mock_server, captured) = create_mock_server_with_capture().await;
-    let client =
-        OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), mock_server.uri(), true);
+    let client = OpenAiCompatClient::new("sk-test".to_string(), mock_server.uri());
     let ctx = make_context(Some("sess-123".to_string()), String::new());
 
     let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
@@ -89,22 +87,6 @@ async fn header_透传开启且单字段缺失() -> Result<()> {
     let records = captured.lock().map(|g| g.clone()).unwrap_or_default();
     let record = records.first().cloned().unwrap_or_default();
     assert_eq!(record.session_id.as_deref(), Some("sess-123"));
-    assert_eq!(record.agent_id, None);
-    Ok(())
-}
-
-#[tokio::test]
-async fn header_透传关闭且字段齐全() -> Result<()> {
-    let (mock_server, captured) = create_mock_server_with_capture().await;
-    let client =
-        OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), mock_server.uri(), false);
-    let ctx = make_context(Some("sess-123".to_string()), "agent-456".to_string());
-
-    let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
-
-    let records = captured.lock().map(|g| g.clone()).unwrap_or_default();
-    let record = records.first().cloned().unwrap_or_default();
-    assert_eq!(record.session_id, None);
     assert_eq!(record.agent_id, None);
     Ok(())
 }
@@ -118,7 +100,7 @@ async fn 并发请求中header与session一一对应() -> Result<()> {
     for i in 0..expected_total {
         let base_url = mock_server.uri();
         handles.push(tokio::spawn(async move {
-            let client = OpenAiCompatClient::new_with_context_headers_enabled("sk-test".to_string(), base_url, true);
+            let client = OpenAiCompatClient::new("sk-test".to_string(), base_url);
             let session = format!("sess-{i}");
             let ctx = make_context(Some(session.clone()), "agent-001".to_string());
             let _receiver = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
@@ -154,11 +136,7 @@ async fn 上游返回4xx时错误链路可观测() {
         .mount(&mock_server)
         .await;
 
-    let client = OpenAiCompatClient::new_with_context_headers_enabled(
-        "sk-test".to_string(),
-        mock_server.uri(),
-        true,
-    );
+    let client = OpenAiCompatClient::new("sk-test".to_string(), mock_server.uri());
     let ctx = make_context(Some("sess-123".to_string()), "agent-456".to_string());
     let result = client.stream(&[], &[], &ModelConfig::default(), &ctx).await;
 

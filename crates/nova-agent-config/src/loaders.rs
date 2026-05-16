@@ -49,8 +49,6 @@ pub struct RawAppConfig {
     pub developer_prompt_files: Vec<String>,
     #[serde(default)]
     pub prompt_compaction: PromptCompactionConfig,
-    #[serde(default)]
-    pub outbound_context_headers: OutboundContextHeaderConfig,
 }
 
 fn reject_removed_defaults<'de, D>(deserializer: D) -> std::result::Result<Option<IgnoredAny>, D::Error>
@@ -329,7 +327,6 @@ impl RawAppConfig {
                 config_path: self.config_path,
                 developer_prompt_files: self.developer_prompt_files,
                 prompt_compaction: self.prompt_compaction,
-                outbound_context_headers: self.outbound_context_headers,
             },
             warnings,
         )

@@ -69,10 +69,6 @@ pub(crate) fn default_max_tokens_field() -> String {
     DEFAULT_MAX_TOKENS_FIELD.to_string()
 }
 
-pub(crate) fn default_context_headers_enabled() -> bool {
-    true
-}
-
 pub(crate) fn default_voice_enabled() -> bool {
     true
 }
@@ -220,9 +216,6 @@ pub struct AppConfig {
     /// prompt 分层压缩配置。
     #[serde(default)]
     pub prompt_compaction: PromptCompactionConfig,
-    /// 出站请求 Header 注入配置。
-    #[serde(default)]
-    pub outbound_context_headers: OutboundContextHeaderConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -235,12 +228,6 @@ pub struct PromptCompactionConfig {
     pub skill_injection: String,
     #[serde(default = "default_tool_guidance")]
     pub tool_guidance: String,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct OutboundContextHeaderConfig {
-    #[serde(default = "default_context_headers_enabled")]
-    pub enabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -551,7 +538,6 @@ impl Default for AppConfig {
             config_path: None,
             developer_prompt_files: Vec::new(),
             prompt_compaction: PromptCompactionConfig::default(),
-            outbound_context_headers: OutboundContextHeaderConfig::default(),
         }
     }
 }

@@ -174,11 +174,10 @@ impl SubagentRuntimeBuilder {
         let model_override = model_override.map(str::to_string);
         let context = context.cloned();
 
-        let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
+        let client = OpenAiCompatClient::from_registry_with_http_client(
             config.providers.clone(),
             binding.provider_id.clone(),
             crate::network::build_provider_client()?,
-            config.outbound_context_headers.enabled,
         );
 
         let sub_registry = crate::tool::ToolRegistry::new();

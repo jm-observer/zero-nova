@@ -160,11 +160,10 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
         agent_registry.register(agent);
     }
 
-    let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
+    let client = OpenAiCompatClient::from_registry_with_http_client(
         config.providers.clone(),
         root_binding.provider_id.clone(),
         http_clients.provider.clone(),
-        config.outbound_context_headers.enabled,
     );
     let mut runtime = AgentRuntime::new(client, tools, agent_config);
     runtime.task_store = Some(task_store);
@@ -284,11 +283,10 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
     };
 
     let agent_registry = build_agent_registry(&config, &skill_registry).await?;
-    let client = OpenAiCompatClient::from_registry_with_http_client_and_context_headers_enabled(
+    let client = OpenAiCompatClient::from_registry_with_http_client(
         config.providers.clone(),
         root_binding.provider_id.clone(),
         http_clients.provider.clone(),
-        config.outbound_context_headers.enabled,
     );
     let mut runtime = AgentRuntime::new(client, tools, agent_config);
     runtime.task_store = Some(task_store);

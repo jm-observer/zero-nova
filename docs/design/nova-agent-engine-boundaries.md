@@ -45,3 +45,4 @@
 - `SubAgentExecutor` 必须同时提供子代理执行入口、catalog agent id 集合以及默认 agent id。
 - 生产环境由 `AgentTool` 实现该 trait；测试环境允许注入 mock executor，避免 orchestration 测试依赖真实 LLM 或完整子代理运行时。
 - `OrchestrateTaskTool` 仍作为外部入口负责构造 engine，现有外部可观测行为保持不变。
+- 仅当所有已执行 stage 成功且 orchestration 未被取消时，engine 才会进入 review 阶段；stage 失败时必须直接结束 orchestration，并返回失败或依赖阻塞摘要。

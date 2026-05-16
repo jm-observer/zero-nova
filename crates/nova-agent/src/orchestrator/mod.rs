@@ -101,6 +101,7 @@ impl OrchestratorEngine {
         let plan = self.parse_plan(plan_json)?;
         let mut results = HashMap::<String, SubAgentResult>::new();
         let mut stage_success = HashMap::<String, bool>::new();
+        let mut failed_stage_id: Option<String> = None;
 
         log::info!(
             "[OrchestratorEngine] Parsed plan_id={} stage_count={} description={}",
@@ -136,6 +137,33 @@ impl OrchestratorEngine {
         self.emit("orchestration_plan", &plan_event).await;
 
         for stage in &plan.stages {
+            if let Some(previous_failed_stage) = failed_stage_id.as_ref() {
+                let summary = if stage
+                    .depends_on
+                    .iter()
+                    .any(|dependency| dependency == previous_failed_stage)
+                {
+                    format!(
+                        "Stage '{}' blocked by dependency '{}'.",
+                        stage.stage_id, previous_failed_stage
+                    )
+                } else {
+                    format!("Orchestration stopped after stage '{}' failed.", previous_failed_stage)
+                };
+                let complete = OrchestrationCompleteArgs {
+                    plan_id: plan.plan_id.clone(),
+                    overall_success: false,
+                    summary,
+                };
+                self.emit("orchestration_complete", &complete).await;
+
+                return Ok(ExecutionOutcome {
+                    plan,
+                    results,
+                    review: None,
+                });
+            }
+
             log::info!(
                 "[OrchestratorEngine] Starting stage plan_id={} stage_id={} mode={} depends_on={:?} agent_count={}",
                 plan.plan_id,
@@ -292,7 +320,11 @@ impl OrchestratorEngine {
                 results.insert(result.agent_id.clone(), result);
             }
 
-            if cancellation_token.is_cancelled() || !all_success {
+            if !all_success {
+                failed_stage_id = Some(stage.stage_id.clone());
+            }
+
+            if cancellation_token.is_cancelled() {
                 break;
             }
         }
@@ -325,6 +357,21 @@ impl OrchestratorEngine {
                 plan_id: plan.plan_id.clone(),
                 overall_success: false,
                 summary: "Orchestration cancelled before review.".to_string(),
+            };
+            self.emit("orchestration_complete", &complete).await;
+
+            return Ok(ExecutionOutcome {
+                plan,
+                results,
+                review: None,
+            });
+        }
+
+        if let Some(stage_id) = failed_stage_id {
+            let complete = OrchestrationCompleteArgs {
+                plan_id: plan.plan_id.clone(),
+                overall_success: false,
+                summary: format!("Orchestration stopped after stage '{}' failed.", stage_id),
             };
             self.emit("orchestration_complete", &complete).await;
 
@@ -489,4 +536,751 @@ fn rewire_log_forwarding(
         event_tx: interceptor_tx,
         ..ctx
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rewire_log_forwarding, OrchestratorEngine, SubAgentExecutor};
+    use crate::event::AgentEvent;
+    use crate::orchestrator::scheduler::SubAgentStatus;
+    use crate::prompt::EnvironmentSnapshot;
+    use crate::tool::{ToolContext, ToolOutput};
+    use anyhow::{anyhow, Result};
+    use async_trait::async_trait;
+    use serde_json::{json, Value};
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+    use tokio::sync::{mpsc, Mutex};
+    use tokio::time::{timeout, Duration};
+    use tokio_util::sync::CancellationToken;
+
+    #[derive(Clone)]
+    struct AgentSpec {
+        agent_id: String,
+        description: String,
+        subagent_type: String,
+        agent_selection: Option<String>,
+    }
+
+    #[derive(Clone)]
+    struct StageSpec {
+        stage_id: String,
+        mode: &'static str,
+        depends_on: Vec<String>,
+        agents: Vec<AgentSpec>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct ParsedEvent {
+        kind: String,
+        args: Value,
+        raw: String,
+    }
+
+    #[derive(Clone)]
+    struct MockExecutor {
+        responses: HashMap<String, std::result::Result<String, String>>,
+        catalog: HashSet<String>,
+        default_id: String,
+        cancel_on_key: Option<(String, CancellationToken)>,
+    }
+
+    #[async_trait]
+    impl SubAgentExecutor for MockExecutor {
+        async fn execute_agent(&self, input: Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
+            let key = request_key(&input);
+            if let Some((cancel_key, token)) = &self.cancel_on_key {
+                if key == *cancel_key {
+                    token.cancel();
+                }
+            }
+
+            match self.responses.get(&key) {
+                Some(Ok(output)) => Ok(ToolOutput {
+                    content: serde_json::to_string(&json!({ "output": output })).expect("serialize mock output"),
+                    is_error: false,
+                }),
+                Some(Err(message)) => Err(anyhow!(message.clone())),
+                None => Ok(ToolOutput {
+                    content: serde_json::to_string(&json!({ "output": "" })).expect("serialize empty mock output"),
+                    is_error: false,
+                }),
+            }
+        }
+
+        fn catalog_agent_ids(&self) -> HashSet<String> {
+            self.catalog.clone()
+        }
+
+        fn default_agent_id(&self) -> String {
+            self.default_id.clone()
+        }
+    }
+
+    fn request_key(input: &Value) -> String {
+        let reviewer_selected = input["agent_selection"]
+            .as_str()
+            .map(|value| value.eq_ignore_ascii_case("reviewer"))
+            .unwrap_or(false)
+            || input["subagent_type"]
+                .as_str()
+                .map(|value| value.eq_ignore_ascii_case("reviewer"))
+                .unwrap_or(false);
+        if reviewer_selected {
+            return "reviewer".to_string();
+        }
+
+        input["agent_id"]
+            .as_str()
+            .or_else(|| input["description"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    fn build_executor(
+        responses: HashMap<String, std::result::Result<String, String>>,
+        catalog: &[&str],
+        default_id: &str,
+    ) -> Arc<dyn SubAgentExecutor> {
+        Arc::new(MockExecutor {
+            responses,
+            catalog: catalog.iter().map(|item| (*item).to_string()).collect(),
+            default_id: default_id.to_string(),
+            cancel_on_key: None,
+        })
+    }
+
+    fn build_executor_with_cancellation(
+        responses: HashMap<String, std::result::Result<String, String>>,
+        catalog: &[&str],
+        default_id: &str,
+        cancel_key: &str,
+        token: CancellationToken,
+    ) -> Arc<dyn SubAgentExecutor> {
+        Arc::new(MockExecutor {
+            responses,
+            catalog: catalog.iter().map(|item| (*item).to_string()).collect(),
+            default_id: default_id.to_string(),
+            cancel_on_key: Some((cancel_key.to_string(), token)),
+        })
+    }
+
+    fn build_engine(
+        executor: Arc<dyn SubAgentExecutor>,
+    ) -> (OrchestratorEngine, mpsc::Receiver<AgentEvent>, Option<ToolContext>) {
+        let (event_tx, event_rx) = mpsc::channel(64);
+        let context = Some(build_tool_context(event_tx.clone(), None));
+        let engine = OrchestratorEngine::new(executor, event_tx, context.clone());
+        (engine, event_rx, context)
+    }
+
+    fn build_tool_context(
+        event_tx: mpsc::Sender<AgentEvent>,
+        cancellation_token: Option<CancellationToken>,
+    ) -> ToolContext {
+        ToolContext {
+            event_tx,
+            tool_use_id: "tool-1".to_string(),
+            session_id: "session-1".to_string(),
+            task_store: None,
+            skill_registry: None,
+            read_files: Arc::new(Mutex::new(HashSet::new())),
+            turn_read_state: None,
+            environment: Some(EnvironmentSnapshot {
+                config_dir: "D:/config".to_string(),
+                project_dir: None,
+                platform: "windows".to_string(),
+                shell: "powershell".to_string(),
+                git_branch: None,
+                git_status_summary: None,
+                recent_commits: None,
+                model_id: None,
+                current_date: "2026-05-16".to_string(),
+            }),
+            shared_environment: None,
+            cancellation_token,
+            visible_tool_names: Arc::new(HashSet::new()),
+        }
+    }
+
+    fn build_plan_json(stages: Vec<StageSpec>) -> String {
+        serde_json::to_string(&json!({
+            "planId": "p1",
+            "description": "test plan",
+            "stages": stages.into_iter().map(stage_to_json).collect::<Vec<_>>()
+        }))
+        .expect("serialize plan")
+    }
+
+    fn stage_to_json(stage: StageSpec) -> Value {
+        json!({
+            "stageId": stage.stage_id,
+            "mode": stage.mode,
+            "dependsOn": stage.depends_on,
+            "agents": stage.agents.into_iter().map(agent_to_json).collect::<Vec<_>>()
+        })
+    }
+
+    fn agent_to_json(agent: AgentSpec) -> Value {
+        json!({
+            "agentId": agent.agent_id,
+            "description": agent.description,
+            "subagentType": agent.subagent_type,
+            "agentSelection": agent.agent_selection,
+            "prompt": "do work",
+            "contextFiles": [],
+            "outputFormat": "summary"
+        })
+    }
+
+    fn review_response(success: bool, summary: &str) -> String {
+        serde_json::to_string(&json!({
+            "success": success,
+            "issues": [],
+            "retryAgents": [],
+            "summary": summary
+        }))
+        .expect("serialize review response")
+    }
+
+    fn parse_event(raw: &str) -> ParsedEvent {
+        let kind_start = raw.find("kind=").expect("kind should exist") + "kind=".len();
+        let args_marker = raw.find(" args=").expect("args should exist");
+        let kind = raw[kind_start..args_marker].to_string();
+        let args_start = args_marker + " args=".len();
+        let args_end = if kind == "sub_agent_log" {
+            raw[args_start..]
+                .find(" stream=")
+                .map(|index| args_start + index)
+                .unwrap_or(raw.len())
+        } else {
+            raw.len()
+        };
+        let args = serde_json::from_str(&raw[args_start..args_end]).expect("event args should be valid json");
+        ParsedEvent {
+            kind,
+            args,
+            raw: raw.to_string(),
+        }
+    }
+
+    fn collect_events(rx: &mut mpsc::Receiver<AgentEvent>) -> Vec<ParsedEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let AgentEvent::SystemLog(raw) = event {
+                events.push(parse_event(&raw));
+            }
+        }
+        events
+    }
+
+    fn event_kinds(events: &[ParsedEvent]) -> Vec<&str> {
+        events.iter().map(|event| event.kind.as_str()).collect()
+    }
+
+    fn find_event<'a>(events: &'a [ParsedEvent], kind: &str) -> &'a ParsedEvent {
+        events
+            .iter()
+            .find(|event| event.kind == kind)
+            .expect("event should exist")
+    }
+
+    fn stage(stage_id: &str, mode: &'static str, depends_on: Vec<&str>, agents: Vec<AgentSpec>) -> StageSpec {
+        StageSpec {
+            stage_id: stage_id.to_string(),
+            mode,
+            depends_on: depends_on.into_iter().map(|item| item.to_string()).collect(),
+            agents,
+        }
+    }
+
+    fn agent(agent_id: &str) -> AgentSpec {
+        AgentSpec {
+            agent_id: agent_id.to_string(),
+            description: format!("task-{agent_id}"),
+            subagent_type: "nova".to_string(),
+            agent_selection: Some("nova".to_string()),
+        }
+    }
+
+    #[test]
+    fn validate_agent_selection_known_agent() {
+        let executor = build_executor(HashMap::new(), &["nova", "developer"], "nova");
+        let (engine, _event_rx, _context) = build_engine(executor);
+
+        let (selected, warning) = engine.validate_agent_selection("developer");
+        assert_eq!(selected, "developer");
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn validate_agent_selection_unknown_agent() {
+        let executor = build_executor(HashMap::new(), &["nova"], "nova");
+        let (engine, _event_rx, _context) = build_engine(executor);
+
+        let (selected, warning) = engine.validate_agent_selection("unknown-agent");
+        assert_eq!(selected, "nova");
+        let warning = warning.expect("warning should exist");
+        assert!(warning.contains("not found in catalog"));
+    }
+
+    #[test]
+    fn review_agent_id_with_reviewer() {
+        let executor = build_executor(HashMap::new(), &["nova", "reviewer"], "nova");
+        let (engine, _event_rx, _context) = build_engine(executor);
+
+        assert_eq!(engine.review_agent_id(), "reviewer");
+    }
+
+    #[test]
+    fn review_agent_id_without_reviewer() {
+        let executor = build_executor(HashMap::new(), &["nova"], "nova");
+        let (engine, _event_rx, _context) = build_engine(executor);
+
+        assert_eq!(engine.review_agent_id(), "nova");
+    }
+
+    #[test]
+    fn parse_plan_valid() {
+        let executor = build_executor(HashMap::new(), &["nova"], "nova");
+        let (engine, _event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![
+            stage("s1", "parallel", vec![], vec![agent("a1")]),
+            stage("s2", "serial", vec!["s1"], vec![agent("a2")]),
+        ]);
+
+        let plan = engine.parse_plan(&plan_json).expect("plan should parse");
+        assert_eq!(plan.plan_id, "p1");
+        assert_eq!(plan.stages.len(), 2);
+    }
+
+    #[test]
+    fn parse_plan_invalid() {
+        let executor = build_executor(HashMap::new(), &["nova"], "nova");
+        let (engine, _event_rx, _context) = build_engine(executor);
+
+        assert!(engine.parse_plan("not valid json").is_err());
+    }
+
+    #[tokio::test]
+    async fn single_stage_parallel_all_success() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("a2".to_string(), Ok("output-a2".to_string()));
+        responses.insert(
+            "reviewer".to_string(),
+            Ok(review_response(true, "All agents completed successfully.")),
+        );
+        let executor = build_executor(responses, &["nova", "reviewer"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![stage("s1", "parallel", vec![], vec![agent("a1"), agent("a2")])]);
+
+        let outcome = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should succeed");
+
+        assert_eq!(outcome.results.len(), 2);
+        assert_eq!(outcome.results["a1"].status, SubAgentStatus::Success);
+        assert_eq!(outcome.results["a2"].status, SubAgentStatus::Success);
+        let review = outcome.review.expect("review should exist");
+        assert!(review.success);
+
+        let events = collect_events(&mut event_rx);
+        let kinds = event_kinds(&events);
+        assert_eq!(kinds.first().copied(), Some("orchestration_plan"));
+        assert_eq!(kinds.iter().filter(|kind| **kind == "sub_agent_spawn").count(), 2);
+        assert_eq!(kinds.iter().filter(|kind| **kind == "sub_agent_complete").count(), 2);
+        assert!(kinds.contains(&"stage_complete"));
+        assert!(kinds.contains(&"orchestration_review_start"));
+        assert_eq!(kinds.last().copied(), Some("orchestration_complete"));
+        assert_eq!(
+            find_event(&events, "orchestration_complete").args["overallSuccess"],
+            Value::Bool(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn single_stage_serial_all_success() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("a2".to_string(), Ok("output-a2".to_string()));
+        responses.insert(
+            "reviewer".to_string(),
+            Ok(review_response(true, "All agents completed successfully.")),
+        );
+        let executor = build_executor(responses, &["nova", "reviewer"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![stage("s1", "serial", vec![], vec![agent("a1"), agent("a2")])]);
+
+        let outcome = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should succeed");
+
+        assert_eq!(outcome.results.len(), 2);
+        assert_eq!(outcome.results["a1"].status, SubAgentStatus::Success);
+        assert_eq!(outcome.results["a2"].status, SubAgentStatus::Success);
+        assert!(outcome.review.expect("review should exist").success);
+
+        let events = collect_events(&mut event_rx);
+        let kinds = event_kinds(&events);
+        assert_eq!(kinds.first().copied(), Some("orchestration_plan"));
+        assert_eq!(kinds.iter().filter(|kind| **kind == "sub_agent_spawn").count(), 2);
+        assert_eq!(kinds.iter().filter(|kind| **kind == "sub_agent_complete").count(), 2);
+        assert_eq!(kinds.last().copied(), Some("orchestration_complete"));
+    }
+
+    #[tokio::test]
+    async fn two_stage_serial_dependency() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("a2".to_string(), Ok("output-a2".to_string()));
+        responses.insert("reviewer".to_string(), Ok(review_response(true, "Looks good.")));
+        let executor = build_executor(responses, &["nova", "reviewer"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![
+            stage("s1", "parallel", vec![], vec![agent("a1")]),
+            stage("s2", "serial", vec!["s1"], vec![agent("a2")]),
+        ]);
+
+        let outcome = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should succeed");
+
+        assert!(outcome.review.expect("review should exist").success);
+        let events = collect_events(&mut event_rx);
+        let s1_spawn = events
+            .iter()
+            .position(|event| event.kind == "sub_agent_spawn" && event.args["stageId"] == "s1")
+            .expect("s1 spawn should exist");
+        let s2_spawn = events
+            .iter()
+            .position(|event| event.kind == "sub_agent_spawn" && event.args["stageId"] == "s2")
+            .expect("s2 spawn should exist");
+        assert!(s1_spawn < s2_spawn);
+        assert_eq!(events.iter().filter(|event| event.kind == "stage_complete").count(), 2);
+        assert_eq!(
+            find_event(&events, "orchestration_complete").args["overallSuccess"],
+            Value::Bool(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn dependency_failure_blocks_downstream() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Err("boom".to_string()));
+        let executor = build_executor(responses, &["nova"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![
+            stage("s1", "parallel", vec![], vec![agent("a1")]),
+            stage("s2", "serial", vec!["s1"], vec![agent("a2")]),
+        ]);
+
+        let outcome = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should finish");
+
+        assert!(outcome.review.is_none());
+        let events = collect_events(&mut event_rx);
+        let stage_complete = find_event(&events, "stage_complete");
+        assert_eq!(stage_complete.args["allSuccess"], Value::Bool(false));
+        assert!(!events
+            .iter()
+            .any(|event| event.kind == "sub_agent_spawn" && event.args["stageId"] == "s2"));
+        let complete = find_event(&events, "orchestration_complete");
+        assert_eq!(complete.args["overallSuccess"], Value::Bool(false));
+        let summary = complete.args["summary"].as_str().expect("summary should be string");
+        assert!(summary.contains("blocked by dependency"));
+    }
+
+    #[tokio::test]
+    async fn partial_stage_failure_stops_orchestration() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("a2".to_string(), Err("fail".to_string()));
+        let executor = build_executor(responses, &["nova"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![
+            stage("s1", "parallel", vec![], vec![agent("a1"), agent("a2")]),
+            stage("s2", "serial", vec!["s1"], vec![agent("a3")]),
+        ]);
+
+        let outcome = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should finish");
+
+        assert!(outcome.review.is_none());
+        let events = collect_events(&mut event_rx);
+        assert_eq!(
+            find_event(&events, "stage_complete").args["allSuccess"],
+            Value::Bool(false)
+        );
+        assert!(!events
+            .iter()
+            .any(|event| event.kind == "sub_agent_spawn" && event.args["stageId"] == "s2"));
+        assert_eq!(
+            find_event(&events, "orchestration_complete").args["overallSuccess"],
+            Value::Bool(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_review() {
+        let token = CancellationToken::new();
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        let executor = build_executor_with_cancellation(responses, &["nova"], "nova", "a1", token.clone());
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
+
+        let outcome = engine
+            .execute_plan(&plan_json, token)
+            .await
+            .expect("execute plan should finish");
+
+        assert!(outcome.review.is_none());
+        let events = collect_events(&mut event_rx);
+        let complete = find_event(&events, "orchestration_complete");
+        assert_eq!(complete.args["overallSuccess"], Value::Bool(false));
+        assert!(complete.args["summary"]
+            .as_str()
+            .expect("summary should be string")
+            .contains("cancelled before review"));
+    }
+
+    #[tokio::test]
+    async fn empty_plan_no_stages() {
+        let executor = build_executor(HashMap::new(), &["nova"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = serde_json::to_string(&json!({
+            "planId": "test",
+            "description": "empty",
+            "stages": []
+        }))
+        .expect("serialize empty plan");
+
+        let outcome = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should succeed");
+
+        assert!(outcome.results.is_empty());
+        assert!(outcome.review.is_none());
+        let events = collect_events(&mut event_rx);
+        let complete = find_event(&events, "orchestration_complete");
+        assert_eq!(complete.args["overallSuccess"], Value::Bool(true));
+        assert!(complete.args["summary"]
+            .as_str()
+            .expect("summary should be string")
+            .contains("No stages"));
+    }
+
+    #[tokio::test]
+    async fn event_sequence_single_stage() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("reviewer".to_string(), Ok(review_response(true, "All good.")));
+        let executor = build_executor(responses, &["nova", "reviewer"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = build_plan_json(vec![stage("s1", "parallel", vec![], vec![agent("a1")])]);
+
+        let _ = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should succeed");
+
+        let events = collect_events(&mut event_rx);
+        assert_eq!(
+            event_kinds(&events),
+            vec![
+                "orchestration_plan",
+                "sub_agent_spawn",
+                "sub_agent_complete",
+                "stage_complete",
+                "orchestration_review_start",
+                "orchestration_complete",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn event_args_contain_correct_ids() {
+        let mut responses = HashMap::new();
+        responses.insert("a1".to_string(), Ok("output-a1".to_string()));
+        responses.insert("reviewer".to_string(), Ok(review_response(true, "All good.")));
+        let executor = build_executor(responses, &["nova", "reviewer"], "nova");
+        let (engine, mut event_rx, _context) = build_engine(executor);
+        let plan_json = serde_json::to_string(&json!({
+            "planId": "p1",
+            "description": "ids",
+            "stages": [{
+                "stageId": "s1",
+                "mode": "parallel",
+                "dependsOn": [],
+                "agents": [{
+                    "agentId": "a1",
+                    "description": "task-a1",
+                    "subagentType": "nova",
+                    "agentSelection": "nova",
+                    "prompt": "do work"
+                }]
+            }]
+        }))
+        .expect("serialize plan");
+
+        let _ = engine
+            .execute_plan(&plan_json, CancellationToken::new())
+            .await
+            .expect("execute plan should succeed");
+
+        let events = collect_events(&mut event_rx);
+        assert_eq!(
+            find_event(&events, "orchestration_plan").args["planId"],
+            Value::String("p1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "sub_agent_spawn").args["planId"],
+            Value::String("p1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "sub_agent_spawn").args["stageId"],
+            Value::String("s1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "sub_agent_spawn").args["agentId"],
+            Value::String("a1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "sub_agent_complete").args["planId"],
+            Value::String("p1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "sub_agent_complete").args["stageId"],
+            Value::String("s1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "sub_agent_complete").args["agentId"],
+            Value::String("a1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "stage_complete").args["planId"],
+            Value::String("p1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "stage_complete").args["stageId"],
+            Value::String("s1".to_string())
+        );
+        assert_eq!(
+            find_event(&events, "orchestration_complete").args["planId"],
+            Value::String("p1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn log_delta_forwarded_as_orchestration_progress() {
+        let (orchestrator_tx, mut orchestrator_rx) = mpsc::channel(8);
+        let (original_tx, mut original_rx) = mpsc::channel(8);
+        let context = Some(build_tool_context(original_tx, None));
+        let forwarded = rewire_log_forwarding(
+            context,
+            orchestrator_tx,
+            "p1".to_string(),
+            "a1".to_string(),
+            "s1".to_string(),
+        )
+        .expect("context should be rewired");
+
+        forwarded
+            .event_tx
+            .send(AgentEvent::LogDelta {
+                id: "tool-1".to_string(),
+                name: "Agent".to_string(),
+                log: "hello".to_string(),
+                stream: "stdout".to_string(),
+            })
+            .await
+            .expect("send log delta");
+
+        let orchestrator_event = timeout(Duration::from_millis(200), orchestrator_rx.recv())
+            .await
+            .expect("orchestrator event should arrive")
+            .expect("orchestrator channel should yield event");
+        let original_event = timeout(Duration::from_millis(200), original_rx.recv())
+            .await
+            .expect("original event should arrive")
+            .expect("original channel should yield event");
+
+        match orchestrator_event {
+            AgentEvent::SystemLog(raw) => {
+                let parsed = parse_event(&raw);
+                assert_eq!(parsed.kind, "sub_agent_log");
+                assert_eq!(parsed.args["planId"], Value::String("p1".to_string()));
+                assert_eq!(parsed.args["stageId"], Value::String("s1".to_string()));
+                assert_eq!(parsed.args["agentId"], Value::String("a1".to_string()));
+                assert!(parsed.raw.contains("log=hello"));
+            }
+            other => panic!("unexpected orchestrator event: {other:?}"),
+        }
+
+        match original_event {
+            AgentEvent::LogDelta { log, stream, .. } => {
+                assert_eq!(log, "hello");
+                assert_eq!(stream, "stdout");
+            }
+            other => panic!("unexpected original event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn non_log_events_passthrough_only() {
+        let (orchestrator_tx, mut orchestrator_rx) = mpsc::channel(8);
+        let (original_tx, mut original_rx) = mpsc::channel(8);
+        let context = Some(build_tool_context(original_tx, None));
+        let forwarded = rewire_log_forwarding(
+            context,
+            orchestrator_tx,
+            "p1".to_string(),
+            "a1".to_string(),
+            "s1".to_string(),
+        )
+        .expect("context should be rewired");
+
+        forwarded
+            .event_tx
+            .send(AgentEvent::TextDelta("chunk".to_string()))
+            .await
+            .expect("send text delta");
+
+        let original_event = timeout(Duration::from_millis(200), original_rx.recv())
+            .await
+            .expect("original event should arrive")
+            .expect("original channel should yield event");
+        match original_event {
+            AgentEvent::TextDelta(chunk) => assert_eq!(chunk, "chunk"),
+            other => panic!("unexpected original event: {other:?}"),
+        }
+
+        let orchestrator_result = timeout(Duration::from_millis(50), orchestrator_rx.recv()).await;
+        assert!(
+            orchestrator_result.is_err(),
+            "orchestrator should not receive non-log events"
+        );
+    }
+
+    #[test]
+    fn none_context_returns_none() {
+        let (orchestrator_tx, _orchestrator_rx) = mpsc::channel(1);
+        let result = rewire_log_forwarding(
+            None,
+            orchestrator_tx,
+            "p1".to_string(),
+            "a1".to_string(),
+            "s1".to_string(),
+        );
+        assert!(result.is_none());
+    }
 }

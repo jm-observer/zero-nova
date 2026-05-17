@@ -75,6 +75,8 @@ struct RawToolConfig {
     pub project_context_file: Option<String>,
     #[serde(default)]
     pub default_policy: Option<String>,
+    #[serde(default)]
+    pub tools_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -304,6 +306,7 @@ impl RawAppConfig {
                     prompts_dir: self.tool.prompts_dir,
                     project_context_file: self.tool.project_context_file,
                     default_policy: self.tool.default_policy,
+                    tools_dir: self.tool.tools_dir,
                 },
                 gateway: GatewayConfig {
                     host: self.gateway.host,

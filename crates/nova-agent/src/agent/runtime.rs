@@ -182,7 +182,7 @@ impl AgentRuntime {
             model_config,
         } = req;
         let turn_ctx = self
-            .prepare_turn(user_input, Arc::new(history.to_vec()), String::new())
+            .prepare_turn(user_input, Arc::new(history.to_vec()), String::new(), session_id)
             .await?;
         let user_message = Message::new(
             Role::User,
@@ -218,6 +218,7 @@ impl AgentRuntime {
         input: &str,
         current_history: Arc<Vec<Message>>,
         system_prompt: String,
+        session_id: &str,
     ) -> Result<TurnContext> {
         // 1. 决定 active skill
         let active_skill = self.decide_active_skill(input, &current_history)?;
@@ -233,8 +234,30 @@ impl AgentRuntime {
             CapabilityPolicy::default()
         };
 
-        // 3. 获取统一工具定义集合
-        let tool_definitions = self.filter_tool_definitions().await;
+        // 3. 获取统一工具视图（loaded + deferred）
+        let turn_view = self.tools.get_turn_view(session_id, true, true, true).await;
+        let tool_definitions: Vec<_> = turn_view
+            .loaded
+            .iter()
+            .map(|d| ToolDefinition {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                input_schema: d.input_schema.clone(),
+            })
+            .collect();
+
+        // 将 deferred tool 摘要追加到系统提示词
+        let system_prompt = if turn_view.deferred.is_empty() {
+            system_prompt
+        } else {
+            let mut deferred_section = String::from(
+                "\n\n## Deferred Tools\n\nThe following tools are available but not loaded. Use `ToolSearch` to search and activate them:\n",
+            );
+            for d in &turn_view.deferred {
+                deferred_section.push_str(&format!("- `{}`: {}\n", d.name, d.description));
+            }
+            format!("{}{}", system_prompt, deferred_section)
+        };
 
         // 4. 裁剪历史（如果 active skill 切换了则裁剪）
         let prompt_diag_builder = SystemPromptBuilder::new().base_section(system_prompt.clone());
@@ -372,13 +395,6 @@ impl AgentRuntime {
 
         // 阶段一：返回 None（后续添加 Sticky + LLM 路由）
         Ok(None)
-    }
-
-    /// 过滤工具定义。
-    ///
-    /// Plan 2 起不再基于 active skill 裁剪当前轮工具集合。
-    async fn filter_tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.tool_definitions().await
     }
 
     /// 裁剪历史（如果 active skill 切换了则裁剪）。

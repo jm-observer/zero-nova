@@ -20,7 +20,12 @@
 
 - 所有 agent 共享同一套 skill registry。
 - 所有 agent 共享同一套工具注册集合，主 agent 与子 agent 不再通过配置获得不同工具集。
-- 工具系统已收敛为单态 loaded 模型，`Skill`、`Task*` 等工具在 runtime 启动后即可直接可见和调用。
+- 工具系统采用三层模型：
+  - **always-on**：注册期写入全局 `tools`，`Skill`、`Task*` 等启动后即可直接可见和调用，解析行为不改写。
+  - **deferred**：全局 `deferred` 工厂表，注册期写入后只读，需经 `ToolSearch` 激活。
+  - **会话激活**：deferred 工具经 `ToolSearch` 解析后，仅存入调用方 `session_id` 的激活集合（`session_activations`），不写全局 `tools`，不跨会话泄漏。
+- `get_turn_view` / `tool_metadata` / `execute` 以 `session_id` 为维度组装视图：`loaded` = always-on + 该 session 激活；`deferred` = 该 session 未激活项。
+- 会话删除时通过 `clear_session_activations` 释放该 session 激活集合，激活态以 deferred 工具总数为上界，不进程级无限累积。
 - turn 级 active skill 仍可影响 prompt 语义与工作流提示，但不再裁剪工具可见性。
 - agent prompt 的职责是表达角色偏好，而不是隔离能力。
 

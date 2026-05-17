@@ -15,8 +15,17 @@ pub mod write;
 use crate::config::AppConfig;
 use crate::network::HttpClients;
 use crate::skill::SkillRegistry;
-use crate::tool::{ProjectDirService, ToolRegistry};
+use crate::tool::{DeferredToolCategory, ProjectDirService, Tool, ToolRegistry};
 use std::sync::Arc;
+
+async fn register_as_deferred(registry: &ToolRegistry, tool: Box<dyn Tool>, category: DeferredToolCategory) {
+    let def = tool.definition();
+    let tool: Arc<dyn Tool> = Arc::from(tool);
+    let factory: Box<dyn Fn() -> Arc<dyn Tool> + Send + Sync> = Box::new(move || tool.clone());
+    registry
+        .register_deferred_with_category(def.name, def.description, def.input_schema, factory, category)
+        .await;
+}
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
 pub async fn register_builtin_tools(
@@ -72,30 +81,15 @@ async fn register_builtin_tools_inner(
 ) {
     let shared_agent_tool = Arc::new(agent::AgentTool::new(config.clone(), agent_services));
 
+    // Always-on: core tools available every turn
     registry
         .register(Box::new(bash::BashTool::new(&config.tool.bash)))
         .await;
     registry.register(Box::new(read::ReadTool::new(None))).await;
     registry.register(Box::new(write::WriteTool::new(None))).await;
     registry.register(Box::new(edit::EditTool::new(None))).await;
-    registry
-        .register(Box::new(web_search::WebSearchTool::with_client(
-            &config.search,
-            http_clients.web.clone(),
-        )))
-        .await;
-    registry
-        .register(Box::new(web_fetch::WebFetchTool::with_client(http_clients.web.clone())))
-        .await;
-    registry
-        .register(Box::new(project_manager::ProjectManagerTool::new(project_dir_service)))
-        .await;
-    registry
-        .register(Box::new(orchestrate_task::OrchestrateTaskTool::new(
-            shared_agent_tool.clone(),
-        )))
-        .await;
-
+    registry.register(Box::new(tool_info::ToolInfoTool {})).await;
+    registry.register(Box::new(tool_search::ToolSearchTool {})).await;
     registry
         .register(Box::new(skill::SkillTool::new(skill_registry.clone())))
         .await;
@@ -109,8 +103,34 @@ async fn register_builtin_tools_inner(
         .register(Box::new(task::TaskUpdateTool::new(task_store.clone())))
         .await;
 
-    // ToolInfo is always registered as a loaded tool (schema lookup infrastructure)
-    registry.register(Box::new(tool_info::ToolInfoTool {})).await;
+    // Deferred: activated on demand via ToolSearch
+    register_as_deferred(
+        registry,
+        Box::new(web_search::WebSearchTool::with_client(
+            &config.search,
+            http_clients.web.clone(),
+        )),
+        DeferredToolCategory::Search,
+    )
+    .await;
+    register_as_deferred(
+        registry,
+        Box::new(web_fetch::WebFetchTool::with_client(http_clients.web.clone())),
+        DeferredToolCategory::Search,
+    )
+    .await;
+    register_as_deferred(
+        registry,
+        Box::new(project_manager::ProjectManagerTool::new(project_dir_service)),
+        DeferredToolCategory::System,
+    )
+    .await;
+    register_as_deferred(
+        registry,
+        Box::new(orchestrate_task::OrchestrateTaskTool::new(shared_agent_tool.clone())),
+        DeferredToolCategory::System,
+    )
+    .await;
 }
 
 #[cfg(test)]
@@ -122,8 +142,7 @@ mod tests {
     use crate::tool::{ToolRegistry, UnavailableProjectDirService};
     use std::sync::Arc;
 
-    #[tokio::test]
-    async fn orchestrate_task_is_registered_by_default() {
+    async fn make_registry() -> ToolRegistry {
         let registry = ToolRegistry::new();
         register_builtin_tools(
             &registry,
@@ -134,45 +153,63 @@ mod tests {
             &HttpClients::new().expect("http clients should build"),
         )
         .await;
-
-        assert!(registry.has_loaded_tool("OrchestrateTask").await);
+        registry
     }
 
     #[tokio::test]
-    async fn unified_runtime_exposes_shared_tool_set() {
-        let registry = ToolRegistry::new();
-        register_builtin_tools(
-            &registry,
-            &AppConfig::new("D:/config".into()),
-            super::task::TaskStoreHandle::new(super::task::TaskStore::default()),
-            Arc::new(SkillRegistry::new()),
-            Arc::new(UnavailableProjectDirService::new("unavailable")),
-            &HttpClients::new().expect("http clients should build"),
-        )
-        .await;
-
+    async fn always_on_tools_are_loaded() {
+        let registry = make_registry().await;
         for tool_name in [
             "Bash",
             "Read",
             "Write",
             "Edit",
+            "ToolInfo",
+            "ToolSearch",
             "Skill",
             "TaskCreate",
             "TaskList",
             "TaskUpdate",
-            "WebSearch",
-            "WebFetch",
-            "ProjectManager",
-            "OrchestrateTask",
-            "ToolInfo",
         ] {
             assert!(
                 registry.has_loaded_tool(tool_name).await,
-                "tool '{}' should be loaded in the unified runtime",
+                "always-on tool '{}' should be loaded",
                 tool_name
             );
         }
+    }
 
-        assert!(registry.tool_metadata("Skill").await.is_some());
+    #[tokio::test]
+    async fn deferred_tools_are_registered_but_not_loaded() {
+        let registry = make_registry().await;
+        for tool_name in ["WebSearch", "WebFetch", "ProjectManager", "OrchestrateTask"] {
+            let meta = registry.tool_metadata("s1", tool_name).await;
+            assert!(meta.is_some(), "deferred tool '{}' should be discoverable", tool_name);
+            assert!(
+                meta.unwrap().deferred,
+                "tool '{}' should be marked as deferred",
+                tool_name
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn turn_view_separates_loaded_and_deferred() {
+        let registry = make_registry().await;
+        let view = registry.get_turn_view("s1", true, true, true).await;
+
+        let loaded_names: Vec<_> = view.loaded.iter().map(|d| d.name.as_str()).collect();
+        assert!(loaded_names.contains(&"Bash"), "Bash should be in loaded set");
+        assert!(loaded_names.contains(&"Skill"), "Skill should be in loaded set");
+        assert!(
+            !loaded_names.contains(&"WebSearch"),
+            "WebSearch should not be in loaded set"
+        );
+
+        let deferred_names: Vec<_> = view.deferred.iter().map(|d| d.name.as_str()).collect();
+        assert!(
+            deferred_names.contains(&"WebSearch"),
+            "WebSearch should be in deferred set"
+        );
     }
 }

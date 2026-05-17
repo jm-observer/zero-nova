@@ -408,7 +408,7 @@ impl ConversationService {
 
         let prepared_tool_context = self
             .agent
-            .prepare_turn(input, history_for_turn.clone(), String::new())
+            .prepare_turn(input, history_for_turn.clone(), String::new(), session_id)
             .await?;
         let visible_tool_names: HashSet<String> = prepared_tool_context
             .tool_definitions
@@ -471,7 +471,10 @@ impl ConversationService {
             skill_registry,
             extra_sections,
         );
-        let turn_ctx = self.agent.prepare_turn(input, history_for_turn, system_prompt).await?;
+        let turn_ctx = self
+            .agent
+            .prepare_turn(input, history_for_turn, system_prompt, session_id)
+            .await?;
 
         // Phase C: Capture snapshot
         let snapshot =

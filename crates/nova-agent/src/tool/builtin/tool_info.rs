@@ -69,6 +69,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
     // 可见性过滤
     let visible_set: std::collections::HashSet<String> =
         context.map(|ctx| (*ctx.visible_tool_names).clone()).unwrap_or_default();
+    let session_id = context.map(|ctx| ctx.session_id.as_str()).unwrap_or("");
 
     let mut results = Vec::new();
     let mut not_found = Vec::new();
@@ -80,7 +81,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
             continue;
         }
 
-        match registry.tool_metadata(name).await {
+        match registry.tool_metadata(session_id, name).await {
             Some(meta) => {
                 let entry = build_info_entry(&meta, include_schema);
                 results.push(entry);

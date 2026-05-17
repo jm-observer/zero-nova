@@ -604,13 +604,13 @@ impl AgentTool {
             None
         };
 
-        let turn_ctx = runtime
-            .prepare_turn(prompt, Arc::new(Vec::new()), system_prompt)
-            .await?;
         let session_id = context
             .as_ref()
             .map(|ctx| ctx.session_id.clone())
             .unwrap_or_else(|| "subagent".to_string());
+        let turn_ctx = runtime
+            .prepare_turn(prompt, Arc::new(Vec::new()), system_prompt, &session_id)
+            .await?;
         let user_message = Message::new(
             Role::User,
             vec![ContentBlock::Text {

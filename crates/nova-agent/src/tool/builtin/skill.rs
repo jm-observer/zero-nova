@@ -19,8 +19,8 @@ impl SkillTool {
         json!({
             "type": "object",
             "properties": {
-                "skill": { "type": "string", "description": "The name of the skill to load" },
-                "args": { "type": "string", "description": "Optional arguments for the skill" }
+                "skill": { "type": "string", "description": "Skill identifier to activate. Must be one of the identifiers listed in the '## Available Skills' section of the system prompt (the bold/backticked name, e.g. 'orchestrator')." },
+                "args": { "type": "string", "description": "Optional arguments passed to the skill" }
             },
             "required": ["skill"]
         })
@@ -32,7 +32,7 @@ impl Tool for SkillTool {
     fn definition(&self) -> RegisteredToolDefinition {
         RegisteredToolDefinition {
             name: "Skill".to_string(),
-            description: "Loads and injects specialized skills into the current session.".to_string(),
+            description: "Activate a specialized skill and inject its full instructions into the current session. The 'skill' parameter must be a skill identifier from the '## Available Skills' section of the system prompt.".to_string(),
             input_schema: Self::input_schema(),
             defer_loading: false,
         }

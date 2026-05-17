@@ -11,7 +11,7 @@ developer_prompt_files = [
 [providers.spark-12340]
 # api_key = ""
 base_url = "http://192.168.0.68:8085/v1"
-
+#base_url = "http://127.0.0.1:8085/v1"
 [providers.spark-8000]
 # api_key = "<CLOUD_PROVIDER_API_KEY>"
 base_url = "http://192.168.0.68:8082/v1"
@@ -21,8 +21,8 @@ base_url = "http://192.168.0.68:8082/v1"
 [llms.gemma]
 provider = "spark-12340"
 #model = "Huihui-Qwen3.6-35B-A3B-Claude-4.6"
-#model = "gemma-4-26B-A4B-it"
-model = "gemma-4-26b-a4b"
+model = "gemma-4-26B-A4B-it"
+#model = "gemma-4-26b-a4b"
 max_tokens = 8192
 temperature = 0.5
 # 如服务端要求 OpenAI-compatible 扩展参数，可在模型配置下声明
@@ -65,6 +65,7 @@ prompts_dir = "prompts"
 project_context_file = "PROJECT.md"
 default_project_dir = ""
 default_policy = "workflow"
+tools_dir = "tools.d"
 
 [tool.bash]
 shell = "powershell"
@@ -100,21 +101,21 @@ id = "nova"
 display_name = "Nova"
 description = "默认通用助手"
 aliases = ["助手"]
-#provider = "spark-12340"
-provider = "spark-8000"
-llm = "qwen3-6-4.6"
-#llm = "gemma"
+provider = "spark-12340"
+#provider = "spark-8000"
+#llm = "qwen3-6-4.6"
+llm = "gemma"
 prompt_file = "agent-nova.md"
 
-[[gateway.agents]]
-id = "developer"
-display_name = "Developer"
-description = "开发任务通用子代理"
-aliases = ["开发", "coder"]
-provider = "spark-8000"
-llm = "qwen3-6-4.6"
-prompt_file = "agent-developer.md"
-enable_project_developer_prompt = true
+#[[gateway.agents]]
+#id = "developer"
+#display_name = "Developer"
+#description = "开发任务通用子代理"
+#aliases = ["开发", "coder"]
+#provider = "spark-8000"
+#llm = "qwen3-6-4.6"
+#prompt_file = "agent-developer.md"
+#enable_project_developer_prompt = true
 
 #[[gateway.agents]]
 #id = "feature-developer"

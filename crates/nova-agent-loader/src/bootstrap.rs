@@ -25,6 +25,7 @@ use nova_agent::provider::openai_compat::OpenAiCompatClient;
 use nova_agent::skill::SkillRegistry;
 use nova_agent::tool::builtin::register_builtin_tools_with_services;
 use nova_agent::tool::builtin::task::{TaskStore, TaskStoreHandle};
+use nova_agent::tool::external::register_external_tools;
 use nova_agent::tool::ToolRegistry;
 use nova_agent_config::AppConfig;
 use std::collections::HashMap;
@@ -74,6 +75,11 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
         }),
     )
     .await;
+
+    if let Some(tools_dir) = &config.tool.tools_dir {
+        let tools_path = config.config_dir.join(tools_dir);
+        register_external_tools(&tools, &tools_path).await;
+    }
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,
@@ -234,6 +240,11 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
         }),
     )
     .await;
+
+    if let Some(tools_dir) = &config.tool.tools_dir {
+        let tools_path = config.config_dir.join(tools_dir);
+        register_external_tools(&tools, &tools_path).await;
+    }
 
     let agent_config = AgentConfig {
         max_iterations: config.gateway.max_iterations,

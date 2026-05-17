@@ -230,7 +230,16 @@ impl AgentApplicationImpl {
     }
 
     pub async fn delete_session(&self, session_id: &str) -> Result<bool> {
-        self.conversation_service.sessions.delete(session_id).await
+        let deleted = self.conversation_service.sessions.delete(session_id).await?;
+        if deleted {
+            // 释放该 session 激活的 deferred 工具，避免按 session 累积。
+            self.conversation_service
+                .agent
+                .tools()
+                .clear_session_activations(session_id)
+                .await;
+        }
+        Ok(deleted)
     }
 
     pub async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession> {

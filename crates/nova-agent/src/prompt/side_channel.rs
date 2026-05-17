@@ -60,7 +60,7 @@ impl SideChannelInjector {
                 .map(|p| format!("- {}: {}", p.slug, p.description))
                 .collect();
             parts.push(format!(
-                "<system-reminder>\nAvailable skills:\n{}\n\nUse /skill-<name> to activate.\n</system-reminder>",
+                "<system-reminder>\nAvailable skills:\n{}\n\n调用 `Skill` 工具激活：参数 `skill` 填上方技能标识符。\n</system-reminder>",
                 skill_list.join("\n")
             ));
         }

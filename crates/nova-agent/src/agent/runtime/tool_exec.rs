@@ -200,6 +200,11 @@ impl AgentRuntime {
             cancellation_token,
             model_config,
         } = req;
+        // 工具集合需在轮内可变：ToolSearch 解析的 deferred 工具必须在下一次
+        // LLM 调用前进入 `tool_definitions`，并对 ToolInfo 可见，否则模型会
+        // 反复尝试一个已"加载"却不可调用的工具。
+        let mut tool_definitions: Vec<ToolDefinition> = tool_definitions.to_vec();
+        let mut visible_tool_names = visible_tool_names;
         let mut loop_guard_state = LoopGuardState::new(self.config.loop_guard.clone());
         let turn_read_state = Arc::new(RwLock::new(TurnReadState::default()));
 
@@ -229,11 +234,20 @@ impl AgentRuntime {
                 })
                 .await;
 
+            // 刷新工具视图：上一轮 ToolSearch 解析的 deferred 工具在此进入
+            // 本次请求的 tools 集合与可见集合，使其可被调用与查询。
+            // iteration 0 沿用 prepare_turn 已计算好的初始视图。
+            if iteration > 0 {
+                let turn_view = self.tools.get_turn_view(session_id, true, true, true).await;
+                tool_definitions = turn_view.loaded.clone();
+                visible_tool_names = Arc::new(turn_view.loaded.iter().map(|d| d.name.clone()).collect());
+            }
+
             let mut receiver = match self
                 .client
                 .stream(
                     &all_messages,
-                    tool_definitions,
+                    &tool_definitions,
                     model_config,
                     &ProviderRequestContext {
                         session_id: if session_id.trim().is_empty() {

@@ -195,7 +195,7 @@ mod tests {
         });
 
         let prompt = registry.generate_contextual_prompt(None);
-        assert!(prompt.contains("### Available Skills"));
+        assert!(prompt.contains("调用 `Skill` 工具激活"));
         assert!(prompt.contains("**Skill One** (aliases: s1): First skill"));
         assert!(prompt.contains("**Skill Two**: Second skill"));
         assert!(
@@ -272,7 +272,7 @@ mod tests {
             compat_mode: false,
         });
         let prompt = registry.generate_catalog_prompt();
-        assert!(prompt.contains("### Available Skills"));
+        assert!(prompt.contains("调用 `Skill` 工具激活"));
         assert!(!prompt.contains("Full instructions for skill one"));
     }
 

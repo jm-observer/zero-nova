@@ -326,6 +326,9 @@ pub struct ToolConfig {
     pub project_context_file: Option<String>,
     #[serde(default)]
     pub default_policy: Option<String>,
+    /// 外部 tool 定义文件目录。为空���不加载外部 tool。
+    #[serde(default)]
+    pub tools_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

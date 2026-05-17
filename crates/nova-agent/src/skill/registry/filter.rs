@@ -68,16 +68,17 @@ impl SkillRegistry {
             .collect();
 
         if !other_skills.is_empty() {
-            let header = if active_skill_id.is_some() {
-                "### Other Available Skills"
+            if active_skill_id.is_some() {
+                parts.push(format!(
+                    "### Other Available Skills\n\n{}\n\n调用 `Skill` 工具激活：参数 `skill` 填技能名（上方加粗的标识符）。",
+                    other_skills.join("\n"),
+                ));
             } else {
-                "### Available Skills"
-            };
-            parts.push(format!(
-                "{}\n\n{}\n\nUse `/skill-<name>` to activate a skill.",
-                header,
-                other_skills.join("\n"),
-            ));
+                parts.push(format!(
+                    "{}\n\n调用 `Skill` 工具激活：参数 `skill` 填技能名（上方加粗的标识符）。",
+                    other_skills.join("\n"),
+                ));
+            }
         }
 
         parts.join("\n\n")
@@ -94,7 +95,7 @@ impl SkillRegistry {
             .map(|p| format!("- **{}** (`{}`): {}", p.display_name, p.id, p.description))
             .collect();
         format!(
-            "### Available Skills\n\n{}\n\nUse `/skill-<name>` to activate a skill.",
+            "{}\n\n调用 `Skill` 工具激活：参数 `skill` 填技能标识符（反引号中的名称，如 `orchestrator`）。",
             lines.join("\n")
         )
     }

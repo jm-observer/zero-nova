@@ -129,8 +129,7 @@ impl Tool for BashTool {
                     "command": { "type": "string", "description": "The shell command to execute" },
                     "description": { "type": "string", "description": "Clear, concise description of what this command does" },
                     "run_in_background": { "type": "boolean", "description": "Run in background, return immediately" },
-                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 3600000)" },
-                    "dangerouslyDisableSandbox": { "type": "boolean", "description": "Override sandbox mode" }
+                    "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default 3600000)" }
                 },
                 "required": ["command"]
             }),

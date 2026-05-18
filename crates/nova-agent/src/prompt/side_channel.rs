@@ -127,6 +127,7 @@ mod tests {
             instructions: "Do work".to_string(),
             tool_policy: ToolPolicy::InheritAll,
             sticky: false,
+            preload: vec![],
             aliases: vec![],
             examples: vec![],
             source_path: std::path::PathBuf::from("skill-1"),

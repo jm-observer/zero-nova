@@ -80,6 +80,11 @@ pub struct SkillPackage {
     pub source_path: PathBuf,
     /// 兼容旧格式时标记
     pub compat_mode: bool,
+    /// 起该 skill 子 Agent 时预激活的 deferred 工具名列表。
+    /// 由技能目录同级 `preload.toml` 注入（nova-agent-loader/skill_adapter），
+    /// nova-skill-loader 不感知此字段。
+    #[serde(default)]
+    pub preload: Vec<String>,
 }
 
 /// 兼容旧层级的 Skill 结构（被 SkillPackage 逐步替代）。

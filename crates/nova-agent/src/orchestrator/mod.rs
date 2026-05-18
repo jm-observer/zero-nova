@@ -27,6 +27,11 @@ pub struct SubAgentRequest {
     pub plan_id: Option<String>,
     pub stage_id: Option<String>,
     pub output_format: Option<String>,
+    /// 子 Agent 要加载的 skill slug（来自 AgentRequest.skill）。
+    pub skill: Option<String>,
+    /// 子 Agent 完整 system prompt 覆盖。命中即逐字节作为 system prompt，
+    /// 跳过 SystemPromptBuilder（无 base/guards/catalog）。
+    pub system_prompt_override: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -366,6 +371,8 @@ impl OrchestratorEngine {
                         plan_id: Some(plan_id.clone()),
                         stage_id: Some(stage_id.clone()),
                         output_format: Some(agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string())),
+                        skill: agent_req.skill.clone(),
+                        system_prompt_override: None,
                     };
                     let result = executor.execute_agent(request, ctx).await?;
 
@@ -546,6 +553,8 @@ impl OrchestratorEngine {
                 plan_id: Some(plan.plan_id.clone()),
                 stage_id: Some(stage_id.clone()),
                 output_format: Some(agent_req.output_format.clone().unwrap_or_else(|| "summary".to_string())),
+                skill: agent_req.skill.clone(),
+                system_prompt_override: None,
             };
 
             let result = match self.executor.execute_agent(request, ctx).await {
@@ -604,6 +613,8 @@ impl OrchestratorEngine {
             plan_id: None,
             stage_id: None,
             output_format: None,
+            skill: None,
+            system_prompt_override: None,
         };
         match self.executor.execute_agent(request, self.tool_context.clone()).await {
             Ok(result) => {

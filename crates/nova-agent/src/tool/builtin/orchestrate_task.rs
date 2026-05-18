@@ -37,13 +37,22 @@ impl OrchestrateTaskTool {
                 "agentSelection": {
                     "type": "string",
                     "description": "快捷模式：可选的 agent 类型选择"
+                },
+                "skill": {
+                    "type": "string",
+                    "description": "快捷模式：可选 skill slug。设置后子 Agent 的 system prompt 严格等于该 skill 正文（不叠加主 prompt/behavior guards），并预激活该 skill 声明的 preload 工具"
                 }
             }
         })
     }
 }
 
-fn build_shorthand_plan(prompt: &str, description: &str, agent_selection: Option<String>) -> OrchestrationPlan {
+fn build_shorthand_plan(
+    prompt: &str,
+    description: &str,
+    agent_selection: Option<String>,
+    skill: Option<String>,
+) -> OrchestrationPlan {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -65,6 +74,7 @@ fn build_shorthand_plan(prompt: &str, description: &str, agent_selection: Option
                 prompt: prompt.to_string(),
                 context_files: vec![],
                 output_format: Some("full".to_string()),
+                skill,
             }],
         }],
     }
@@ -97,18 +107,19 @@ impl Tool for OrchestrateTaskTool {
             anyhow::bail!("'plan' and 'prompt' are mutually exclusive");
         }
 
-        let plan = if let Some(plan_value) = input.get("plan") {
+        let (plan, is_shorthand) = if let Some(plan_value) = input.get("plan") {
             let raw: OrchestrationPlan = serde_json::from_value(plan_value.clone()).map_err(|e| {
                 anyhow::anyhow!(
                     "Invalid plan object: {}. Expected structure: {{planId, description, stages: [{{stageId, mode: \"parallel\"|\"serial\", dependsOn?: [], agents: [{{agentId, description, prompt}}]}}]}}",
                     e
                 )
             })?;
-            planner::validate_and_sort(raw)?
+            (planner::validate_and_sort(raw)?, false)
         } else if let Some(prompt) = input.get("prompt").and_then(Value::as_str) {
             let desc = input.get("description").and_then(Value::as_str).unwrap_or("Agent task");
             let agent_selection = input.get("agentSelection").and_then(Value::as_str).map(String::from);
-            build_shorthand_plan(prompt, desc, agent_selection)
+            let skill = input.get("skill").and_then(Value::as_str).map(String::from);
+            (build_shorthand_plan(prompt, desc, agent_selection, skill), true)
         } else {
             anyhow::bail!("Either 'plan' (object) or 'prompt' (string) must be provided");
         };
@@ -133,6 +144,24 @@ impl Tool for OrchestrateTaskTool {
             outcome.results.len(),
             outcome.review.is_some()
         );
+
+        if is_shorthand {
+            let content = outcome
+                .results
+                .get("a1")
+                .map(|result| {
+                    if result.output.is_empty() {
+                        result.error.clone().unwrap_or_default()
+                    } else {
+                        result.output.clone()
+                    }
+                })
+                .unwrap_or_else(|| "subagent produced no output".to_string());
+            return Ok(ToolOutput {
+                content,
+                is_error: false,
+            });
+        }
 
         let review = outcome.review.as_ref();
         let output = json!({
@@ -247,15 +276,16 @@ mod tests {
             .await;
 
         // Without real subagent services the agent execution fails gracefully.
-        // The scheduler catches the error and reports stage failure (not a hard error).
+        // Shorthand now returns the sub-agent's output/error text verbatim (not a plan summary).
         let output = result.expect("shorthand plan should not hard-fail");
+        assert!(!output.is_error, "shorthand should not hard-error");
         assert!(
-            output.content.contains("shorthand-"),
-            "output should contain the plan id"
+            !output.content.is_empty(),
+            "shorthand should return sub-agent output/error text, got empty"
         );
         assert!(
-            output.content.contains("\"overallSuccess\": false"),
-            "should report failure without crashing: {}",
+            !output.content.contains("\"overallSuccess\""),
+            "shorthand should NOT return the plan summary JSON: {}",
             output.content
         );
     }

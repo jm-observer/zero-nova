@@ -307,6 +307,7 @@ mod tests {
                     prompt: "p1".to_string(),
                     context_files: vec![],
                     output_format: None,
+                    skill: None,
                 },
                 AgentRequest {
                     agent_id: "a2".to_string(),
@@ -316,6 +317,7 @@ mod tests {
                     prompt: "p2".to_string(),
                     context_files: vec![],
                     output_format: None,
+                    skill: None,
                 },
             ],
         }
@@ -343,6 +345,7 @@ mod tests {
                 prompt: "p1".to_string(),
                 context_files: vec![],
                 output_format: None,
+                skill: None,
             }],
         }
     }

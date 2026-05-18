@@ -547,6 +547,7 @@ mod tests {
                 instructions: "demo instructions".to_string(),
                 tool_policy: ToolPolicy::InheritAll,
                 sticky: false,
+                preload: vec![],
                 aliases: vec!["d".to_string()],
                 examples: vec![],
                 source_path: PathBuf::from("demo"),

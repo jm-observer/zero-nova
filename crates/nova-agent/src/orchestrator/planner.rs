@@ -59,6 +59,10 @@ pub struct AgentRequest {
     pub context_files: Vec<String>,
     #[serde(default)]
     pub output_format: Option<String>,
+    /// 子 Agent 要加载的 skill slug。设置后子 Agent 的 system prompt
+    /// 严格等于该 skill 正文，并预激活其 preload 工具。
+    #[serde(default)]
+    pub skill: Option<String>,
 }
 
 fn default_subagent_type() -> String {

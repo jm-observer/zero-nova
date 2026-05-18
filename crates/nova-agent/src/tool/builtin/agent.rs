@@ -196,6 +196,14 @@ impl SubagentRuntimeBuilder {
             }
         }
 
+        // 子 Agent 的 sub_registry 默认只有 builtin；外部 tools.d 工具仅注册进主
+        // registry（nova-agent-loader/bootstrap）。这里按同源逻辑把 tools.d 也注册进
+        // sub_registry（注册为 deferred），使 skill 的 preload 能对其 resolve_deferred。
+        if let Some(tools_dir) = &config.tool.tools_dir {
+            let tools_path = config.config_dir.join(tools_dir);
+            crate::tool::external::register_external_tools(&sub_registry, &tools_path).await;
+        }
+
         let mut model_config = ModelConfig {
             provider: Some(binding.provider_id.clone()),
             model: spec.model_config.model.clone(),
@@ -310,6 +318,20 @@ struct PromptRequestInputs {
     project_instruction_profile: crate::prompt::ProjectInstructionProfile,
     tool_guidance: crate::prompt::ToolGuidanceMode,
     agent_catalog: Option<String>,
+}
+
+/// `run_subagent` 入参打包（避免过多位置参数）。
+struct SubagentRunParams<'a> {
+    prompt: &'a str,
+    subagent_type: Option<&'a str>,
+    model_override: Option<&'a str>,
+    skill_id: Option<String>,
+    injection_mode: crate::prompt::SkillInjectionMode,
+    agent_id: &'a str,
+    /// 委派 skill slug：命中即用其 instructions 作为完整 system prompt 并预激活 preload。
+    skill_slug: Option<&'a str>,
+    /// 完整 system prompt 覆盖（优先于 skill 推导）。
+    system_prompt_override: Option<String>,
 }
 
 impl AgentTool {
@@ -432,15 +454,43 @@ impl AgentTool {
 
     async fn run_subagent(
         &self,
-        prompt: &str,
-        subagent_type: Option<&str>,
-        model_override: Option<&str>,
-        skill_id: Option<String>,
-        injection_mode: crate::prompt::SkillInjectionMode,
-        agent_id: &str,
+        params: SubagentRunParams<'_>,
         context: Option<ToolContext>,
     ) -> Result<(String, u128, Vec<String>)> {
+        let SubagentRunParams {
+            prompt,
+            subagent_type,
+            model_override,
+            skill_id,
+            injection_mode,
+            agent_id,
+            skill_slug,
+            system_prompt_override,
+        } = params;
         let (spec, mut warnings) = self.resolve_agent_spec(subagent_type)?;
+
+        // skill 委派短路：命中 skill 则其 instructions 作为子 Agent 完整 system prompt，
+        // 并收集 preload 工具；未命中即报错、不回退、不跑 turn。
+        let mut sys_override = system_prompt_override;
+        let mut preload_tools: Vec<String> = Vec::new();
+        if let Some(slug) = skill_slug {
+            match context
+                .as_ref()
+                .and_then(|ctx| ctx.skill_registry.as_ref())
+                .and_then(|registry| registry.find_by_slug(slug).cloned())
+            {
+                Some(pkg) => {
+                    if sys_override.is_none() {
+                        sys_override = Some(pkg.instructions.clone());
+                    }
+                    preload_tools = pkg.preload.clone();
+                }
+                None => {
+                    log::warn!("[Agent] skill '{}' not found in registry; aborting subagent", slug);
+                    return Ok((String::new(), 0, vec![format!("skill '{}' not found", slug)]));
+                }
+            }
+        }
         let config = self.config_store.read().await.clone();
         let binding = config.resolve_agent_binding(spec)?;
 
@@ -481,74 +531,78 @@ impl AgentTool {
             model_config.model
         );
 
-        let mut prompt_template_vars = HashMap::new();
-        prompt_template_vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "idle".to_string());
-        prompt_template_vars.insert(template_vars::PENDING_INTERACTION.to_string(), "none".to_string());
-        prompt_template_vars.insert(template_vars::ACTIVE_AGENT.to_string(), spec.display_name.clone());
-        let prompt_material = services
-            .prompt_service
-            .load_agent_material(spec, Some(environment.clone()), prompt_template_vars.clone())
-            .await?;
+        let system_prompt = if let Some(system_prompt_override) = sys_override {
+            system_prompt_override
+        } else {
+            let mut prompt_template_vars = HashMap::new();
+            prompt_template_vars.insert(template_vars::WORKFLOW_STAGE.to_string(), "idle".to_string());
+            prompt_template_vars.insert(template_vars::PENDING_INTERACTION.to_string(), "none".to_string());
+            prompt_template_vars.insert(template_vars::ACTIVE_AGENT.to_string(), spec.display_name.clone());
+            let prompt_material = services
+                .prompt_service
+                .load_agent_material(spec, Some(environment.clone()), prompt_template_vars.clone())
+                .await?;
 
-        // 使用新的统一构建管道：构建 PromptConstructionRequest → build_from_request
-        // 优先使用传入的 skill_id，否则从输入中解析
-        let resolved_skill_id = skill_id.or_else(|| runtime.resolve_active_skill_id(prompt, &[]).ok().flatten());
-        let workflow_stage = prompt_template_vars
-            .get(template_vars::WORKFLOW_STAGE)
-            .map(String::as_str);
-        let turn_material = services
-            .prompt_service
-            .load_turn_material(
-                project_dir.as_deref(),
-                workflow_stage,
-                resolved_skill_id.clone(),
-                prompt_template_vars.clone(),
-                spec.enable_project_developer_prompt,
+            // 使用新的统一构建管道：构建 PromptConstructionRequest → build_from_request
+            // 优先使用传入的 skill_id，否则从输入中解析
+            let resolved_skill_id = skill_id.or_else(|| runtime.resolve_active_skill_id(prompt, &[]).ok().flatten());
+            let workflow_stage = prompt_template_vars
+                .get(template_vars::WORKFLOW_STAGE)
+                .map(String::as_str);
+            let turn_material = services
+                .prompt_service
+                .load_turn_material(
+                    project_dir.as_deref(),
+                    workflow_stage,
+                    resolved_skill_id.clone(),
+                    prompt_template_vars.clone(),
+                    spec.enable_project_developer_prompt,
+                )
+                .await?;
+            let tool_definitions = runtime.tools().tool_definitions().await;
+            let visible_tool_names: HashSet<String> = tool_definitions.iter().map(|tool| tool.name.clone()).collect();
+
+            let request = self.build_request_from_params(
+                spec,
+                PromptRequestInputs {
+                    base_prompt: prompt_material.agent_prompt.clone(),
+                    prompt: prompt.to_string(),
+                    active_skill_id: resolved_skill_id.clone(),
+                    initial_template_vars: prompt_material.initial_template_vars.clone(),
+                    context_overrides: prompt_template_vars.clone(),
+                    tool_definitions,
+                    visible_tool_names,
+                    project_instruction_profile: prompt_material.project_instruction_profile,
+                    tool_guidance: prompt_material.tool_guidance,
+                    agent_catalog: prompt_material.agent_catalog.clone(),
+                },
+                None,
+            );
+
+            // 更新 request 中的 skill_id 和 injection_mode
+            let final_request = PromptConstructionRequest {
+                skill_id: resolved_skill_id,
+                injection_mode,
+                ..request
+            };
+
+            let name_overrides: HashMap<String, String> = HashMap::new();
+            let extra_sections = PromptExtraSections {
+                system_prompt_base: None,
+                developer_project_prompt: turn_material.developer_project_prompt,
+                project_context: turn_material.project_context,
+                workflow_prompt: turn_material.workflow_prompt,
+                environment_snapshot: prompt_material.environment_snapshot.clone(),
+            };
+            let fallback_skill_registry = crate::skill::SkillRegistry::new();
+            let skill_registry = runtime.skill_registry.as_deref().unwrap_or(&fallback_skill_registry);
+            SystemPromptBuilder::default().build_from_request(
+                &final_request,
+                &name_overrides,
+                skill_registry,
+                extra_sections,
             )
-            .await?;
-        let tool_definitions = runtime.tools().tool_definitions().await;
-        let visible_tool_names: HashSet<String> = tool_definitions.iter().map(|tool| tool.name.clone()).collect();
-
-        let request = self.build_request_from_params(
-            spec,
-            PromptRequestInputs {
-                base_prompt: prompt_material.agent_prompt.clone(),
-                prompt: prompt.to_string(),
-                active_skill_id: resolved_skill_id.clone(),
-                initial_template_vars: prompt_material.initial_template_vars.clone(),
-                context_overrides: prompt_template_vars.clone(),
-                tool_definitions,
-                visible_tool_names,
-                project_instruction_profile: prompt_material.project_instruction_profile,
-                tool_guidance: prompt_material.tool_guidance,
-                agent_catalog: prompt_material.agent_catalog.clone(),
-            },
-            None,
-        );
-
-        // 更新 request 中的 skill_id 和 injection_mode
-        let final_request = PromptConstructionRequest {
-            skill_id: resolved_skill_id,
-            injection_mode,
-            ..request
         };
-
-        let name_overrides: HashMap<String, String> = HashMap::new();
-        let extra_sections = PromptExtraSections {
-            system_prompt_base: None,
-            developer_project_prompt: turn_material.developer_project_prompt,
-            project_context: turn_material.project_context,
-            workflow_prompt: turn_material.workflow_prompt,
-            environment_snapshot: prompt_material.environment_snapshot.clone(),
-        };
-        let fallback_skill_registry = crate::skill::SkillRegistry::new();
-        let skill_registry = runtime.skill_registry.as_deref().unwrap_or(&fallback_skill_registry);
-        let system_prompt = SystemPromptBuilder::default().build_from_request(
-            &final_request,
-            &name_overrides,
-            skill_registry,
-            extra_sections,
-        );
 
         let start_time = Instant::now();
         let (tx, mut rx) = mpsc::channel(100);
@@ -608,6 +662,17 @@ impl AgentTool {
             .as_ref()
             .map(|ctx| ctx.session_id.clone())
             .unwrap_or_else(|| "subagent".to_string());
+
+        // 预激活该 skill 声明的 deferred 工具（全局视图不收窄，仅把这些 promote 为可直调）。
+        for tool_name in &preload_tools {
+            if !runtime.tools().resolve_deferred(&session_id, tool_name).await {
+                log::warn!(
+                    "[Agent] preload tool '{}' not resolvable in subagent registry",
+                    tool_name
+                );
+            }
+        }
+
         let turn_ctx = runtime
             .prepare_turn(prompt, Arc::new(Vec::new()), system_prompt, &session_id)
             .await?;
@@ -670,12 +735,16 @@ impl SubAgentExecutor for AgentTool {
     ) -> Result<crate::orchestrator::SubAgentOutput> {
         let (output, duration_ms, warnings) = self
             .run_subagent(
-                &request.prompt,
-                request.agent_selection.as_deref(),
-                None,
-                None,
-                SkillInjectionMode::Catalog,
-                &request.agent_id,
+                SubagentRunParams {
+                    prompt: &request.prompt,
+                    subagent_type: request.agent_selection.as_deref(),
+                    model_override: None,
+                    skill_id: None,
+                    injection_mode: SkillInjectionMode::Catalog,
+                    agent_id: &request.agent_id,
+                    skill_slug: request.skill.as_deref(),
+                    system_prompt_override: request.system_prompt_override.clone(),
+                },
                 context,
             )
             .await?;

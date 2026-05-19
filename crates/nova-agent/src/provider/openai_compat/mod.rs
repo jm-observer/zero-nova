@@ -10,7 +10,7 @@ use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceive
 use anyhow::{anyhow, Result};
 use async_openai::types::chat::CreateChatCompletionStreamResponse;
 use async_trait::async_trait;
-use log::{debug, trace};
+use log::trace;
 use reqwest::{header, Client};
 use std::collections::{HashMap, VecDeque};
 
@@ -126,7 +126,7 @@ impl LlmClient for OpenAiCompatClient {
         let (api_key, base_url) = self.resolve_endpoint(config)?;
         let base = base_url.trim_end_matches('/').to_string();
 
-        debug!(
+        trace!(
             "[OUTBOUND] LLM HTTP request via reqwest: provider={:?}, model={}, msg_count={}",
             config.provider,
             config.model,
@@ -143,9 +143,10 @@ impl LlmClient for OpenAiCompatClient {
         let extra_headers = Self::build_request_headers(request_context);
         let session_injected = extra_headers.iter().any(|(k, _)| k == HEADER_SESSION_ID);
         let agent_injected = extra_headers.iter().any(|(k, _)| k == HEADER_AGENT_ID);
-        debug!(
+        trace!(
             "[OUTBOUND] LLM request headers: session_id={}, agent_id={}",
-            session_injected, agent_injected
+            session_injected,
+            agent_injected
         );
 
         let url = format!("{}/chat/completions", base);
@@ -224,7 +225,7 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
             if let Some(raw_event) = self.parser.next_raw()? {
                 match raw_event {
                     RawSseEvent::Done => {
-                        debug!("[INBOUND] Stream: [DONE] received from LLM");
+                        trace!("[INBOUND] Stream: [DONE] received from LLM");
                         self.flush_pending_tool_calls();
                         if let Some(event) = self.event_queue.pop_front() {
                             return Ok(Some(event));
@@ -247,7 +248,7 @@ impl StreamReceiver for OpenAiCompatStreamReceiver {
             match self.response.chunk().await {
                 Ok(Some(chunk)) => self.parser.feed(&chunk),
                 Ok(None) => {
-                    debug!("[INBOUND] Stream: upstream closed");
+                    trace!("[INBOUND] Stream: upstream closed");
                     self.flush_pending_tool_calls();
                     if let Some(event) = self.event_queue.pop_front() {
                         return Ok(Some(event));

@@ -147,6 +147,23 @@ impl AgentApplicationImpl {
         self.conversation_service.stop_turn(session_id).await
     }
 
+    /// Register a host-provided native tool as a deferred (System-category)
+    /// tool, so it stays out of agents' always-on tool sets and is only
+    /// activated when a skill `preload` resolves it.
+    pub async fn register_deferred_tool(
+        &self,
+        name: String,
+        description: String,
+        input_schema: Value,
+        factory: Box<dyn Fn() -> Arc<dyn crate::tool::Tool> + Send + Sync>,
+    ) {
+        self.conversation_service
+            .agent
+            .tools()
+            .register_deferred(name, description, input_schema, factory)
+            .await;
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<AppSession>> {
         let summaries = self.conversation_service.sessions.list_sorted().await;
         Ok(summaries

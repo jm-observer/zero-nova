@@ -22,7 +22,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
 tokio-tungstenite = { version = "0.21", features = ["__rustls-tls"] }
 log = "0.4"
-custom-utils = { version = "0.12", features = ["daemon-async"] }
+custom-utils = { version = "0.14", features = ["daemon-async"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "stream", "rustls", "form"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -1,4 +1,4 @@
-﻿//! Core library module for zero-nova.
+//! Core library module for zero-nova.
 //!
 //! This module re-exports the project sub-modules and provides the library entry point.
 
@@ -23,6 +23,7 @@ pub mod conversation;
 
 pub use agent::{AgentConfig, AgentRuntime, TurnResult};
 pub use agent_catalog::{AgentDescriptor, AgentRegistry};
+pub use app::ToolInventoryView;
 pub use event::AgentEvent;
 pub use mcp::{McpClient, McpToolDef, ServerInfo};
 pub use message::{ContentBlock, Message, Role};
@@ -31,4 +32,6 @@ pub use prompt::{
 };
 pub use provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 pub use skill::{CapabilityPolicy, FileToolPriority, PolicySource, Skill, SkillPackage, SkillRegistry, ToolPolicy};
-pub use tool::{RegisteredToolDefinition, Tool, ToolContext, ToolRegistry};
+pub use tool::{
+    DeferredToolCategory, DeferredToolRepresentation, RegisteredToolDefinition, Tool, ToolContext, ToolRegistry,
+};

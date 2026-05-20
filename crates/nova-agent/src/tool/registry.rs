@@ -500,6 +500,11 @@ impl ToolRegistry {
         self.lock_snapshot_async().await.deferred_definitions.clone()
     }
 
+    /// 返回所有 deferred 工具的完整表示（含 category），用于外部只读 listing。
+    pub async fn list_deferred_representations(&self) -> Vec<DeferredToolRepresentation> {
+        self.lock_snapshot_async().await.deferred_representations.clone()
+    }
+
     pub async fn load_deferred_by_category(
         &self,
         session_id: &str,
@@ -1285,5 +1290,75 @@ mod tests {
 
         assert!(output.is_error);
         assert!(output.content.contains("input must be a JSON object"));
+    }
+
+    #[tokio::test]
+    async fn loaded_definitions_returns_registered_tools() {
+        let registry = ToolRegistry::new();
+        registry.register(Box::new(StaticTool { name: "Alpha" })).await;
+        registry.register(Box::new(StaticTool { name: "Beta" })).await;
+
+        let defs = registry.loaded_definitions().await;
+        let names: HashSet<_> = defs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(defs.len(), 2);
+        assert!(names.contains("Alpha"));
+        assert!(names.contains("Beta"));
+    }
+
+    #[tokio::test]
+    async fn loaded_definitions_empty_when_no_tools() {
+        let registry = ToolRegistry::new();
+        assert!(registry.loaded_definitions().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_deferred_representations_returns_registered_deferred() {
+        let registry = ToolRegistry::new();
+        registry
+            .register_deferred_with_category(
+                "DefA".to_string(),
+                "A desc".to_string(),
+                json!({"type": "object"}),
+                Box::new(|| Arc::new(StaticTool { name: "DefA" })),
+                DeferredToolCategory::Skill,
+            )
+            .await;
+        registry
+            .register_deferred_with_category(
+                "DefB".to_string(),
+                "B desc".to_string(),
+                json!({"type": "object"}),
+                Box::new(|| Arc::new(StaticTool { name: "DefB" })),
+                DeferredToolCategory::Task,
+            )
+            .await;
+
+        let reps = registry.list_deferred_representations().await;
+        assert_eq!(reps.len(), 2);
+        let by_name: std::collections::HashMap<_, _> = reps.iter().map(|r| (r.name.as_str(), &r.category)).collect();
+        assert_eq!(by_name.get("DefA"), Some(&&DeferredToolCategory::Skill));
+        assert_eq!(by_name.get("DefB"), Some(&&DeferredToolCategory::Task));
+    }
+
+    #[tokio::test]
+    async fn list_deferred_representations_unaffected_by_session_activation() {
+        let registry = ToolRegistry::new();
+        registry
+            .register_deferred(
+                "DeferredTool".to_string(),
+                "desc".to_string(),
+                json!({"type": "object"}),
+                Box::new(|| Arc::new(StaticTool { name: "DeferredTool" })),
+            )
+            .await;
+
+        assert_eq!(
+            registry.resolve_deferred_with_outcome("s1", "DeferredTool").await,
+            DeferredResolveOutcome::Loaded
+        );
+
+        let reps = registry.list_deferred_representations().await;
+        assert_eq!(reps.len(), 1);
+        assert_eq!(reps[0].name, "DeferredTool");
     }
 }

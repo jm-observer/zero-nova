@@ -1,8 +1,10 @@
 use super::conversation_service::ConversationService;
+use super::inventory::ToolInventoryView;
 use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use crate::agent::TurnResult;
 use crate::config::AppConfig;
 use crate::message::Role;
+use crate::skill::SkillPackage;
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use serde_json::Value;
@@ -335,6 +337,22 @@ impl AgentApplicationImpl {
                 name: agent.display_name.clone(),
                 description: Some(agent.description.clone()),
             })
+    }
+
+    /// 返回所有已加载的 SkillPackage 元数据（只读快照）。
+    pub fn list_skills(&self) -> Vec<SkillPackage> {
+        self.workspace_service.skill_registry.packages.clone()
+    }
+
+    /// 返回当前工具注册视图：always-on 与 deferred 各自的注册态快照。
+    ///
+    /// 注意：deferred 反映**注册态**，与 per-session 激活态无关。
+    pub async fn list_tools(&self) -> ToolInventoryView {
+        let tools = self.conversation_service.agent.tools();
+        ToolInventoryView {
+            loaded: tools.loaded_definitions().await,
+            deferred: tools.list_deferred_representations().await,
+        }
     }
 
     pub async fn config_snapshot(&self) -> Result<Value> {

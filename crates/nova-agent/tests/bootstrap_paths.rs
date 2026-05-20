@@ -42,16 +42,28 @@ fn relative_overrides_are_resolved_from_workspace() {
 
 #[test]
 fn absolute_paths_are_used_directly() {
-    let mut config = AppConfig::new(PathBuf::from("D:/workspace"));
-    config.tool.skills_dir = Some("D:/shared/skills".to_string());
-    config.tool.prompts_dir = Some("D:/shared/prompts".to_string());
-    config.config_path = Some("D:/shared/config.toml".to_string());
+    // 不同平台的绝对路径前缀不一致，Windows 用 "D:/..."，Unix 必须以 "/" 开头
+    #[cfg(windows)]
+    let (workspace, skills, prompts, config_file) = (
+        "D:/workspace",
+        "D:/shared/skills",
+        "D:/shared/prompts",
+        "D:/shared/config.toml",
+    );
+    #[cfg(not(windows))]
+    let (workspace, skills, prompts, config_file) =
+        ("/workspace", "/shared/skills", "/shared/prompts", "/shared/config.toml");
+
+    let mut config = AppConfig::new(PathBuf::from(workspace));
+    config.tool.skills_dir = Some(skills.to_string());
+    config.tool.prompts_dir = Some(prompts.to_string());
+    config.config_path = Some(config_file.to_string());
 
     // Absolute paths should NOT be joined with workspace
-    assert_eq!(config.data_dir_path(), PathBuf::from("D:/workspace/data"));
-    assert_eq!(config.skills_dir(), PathBuf::from("D:/shared/skills"));
-    assert_eq!(config.config_path(), PathBuf::from("D:/shared/config.toml"));
-    assert_eq!(config.prompts_dir(), PathBuf::from("D:/shared/prompts"));
+    assert_eq!(config.data_dir_path(), PathBuf::from(workspace).join("data"));
+    assert_eq!(config.skills_dir(), PathBuf::from(skills));
+    assert_eq!(config.config_path(), PathBuf::from(config_file));
+    assert_eq!(config.prompts_dir(), PathBuf::from(prompts));
 }
 
 // --- Prompt file path construction ---

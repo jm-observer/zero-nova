@@ -112,36 +112,26 @@ jobs:
       - name: Add target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --features prod
+      - name: Build server binary
+        # 只构建服务端二进制；桌面壳 (openflux-rust / Tauri) 需要 GTK/webkit2gtk 依赖，
+        # 不在发布流水线里打。
+        run: cargo build -p nova-server-ws --release --target ${{ matrix.target }} --features prod
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-
-      - name: Get package name
-        id: pkg
-        shell: bash
-        run: |
-          PKG_NAME=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
-          echo "name=$PKG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Prepare artifacts
         shell: bash
         run: |
           mkdir -p dist
-          BINS="${{ steps.pkg.outputs.name }}"
-          for bin in $BINS; do
-            SRC="target/${{ matrix.target }}/release/${bin}"
-            if [ -f "${SRC}.exe" ]; then SRC="${SRC}.exe"; fi
-            if [ -f "$SRC" ]; then
-              cp "$SRC" "dist/$(basename $SRC)_${{ matrix.target }}"
-            fi
-          done
+          SRC="target/${{ matrix.target }}/release/nova-server-ws"
+          if [ -f "${SRC}.exe" ]; then SRC="${SRC}.exe"; fi
+          cp "$SRC" "dist/nova-server-ws_${{ matrix.target }}$([[ "${{ matrix.target }}" == *windows* ]] && echo .exe || echo '')"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.pkg.outputs.name }}_${{ matrix.target }}
-          path: dist/${{ steps.pkg.outputs.name }}_${{ matrix.target }}*
+          name: nova-server-ws_${{ matrix.target }}
+          path: dist/nova-server-ws_${{ matrix.target }}*
 
   release:
     needs: build

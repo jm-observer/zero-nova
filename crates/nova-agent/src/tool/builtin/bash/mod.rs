@@ -1,5 +1,5 @@
 // Platform-specific modules - declared here so they are submodules of bash
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 mod bash_linux;
 #[cfg(target_os = "windows")]
 mod bash_windows;
@@ -20,7 +20,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Instant};
 
 // Platform-specific re-exports for external use
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 pub use bash_linux::{select_shell, UnixBash, UnixSh};
 #[cfg(target_os = "windows")]
 pub use bash_windows::{select_shell, CmdBackend, PowerShellBackend};
@@ -32,9 +32,9 @@ pub enum ShellBackend {
     PowerShell(bash_windows::PowerShellBackend),
     #[cfg(target_os = "windows")]
     Cmd(CmdBackend),
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     UnixSh(UnixSh),
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     UnixBash(UnixBash),
 }
 
@@ -45,9 +45,9 @@ impl ShellBackend {
             Self::PowerShell(b) => b.name(),
             #[cfg(target_os = "windows")]
             Self::Cmd(b) => b.name(),
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             Self::UnixSh(b) => b.name(),
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             Self::UnixBash(b) => b.name(),
         }
     }
@@ -58,9 +58,9 @@ impl ShellBackend {
             Self::PowerShell(b) => b.build_command(command_str),
             #[cfg(target_os = "windows")]
             Self::Cmd(b) => b.build_command(command_str),
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             Self::UnixSh(b) => b.build_command(command_str),
-            #[cfg(target_os = "linux")]
+            #[cfg(unix)]
             Self::UnixBash(b) => b.build_command(command_str),
         }
     }

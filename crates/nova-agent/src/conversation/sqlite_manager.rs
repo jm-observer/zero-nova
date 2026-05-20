@@ -45,7 +45,9 @@ impl SqliteManager {
                 agent_id TEXT,
                 created_at INTEGER,
                 updated_at INTEGER,
-                runtime_control TEXT -- Plan 1: Session extension
+                runtime_control TEXT,
+                parent_session_id TEXT,
+                parent_tool_use_id TEXT
             );",
         )
         .execute(&self.pool)
@@ -190,6 +192,45 @@ impl SqliteManager {
         self.migrate_audit_logs_schema().await?;
         self.migrate_diagnostics_schema().await?;
         self.migrate_workspace_restore_state_schema().await?;
+        self.migrate_sessions_parent_child_columns().await?;
+
+        Ok(())
+    }
+
+    async fn migrate_sessions_parent_child_columns(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect sessions table schema")?;
+
+        let mut has_parent_session_id = false;
+        let mut has_parent_tool_use_id = false;
+        for column in columns {
+            let name: String = Row::get(&column, "name");
+            if name == "parent_session_id" {
+                has_parent_session_id = true;
+            } else if name == "parent_tool_use_id" {
+                has_parent_tool_use_id = true;
+            }
+        }
+
+        if !has_parent_session_id {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add parent_session_id column to sessions table")?;
+        }
+        if !has_parent_tool_use_id {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN parent_tool_use_id TEXT")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add parent_tool_use_id column to sessions table")?;
+        }
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)")
+            .execute(&self.pool)
+            .await
+            .context("Failed to create idx_sessions_parent index")?;
 
         Ok(())
     }
@@ -677,6 +718,56 @@ mod tests {
             snapshot.get("restorable_run_state").and_then(Value::as_str),
             Some("reattachable")
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn migration_adds_parent_columns_to_legacy_sessions_table() -> Result<()> {
+        let dir = tempdir()?;
+        let db_path = dir.path().join("sessions.db");
+        let pool =
+            SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db_path).create_if_missing(true)).await?;
+
+        // 模拟旧库：不含 parent_* 列
+        sqlx::query(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                agent_id TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                runtime_control TEXT
+            );",
+        )
+        .execute(&pool)
+        .await?;
+        pool.close().await;
+
+        // 第一次跑 migration——加列 + 索引
+        let manager = SqliteManager::new(dir.path()).await?;
+        let columns = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&manager.pool)
+            .await?;
+        let names: Vec<String> = columns.iter().map(|c| c.get::<String, _>("name")).collect();
+        assert!(names.iter().any(|n| n == "parent_session_id"));
+        assert!(names.iter().any(|n| n == "parent_tool_use_id"));
+
+        manager.pool.close().await;
+
+        // 第二次跑 migration——应幂等（不抛错、不重复加列）
+        let manager2 = SqliteManager::new(dir.path()).await?;
+        let columns2 = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&manager2.pool)
+            .await?;
+        let count_parent = columns2
+            .iter()
+            .filter(|c| {
+                let n: String = c.get::<String, _>("name");
+                n == "parent_session_id" || n == "parent_tool_use_id"
+            })
+            .count();
+        assert_eq!(count_parent, 2);
 
         Ok(())
     }

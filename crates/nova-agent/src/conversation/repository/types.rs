@@ -20,4 +20,6 @@ pub type SessionRow = (
     i64,
     i64,
     crate::conversation::control::ControlState,
+    Option<String>, // parent_session_id
+    Option<String>, // parent_tool_use_id
 );

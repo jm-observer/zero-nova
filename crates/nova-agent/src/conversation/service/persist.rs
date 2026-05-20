@@ -20,6 +20,8 @@ impl SessionService {
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
                 &runtime_control,
+                session.parent_session_id.as_deref(),
+                session.parent_tool_use_id.as_deref(),
             )
             .await?;
 
@@ -54,6 +56,8 @@ impl SessionService {
                 session.created_at,
                 session.updated_at.load(Ordering::SeqCst),
                 &runtime_control,
+                session.parent_session_id.as_deref(),
+                session.parent_tool_use_id.as_deref(),
             )
             .await
     }

@@ -46,6 +46,9 @@ fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
         super::control::ControlState::new(&agent_id)
     };
 
+    let parent_session_id: Option<String> = row.try_get("parent_session_id").unwrap_or(None);
+    let parent_tool_use_id: Option<String> = row.try_get("parent_tool_use_id").unwrap_or(None);
+
     Ok((
         session_id,
         row.get("title"),
@@ -53,6 +56,8 @@ fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
         row.get("created_at"),
         row.get("updated_at"),
         runtime_control,
+        parent_session_id,
+        parent_tool_use_id,
     ))
 }
 

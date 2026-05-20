@@ -50,6 +50,9 @@ impl SessionService {
             chat_lock: Mutex::new(()),
             cancellation_token: RwLock::new(None),
             title_state: RwLock::new(TitleState::new_default()),
+            parent_session_id: None,
+            parent_tool_use_id: None,
+            child_session_ids: RwLock::new(Vec::new()),
         });
 
         self.persist_full_session(&session).await?;
@@ -145,6 +148,8 @@ impl SessionService {
             new_control
         };
 
+        // copy_session 副本视为独立根 Session，不继承父子关系
+        // （见 docs/2026-05-20-session-parent-child-tree 总览「已收敛的待澄清点」#1）。
         let session = Arc::new(Session {
             control: tokio::sync::RwLock::new(new_control),
             id: new_id.clone(),
@@ -155,6 +160,9 @@ impl SessionService {
             chat_lock: Mutex::new(()),
             cancellation_token: RwLock::new(None),
             title_state: RwLock::new(TitleState::new_default()),
+            parent_session_id: None,
+            parent_tool_use_id: None,
+            child_session_ids: RwLock::new(Vec::new()),
         });
 
         self.persist_full_session(&session).await?;

@@ -8,8 +8,12 @@ impl SessionService {
     /// 启动阶段仅加载会话索引（不加载消息历史）。
     pub async fn load_session_index(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
-        for (id, title, agent_id, created_at, updated_at, runtime_control) in rows {
+        for (id, title, agent_id, created_at, updated_at, runtime_control, parent_session_id, parent_tool_use_id) in
+            rows
+        {
             let title_state = runtime_control.title_state.clone();
+            // 回填 child_session_ids（load 路径，create 路径初始为空——见 plan-1 步骤 5）。
+            let child_session_ids = self.repository.list_child_session_ids(&id).await.unwrap_or_default();
             let session = Arc::new(
                 super::session_factory::session_from_index_row(
                     id.clone(),
@@ -19,6 +23,9 @@ impl SessionService {
                     updated_at,
                     runtime_control,
                     title_state,
+                    parent_session_id,
+                    parent_tool_use_id,
+                    child_session_ids,
                 )
                 .await,
             );
@@ -30,7 +37,8 @@ impl SessionService {
     /// 从数据库加载所有会话到内存（完整 history，测试/迁移辅助）。
     pub async fn load_all(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
-        for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control) in rows {
+        for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control, _parent_id, _parent_tool_use_id) in rows
+        {
             if let Some(session) = self.load_session_from_db(&id).await? {
                 self.cache.insert_loaded(id, session).await;
             }
@@ -42,8 +50,16 @@ impl SessionService {
         &self,
         agent_id: &str,
     ) -> Result<Option<Arc<crate::conversation::session::Session>>> {
-        let Some((session_id, _title, _agent_id, _created_at, _updated_at, _runtime_control)) =
-            self.repository.find_latest_session_by_agent(agent_id).await?
+        let Some((
+            session_id,
+            _title,
+            _agent_id,
+            _created_at,
+            _updated_at,
+            _runtime_control,
+            _parent_session_id,
+            _parent_tool_use_id,
+        )) = self.repository.find_latest_session_by_agent(agent_id).await?
         else {
             return Ok(None);
         };
@@ -58,11 +74,14 @@ impl SessionService {
         }
 
         let loaded = self.repository.load_session_meta(id).await?;
-        let Some((id, title, agent_id, created_at, updated_at, runtime_control)) = loaded else {
+        let Some((id, title, agent_id, created_at, updated_at, runtime_control, parent_session_id, parent_tool_use_id)) =
+            loaded
+        else {
             return Ok(None);
         };
 
         let title_state = runtime_control.title_state.clone();
+        let child_session_ids = self.repository.list_child_session_ids(&id).await.unwrap_or_default();
         let session = Arc::new(
             super::session_factory::session_from_index_row(
                 id.clone(),
@@ -72,6 +91,9 @@ impl SessionService {
                 updated_at,
                 runtime_control,
                 title_state,
+                parent_session_id,
+                parent_tool_use_id,
+                child_session_ids,
             )
             .await,
         );
@@ -188,21 +210,40 @@ impl SessionService {
         id: &str,
     ) -> Result<Option<Arc<crate::conversation::session::Session>>> {
         let loaded = self.repository.load_session(id).await?;
-        Ok(loaded.map(
-            |(id, title, _agent_id, created_at, updated_at, runtime_control, history)| {
-                let title_state = runtime_control.title_state.clone();
-                Arc::new(crate::conversation::session::Session {
-                    control: tokio::sync::RwLock::new(runtime_control),
-                    id,
-                    name: tokio::sync::RwLock::new(title),
-                    history: tokio::sync::RwLock::new(history),
-                    created_at,
-                    updated_at: std::sync::atomic::AtomicI64::new(updated_at),
-                    chat_lock: tokio::sync::Mutex::new(()),
-                    cancellation_token: tokio::sync::RwLock::new(None),
-                    title_state: tokio::sync::RwLock::new(title_state),
-                })
-            },
-        ))
+        let Some((
+            row_id,
+            title,
+            _agent_id,
+            created_at,
+            updated_at,
+            runtime_control,
+            history,
+            parent_session_id,
+            parent_tool_use_id,
+        )) = loaded
+        else {
+            return Ok(None);
+        };
+
+        let child_session_ids = self
+            .repository
+            .list_child_session_ids(&row_id)
+            .await
+            .unwrap_or_default();
+        let title_state = runtime_control.title_state.clone();
+        Ok(Some(Arc::new(crate::conversation::session::Session {
+            control: tokio::sync::RwLock::new(runtime_control),
+            id: row_id,
+            name: tokio::sync::RwLock::new(title),
+            history: tokio::sync::RwLock::new(history),
+            created_at,
+            updated_at: std::sync::atomic::AtomicI64::new(updated_at),
+            chat_lock: tokio::sync::Mutex::new(()),
+            cancellation_token: tokio::sync::RwLock::new(None),
+            title_state: tokio::sync::RwLock::new(title_state),
+            parent_session_id,
+            parent_tool_use_id,
+            child_session_ids: tokio::sync::RwLock::new(child_session_ids),
+        })))
     }
 }

@@ -13,8 +13,17 @@ async fn permission_repository_matches_current_schema() -> Result<()> {
     let manager = SqliteManager::new(dir.path()).await?;
     let repo = SqliteSessionRepository::new(manager.pool.clone());
 
-    repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
-        .await?;
+    repo.save_session(
+        "session-1",
+        "title",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
 
     repo.create_run(&RunRecord {
         id: "run-1".to_string(),
@@ -74,8 +83,17 @@ async fn run_repository_matches_current_schema() -> Result<()> {
     let manager = SqliteManager::new(dir.path()).await?;
     let repo = SqliteSessionRepository::new(manager.pool.clone());
 
-    repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
-        .await?;
+    repo.save_session(
+        "session-1",
+        "title",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
 
     repo.create_run(&RunRecord {
         id: "run-1".to_string(),
@@ -142,8 +160,17 @@ async fn audit_log_repository_matches_current_schema() -> Result<()> {
     let manager = crate::conversation::sqlite_manager::SqliteManager::new(dir.path()).await?;
     let repo = SqliteSessionRepository::new(manager.pool.clone());
 
-    repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
-        .await?;
+    repo.save_session(
+        "session-1",
+        "title",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
 
     repo.create_audit_log(&crate::conversation::model::AuditLogRecord {
         id: 0,
@@ -170,12 +197,39 @@ async fn find_latest_session_by_agent_uses_updated_at_desc() -> Result<()> {
     let manager = SqliteManager::new(dir.path()).await?;
     let repo = SqliteSessionRepository::new(manager.pool.clone());
 
-    repo.save_session("session-1", "older", "agent-1", 10, 10, &ControlState::new("agent-1"))
-        .await?;
-    repo.save_session("session-2", "newer", "agent-1", 20, 30, &ControlState::new("agent-1"))
-        .await?;
-    repo.save_session("session-3", "other", "agent-2", 20, 40, &ControlState::new("agent-2"))
-        .await?;
+    repo.save_session(
+        "session-1",
+        "older",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
+    repo.save_session(
+        "session-2",
+        "newer",
+        "agent-1",
+        20,
+        30,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
+    repo.save_session(
+        "session-3",
+        "other",
+        "agent-2",
+        20,
+        40,
+        &ControlState::new("agent-2"),
+        None,
+        None,
+    )
+    .await?;
 
     let latest = repo
         .find_latest_session_by_agent("agent-1")
@@ -193,8 +247,17 @@ async fn diagnostic_repository_matches_current_schema() -> Result<()> {
     let manager = crate::conversation::sqlite_manager::SqliteManager::new(dir.path()).await?;
     let repo = SqliteSessionRepository::new(manager.pool.clone());
 
-    repo.save_session("session-1", "title", "agent-1", 10, 10, &ControlState::new("agent-1"))
-        .await?;
+    repo.save_session(
+        "session-1",
+        "title",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
 
     repo.create_diagnostic_issue(&crate::conversation::model::DiagnosticIssue {
         id: "diag-1".to_string(),
@@ -212,5 +275,175 @@ async fn diagnostic_repository_matches_current_schema() -> Result<()> {
     assert_eq!(issues[0].message, "Something went wrong");
     assert_eq!(issues[0].details, Some(serde_json::json!({"code": 500})));
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Plan 1: 父子 Session 持久化测试
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn save_load_root_session_has_null_parent_columns() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+    repo.save_session(
+        "root",
+        "title",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
+
+    let row = repo.load_session_meta("root").await?.expect("session should exist");
+    assert_eq!(row.0, "root");
+    assert_eq!(row.6, None);
+    assert_eq!(row.7, None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn save_load_child_session_round_trips_parent_columns() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+    repo.save_session(
+        "child",
+        "child-title",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        Some("parent-id"),
+        Some("toolu_xyz"),
+    )
+    .await?;
+
+    let row = repo.load_session_meta("child").await?.expect("session should exist");
+    assert_eq!(row.6, Some("parent-id".to_string()));
+    assert_eq!(row.7, Some("toolu_xyz".to_string()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_child_session_ids_returns_children_in_created_order() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+    repo.save_session(
+        "parent",
+        "p",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
+    repo.save_session(
+        "c1",
+        "c1",
+        "agent-1",
+        20,
+        20,
+        &ControlState::new("agent-1"),
+        Some("parent"),
+        Some("t1"),
+    )
+    .await?;
+    repo.save_session(
+        "c2",
+        "c2",
+        "agent-1",
+        30,
+        30,
+        &ControlState::new("agent-1"),
+        Some("parent"),
+        Some("t2"),
+    )
+    .await?;
+    repo.save_session(
+        "c3",
+        "c3",
+        "agent-1",
+        40,
+        40,
+        &ControlState::new("agent-1"),
+        Some("parent"),
+        Some("t3"),
+    )
+    .await?;
+
+    let children = repo.list_child_session_ids("parent").await?;
+    assert_eq!(children, vec!["c1".to_string(), "c2".to_string(), "c3".to_string()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_child_session_ids_empty_when_no_children() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+    repo.save_session(
+        "root",
+        "r",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
+
+    assert!(repo.list_child_session_ids("root").await?.is_empty());
+    assert!(repo.list_child_session_ids("nonexistent").await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn upsert_does_not_overwrite_parent_columns() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+    repo.save_session(
+        "child",
+        "c",
+        "agent-1",
+        10,
+        10,
+        &ControlState::new("agent-1"),
+        Some("p1"),
+        Some("t1"),
+    )
+    .await?;
+
+    // 第二次以 None 覆写——ON CONFLICT 不包含 parent_* 列，应保持首写值。
+    repo.save_session(
+        "child",
+        "c-updated",
+        "agent-1",
+        10,
+        20,
+        &ControlState::new("agent-1"),
+        None,
+        None,
+    )
+    .await?;
+
+    let row = repo.load_session_meta("child").await?.expect("session should exist");
+    assert_eq!(row.1, "c-updated"); // title 被覆写
+    assert_eq!(row.6, Some("p1".to_string())); // parent_session_id 保留
+    assert_eq!(row.7, Some("t1".to_string())); // parent_tool_use_id 保留
     Ok(())
 }

@@ -101,4 +101,6 @@ pub enum ContentBlockDTO {
     },
     #[serde(rename = "thinking")]
     Thinking { thinking: String },
+    #[serde(rename = "image")]
+    Image { mime: String, data_base64: String },
 }

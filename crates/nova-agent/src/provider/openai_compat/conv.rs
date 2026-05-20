@@ -2,11 +2,12 @@
 
 use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls, ChatCompletionRequestAssistantMessage,
-    ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessage,
+    ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestMessage,
+    ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestMessageContentPartText,
+    ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessage,
     ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
-    ChatCompletionStreamOptions, ChatCompletionTool, ChatCompletionTools, CompletionUsage, CreateChatCompletionRequest,
-    FinishReason, FunctionCall, FunctionObject, ReasoningEffort,
+    ChatCompletionRequestUserMessageContentPart, ChatCompletionStreamOptions, ChatCompletionTool, ChatCompletionTools,
+    CompletionUsage, CreateChatCompletionRequest, FinishReason, FunctionCall, FunctionObject, ImageUrl, ReasoningEffort,
 };
 
 use crate::message::{ContentBlock, Message, Role};
@@ -44,14 +45,24 @@ pub fn messages_to_openai(messages: &[Message]) -> Vec<ChatCompletionRequestMess
                 }
             }
             Role::User => {
-                // User 消息：处理 Text 和 ToolResult
+                // User 消息：处理 Text / Image / ToolResult。
+                // Image 出现时使用 Array content（vision part）；纯文本仍走 Text content。
                 let mut text_parts = Vec::new();
+                let mut image_parts: Vec<ChatCompletionRequestMessageContentPartImage> = Vec::new();
                 let mut tool_results = Vec::new();
 
                 for block in &msg.content {
                     match block {
                         ContentBlock::Text { text } => {
                             text_parts.push(text.clone());
+                        }
+                        ContentBlock::Image { mime, data_base64 } => {
+                            image_parts.push(ChatCompletionRequestMessageContentPartImage {
+                                image_url: ImageUrl {
+                                    url: format!("data:{};base64,{}", mime, data_base64),
+                                    detail: None,
+                                },
+                            });
                         }
                         ContentBlock::ToolResult {
                             tool_use_id, output, ..
@@ -70,17 +81,30 @@ pub fn messages_to_openai(messages: &[Message]) -> Vec<ChatCompletionRequestMess
                             content: ChatCompletionRequestToolMessageContent::Text(output),
                         }));
                     }
-                    // 如果有文本部分，单独作为 User 消息
+                }
+
+                let user_content: Option<ChatCompletionRequestUserMessageContent> = if !image_parts.is_empty() {
+                    let mut parts: Vec<ChatCompletionRequestUserMessageContentPart> = Vec::new();
                     if !text_parts.is_empty() {
-                        result.push(ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                            content: ChatCompletionRequestUserMessageContent::Text(text_parts.join("\n")),
-                            name: None,
-                        }));
+                        parts.push(ChatCompletionRequestUserMessageContentPart::Text(
+                            ChatCompletionRequestMessageContentPartText {
+                                text: text_parts.join("\n"),
+                            },
+                        ));
                     }
+                    for img in image_parts {
+                        parts.push(ChatCompletionRequestUserMessageContentPart::ImageUrl(img));
+                    }
+                    Some(ChatCompletionRequestUserMessageContent::Array(parts))
                 } else if !text_parts.is_empty() {
-                    // 纯文本 User 消息
+                    Some(ChatCompletionRequestUserMessageContent::Text(text_parts.join("\n")))
+                } else {
+                    None
+                };
+
+                if let Some(content) = user_content {
                     result.push(ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                        content: ChatCompletionRequestUserMessageContent::Text(text_parts.join("\n")),
+                        content,
                         name: None,
                     }));
                 }

@@ -57,6 +57,7 @@ impl HistoryTrimmer {
                         ContentBlock::Thinking { thinking } => thinking.len(),
                         ContentBlock::ToolUse { name, input, .. } => name.len() + input.to_string().len(),
                         ContentBlock::ToolResult { output, .. } => output.len(),
+                        ContentBlock::Image { data_base64, .. } => data_base64.len(),
                     })
                     .sum::<usize>()
             })

@@ -177,7 +177,7 @@ impl ConversationService {
     pub async fn start_turn(
         &self,
         session_id: &str,
-        input: &str,
+        input: crate::message::UserInput,
         event_tx: mpsc::Sender<AgentEvent>,
     ) -> Result<TurnResult> {
         self.execute_agent_turn(session_id, input, event_tx).await
@@ -226,9 +226,18 @@ impl ConversationService {
     async fn execute_agent_turn(
         &self,
         session_id: &str,
-        input: &str,
+        input: crate::message::UserInput,
         event_tx: mpsc::Sender<AgentEvent>,
     ) -> Result<TurnResult> {
+        let input_blocks = input.into_blocks();
+        let input_preview = input_blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let turn_id = uuid::Uuid::new_v4().to_string();
         let run_id = turn_id.clone(); // Use turn_id as run_id for simplicity
         let now = Utc::now().timestamp_millis();
@@ -345,14 +354,7 @@ impl ConversationService {
         let _lock = session.chat_lock.lock().await;
 
         self.sessions
-            .append_message(
-                session_id,
-                Role::User,
-                vec![ContentBlock::Text {
-                    text: input.to_string(),
-                }],
-                None,
-            )
+            .append_message(session_id, Role::User, input_blocks.clone(), None)
             .await?;
 
         let token = CancellationToken::new();
@@ -397,7 +399,9 @@ impl ConversationService {
         context_overrides.insert("workflow_stage".to_string(), "idle".to_string());
         context_overrides.insert("pending_interaction".to_string(), "none".to_string());
         context_overrides.insert("active_agent".to_string(), agent_descriptor.display_name.clone());
-        let active_skill_id = self.agent.resolve_active_skill_id(input, history_for_turn.as_ref())?;
+        let active_skill_id = self
+            .agent
+            .resolve_active_skill_id(&input_preview, history_for_turn.as_ref())?;
 
         // 使用统一构建管道：构建 PromptConstructionRequest → build_from_request
         let injection_mode = if compaction.enabled {
@@ -408,7 +412,7 @@ impl ConversationService {
 
         let prepared_tool_context = self
             .agent
-            .prepare_turn(input, history_for_turn.clone(), String::new(), session_id)
+            .prepare_turn(&input_preview,history_for_turn.clone(), String::new(), session_id)
             .await?;
         let visible_tool_names: HashSet<String> = prepared_tool_context
             .tool_definitions
@@ -422,7 +426,7 @@ impl ConversationService {
             injection_mode,
             initial_template_vars: agent_descriptor.initial_template_vars.clone(),
             context_overrides: context_overrides.clone(),
-            original_base_user_message: Some(input.to_string()),
+            original_base_user_message: Some(input_preview.clone()),
             tool_definitions: Arc::new(prepared_tool_context.tool_definitions.clone()),
             visible_tool_names: Arc::new(visible_tool_names),
             project_instruction_profile: if compaction.enabled {
@@ -473,7 +477,7 @@ impl ConversationService {
         );
         let turn_ctx = self
             .agent
-            .prepare_turn(input, history_for_turn, system_prompt, session_id)
+            .prepare_turn(&input_preview,history_for_turn, system_prompt, session_id)
             .await?;
 
         // Phase C: Capture snapshot
@@ -512,13 +516,7 @@ impl ConversationService {
             .update_runtime_state(session_id, Some(snapshot_internal.clone()), None, Some(initial_skills))
             .await?;
 
-        let user_message = Message::new(
-            Role::User,
-            vec![ContentBlock::Text {
-                text: input.to_string(),
-            }],
-            Utc::now().timestamp_millis(),
-        );
+        let user_message = Message::new(Role::User, input_blocks.clone(), Utc::now().timestamp_millis());
         let active_skill_id = turn_ctx.active_skill.as_ref().map(|s| s.skill_id.clone());
         let execution_model_config: crate::provider::ModelConfig = execution_binding.model_config.clone().into();
         let turn_result = match self

@@ -27,7 +27,7 @@ pub use app::{SessionTree, ToolInventoryView};
 pub use conversation::session::SessionSummary;
 pub use event::AgentEvent;
 pub use mcp::{McpClient, McpToolDef, ServerInfo};
-pub use message::{ContentBlock, Message, Role};
+pub use message::{ContentBlock, Message, Role, UserInput};
 pub use prompt::{
     ActiveSkillState, SkillInvocationLevel, SkillRouteDecision, SkillSwitchResult, SystemPromptBuilder, TurnContext,
 };

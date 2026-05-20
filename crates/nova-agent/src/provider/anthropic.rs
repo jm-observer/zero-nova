@@ -3,7 +3,8 @@ use crate::message::{ContentBlock, Message, Role};
 use crate::provider::sse::SseParser;
 use crate::provider::types::ProviderRequestContext;
 use crate::provider::types::{
-    InputContentBlock, InputMessage, MessageRequest, StreamEvent, ThinkingConfig, ThinkingMode, ToolDefinition,
+    AnthropicImageSource, InputContentBlock, InputMessage, MessageRequest, StreamEvent, ThinkingConfig, ThinkingMode,
+    ToolDefinition,
 };
 use crate::provider::{LlmClient, ModelConfig, ProviderStreamEvent, StopReason, StreamReceiver};
 use anyhow::{anyhow, Result};
@@ -96,6 +97,13 @@ impl LlmClient for AnthropicClient {
                         tool_use_id: tool_use_id.clone(),
                         output: output.clone(),
                         is_error: *is_error,
+                    },
+                    ContentBlock::Image { mime, data_base64 } => InputContentBlock::Image {
+                        source: AnthropicImageSource {
+                            kind: "base64".to_string(),
+                            media_type: mime.clone(),
+                            data: data_base64.clone(),
+                        },
                     },
                 })
                 .collect();

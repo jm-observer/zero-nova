@@ -82,9 +82,10 @@ impl AgentApplicationImpl {
     pub async fn start_turn(
         &self,
         session_id: &str,
-        input: &str,
+        input: impl Into<crate::message::UserInput>,
         sender: mpsc::Sender<AppEvent>,
     ) -> Result<TurnResult> {
+        let input = input.into();
         let before_skill_bindings = self
             .workspace_service
             .list_session_skill_bindings(session_id)

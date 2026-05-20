@@ -266,6 +266,7 @@ pub fn app_message_to_protocol(message: AppMessage) -> MessageDTO {
                     content: output,
                     is_error,
                 },
+                ContentBlock::Image { mime, data_base64 } => ContentBlockDTO::Image { mime, data_base64 },
             })
             .collect(),
         timestamp: message.timestamp,

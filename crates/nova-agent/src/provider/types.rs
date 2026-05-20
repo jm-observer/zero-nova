@@ -67,6 +67,17 @@ pub enum InputContentBlock {
         #[serde(default)]
         is_error: bool,
     },
+    /// Image block carrying base64 image data; serializes to the Anthropic
+    /// vision content format (`{type:"image", source:{type:"base64", ...}}`).
+    Image { source: AnthropicImageSource },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnthropicImageSource {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub media_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

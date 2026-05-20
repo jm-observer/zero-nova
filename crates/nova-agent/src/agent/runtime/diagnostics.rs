@@ -104,6 +104,11 @@ impl AgentRuntime {
                     chars += c;
                     tool_result_chars += c;
                 }
+                ContentBlock::Image { data_base64, .. } => {
+                    // 图片字节不参与「chars」预算（避免 base64 长度淹没文本统计），
+                    // 但累加进 tool_result_chars 以便 vision 输入仍出现在大消息报警里。
+                    tool_result_chars += data_base64.len();
+                }
             }
         }
         let is_empty_assistant = matches!(message.role, Role::Assistant) && chars == 0 && tool_calls == 0;

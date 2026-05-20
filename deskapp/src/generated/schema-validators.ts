@@ -114,11 +114,15 @@ const GatewayMessageGeneratedSchema = {
         "messages": {
           "items": true,
           "type": "array"
+        },
+        "session": {
+          "$ref": "#/definitions/Session"
         }
       },
       "required": [
         "agent",
-        "messages"
+        "messages",
+        "session"
       ],
       "type": "object"
     },
@@ -559,6 +563,37 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
+    "LoopGuardMetrics": {
+      "properties": {
+        "duplicateToolCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rejectedCalls": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stalledIterations": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "totalTriggers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "duplicateToolCalls",
+        "rejectedCalls",
+        "stalledIterations",
+        "totalTriggers"
+      ],
+      "type": "object"
+    },
     "MemoryHitSnapshot": {
       "properties": {
         "excerpt": {
@@ -938,6 +973,66 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
+    "ProviderHealthRequest": {
+      "type": "object"
+    },
+    "ProviderHealthSnapshot": {
+      "properties": {
+        "checkedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "latencyMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkedAt",
+        "provider",
+        "scope",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ProviderHealthSnapshotResponse": {
+      "properties": {
+        "providers": {
+          "items": {
+            "$ref": "#/definitions/ProviderHealthSnapshot"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "providers",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "RunControlRequest": {
       "properties": {
         "action": {
@@ -1244,6 +1339,69 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
+    "SessionFileTreeEntry": {
+      "properties": {
+        "isDir": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "isDir",
+        "name",
+        "relativePath"
+      ],
+      "type": "object"
+    },
+    "SessionFileTreeRequest": {
+      "properties": {
+        "relativePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionFileTreeResponse": {
+      "properties": {
+        "baseRelativePath": {
+          "type": "string"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/definitions/SessionFileTreeEntry"
+          },
+          "type": "array"
+        },
+        "projectDirPresent": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "baseRelativePath",
+        "entries",
+        "projectDirPresent",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "SessionIdPayload": {
       "properties": {
         "sessionId": {
@@ -1409,11 +1567,48 @@ const GatewayMessageGeneratedSchema = {
             }
           ]
         },
+        "loopGuardMetrics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/LoopGuardMetrics"
+            }
+          ],
+          "default": {
+            "duplicateToolCalls": 0,
+            "rejectedCalls": 0,
+            "stalledIterations": 0,
+            "totalTriggers": 0
+          }
+        },
         "modelOverride": {
           "$ref": "#/definitions/SessionModelOverride"
         },
+        "projectDir": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projectDirSource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "sessionId": {
           "type": "string"
+        },
+        "systemPromptState": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SessionSystemPromptState"
+            }
+          ],
+          "default": {
+            "sourceRevision": "",
+            "updatedAt": 0,
+            "version": ""
+          }
         },
         "tokenCounters": {
           "$ref": "#/definitions/SessionTokenCounters"
@@ -1462,6 +1657,103 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
+    "SessionSummaryUpdatedPayload": {
+      "description": "会话标题更新推送事件 payload（Plan 2 + Plan 3）",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "messageCount": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "version": {
+          "default": "1.0",
+          "description": "事件版本，用于前端兼容处理（Plan 3）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "messageCount",
+        "sessionId",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionSystemPromptReloadRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionSystemPromptReloadResponse": {
+      "properties": {
+        "changed": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "versionAfter": {
+          "type": "string"
+        },
+        "versionBefore": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "changed",
+        "sessionId",
+        "updatedAt",
+        "versionAfter",
+        "versionBefore"
+      ],
+      "type": "object"
+    },
+    "SessionSystemPromptState": {
+      "properties": {
+        "sourceRevision": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sourceRevision",
+        "updatedAt",
+        "version"
+      ],
+      "type": "object"
+    },
     "SessionTokenCounters": {
       "properties": {
         "cacheCreationInputTokens": {
@@ -1498,6 +1790,51 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
+    "SessionTokenUsageDetailRequest": {
+      "properties": {
+        "beforeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": 20,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionTokenUsageDetailResponse": {
+      "properties": {
+        "hasMore": {
+          "type": "boolean"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turns": {
+          "items": {
+            "$ref": "#/definitions/TurnUsageDetail"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hasMore",
+        "sessionId",
+        "turns"
+      ],
+      "type": "object"
+    },
     "SessionTokenUsageRequest": {
       "properties": {
         "sessionId": {
@@ -1511,17 +1848,76 @@ const GatewayMessageGeneratedSchema = {
     },
     "SessionTokenUsageResponse": {
       "properties": {
-        "updatedAt": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "usage": {
-          "$ref": "#/definitions/SessionTokenCounters"
+        "summary": {
+          "$ref": "#/definitions/SessionTokenUsageSummary"
         }
       },
       "required": [
-        "updatedAt",
-        "usage"
+        "summary"
+      ],
+      "type": "object"
+    },
+    "SessionTokenUsageSummary": {
+      "properties": {
+        "cacheCreationInputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cacheReadInputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lastTurnUsage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "totalTurnCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "turnsWithMissingUsage": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "turnsWithUnknownCacheUsage": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cacheCreationInputTokens",
+        "cacheReadInputTokens",
+        "inputTokens",
+        "outputTokens",
+        "totalTurnCount",
+        "turnsWithMissingUsage",
+        "turnsWithUnknownCacheUsage",
+        "updatedAt"
       ],
       "type": "object"
     },
@@ -1867,6 +2263,114 @@ const GatewayMessageGeneratedSchema = {
             "null"
           ]
         },
+        "completeness": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UsageCompleteness"
+            }
+          ],
+          "default": "partial"
+        },
+        "inputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "outputTokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rawProviderUsage": true,
+        "source": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UsageSource"
+            }
+          ],
+          "default": "provider"
+        }
+      },
+      "required": [
+        "inputTokens",
+        "outputTokens"
+      ],
+      "type": "object"
+    },
+    "TurnUsageDetail": {
+      "properties": {
+        "finishedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "startedAt",
+        "status",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "Usage": {
+      "description": "Usage statistics for a chat turn, re-exported from nova-core. This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
+      "properties": {
+        "cacheCreationInputTokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cacheReadInputTokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "inputTokens": {
           "format": "uint64",
           "minimum": 0,
@@ -1884,37 +2388,21 @@ const GatewayMessageGeneratedSchema = {
       ],
       "type": "object"
     },
-    "Usage": {
-      "description": "Usage statistics for a chat turn, re-exported from nova-core. This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
-      "properties": {
-        "cacheCreationInputTokens": {
-          "default": 0,
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "cacheReadInputTokens": {
-          "default": 0,
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "inputTokens": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "outputTokens": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "inputTokens",
-        "outputTokens"
+    "UsageCompleteness": {
+      "enum": [
+        "full",
+        "partial",
+        "missing"
       ],
-      "type": "object"
+      "type": "string"
+    },
+    "UsageSource": {
+      "enum": [
+        "provider",
+        "estimated",
+        "mixed"
+      ],
+      "type": "string"
     },
     "VoiceCapabilitiesRequest": {
       "type": "object"
@@ -3026,6 +3514,60 @@ const GatewayMessageGeneratedSchema = {
     {
       "properties": {
         "payload": {
+          "$ref": "#/definitions/ProviderHealthRequest"
+        },
+        "type": {
+          "enum": [
+            "provider.health"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/ProviderHealthSnapshotResponse"
+        },
+        "type": {
+          "enum": [
+            "provider.health.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/ProviderHealthSnapshot"
+        },
+        "type": {
+          "enum": [
+            "provider.health.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
           "$ref": "#/definitions/SessionRuntimeRequest"
         },
         "type": {
@@ -3049,6 +3591,42 @@ const GatewayMessageGeneratedSchema = {
         "type": {
           "enum": [
             "session.runtime.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionRuntimeSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.runtime.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionSummaryUpdatedPayload"
+        },
+        "type": {
+          "enum": [
+            "session.summary.updated"
           ],
           "type": "string"
         }
@@ -3098,6 +3676,42 @@ const GatewayMessageGeneratedSchema = {
     {
       "properties": {
         "payload": {
+          "$ref": "#/definitions/SessionSystemPromptReloadRequest"
+        },
+        "type": {
+          "enum": [
+            "session.system_prompt.reload"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionSystemPromptReloadResponse"
+        },
+        "type": {
+          "enum": [
+            "session.system_prompt.reload.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
           "$ref": "#/definitions/SessionToolsRequest"
         },
         "type": {
@@ -3121,6 +3735,60 @@ const GatewayMessageGeneratedSchema = {
         "type": {
           "enum": [
             "session.tools.list.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionToolsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.tools.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionFileTreeRequest"
+        },
+        "type": {
+          "enum": [
+            "session.file_tree.list"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionFileTreeResponse"
+        },
+        "type": {
+          "enum": [
+            "session.file_tree.list.response"
           ],
           "type": "string"
         }
@@ -3170,11 +3838,47 @@ const GatewayMessageGeneratedSchema = {
     {
       "properties": {
         "payload": {
+          "$ref": "#/definitions/SessionSkillBindingsResponse"
+        },
+        "type": {
+          "enum": [
+            "session.skill.bindings.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
           "$ref": "#/definitions/SessionMemoryHitsRequest"
         },
         "type": {
           "enum": [
             "session.memory.hits"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/MemoryHitSnapshot"
+        },
+        "type": {
+          "enum": [
+            "session.memory.hit"
           ],
           "type": "string"
         }
@@ -3246,7 +3950,7 @@ const GatewayMessageGeneratedSchema = {
         },
         "type": {
           "enum": [
-            "sessions.token_usage"
+            "session.token.usage"
           ],
           "type": "string"
         }
@@ -3264,7 +3968,61 @@ const GatewayMessageGeneratedSchema = {
         },
         "type": {
           "enum": [
-            "sessions.token_usage.response"
+            "session.token.usage.response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionTokenUsageResponse"
+        },
+        "type": {
+          "enum": [
+            "session.token.usage.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionTokenUsageDetailRequest"
+        },
+        "type": {
+          "enum": [
+            "session.token.usage.detail"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionTokenUsageDetailResponse"
+        },
+        "type": {
+          "enum": [
+            "session.token.usage.detail.response"
           ],
           "type": "string"
         }
@@ -3602,96 +4360,6 @@ const GatewayMessageGeneratedSchema = {
     {
       "properties": {
         "payload": {
-          "$ref": "#/definitions/SessionRuntimeSnapshot"
-        },
-        "type": {
-          "enum": [
-            "session.runtime.updated"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "payload",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "payload": {
-          "$ref": "#/definitions/SessionTokenUsageResponse"
-        },
-        "type": {
-          "enum": [
-            "session.token.usage"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "payload",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "payload": {
-          "$ref": "#/definitions/SessionToolsResponse"
-        },
-        "type": {
-          "enum": [
-            "session.tools.updated"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "payload",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "payload": {
-          "$ref": "#/definitions/SessionSkillBindingsResponse"
-        },
-        "type": {
-          "enum": [
-            "session.skill.bindings.updated"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "payload",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "payload": {
-          "$ref": "#/definitions/MemoryHitSnapshot"
-        },
-        "type": {
-          "enum": [
-            "session.memory.hit"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "payload",
-        "type"
-      ],
-      "type": "object"
-    },
-    {
-      "properties": {
-        "payload": {
           "$ref": "#/definitions/RunRecord"
         },
         "type": {
@@ -3919,16 +4587,22 @@ const ChatCompletePayloadGeneratedSchema = {
       "description": "Usage statistics for a chat turn, re-exported from nova-core. This mirrors `crate::provider::types::Usage` to avoid adding a dependency on nova-core.",
       "properties": {
         "cacheCreationInputTokens": {
-          "default": 0,
+          "default": null,
           "format": "uint64",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "cacheReadInputTokens": {
-          "default": 0,
+          "default": null,
           "format": "uint64",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "inputTokens": {
           "format": "uint64",
@@ -4077,6 +4751,111 @@ const ProgressEventGeneratedSchema = {
   "type": "object"
 } as const;
 
+const ProviderHealthSnapshotGeneratedSchema = {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "checkedAt": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "latencyMs": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "message": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "checkedAt",
+    "provider",
+    "scope",
+    "status"
+  ],
+  "title": "ProviderHealthSnapshot",
+  "type": "object"
+} as const;
+
+const ProviderHealthSnapshotResponseGeneratedSchema = {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ProviderHealthSnapshot": {
+      "properties": {
+        "checkedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "latencyMs": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkedAt",
+        "provider",
+        "scope",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "providers": {
+      "items": {
+        "$ref": "#/definitions/ProviderHealthSnapshot"
+      },
+      "type": "array"
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "providers",
+    "updatedAt"
+  ],
+  "title": "ProviderHealthSnapshotResponse",
+  "type": "object"
+} as const;
+
 const SessionCreateResponseGeneratedSchema = {
   "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4128,6 +4907,58 @@ const SessionCreateResponseGeneratedSchema = {
     "session"
   ],
   "title": "SessionCreateResponse",
+  "type": "object"
+} as const;
+
+const SessionFileTreeResponseGeneratedSchema = {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "SessionFileTreeEntry": {
+      "properties": {
+        "isDir": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "relativePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "isDir",
+        "name",
+        "relativePath"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "baseRelativePath": {
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/definitions/SessionFileTreeEntry"
+      },
+      "type": "array"
+    },
+    "projectDirPresent": {
+      "type": "boolean"
+    },
+    "updatedAt": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "baseRelativePath",
+    "entries",
+    "projectDirPresent",
+    "updatedAt"
+  ],
+  "title": "SessionFileTreeResponse",
   "type": "object"
 } as const;
 
@@ -4341,6 +5172,13 @@ const ChatPayloadGeneratedSchema = {
   "type": "object"
 } as const;
 
+const ProviderHealthRequestGeneratedSchema = {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProviderHealthRequest",
+  "type": "object"
+} as const;
+
 const SessionCreateRequestGeneratedSchema = {
   "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4359,6 +5197,27 @@ const SessionCreateRequestGeneratedSchema = {
     "agentId"
   ],
   "title": "SessionCreateRequest",
+  "type": "object"
+} as const;
+
+const SessionFileTreeRequestGeneratedSchema = {
+  "$defs": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "relativePath": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sessionId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId"
+  ],
+  "title": "SessionFileTreeRequest",
   "type": "object"
 } as const;
 
@@ -4460,7 +5319,10 @@ const inboundPayloadValidators: Record<string, Validator> = {
   "chat.complete": createValidator(ChatCompletePayloadGeneratedSchema, ChatCompletePayloadGeneratedSchema),
   "error": createValidator(ErrorPayloadGeneratedSchema, ErrorPayloadGeneratedSchema),
   "chat.progress": createValidator(ProgressEventGeneratedSchema, ProgressEventGeneratedSchema),
+  "provider.health.updated": createValidator(ProviderHealthSnapshotGeneratedSchema, ProviderHealthSnapshotGeneratedSchema),
+  "provider.health.response": createValidator(ProviderHealthSnapshotResponseGeneratedSchema, ProviderHealthSnapshotResponseGeneratedSchema),
   "sessions.create.response": createValidator(SessionCreateResponseGeneratedSchema, SessionCreateResponseGeneratedSchema),
+  "session.file_tree.list.response": createValidator(SessionFileTreeResponseGeneratedSchema, SessionFileTreeResponseGeneratedSchema),
   "skill.activated": createValidator(SkillActivatedPayloadGeneratedSchema, SkillActivatedPayloadGeneratedSchema),
   "task.status_changed": createValidator(TaskStatusChangedPayloadGeneratedSchema, TaskStatusChangedPayloadGeneratedSchema),
   "welcome": createValidator(WelcomePayloadGeneratedSchema, WelcomePayloadGeneratedSchema),
@@ -4470,7 +5332,9 @@ const inboundPayloadValidators: Record<string, Validator> = {
 const outboundPayloadValidators: Record<string, Validator> = {
   "agent.inspect": createValidator(AgentInspectRequestGeneratedSchema, AgentInspectRequestGeneratedSchema),
   "chat": createValidator(ChatPayloadGeneratedSchema, ChatPayloadGeneratedSchema),
+  "provider.health": createValidator(ProviderHealthRequestGeneratedSchema, ProviderHealthRequestGeneratedSchema),
   "sessions.create": createValidator(SessionCreateRequestGeneratedSchema, SessionCreateRequestGeneratedSchema),
+  "session.file_tree.list": createValidator(SessionFileTreeRequestGeneratedSchema, SessionFileTreeRequestGeneratedSchema),
   "workspace.restore": createValidator(WorkspaceRestoreRequestGeneratedSchema, WorkspaceRestoreRequestGeneratedSchema),
   ...Object.fromEntries(Object.entries(customOutboundSchemas).map(([type, schema]) => [type, createValidator(schema, schema)])),
 };
@@ -4748,4 +5612,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function deepEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
-

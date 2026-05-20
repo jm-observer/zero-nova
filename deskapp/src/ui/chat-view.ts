@@ -199,9 +199,7 @@ export class ChatView {
         });
 
         this.bus.on('tool:result', (event: any) => {
-            if (event.sessionId === this.state.currentSessionId) {
-                this.handleToolResult(event);
-            }
+            this.handleToolResult(event);
         });
         
         this.bus.on('chat:error', (payload: any) => {
@@ -1470,12 +1468,13 @@ export class ChatView {
     }
 
     private handleToolResult(event: any) {
-        const { toolUseId, result, isError } = event;
+        const toolUseId = this.resolveToolUseId(event);
+        const { result, isError } = event;
+        const sessionId = event.sessionId || this.state.currentSessionId;
         this.handleProjectManagerResult(event);
-        
-        // 当 streamingMessageEl 不存在时，缓存结果以便后续渲染
-        if (!this.streamingMessageEl) {
-            const sessionId = event.sessionId || this.state.currentSessionId;
+
+        // 非当前会话或没有 streaming 容器：先缓存，待 tool:start / 消息恢复时回放
+        if (sessionId !== this.state.currentSessionId || !this.streamingMessageEl) {
             if (!this.pendingToolResults.has(sessionId)) {
                 this.pendingToolResults.set(sessionId, new Map());
             }
@@ -1797,11 +1796,13 @@ export class ChatView {
                 <div class="tool-result-content">${displayContent}</div>
             </div>
         `;
-        markdownBody.insertAdjacentHTML('beforeend', html);
-        
+
         const resultContainer = markdownBody.querySelector(`.tool-result-container[data-rel-id="${toolUseId}"]`);
         if (resultContainer) {
+            resultContainer.insertAdjacentHTML('beforeend', html);
             resultContainer.classList.add('has-result');
+        } else {
+            markdownBody.insertAdjacentHTML('beforeend', html);
         }
     }
 }

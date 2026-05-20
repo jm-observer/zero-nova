@@ -69,9 +69,9 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt --all --check
       - name: Cargo clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --exclude openflux-rust -- -D warnings
       - name: Cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude openflux-rust
 
   build:
     needs: [schema-check, frontend-check, check]

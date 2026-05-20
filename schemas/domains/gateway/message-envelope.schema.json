@@ -545,6 +545,37 @@
       ],
       "type": "object"
     },
+    "LoopGuardMetrics": {
+      "properties": {
+        "duplicateToolCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "rejectedCalls": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stalledIterations": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "totalTriggers": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "duplicateToolCalls",
+        "rejectedCalls",
+        "stalledIterations",
+        "totalTriggers"
+      ],
+      "type": "object"
+    },
     "MemoryHitSnapshot": {
       "properties": {
         "excerpt": {
@@ -1518,6 +1549,19 @@
             }
           ]
         },
+        "loopGuardMetrics": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/LoopGuardMetrics"
+            }
+          ],
+          "default": {
+            "duplicateToolCalls": 0,
+            "rejectedCalls": 0,
+            "stalledIterations": 0,
+            "totalTriggers": 0
+          }
+        },
         "modelOverride": {
           "$ref": "#/definitions/SessionModelOverride"
         },
@@ -1591,6 +1635,44 @@
       },
       "required": [
         "skills",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "SessionSummaryUpdatedPayload": {
+      "description": "会话标题更新推送事件 payload（Plan 2 + Plan 3）",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "messageCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "version": {
+          "default": "1.0",
+          "description": "事件版本，用于前端兼容处理（Plan 3）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agentId",
+        "messageCount",
+        "sessionId",
         "updatedAt"
       ],
       "type": "object"
@@ -3509,6 +3591,24 @@
         "type": {
           "enum": [
             "session.runtime.updated"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "payload",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "payload": {
+          "$ref": "#/definitions/SessionSummaryUpdatedPayload"
+        },
+        "type": {
+          "enum": [
+            "session.summary.updated"
           ],
           "type": "string"
         }

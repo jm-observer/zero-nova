@@ -145,7 +145,7 @@ describe('ChatView @ tool merge (Plan-4)', () => {
             // 不直接调用 private buildToolHtml，改为触发公开渲染流程
             bus.emit('chat:complete', { sessionId: 'session-1' });
             
-            bus.emit('messages_updated', {
+            bus.emit('messages:updated', {
                 sessionId: 'session-1',
                 messages: [{
                     id: 'msg-1',

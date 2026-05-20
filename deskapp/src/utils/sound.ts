@@ -20,7 +20,7 @@ const SOUND_CONFIG = {
 } as const;
 
 // 模块级状态
-let lastPlayTime = 0;
+let lastPlayTime: number | null = null;
 let audioContext: AudioContext | null = null;
 
 /**
@@ -30,7 +30,11 @@ let audioContext: AudioContext | null = null;
  */
 function getAudioContext(): AudioContext {
     if (!audioContext || audioContext.state === 'closed') {
-        audioContext = new AudioContext();
+        const Ctor = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+        if (!Ctor) {
+            throw new Error('AudioContext is not available in this environment');
+        }
+        audioContext = new Ctor();
     }
     return audioContext;
 }
@@ -44,8 +48,8 @@ function getAudioContext(): AudioContext {
 export function playCompletionSound(): void {
     const now = Date.now();
 
-    // 冷却时间去重
-    if (now - lastPlayTime < SOUND_CONFIG.cooldown) {
+    // 冷却时间去重（首次播放始终触发）
+    if (lastPlayTime !== null && now - lastPlayTime < SOUND_CONFIG.cooldown) {
         return;
     }
 
@@ -94,5 +98,6 @@ export function playCompletionSound(): void {
  * 主要用于测试或手动触发场景。
  */
 export function resetSoundState(): void {
-    lastPlayTime = 0;
+    lastPlayTime = null;
+    audioContext = null;
 }

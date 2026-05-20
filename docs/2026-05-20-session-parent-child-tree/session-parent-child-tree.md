@@ -105,8 +105,8 @@ walk(tree):
 | 顺序 | Plan | 依赖 | 状态 |
 |------|------|------|------|
 | 1 | [Session 父子模型 + 持久化](session-parent-child-tree-plan-1.md) | 无 | ✅ 已完成 |
-| 2 | [AgentTool 子 Session 路径改造](session-parent-child-tree-plan-2.md) | Plan 1 | ⏳ 待评审 |
-| 3 | [`get_session_tree` API + v0.3.5 tag](session-parent-child-tree-plan-3.md) | Plan 1, Plan 2 | ⏳ 待评审 |
+| 2 | [AgentTool 子 Session 路径改造](session-parent-child-tree-plan-2.md) | Plan 1 | ✅ 已完成 |
+| 3 | [`get_session_tree` API + v0.3.5 tag](session-parent-child-tree-plan-3.md) | Plan 1, Plan 2 | ✅ 已完成（代码层，发版未执行） |
 
 三个 Plan 严格顺序执行，每完成一个走 CLAUDE.md 修复流程（clippy + fmt + test 全绿）。Plan 3 完成后升 git tag `v0.3.5` 并推 origin。
 

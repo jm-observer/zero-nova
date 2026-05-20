@@ -1,4 +1,5 @@
 use crate::agent::AgentRuntime;
+use crate::app::conversation_service::ConversationWriteHandle;
 use crate::config::{AgentSpec, AppConfig};
 use crate::event::AgentEvent;
 use crate::message::{ContentBlock, Message, Role};
@@ -20,6 +21,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 /// Concrete subagent prompt service.
 #[derive(Clone)]
@@ -296,6 +298,9 @@ impl crate::tool::ProjectDirService for UnavailableSubagentProjectDirService {
 pub struct AgentToolServices {
     pub prompt_service: SubagentPromptService,
     pub runtime_builder: SubagentRuntimeBuilder,
+    /// 子 Agent 派生路径的会话持久化句柄；CLI / 一次性独立调用路径为 None，仅 Gateway 路径填值。
+    /// None 视为 fallback 老语义（子 turn messages 不持久化）。
+    pub conversation_writer: Option<Arc<ConversationWriteHandle>>,
 }
 
 /// Tool to spawn a subagent for specialized task execution.
@@ -658,12 +663,28 @@ impl AgentTool {
             None
         };
 
-        let session_id = context
-            .as_ref()
-            .map(|ctx| ctx.session_id.clone())
-            .unwrap_or_else(|| "subagent".to_string());
+        // ============================================================
+        // 子 Session 派生（Plan 2）—— 判定逻辑见 `decide_child_session_path`
+        // ============================================================
+        let parent_context = decide_child_session_path(services.conversation_writer.as_ref(), context.as_ref())?;
+        let child_session_info = if let Some((writer, parent_session_id, parent_tool_use_id)) = parent_context {
+            let child_id = writer
+                .create_child_session(&parent_session_id, &parent_tool_use_id, agent_id, None)
+                .await?;
+            Some((writer, child_id))
+        } else {
+            None
+        };
 
-        // 预激活该 skill 声明的 deferred 工具（全局视图不收窄，仅把这些 promote 为可直调）。
+        let session_id = match &child_session_info {
+            Some((_, child_id)) => child_id.clone(),
+            None => context
+                .as_ref()
+                .map(|ctx| ctx.session_id.clone())
+                .unwrap_or_else(|| "subagent".to_string()),
+        };
+
+        // 预激活该 skill 声明的 deferred 工具（注意：用 session_id，可能是 child_session_id 或 fallback id）。
         for tool_name in &preload_tools {
             if !runtime.tools().resolve_deferred(&session_id, tool_name).await {
                 log::warn!(
@@ -672,6 +693,13 @@ impl AgentTool {
                 );
             }
         }
+
+        // CancellationToken 父子链：父被取消时子也跟着取消。父若无 token 则子独立创建。
+        let child_cancel = context
+            .as_ref()
+            .and_then(|ctx| ctx.cancellation_token.clone())
+            .map(|parent_tok| parent_tok.child_token())
+            .or_else(|| Some(CancellationToken::new()));
 
         let turn_ctx = runtime
             .prepare_turn(prompt, Arc::new(Vec::new()), system_prompt, &session_id)
@@ -691,11 +719,18 @@ impl AgentTool {
                 agent_id,
                 Some(environment),
                 tx,
-                None,
+                child_cancel,
             )
             .await?;
         if let Some(handle) = forwarding_handle {
             handle.await?;
+        }
+
+        // 子 turn 完成后持久化 messages 到子 Session.history（含 ProviderHttpTrace）。
+        if let Some((writer, child_id)) = &child_session_info {
+            if let Err(err) = writer.persist_subagent_turn(child_id, &result).await {
+                log::warn!("[Agent] persist_subagent_turn failed for child {}: {}", child_id, err);
+            }
         }
 
         let final_assistant_msg = result
@@ -768,6 +803,26 @@ impl SubAgentExecutor for AgentTool {
 
     fn default_agent_id(&self) -> String {
         AgentTool::default_agent_id(self)
+    }
+}
+
+/// 判定 `run_subagent` 是否应该走子 Session 派生路径。
+///
+/// 见设计稿「已收敛的待澄清点」#2：
+/// - `writer == None`（CLI / 独立调用）→ `Ok(None)` fallback；
+/// - `writer == Some` + `context == None` → `Ok(None)` fallback；
+/// - `writer == Some` + `context == Some` 但 `tool_use_id` 为空 → `Err`（上游 bug）；
+/// - 其它（正常路径）→ `Ok(Some((writer, parent_session_id, parent_tool_use_id)))`。
+fn decide_child_session_path(
+    writer: Option<&Arc<ConversationWriteHandle>>,
+    context: Option<&ToolContext>,
+) -> Result<Option<(Arc<ConversationWriteHandle>, String, String)>> {
+    match (writer, context) {
+        (Some(_), Some(ctx)) if ctx.tool_use_id.is_empty() => {
+            anyhow::bail!("[Agent] ToolContext present but tool_use_id is empty (upstream bug)")
+        }
+        (Some(writer), Some(ctx)) => Ok(Some((writer.clone(), ctx.session_id.clone(), ctx.tool_use_id.clone()))),
+        _ => Ok(None),
     }
 }
 

@@ -860,3 +860,340 @@ async fn title_is_not_regenerated_after_success_and_reload() -> Result<()> {
     assert_eq!(loaded_title_state.status, TitleStatus::Succeeded);
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Plan 2: 父子 Session 派生路径测试
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_with_parent_persists_parent_columns() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+
+    // 先建一个父 Session
+    let parent = service
+        .create(Some("parent".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+
+    let child = service
+        .create_with_parent(
+            Some("child".to_string()),
+            "agent-1".to_string(),
+            parent.id.clone(),
+            "toolu_xyz".to_string(),
+            None,
+        )
+        .await?;
+
+    // 内存侧 parent_* 字段正确
+    assert_eq!(child.parent_session_id.as_deref(), Some(parent.id.as_str()));
+    assert_eq!(child.parent_tool_use_id.as_deref(), Some("toolu_xyz"));
+
+    // SQLite 侧落盘正确
+    let row = repository.load_session_meta(&child.id).await?.expect("child row");
+    assert_eq!(row.6.as_deref(), Some(parent.id.as_str()));
+    assert_eq!(row.7.as_deref(), Some("toolu_xyz"));
+
+    // list_child_session_ids 可查到
+    let children_ids = repository.list_child_session_ids(&parent.id).await?;
+    assert_eq!(children_ids, vec![child.id.clone()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn try_get_loaded_returns_session_when_cached() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let session = service
+        .create(Some("s".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+
+    let got = service.try_get_loaded(&session.id).await;
+    assert!(got.is_some());
+    assert_eq!(got.unwrap().id, session.id);
+
+    // 未知 id 返回 None，不报错
+    assert!(service.try_get_loaded("nonexistent").await.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_handle_create_child_session_pushes_into_parent_memory() -> Result<()> {
+    use crate::app::conversation_service::ConversationWriteHandle;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    // 父 Session 创建并进入 cache
+    let parent = service
+        .create(Some("p".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+
+    let child_id = writer
+        .create_child_session(&parent.id, "toolu_x", "agent-1", None)
+        .await?;
+
+    // 父内存侧已 push_child
+    let parent_children = parent.get_child_ids().await;
+    assert_eq!(parent_children, vec![child_id.clone()]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn write_handle_persist_subagent_turn_attaches_provider_http_trace() -> Result<()> {
+    use crate::agent::TurnResult;
+    use crate::app::conversation_service::ConversationWriteHandle;
+    use crate::message::{ContentBlock, Message, Role};
+    use crate::provider::types::Usage;
+    use serde_json::json;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    // 父 + 子
+    let parent = service
+        .create(Some("p".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let child_id = writer
+        .create_child_session(&parent.id, "toolu_x", "agent-1", None)
+        .await?;
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let turn = TurnResult {
+        messages: vec![
+            Message::new(Role::User, vec![ContentBlock::Text { text: "hi".to_string() }], now),
+            Message::new(
+                Role::Assistant,
+                vec![ContentBlock::Text {
+                    text: "hello".to_string(),
+                }],
+                now,
+            ),
+        ],
+        usage: Usage::default(),
+        provider_request_body: Some(json!({"req": "body"})),
+        provider_response_body: Some(json!({"resp": "body"})),
+    };
+
+    writer.persist_subagent_turn(&child_id, &turn).await?;
+
+    // 重新从 DB 加载子 Session.history，确认 Assistant Message 带 trace
+    let loaded = repository.load_session(&child_id).await?.expect("child should exist");
+    let history = loaded.6; // index 6: history (前 0..5 是 id/title/agent_id/created_at/updated_at/runtime_control)
+                            // 等等：load_session 返回元组实际是 (id, title, agent_id, created_at, updated_at, runtime_control, history, parent_session_id, parent_tool_use_id)
+                            // 所以 history 在 index 6
+    assert_eq!(history.len(), 2);
+    let assistant = history.iter().find(|m| m.role == Role::Assistant).expect("assistant");
+    let metadata = assistant.metadata.as_ref().expect("assistant metadata");
+    let trace = metadata.provider_http_trace.as_ref().expect("provider_http_trace");
+    assert_eq!(trace.request_body, json!({"req":"body"}));
+    assert_eq!(trace.response_body, json!({"resp":"body"}));
+
+    // User Message 不应带 trace
+    let user = history.iter().find(|m| m.role == Role::User).expect("user");
+    assert!(user
+        .metadata
+        .as_ref()
+        .and_then(|m| m.provider_http_trace.as_ref())
+        .is_none());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Plan 3: 父子树查询 + 级联删除测试
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_child_session_summaries_returns_summaries_in_created_order() -> Result<()> {
+    use crate::app::conversation_service::ConversationWriteHandle;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    let parent = service
+        .create(Some("p".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let c1 = writer
+        .create_child_session(&parent.id, "t1", "agent-1", Some("c1".to_string()))
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let c2 = writer
+        .create_child_session(&parent.id, "t2", "agent-1", Some("c2".to_string()))
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    let c3 = writer
+        .create_child_session(&parent.id, "t3", "agent-1", Some("c3".to_string()))
+        .await?;
+
+    let summaries = service.list_child_session_summaries(&parent.id).await?;
+    let ids: Vec<String> = summaries.iter().map(|s| s.id.clone()).collect();
+    assert_eq!(ids, vec![c1, c2, c3]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_child_session_summaries_empty_for_leaf_or_unknown() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let root = service
+        .create(Some("r".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    assert!(service.list_child_session_summaries(&root.id).await?.is_empty());
+    assert!(service.list_child_session_summaries("ghost").await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn delete_session_tree_returns_zero_for_nonexistent_root() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let count = service.delete_session_tree("ghost").await?;
+    assert_eq!(count, 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn delete_session_tree_cascades_full_subtree() -> Result<()> {
+    use crate::app::conversation_service::ConversationWriteHandle;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    // 构造：p + 2 子 + 3 孙
+    let p = service
+        .create(Some("p".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let c1 = writer.create_child_session(&p.id, "t1", "agent-1", None).await?;
+    let c2 = writer.create_child_session(&p.id, "t2", "agent-1", None).await?;
+    let _g1 = writer.create_child_session(&c1, "tg1", "agent-1", None).await?;
+    let _g2 = writer.create_child_session(&c1, "tg2", "agent-1", None).await?;
+    let _g3 = writer.create_child_session(&c2, "tg3", "agent-1", None).await?;
+
+    let deleted = service.delete_session_tree(&p.id).await?;
+    assert_eq!(deleted, 6);
+    assert!(repository.load_session_meta(&p.id).await?.is_none());
+    assert!(repository.load_session_meta(&c1).await?.is_none());
+    assert!(repository.load_session_meta(&c2).await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn build_session_tree_depth_zero_returns_root_only_with_truncated() -> Result<()> {
+    use crate::app::conversation_service::ConversationWriteHandle;
+    use crate::app::session_tree::build_session_tree;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    let p = service
+        .create(Some("p".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let _c = writer.create_child_session(&p.id, "t1", "agent-1", None).await?;
+
+    let tree = build_session_tree(&service, &p.id, 0).await?;
+    assert!(tree.children.is_empty());
+    assert!(tree.truncated, "root has child but depth=0 → truncated");
+    assert_eq!(tree.summary.id, p.id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn build_session_tree_recurses_to_full_depth_with_parent_tool_use_id() -> Result<()> {
+    use crate::app::conversation_service::ConversationWriteHandle;
+    use crate::app::session_tree::build_session_tree;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    let p = service
+        .create(Some("p".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let c = writer.create_child_session(&p.id, "toolu_c", "agent-1", None).await?;
+    let _g = writer.create_child_session(&c, "toolu_g", "agent-1", None).await?;
+
+    let tree = build_session_tree(&service, &p.id, 8).await?;
+    assert!(!tree.truncated);
+    assert!(tree.parent_tool_use_id.is_none(), "root has no parent_tool_use_id");
+    assert_eq!(tree.children.len(), 1);
+    let child = &tree.children[0];
+    assert_eq!(child.parent_tool_use_id.as_deref(), Some("toolu_c"));
+    assert!(!child.truncated);
+    assert_eq!(child.children.len(), 1);
+    let grand = &child.children[0];
+    assert_eq!(grand.parent_tool_use_id.as_deref(), Some("toolu_g"));
+    assert!(!grand.truncated);
+    assert!(grand.children.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn build_session_tree_truncates_at_depth_limit() -> Result<()> {
+    use crate::app::conversation_service::ConversationWriteHandle;
+    use crate::app::session_tree::build_session_tree;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let writer = ConversationWriteHandle::new(service.clone());
+
+    // 5 层链：root → c1 → c2 → c3 → c4
+    let root = service
+        .create(Some("r".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let c1 = writer.create_child_session(&root.id, "t1", "agent-1", None).await?;
+    let c2 = writer.create_child_session(&c1, "t2", "agent-1", None).await?;
+    let c3 = writer.create_child_session(&c2, "t3", "agent-1", None).await?;
+    let _c4 = writer.create_child_session(&c3, "t4", "agent-1", None).await?;
+
+    // max_depth=2：展开 root + c1 + c2 三层节点（root 用初始 depth=2 进入，c1 用 depth=1，c2 用 depth=0 即 leaf-with-truncated）
+    let tree = build_session_tree(&service, &root.id, 2).await?;
+    let level2 = &tree.children[0].children[0]; // c2 节点（remaining=0 时构建）
+    assert!(level2.children.is_empty(), "c2 sits at depth boundary");
+    assert!(level2.truncated, "c2 has child c3 but remaining_depth=0 → truncated");
+    Ok(())
+}
+
+#[tokio::test]
+async fn build_session_tree_returns_err_for_unknown_root() -> Result<()> {
+    use crate::app::session_tree::build_session_tree;
+
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let err = build_session_tree(&service, "ghost", 8).await;
+    assert!(err.is_err());
+    assert!(err.unwrap_err().to_string().contains("not found"));
+    Ok(())
+}

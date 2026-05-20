@@ -205,6 +205,27 @@ impl SessionService {
         Ok(control.project_dir.clone())
     }
 
+    /// 按 parent_session_id 列出直接子 Session 的轻量摘要（不加载 history）。
+    /// message_count 走单独的 COUNT 查询。Plan 3 对外 `list_child_sessions` 委托此方法。
+    pub async fn list_child_session_summaries(&self, parent_id: &str) -> Result<Vec<SessionSummary>> {
+        let child_ids = self.repository.list_child_session_ids(parent_id).await?;
+        let mut out = Vec::with_capacity(child_ids.len());
+        for id in child_ids {
+            if let Some(row) = self.repository.load_session_meta(&id).await? {
+                let msg_count = self.repository.count_messages(&id).await.unwrap_or(0);
+                out.push(SessionSummary {
+                    id: row.0,
+                    name: row.1,
+                    agent_id: row.2,
+                    created_at: row.3,
+                    updated_at: row.4,
+                    message_count: msg_count,
+                });
+            }
+        }
+        Ok(out)
+    }
+
     pub(super) async fn load_session_from_db(
         &self,
         id: &str,

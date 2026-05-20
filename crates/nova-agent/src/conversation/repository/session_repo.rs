@@ -258,4 +258,26 @@ impl SqliteSessionRepository {
         tx.commit().await?;
         Ok(())
     }
+
+    /// 单 transaction 批量删 session 行 + 其 messages。空列表直接返回 Ok。
+    /// 不存在的 id 静默跳过（DELETE 是幂等的）。
+    pub async fn delete_sessions_bulk(&self, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.pool.acquire().await?;
+        let mut tx = conn.begin().await?;
+        for id in ids {
+            sqlx::query("DELETE FROM messages WHERE session_id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("DELETE FROM sessions WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
 }

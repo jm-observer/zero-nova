@@ -18,6 +18,47 @@ impl SessionService {
         self.create_for_agent(name, agent_id, system_prompt, None).await
     }
 
+    /// 创建一个子 Session 并落盘父子关系。父 Session 内存侧若已加载，调用方需自行 push_child。
+    /// `parent_tool_use_id` 必填——用于复盘 UI 把子树锚定到父 history 的具体 ToolUse。
+    pub async fn create_with_parent(
+        &self,
+        name: Option<String>,
+        agent_id: String,
+        parent_session_id: String,
+        parent_tool_use_id: String,
+        inherited_project_dir: Option<PathBuf>,
+    ) -> Result<Arc<Session>> {
+        let id = Uuid::new_v4().to_string();
+        let session_name = name.unwrap_or_else(|| format!("subagent-{}", parent_tool_use_id));
+        let now = Utc::now().timestamp_millis();
+
+        let session = Arc::new(Session {
+            control: tokio::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
+            id: id.clone(),
+            name: RwLock::new(session_name),
+            history: RwLock::new(Vec::new()),
+            created_at: now,
+            updated_at: AtomicI64::new(now),
+            chat_lock: Mutex::new(()),
+            cancellation_token: RwLock::new(None),
+            title_state: RwLock::new(TitleState::new_default()),
+            parent_session_id: Some(parent_session_id),
+            parent_tool_use_id: Some(parent_tool_use_id),
+            child_session_ids: RwLock::new(Vec::new()),
+        });
+
+        self.persist_full_session(&session).await?;
+        self.cache.insert_loaded(id, session.clone()).await;
+        Ok(session)
+    }
+
+    /// 从 cache 读已加载的 Session（不触发 DB load）。
+    /// 用于子 Agent 派生路径中尝试给父 Session push_child 时，父若不在内存就跳过——
+    /// 持久化关系靠子行的 parent_session_id 列承载，父侧 children 是 load 时回填。
+    pub async fn try_get_loaded(&self, id: &str) -> Option<Arc<Session>> {
+        self.cache.get(id).await
+    }
+
     pub async fn create_for_agent(
         &self,
         name: Option<String>,
@@ -119,6 +160,31 @@ impl SessionService {
     pub async fn delete(&self, id: &str) -> Result<bool> {
         self.repository.delete_session(id).await?;
         Ok(self.cache.remove(id).await.is_some())
+    }
+
+    /// 级联删除以 root_id 为根的整棵子树（含根本身）。
+    ///
+    /// 见设计稿「已收敛的待澄清点」#4：root 不存在时返回 `Ok(0)`，不进入 DFS / cache.remove。
+    /// 返回删除的 Session 数量。
+    pub async fn delete_session_tree(&self, root_id: &str) -> Result<usize> {
+        if self.repository.load_session_meta(root_id).await?.is_none() {
+            return Ok(0);
+        }
+
+        // DFS 收集所有后代 id（含 root）。
+        let mut to_delete = vec![root_id.to_string()];
+        let mut stack = vec![root_id.to_string()];
+        while let Some(cur) = stack.pop() {
+            let kids = self.repository.list_child_session_ids(&cur).await?;
+            stack.extend(kids.iter().cloned());
+            to_delete.extend(kids);
+        }
+        let count = to_delete.len();
+        self.repository.delete_sessions_bulk(&to_delete).await?;
+        for id in &to_delete {
+            self.cache.remove(id).await;
+        }
+        Ok(count)
     }
 
     pub async fn copy_session(&self, source_id: &str, truncate_index: Option<usize>) -> Result<Option<Arc<Session>>> {

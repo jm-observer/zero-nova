@@ -23,7 +23,8 @@ pub mod conversation;
 
 pub use agent::{AgentConfig, AgentRuntime, TurnResult};
 pub use agent_catalog::{AgentDescriptor, AgentRegistry};
-pub use app::ToolInventoryView;
+pub use app::{SessionTree, ToolInventoryView};
+pub use conversation::session::SessionSummary;
 pub use event::AgentEvent;
 pub use mcp::{McpClient, McpToolDef, ServerInfo};
 pub use message::{ContentBlock, Message, Role};

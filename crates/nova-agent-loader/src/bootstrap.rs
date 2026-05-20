@@ -72,6 +72,9 @@ pub async fn build_agent_runtime(config: &AppConfig, options: AgentRuntimeBuildO
         Some(nova_agent::tool::builtin::agent::AgentToolServices {
             prompt_service: agent_prompt_service,
             runtime_builder,
+            // 该 build_agent_runtime 路径无 SessionService（CLI / 一次性独立运行），
+            // 子 Agent 派生回退到老语义（不持久化）。
+            conversation_writer: None,
         }),
     )
     .await;
@@ -227,6 +230,9 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
     let tools = ToolRegistry::new();
     let agent_prompt_service = build_agent_prompt_service(Arc::new(config.clone()));
     let runtime_builder = build_subagent_runtime_builder(Arc::new(config.clone()));
+    let conversation_writer = Arc::new(nova_agent::app::conversation_service::ConversationWriteHandle::new(
+        session_service.clone(),
+    ));
     register_builtin_tools_with_services(
         &tools,
         &config,
@@ -237,6 +243,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
         Some(nova_agent::tool::builtin::agent::AgentToolServices {
             prompt_service: agent_prompt_service,
             runtime_builder,
+            conversation_writer: Some(conversation_writer),
         }),
     )
     .await;

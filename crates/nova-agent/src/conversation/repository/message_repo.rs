@@ -2,6 +2,7 @@ use super::SqliteSessionRepository;
 use crate::message::{ContentBlock, Role};
 use anyhow::Result;
 use serde_json::Value;
+use sqlx::Row;
 
 impl SqliteSessionRepository {
     pub async fn save_message(
@@ -34,5 +35,15 @@ impl SqliteSessionRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// 返回指定 session 的消息总数。用于 SessionSummary 的 message_count 字段，避免 load 完整 history。
+    pub async fn count_messages(&self, session_id: &str) -> Result<usize> {
+        let row = sqlx::query("SELECT COUNT(*) AS c FROM messages WHERE session_id = ?")
+            .bind(session_id)
+            .fetch_one(&self.pool)
+            .await?;
+        let count: i64 = row.get::<i64, _>("c");
+        Ok(count.max(0) as usize)
     }
 }

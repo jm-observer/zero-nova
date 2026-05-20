@@ -1,8 +1,10 @@
 use super::conversation_service::ConversationService;
 use super::inventory::ToolInventoryView;
+use super::session_tree::SessionTree;
 use super::types::{AppAgent, AppAgentSwitch, AppEvent, AppMessage, AppSession};
 use crate::agent::TurnResult;
 use crate::config::AppConfig;
+use crate::conversation::session::SessionSummary;
 use crate::message::Role;
 use crate::skill::SkillPackage;
 use anyhow::{Context, Result};
@@ -249,6 +251,19 @@ impl AgentApplicationImpl {
     }
 
     pub async fn delete_session(&self, session_id: &str) -> Result<bool> {
+        // Plan 3：有子 Session 时拒绝删除（避免造成孤儿子 Session）。
+        let children = self
+            .conversation_service
+            .sessions
+            .list_child_session_summaries(session_id)
+            .await?;
+        if !children.is_empty() {
+            anyhow::bail!(
+                "session {} has {} child sessions; use delete_session_tree to delete cascade",
+                session_id,
+                children.len()
+            );
+        }
         let deleted = self.conversation_service.sessions.delete(session_id).await?;
         if deleted {
             // 释放该 session 激活的 deferred 工具，避免按 session 累积。
@@ -259,6 +274,39 @@ impl AgentApplicationImpl {
                 .await;
         }
         Ok(deleted)
+    }
+
+    /// 列出指定 parent Session 的所有直接子 Session 摘要（轻量，不拉 history）。
+    pub async fn list_child_sessions(&self, parent_id: &str) -> Result<Vec<SessionSummary>> {
+        self.conversation_service
+            .sessions
+            .list_child_session_summaries(parent_id)
+            .await
+    }
+
+    /// 深度优先返回以 root_id 为根的完整父子树（每节点含 history + ProviderHttpTrace）。
+    ///
+    /// `max_depth = 0` 表示仅返回根（若根有子则 truncated=true）；
+    /// 超过 max_depth 的子树截断并标记 truncated=true；
+    /// root_id 不存在返回 `Err`。
+    pub async fn get_session_tree(&self, root_id: &str, max_depth: usize) -> Result<SessionTree> {
+        super::session_tree::build_session_tree(&self.conversation_service.sessions, root_id, max_depth).await
+    }
+
+    /// 级联删除整棵子树。root 不存在返回 `Ok(0)`（见设计稿「已收敛的待澄清点」#4）。
+    pub async fn delete_session_tree(&self, root_id: &str) -> Result<usize> {
+        let count = self.conversation_service.sessions.delete_session_tree(root_id).await?;
+        // 实际删除的每个 session 都释放其 deferred 工具激活。
+        // 注：to_delete 列表在 SessionService::delete_session_tree 内部，调用者无从拿到；
+        // 这里保守地仅清理 root 的 activations，下层 Session 的 activations 随 session 删除已无意义。
+        if count > 0 {
+            self.conversation_service
+                .agent
+                .tools()
+                .clear_session_activations(root_id)
+                .await;
+        }
+        Ok(count)
     }
 
     pub async fn copy_session(&self, session_id: &str, truncate_index: Option<usize>) -> Result<AppSession> {

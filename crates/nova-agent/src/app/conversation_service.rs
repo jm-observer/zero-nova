@@ -660,6 +660,81 @@ impl ConversationService {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ConversationWriteHandle —— Plan 2: 给 AgentTool 子 Agent 派生路径用的最小写入句柄
+// ---------------------------------------------------------------------------
+
+/// 封装"创建子 Session + 持久化 turn 结果"两个原子操作。
+/// 不暴露 ConversationService 全量 API（避免子 Agent 路径偶然触发高层路径如 `start_turn`）。
+#[derive(Clone)]
+pub struct ConversationWriteHandle {
+    sessions: SessionService,
+}
+
+impl ConversationWriteHandle {
+    pub fn new(sessions: SessionService) -> Self {
+        Self { sessions }
+    }
+
+    /// 创建子 Session 并落盘父子关系。
+    /// 父 Session 若已在内存中，同步 push_child 维护子 id 列表；持久化关系由子行 parent_session_id 列承载。
+    pub async fn create_child_session(
+        &self,
+        parent_session_id: &str,
+        parent_tool_use_id: &str,
+        agent_id: &str,
+        title: Option<String>,
+    ) -> Result<String> {
+        let child = self
+            .sessions
+            .create_with_parent(
+                title,
+                agent_id.to_string(),
+                parent_session_id.to_string(),
+                parent_tool_use_id.to_string(),
+                None,
+            )
+            .await?;
+        let child_id = child.id.clone();
+        if let Some(parent) = self.sessions.try_get_loaded(parent_session_id).await {
+            parent.push_child(&child_id).await;
+        }
+        Ok(child_id)
+    }
+
+    /// 把子 turn 的 messages（含 ProviderHttpTrace metadata）追加到子 Session.history 并落 SQLite。
+    /// 语义与 `ConversationService::start_turn` 中持久化父 turn 的循环等价（同一份末次 trace 贴到每条 Assistant Message——
+    /// 见设计稿「项目现状」段的复盘 trace 粒度限制）。
+    pub async fn persist_subagent_turn(&self, child_session_id: &str, turn_result: &TurnResult) -> Result<()> {
+        for msg in &turn_result.messages {
+            let metadata = if msg.role == Role::Assistant {
+                turn_result
+                    .provider_request_body
+                    .as_ref()
+                    .zip(turn_result.provider_response_body.as_ref())
+                    .map(|(request_body, response_body)| {
+                        serde_json::json!({
+                            "providerHttpTrace": {
+                                "requestBody": request_body,
+                                "responseBody": response_body,
+                                "format": "json",
+                                "boundMessageId": "",
+                                "capturedAt": Utc::now().timestamp_millis(),
+                                "truncated": false
+                            }
+                        })
+                    })
+            } else {
+                None
+            };
+            self.sessions
+                .append_message(child_session_id, msg.role.clone(), msg.content.clone(), metadata)
+                .await?;
+        }
+        Ok(())
+    }
+}
+
 fn infer_usage_completeness(usage: &crate::provider::types::Usage) -> UsageCompleteness {
     if usage.input_tokens == 0 && usage.output_tokens == 0 {
         return UsageCompleteness::Missing;

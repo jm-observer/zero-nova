@@ -75,14 +75,26 @@ impl SessionService {
             initial_history.push(Message {
                 id: Uuid::new_v4().to_string(),
                 role: Role::System,
-                content: vec![ContentBlock::Text { text: system_prompt }],
+                content: vec![ContentBlock::Text {
+                    text: system_prompt.clone(),
+                }],
                 created_at: now,
                 metadata: None,
             });
         }
 
+        // 同时把 system_prompt 写到 control.system_prompt_base_override：
+        // prepare_turn 在每轮重建 prompt 时读 override 优先于
+        // agent_descriptor.system_prompt_base 静态字段。这样调用方（如外部
+        // AgentPromptProvider 返回的动态字符串）在 create_session 时定格的
+        // 内容会被 prepare_turn 真正用上，而不只是停留在 history[0]。
+        let mut control = ControlState::new_with_project_dir(&agent_id, inherited_project_dir);
+        if !system_prompt.is_empty() {
+            control.system_prompt_base_override = Some(system_prompt);
+        }
+
         let session = Arc::new(Session {
-            control: tokio::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
+            control: tokio::sync::RwLock::new(control),
             id: id.clone(),
             name: RwLock::new(session_name),
             history: RwLock::new(initial_history),

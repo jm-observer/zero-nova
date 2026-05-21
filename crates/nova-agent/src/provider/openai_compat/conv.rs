@@ -7,7 +7,8 @@ use async_openai::types::chat::{
     ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessage,
     ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
     ChatCompletionRequestUserMessageContentPart, ChatCompletionStreamOptions, ChatCompletionTool, ChatCompletionTools,
-    CompletionUsage, CreateChatCompletionRequest, FinishReason, FunctionCall, FunctionObject, ImageUrl, ReasoningEffort,
+    CompletionUsage, CreateChatCompletionRequest, FinishReason, FunctionCall, FunctionObject, ImageUrl,
+    ReasoningEffort,
 };
 
 use crate::message::{ContentBlock, Message, Role};

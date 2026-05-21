@@ -1,6 +1,7 @@
 use crate::orchestrator::planner::{self, AgentRequest, ExecutionStage, OrchestrationPlan, StageMode};
 use crate::orchestrator::{OrchestratorEngine, SubAgentExecutor};
 use crate::tool::builtin::agent::AgentTool;
+use crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot;
 use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -11,11 +12,22 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct OrchestrateTaskTool {
     agent_tool: Arc<AgentTool>,
+    /// 共享 hook slot：多个 clone 共享同一注册状态。外部宿主（zero 等）
+    /// 通过 `AgentApplicationImpl::register_orchestrate_task_prompt_hook` 注入。
+    prompt_hook: OrchestrateTaskHookSlot,
 }
 
 impl OrchestrateTaskTool {
     pub fn new(agent_tool: Arc<AgentTool>) -> Self {
-        Self { agent_tool }
+        Self {
+            agent_tool,
+            prompt_hook: OrchestrateTaskHookSlot::new(),
+        }
+    }
+
+    /// 暴露内部 hook slot 供外层（`AgentApplicationImpl`）取一份共享句柄注入 hook。
+    pub fn prompt_hook_slot(&self) -> OrchestrateTaskHookSlot {
+        self.prompt_hook.clone()
     }
 
     pub fn input_schema() -> Value {
@@ -107,7 +119,7 @@ impl Tool for OrchestrateTaskTool {
             anyhow::bail!("'plan' and 'prompt' are mutually exclusive");
         }
 
-        let (plan, is_shorthand) = if let Some(plan_value) = input.get("plan") {
+        let (mut plan, is_shorthand) = if let Some(plan_value) = input.get("plan") {
             let raw: OrchestrationPlan = serde_json::from_value(plan_value.clone()).map_err(|e| {
                 anyhow::anyhow!(
                     "Invalid plan object: {}. Expected structure: {{planId, description, stages: [{{stageId, mode: \"parallel\"|\"serial\", dependsOn?: [], agents: [{{agentId, description, prompt}}]}}]}}",
@@ -123,6 +135,27 @@ impl Tool for OrchestrateTaskTool {
         } else {
             anyhow::bail!("Either 'plan' (object) or 'prompt' (string) must be provided");
         };
+
+        // 激活子 Agent 之前，让外部宿主 hook 改写每个 AgentRequest.prompt。
+        // hook 缺失或返回 Err 时保留原 prompt（fallback）。
+        if let Some(hook) = self.prompt_hook.get().await {
+            for stage in plan.stages.iter_mut() {
+                for req in stage.agents.iter_mut() {
+                    let slug = req.skill.as_deref().unwrap_or("");
+                    match hook.transform_prompt(slug, &req.prompt, &tool_context.session_id).await {
+                        Ok(new_prompt) => {
+                            req.prompt = new_prompt;
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "OrchestrateTaskPromptHook 失败 skill={slug} session_id={} err={e:#}，使用原 prompt",
+                                tool_context.session_id
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         log::info!(
             "[OrchestrateTaskTool] Received orchestration request plan_id={} stage_count={}",
@@ -311,6 +344,94 @@ mod tests {
             .expect("error should exist")
             .to_string()
             .contains("mutually exclusive"));
+    }
+
+    #[tokio::test]
+    async fn shorthand_hook_transforms_prompt_before_subagent() {
+        // hook 注入后，子 Agent 收到的 prompt 应该被 hook 改写过。
+        // 由于实际 subagent execution 没起 services 会失败，我们检查 hook 调用本身。
+        use crate::tool::builtin::orchestrate_hook::{OrchestrateTaskHookSlot, OrchestrateTaskPromptHook};
+        use async_trait::async_trait;
+        use std::sync::Mutex as StdMutex;
+
+        struct RecorderHook {
+            calls: Arc<StdMutex<Vec<(String, String, String)>>>,
+        }
+        #[async_trait]
+        impl OrchestrateTaskPromptHook for RecorderHook {
+            async fn transform_prompt(&self, slug: &str, prompt: &str, session_id: &str) -> anyhow::Result<String> {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((slug.to_string(), prompt.to_string(), session_id.to_string()));
+                Ok(format!("[INJECTED] {prompt}"))
+            }
+        }
+
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
+        let slot: OrchestrateTaskHookSlot = tool.prompt_hook_slot();
+        slot.set(Arc::new(RecorderHook { calls: calls.clone() })).await;
+
+        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(64);
+        let _ = tool
+            .execute(
+                serde_json::json!({
+                    "prompt": "原 prompt",
+                    "description": "测试",
+                    "skill": "alarm"
+                }),
+                Some(test_context(event_tx)),
+            )
+            .await;
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 1, "hook should be called exactly once");
+        assert_eq!(recorded[0].0, "alarm", "skill_slug should be passed");
+        assert_eq!(recorded[0].1, "原 prompt", "original prompt should be passed");
+        assert_eq!(recorded[0].2, "session-1", "session_id should be passed");
+    }
+
+    #[tokio::test]
+    async fn shorthand_without_hook_keeps_original_prompt() {
+        // 未注册 hook 时，behaviour 保持与旧 nova 一致（既有测试已覆盖 path），
+        // 这里再加一条断言确认 hook slot 未注入时不调用任何 hook。
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
+        let slot = tool.prompt_hook_slot();
+        assert!(slot.get().await.is_none(), "未 set 时 slot 应为 None");
+    }
+
+    #[tokio::test]
+    async fn shorthand_hook_err_falls_back_to_original_prompt() {
+        // hook 返回 Err 时不应阻塞主链路，子 Agent 收到原 prompt。
+        use crate::tool::builtin::orchestrate_hook::OrchestrateTaskPromptHook;
+        use async_trait::async_trait;
+
+        struct FailingHook;
+        #[async_trait]
+        impl OrchestrateTaskPromptHook for FailingHook {
+            async fn transform_prompt(&self, _slug: &str, _prompt: &str, _session_id: &str) -> anyhow::Result<String> {
+                anyhow::bail!("intentional hook failure for test")
+            }
+        }
+
+        let tool = OrchestrateTaskTool::new(Arc::new(AgentTool::new_without_subagent_services(test_config())));
+        tool.prompt_hook_slot().set(Arc::new(FailingHook)).await;
+
+        let (event_tx, _event_rx) = mpsc::channel::<AgentEvent>(64);
+        let result = tool
+            .execute(
+                serde_json::json!({
+                    "prompt": "原 prompt",
+                    "description": "测试",
+                    "skill": "alarm"
+                }),
+                Some(test_context(event_tx)),
+            )
+            .await;
+        // 主链路不应因 hook 失败而 hard error
+        let output = result.expect("hook failure should not hard-fail orchestrate");
+        assert!(!output.is_error, "hook err 应 fallback 到原 prompt 而非 hard error");
     }
 
     #[tokio::test]

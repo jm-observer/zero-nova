@@ -233,7 +233,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
     let conversation_writer = Arc::new(nova_agent::app::conversation_service::ConversationWriteHandle::new(
         session_service.clone(),
     ));
-    register_builtin_tools_with_services(
+    let orchestrate_task_hook_slot = register_builtin_tools_with_services(
         &tools,
         &config,
         task_store.clone(),
@@ -352,6 +352,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
         Arc::new(config),
         config_snapshot_cache,
         config_path,
+        orchestrate_task_hook_slot,
     )))
 }
 

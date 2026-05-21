@@ -103,6 +103,10 @@ pub struct ConversationService {
     pub sessions: SessionService,
     pub config: Arc<AppConfig>,
     turn_prompt_service: TurnPromptService,
+    /// 外部宿主注册的 prompt provider 表（按 agent_id 索引）。
+    /// `create_session` 会优先调 provider 拿动态 prompt，缺失/失败时
+    /// fallback 到 AgentDescriptor.system_prompt_template 静态字段。
+    pub prompt_providers: crate::prompt_provider::PromptProviderRegistry,
 }
 
 impl ConversationService {
@@ -147,6 +151,7 @@ impl ConversationService {
             sessions,
             config: config.clone(),
             turn_prompt_service,
+            prompt_providers: crate::prompt_provider::PromptProviderRegistry::new(),
         }
     }
 
@@ -412,7 +417,7 @@ impl ConversationService {
 
         let prepared_tool_context = self
             .agent
-            .prepare_turn(&input_preview,history_for_turn.clone(), String::new(), session_id)
+            .prepare_turn(&input_preview, history_for_turn.clone(), String::new(), session_id)
             .await?;
         let visible_tool_names: HashSet<String> = prepared_tool_context
             .tool_definitions
@@ -477,7 +482,7 @@ impl ConversationService {
         );
         let turn_ctx = self
             .agent
-            .prepare_turn(&input_preview,history_for_turn, system_prompt, session_id)
+            .prepare_turn(&input_preview, history_for_turn, system_prompt, session_id)
             .await?;
 
         // Phase C: Capture snapshot

@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod bash;
 pub mod edit;
+pub mod orchestrate_hook;
 pub mod orchestrate_task;
 pub mod project_manager;
 pub mod read;
@@ -16,6 +17,7 @@ use crate::config::AppConfig;
 use crate::network::HttpClients;
 use crate::skill::SkillRegistry;
 use crate::tool::{DeferredToolCategory, ProjectDirService, Tool, ToolRegistry};
+use orchestrate_hook::OrchestrateTaskHookSlot;
 use std::sync::Arc;
 
 async fn register_as_deferred(registry: &ToolRegistry, tool: Box<dyn Tool>, category: DeferredToolCategory) {
@@ -28,6 +30,10 @@ async fn register_as_deferred(registry: &ToolRegistry, tool: Box<dyn Tool>, cate
 }
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
+///
+/// 返回 `OrchestrateTaskHookSlot`：调用方可把该 slot 传给 `AgentApplicationImpl`
+/// 用于后续注入 `OrchestrateTaskPromptHook`（外部宿主如 zero 用此前置注入
+/// 子 Agent prompt 上下文）。
 pub async fn register_builtin_tools(
     registry: &ToolRegistry,
     config: &AppConfig,
@@ -35,7 +41,7 @@ pub async fn register_builtin_tools(
     skill_registry: Arc<SkillRegistry>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
-) {
+) -> OrchestrateTaskHookSlot {
     register_builtin_tools_inner(
         registry,
         config,
@@ -45,10 +51,11 @@ pub async fn register_builtin_tools(
         http_clients,
         None,
     )
-    .await;
+    .await
 }
 
 /// Registers built-in tools with subagent execution capabilities.
+/// 返回值含义见 [`register_builtin_tools`]。
 pub async fn register_builtin_tools_with_services(
     registry: &ToolRegistry,
     config: &AppConfig,
@@ -57,7 +64,7 @@ pub async fn register_builtin_tools_with_services(
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
     agent_services: Option<agent::AgentToolServices>,
-) {
+) -> OrchestrateTaskHookSlot {
     register_builtin_tools_inner(
         registry,
         config,
@@ -67,7 +74,7 @@ pub async fn register_builtin_tools_with_services(
         http_clients,
         agent_services,
     )
-    .await;
+    .await
 }
 
 async fn register_builtin_tools_inner(
@@ -78,7 +85,7 @@ async fn register_builtin_tools_inner(
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
     agent_services: Option<agent::AgentToolServices>,
-) {
+) -> OrchestrateTaskHookSlot {
     let shared_agent_tool = Arc::new(agent::AgentTool::new(config.clone(), agent_services));
 
     // Always-on: core tools available every turn
@@ -125,12 +132,11 @@ async fn register_builtin_tools_inner(
         DeferredToolCategory::System,
     )
     .await;
-    register_as_deferred(
-        registry,
-        Box::new(orchestrate_task::OrchestrateTaskTool::new(shared_agent_tool.clone())),
-        DeferredToolCategory::System,
-    )
-    .await;
+    let orchestrate_tool = orchestrate_task::OrchestrateTaskTool::new(shared_agent_tool.clone());
+    let prompt_hook_slot = orchestrate_tool.prompt_hook_slot();
+    register_as_deferred(registry, Box::new(orchestrate_tool), DeferredToolCategory::System).await;
+
+    prompt_hook_slot
 }
 
 #[cfg(test)]

@@ -69,7 +69,9 @@ pub enum InputContentBlock {
     },
     /// Image block carrying base64 image data; serializes to the Anthropic
     /// vision content format (`{type:"image", source:{type:"base64", ...}}`).
-    Image { source: AnthropicImageSource },
+    Image {
+        source: AnthropicImageSource,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -25,6 +25,10 @@ pub struct AgentApplicationImpl {
     config_inner: ArcSwap<AppConfig>,
     config_snapshot_cache: Arc<ArcSwap<Value>>,
     config_path: PathBuf,
+    /// OrchestrateTaskTool 的 hook slot 共享句柄。
+    /// 由 `register_builtin_tools` 在构造工具时产出，注入到 AgentApplicationImpl
+    /// 持有，外部宿主通过 `register_orchestrate_task_prompt_hook` 写入。
+    orchestrate_task_hook_slot: crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot,
     // voice_service: VoiceService,
 }
 
@@ -35,6 +39,7 @@ impl AgentApplicationImpl {
         config: Arc<AppConfig>,
         config_snapshot_cache: Arc<ArcSwap<Value>>,
         config_path: PathBuf,
+        orchestrate_task_hook_slot: crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot,
         // voice_service: VoiceService,
     ) -> Self {
         Self {
@@ -44,6 +49,7 @@ impl AgentApplicationImpl {
             config_inner: ArcSwap::from_pointee((*config).clone()),
             config_snapshot_cache,
             config_path,
+            orchestrate_task_hook_slot,
             // voice_service,
         }
     }
@@ -71,6 +77,34 @@ impl AgentApplicationImpl {
 
     fn voice_not_implemented<T>() -> Result<T> {
         anyhow::bail!("voice not implemented")
+    }
+
+    /// 注册外部宿主的 `AgentPromptProvider`。注册后，所有后续 `create_session`
+    /// 对该 `agent_id` 的调用都将通过 provider 拉取最新 system prompt。
+    /// 重复注册静默覆盖。`agent_id` 在 registry 不存在时返回 Err。
+    pub async fn register_agent_prompt_provider(
+        &self,
+        agent_id: &str,
+        provider: Arc<dyn crate::prompt_provider::AgentPromptProvider>,
+    ) -> Result<()> {
+        if self.conversation_service.agent_registry.get(agent_id).is_none() {
+            anyhow::bail!("Agent '{agent_id}' not found");
+        }
+        self.conversation_service
+            .prompt_providers
+            .register(agent_id, provider)
+            .await;
+        Ok(())
+    }
+
+    /// 注册外部宿主的 `OrchestrateTaskPromptHook`。注册后，所有后续
+    /// `OrchestrateTaskTool::execute` 调用在激活子 Agent 前都会通过 hook
+    /// 改写每个 `AgentRequest.prompt`。重复注册静默覆盖。
+    pub async fn register_orchestrate_task_prompt_hook(
+        &self,
+        hook: Arc<dyn crate::tool::builtin::orchestrate_hook::OrchestrateTaskPromptHook>,
+    ) {
+        self.orchestrate_task_hook_slot.set(hook).await;
     }
 }
 
@@ -211,12 +245,29 @@ impl AgentApplicationImpl {
     }
 
     pub async fn create_session(&self, title: Option<String>, agent_id: String) -> Result<AppSession> {
-        let system_prompt = self
-            .conversation_service
-            .agent_registry
-            .get(&agent_id)
-            .map(|agent| agent.system_prompt_template.clone())
-            .unwrap_or_default();
+        // 优先调外部 provider（zero 等宿主注册的 AgentPromptProvider）拿当前
+        // 完整 system prompt；provider 缺失或返回 Err 时 fallback 到旧路径
+        // （agent.system_prompt_template 静态字段），不阻塞主链路。
+        let provider = self.conversation_service.prompt_providers.get(&agent_id).await;
+        let template_fallback = || -> String {
+            self.conversation_service
+                .agent_registry
+                .get(&agent_id)
+                .map(|agent| agent.system_prompt_template.clone())
+                .unwrap_or_default()
+        };
+        let system_prompt = match provider {
+            Some(p) => match p.current_system_prompt(&agent_id).await {
+                Ok(prompt) => prompt,
+                Err(err) => {
+                    log::warn!(
+                        "AgentPromptProvider 调用失败 agent_id={agent_id} err={err:#}，fallback 到 system_prompt_template"
+                    );
+                    template_fallback()
+                }
+            },
+            None => template_fallback(),
+        };
 
         let inherited_project_dir = self
             .conversation_service

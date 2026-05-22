@@ -32,6 +32,13 @@ impl SessionService {
         let session_name = name.unwrap_or_else(|| format!("subagent-{}", parent_tool_use_id));
         let now = Utc::now().timestamp_millis();
 
+        // 从父 Session 派生不可变的祖先关系：root 沿用父的 root，
+        // 祖先链 = 父的祖先链 ++ [父 id]。对存量父级（两列为 NULL）resolve_*
+        // 会降级 walk，结果同样正确。
+        let root_session_id = self.resolve_session_root(&parent_session_id).await?;
+        let mut ancestor_ids = self.resolve_session_ancestors(&parent_session_id).await?;
+        ancestor_ids.push(parent_session_id.clone());
+
         let session = Arc::new(Session {
             control: tokio::sync::RwLock::new(ControlState::new_with_project_dir(&agent_id, inherited_project_dir)),
             id: id.clone(),
@@ -44,6 +51,8 @@ impl SessionService {
             title_state: RwLock::new(TitleState::new_default()),
             parent_session_id: Some(parent_session_id),
             parent_tool_use_id: Some(parent_tool_use_id),
+            root_session_id: Some(root_session_id),
+            ancestor_ids: Some(ancestor_ids),
             child_session_ids: RwLock::new(Vec::new()),
         });
 
@@ -105,6 +114,9 @@ impl SessionService {
             title_state: RwLock::new(TitleState::new_default()),
             parent_session_id: None,
             parent_tool_use_id: None,
+            // 根 Session：root 指向自身，祖先链为空。
+            root_session_id: Some(id.clone()),
+            ancestor_ids: Some(Vec::new()),
             child_session_ids: RwLock::new(Vec::new()),
         });
 
@@ -240,6 +252,9 @@ impl SessionService {
             title_state: RwLock::new(TitleState::new_default()),
             parent_session_id: None,
             parent_tool_use_id: None,
+            // 副本视为独立根 Session：root 指向自身，祖先链为空。
+            root_session_id: Some(new_id.clone()),
+            ancestor_ids: Some(Vec::new()),
             child_session_ids: RwLock::new(Vec::new()),
         });
 

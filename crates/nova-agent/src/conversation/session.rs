@@ -22,6 +22,12 @@ pub struct Session {
     pub parent_session_id: Option<String>,
     /// 父 Session history 中派生本 Session 的那条 ToolUse 的 id。创建后不变更。
     pub parent_tool_use_id: Option<String>,
+    /// 所属顶层会话 id。根 Session 为自身 id。创建后不变更；
+    /// 存量（v0.3.14 前创建的）Session load 出来为 None。
+    pub root_session_id: Option<String>,
+    /// 完整祖先链，根在前→直接父在后。根 Session 为 Some(vec![])；
+    /// 存量 Session 为 None。创建后不变更。
+    pub ancestor_ids: Option<Vec<String>>,
     /// 直接子 Session id 列表（append-only）；load 时从 repository 回填。
     pub child_session_ids: RwLock<Vec<String>>,
 }
@@ -107,6 +113,8 @@ mod tests {
             title_state: RwLock::new(TitleState::new_default()),
             parent_session_id: None,
             parent_tool_use_id: None,
+            root_session_id: Some(id.to_string()),
+            ancestor_ids: Some(Vec::new()),
             child_session_ids: RwLock::new(Vec::new()),
         }
     }

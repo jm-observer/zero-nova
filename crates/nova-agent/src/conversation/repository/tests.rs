@@ -22,6 +22,8 @@ async fn permission_repository_matches_current_schema() -> Result<()> {
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
 
@@ -90,6 +92,8 @@ async fn run_repository_matches_current_schema() -> Result<()> {
         10,
         10,
         &ControlState::new("agent-1"),
+        None,
+        None,
         None,
         None,
     )
@@ -169,6 +173,8 @@ async fn audit_log_repository_matches_current_schema() -> Result<()> {
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
 
@@ -206,6 +212,8 @@ async fn find_latest_session_by_agent_uses_updated_at_desc() -> Result<()> {
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
     repo.save_session(
@@ -217,6 +225,8 @@ async fn find_latest_session_by_agent_uses_updated_at_desc() -> Result<()> {
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
     repo.save_session(
@@ -226,6 +236,8 @@ async fn find_latest_session_by_agent_uses_updated_at_desc() -> Result<()> {
         20,
         40,
         &ControlState::new("agent-2"),
+        None,
+        None,
         None,
         None,
     )
@@ -254,6 +266,8 @@ async fn diagnostic_repository_matches_current_schema() -> Result<()> {
         10,
         10,
         &ControlState::new("agent-1"),
+        None,
+        None,
         None,
         None,
     )
@@ -297,6 +311,8 @@ async fn save_load_root_session_has_null_parent_columns() -> Result<()> {
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
 
@@ -322,6 +338,8 @@ async fn save_load_child_session_round_trips_parent_columns() -> Result<()> {
         &ControlState::new("agent-1"),
         Some("parent-id"),
         Some("toolu_xyz"),
+        None,
+        None,
     )
     .await?;
 
@@ -346,6 +364,8 @@ async fn list_child_session_ids_returns_children_in_created_order() -> Result<()
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
     repo.save_session(
@@ -357,6 +377,8 @@ async fn list_child_session_ids_returns_children_in_created_order() -> Result<()
         &ControlState::new("agent-1"),
         Some("parent"),
         Some("t1"),
+        None,
+        None,
     )
     .await?;
     repo.save_session(
@@ -368,6 +390,8 @@ async fn list_child_session_ids_returns_children_in_created_order() -> Result<()
         &ControlState::new("agent-1"),
         Some("parent"),
         Some("t2"),
+        None,
+        None,
     )
     .await?;
     repo.save_session(
@@ -379,6 +403,8 @@ async fn list_child_session_ids_returns_children_in_created_order() -> Result<()
         &ControlState::new("agent-1"),
         Some("parent"),
         Some("t3"),
+        None,
+        None,
     )
     .await?;
 
@@ -400,6 +426,8 @@ async fn list_child_session_ids_empty_when_no_children() -> Result<()> {
         10,
         10,
         &ControlState::new("agent-1"),
+        None,
+        None,
         None,
         None,
     )
@@ -425,6 +453,8 @@ async fn upsert_does_not_overwrite_parent_columns() -> Result<()> {
         &ControlState::new("agent-1"),
         Some("p1"),
         Some("t1"),
+        None,
+        None,
     )
     .await?;
 
@@ -438,6 +468,8 @@ async fn upsert_does_not_overwrite_parent_columns() -> Result<()> {
         &ControlState::new("agent-1"),
         None,
         None,
+        None,
+        None,
     )
     .await?;
 
@@ -445,5 +477,39 @@ async fn upsert_does_not_overwrite_parent_columns() -> Result<()> {
     assert_eq!(row.1, "c-updated"); // title 被覆写
     assert_eq!(row.6, Some("p1".to_string())); // parent_session_id 保留
     assert_eq!(row.7, Some("t1".to_string())); // parent_tool_use_id 保留
+    Ok(())
+}
+
+#[tokio::test]
+async fn root_ancestor_columns_round_trip() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repo = SqliteSessionRepository::new(manager.pool.clone());
+
+    let ancestors = vec!["root-x".to_string(), "mid-y".to_string()];
+    let ancestors_json = serde_json::to_string(&ancestors)?;
+    repo.save_session(
+        "sess-z",
+        "t",
+        "agent-1",
+        1,
+        1,
+        &ControlState::new("agent-1"),
+        Some("mid-y"),
+        Some("tu"),
+        Some("root-x"),
+        Some(&ancestors_json),
+    )
+    .await?;
+
+    // load_session_meta：SessionRow index 8 = root_session_id, 9 = ancestor_ids
+    let row = repo.load_session_meta("sess-z").await?.expect("row");
+    assert_eq!(row.8.as_deref(), Some("root-x"));
+    assert_eq!(row.9, Some(ancestors.clone()));
+
+    // load_session（含 history）：index 9 = root_session_id, 10 = ancestor_ids
+    let full = repo.load_session("sess-z").await?.expect("row");
+    assert_eq!(full.9.as_deref(), Some("root-x"));
+    assert_eq!(full.10, Some(ancestors));
     Ok(())
 }

@@ -902,6 +902,171 @@ async fn create_with_parent_persists_parent_columns() -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// 子 Agent 会话根解析（v0.3.14）：root_session_id / ancestor_ids
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_for_agent_sets_self_as_root() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+
+    let root = service
+        .create(Some("root".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    assert_eq!(root.root_session_id.as_deref(), Some(root.id.as_str()));
+    assert_eq!(root.ancestor_ids, Some(Vec::<String>::new()));
+
+    // 落盘列也对：SessionRow index 8 = root_session_id, 9 = ancestor_ids
+    let row = repository.load_session_meta(&root.id).await?.expect("root row");
+    assert_eq!(row.8.as_deref(), Some(root.id.as_str()));
+    assert_eq!(row.9, Some(Vec::<String>::new()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_with_parent_derives_root_and_ancestors() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let root = service
+        .create(Some("root".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let child = service
+        .create_with_parent(
+            Some("child".to_string()),
+            "agent-1".to_string(),
+            root.id.clone(),
+            "tu1".to_string(),
+            None,
+        )
+        .await?;
+
+    assert_eq!(child.root_session_id.as_deref(), Some(root.id.as_str()));
+    assert_eq!(child.ancestor_ids, Some(vec![root.id.clone()]));
+    Ok(())
+}
+
+#[tokio::test]
+async fn nested_subagent_keeps_top_root() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let root = service
+        .create(Some("root".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let child = service
+        .create_with_parent(None, "agent-1".to_string(), root.id.clone(), "tu1".to_string(), None)
+        .await?;
+    let grandchild = service
+        .create_with_parent(None, "agent-1".to_string(), child.id.clone(), "tu2".to_string(), None)
+        .await?;
+
+    assert_eq!(grandchild.root_session_id.as_deref(), Some(root.id.as_str()));
+    assert_eq!(grandchild.ancestor_ids, Some(vec![root.id.clone(), child.id.clone()]));
+    Ok(())
+}
+
+#[tokio::test]
+async fn ancestor_invariants_hold() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let root = service
+        .create(Some("root".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let child = service
+        .create_with_parent(None, "agent-1".to_string(), root.id.clone(), "tu1".to_string(), None)
+        .await?;
+    let grandchild = service
+        .create_with_parent(None, "agent-1".to_string(), child.id.clone(), "tu2".to_string(), None)
+        .await?;
+
+    for s in [&root, &child, &grandchild] {
+        let anc = s.ancestor_ids.clone().expect("ancestor_ids populated");
+        // root == ancestors[0]（非空时）else 自身
+        let expected_root = anc.first().cloned().unwrap_or_else(|| s.id.clone());
+        assert_eq!(s.root_session_id.as_deref(), Some(expected_root.as_str()));
+        // parent_session_id == ancestors[-1]（非空时）else None
+        assert_eq!(s.parent_session_id.as_deref(), anc.last().map(String::as_str));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn get_session_root_walks_up() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let root = service
+        .create(Some("root".to_string()), "agent-1".to_string(), String::new())
+        .await?;
+    let child = service
+        .create_with_parent(None, "agent-1".to_string(), root.id.clone(), "tu1".to_string(), None)
+        .await?;
+    let grandchild = service
+        .create_with_parent(None, "agent-1".to_string(), child.id.clone(), "tu2".to_string(), None)
+        .await?;
+
+    assert_eq!(service.resolve_session_root(&root.id).await?, root.id);
+    assert_eq!(service.resolve_session_root(&child.id).await?, root.id);
+    assert_eq!(service.resolve_session_root(&grandchild.id).await?, root.id);
+    assert_eq!(
+        service.resolve_session_ancestors(&grandchild.id).await?,
+        vec![root.id.clone(), child.id.clone()]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn get_session_root_falls_back_for_legacy_row() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository.clone());
+
+    let ctrl = crate::conversation::control::ControlState::new("agent-1");
+    // 存量根：root_session_id / ancestor_ids 两列为 NULL。
+    repository
+        .save_session("legacy-root", "t", "agent-1", 1, 1, &ctrl, None, None, None, None)
+        .await?;
+    // 存量子：parent 指向 legacy-root，root/ancestor 列同样 NULL。
+    repository
+        .save_session(
+            "legacy-child",
+            "t",
+            "agent-1",
+            2,
+            2,
+            &ctrl,
+            Some("legacy-root"),
+            Some("tu"),
+            None,
+            None,
+        )
+        .await?;
+
+    // resolve_session_root 在列为 NULL 时降级 walk parent_session_id 链。
+    assert_eq!(service.resolve_session_root("legacy-root").await?, "legacy-root");
+    assert_eq!(service.resolve_session_root("legacy-child").await?, "legacy-root");
+    assert_eq!(
+        service.resolve_session_ancestors("legacy-child").await?,
+        vec!["legacy-root".to_string()]
+    );
+    assert!(service.resolve_session_ancestors("legacy-root").await?.is_empty());
+    Ok(())
+}
+
 #[tokio::test]
 async fn try_get_loaded_returns_session_when_cached() -> Result<()> {
     let dir = tempdir()?;

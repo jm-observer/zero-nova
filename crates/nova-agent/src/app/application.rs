@@ -366,6 +366,28 @@ impl AgentApplicationImpl {
         super::session_tree::build_session_tree(&self.conversation_service.sessions, root_id, max_depth).await
     }
 
+    /// 解析任意 session 的顶层 root session id。
+    ///
+    /// 子 Agent 内的工具据 `ToolContext.session_id` 调本方法即可定位所属顶层
+    /// 对话，无需经 LLM 传任何寻址标识符。优先读 `root_session_id` 列；
+    /// 对 v0.3.14 前的存量行降级沿 `parent_session_id` 链 walk。
+    /// session 不存在返回 `Err`。
+    pub async fn get_session_root(&self, session_id: &str) -> Result<String> {
+        self.conversation_service
+            .sessions
+            .resolve_session_root(session_id)
+            .await
+    }
+
+    /// 解析任意 session 的完整祖先链（根在前→直接父在后）。根 session 返回空 Vec。
+    /// 与 `get_session_root` 同源：优先读 `ancestor_ids` 列，存量行降级 walk。
+    pub async fn get_session_ancestors(&self, session_id: &str) -> Result<Vec<String>> {
+        self.conversation_service
+            .sessions
+            .resolve_session_ancestors(session_id)
+            .await
+    }
+
     /// 级联删除整棵子树。root 不存在返回 `Ok(0)`（见设计稿「已收敛的待澄清点」#4）。
     pub async fn delete_session_tree(&self, root_id: &str) -> Result<usize> {
         let count = self.conversation_service.sessions.delete_session_tree(root_id).await?;

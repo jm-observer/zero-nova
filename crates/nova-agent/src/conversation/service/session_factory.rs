@@ -14,6 +14,8 @@ pub(super) async fn session_from_index_row(
     title_state: TitleState,
     parent_session_id: Option<String>,
     parent_tool_use_id: Option<String>,
+    root_session_id: Option<String>,
+    ancestor_ids: Option<Vec<String>>,
     child_session_ids: Vec<String>,
 ) -> Session {
     let session = Session {
@@ -28,6 +30,8 @@ pub(super) async fn session_from_index_row(
         title_state: RwLock::new(title_state),
         parent_session_id,
         parent_tool_use_id,
+        root_session_id,
+        ancestor_ids,
         child_session_ids: RwLock::new(child_session_ids),
     };
     {

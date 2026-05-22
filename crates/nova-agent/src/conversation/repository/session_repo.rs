@@ -1,11 +1,11 @@
-use super::{parse_session_row, SessionRow, SqliteSessionRepository};
+use super::{parse_ancestor_ids, parse_session_row, SessionRow, SqliteSessionRepository};
 use crate::message::{ContentBlock, Message, Role};
 use anyhow::Result;
 use log::warn;
 use sqlx::{Acquire, Row};
 
 impl SqliteSessionRepository {
-    // 9 参数：与 sessions 表列一一对应；引入参数结构体会让 6 个既有调用点都被迫改造，
+    // 11 参数：与 sessions 表列一一对应；引入参数结构体会让既有调用点都被迫改造，
     // 收益与代价不匹配。保留扁平签名。
     #[allow(clippy::too_many_arguments)]
     pub async fn save_session(
@@ -18,15 +18,18 @@ impl SqliteSessionRepository {
         runtime_control: &crate::conversation::control::ControlState,
         parent_session_id: Option<&str>,
         parent_tool_use_id: Option<&str>,
+        root_session_id: Option<&str>,
+        ancestor_ids: Option<&str>,
     ) -> Result<()> {
         let runtime_control_json = serde_json::to_string(runtime_control)?;
-        // ON CONFLICT 子句中 parent_session_id / parent_tool_use_id 故意不出现：
-        // 子 Session 创建后这两列永不被 UPDATE 覆盖（一次写定语义）。
+        // ON CONFLICT 子句中 parent_session_id / parent_tool_use_id /
+        // root_session_id / ancestor_ids 故意不出现：祖先关系创建后永不变更
+        // （一次写定语义），UPDATE 路径不得覆盖。
         sqlx::query(
             "INSERT INTO sessions \
              (id, title, agent_id, created_at, updated_at, runtime_control, \
-              parent_session_id, parent_tool_use_id) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+              parent_session_id, parent_tool_use_id, root_session_id, ancestor_ids) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET \
                 title = excluded.title, \
                 agent_id = excluded.agent_id, \
@@ -41,6 +44,8 @@ impl SqliteSessionRepository {
         .bind(runtime_control_json)
         .bind(parent_session_id)
         .bind(parent_tool_use_id)
+        .bind(root_session_id)
+        .bind(ancestor_ids)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -65,7 +70,7 @@ impl SqliteSessionRepository {
     pub async fn load_session_meta(&self, id: &str) -> Result<Option<SessionRow>> {
         let row = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control, \
-                    parent_session_id, parent_tool_use_id \
+                    parent_session_id, parent_tool_use_id, root_session_id, ancestor_ids \
              FROM sessions WHERE id = ?",
         )
         .bind(id)
@@ -88,13 +93,15 @@ impl SqliteSessionRepository {
             i64,
             crate::conversation::control::ControlState,
             Vec<Message>,
-            Option<String>, // parent_session_id
-            Option<String>, // parent_tool_use_id
+            Option<String>,      // parent_session_id
+            Option<String>,      // parent_tool_use_id
+            Option<String>,      // root_session_id
+            Option<Vec<String>>, // ancestor_ids
         )>,
     > {
         let row = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control, \
-                    parent_session_id, parent_tool_use_id \
+                    parent_session_id, parent_tool_use_id, root_session_id, ancestor_ids \
              FROM sessions WHERE id = ?",
         )
         .bind(id)
@@ -110,6 +117,8 @@ impl SqliteSessionRepository {
             let runtime_control_json: Option<String> = row.get("runtime_control");
             let parent_session_id: Option<String> = row.try_get("parent_session_id").unwrap_or(None);
             let parent_tool_use_id: Option<String> = row.try_get("parent_tool_use_id").unwrap_or(None);
+            let root_session_id: Option<String> = row.try_get("root_session_id").unwrap_or(None);
+            let ancestor_ids = parse_ancestor_ids(row.try_get("ancestor_ids").unwrap_or(None));
 
             let runtime_control = if let Some(json) = runtime_control_json {
                 serde_json::from_str::<crate::conversation::control::ControlState>(&json)?
@@ -160,6 +169,8 @@ impl SqliteSessionRepository {
                 history,
                 parent_session_id,
                 parent_tool_use_id,
+                root_session_id,
+                ancestor_ids,
             )));
         }
 
@@ -169,7 +180,7 @@ impl SqliteSessionRepository {
     pub async fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let rows = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control, \
-                    parent_session_id, parent_tool_use_id \
+                    parent_session_id, parent_tool_use_id, root_session_id, ancestor_ids \
              FROM sessions ORDER BY updated_at DESC",
         )
         .fetch_all(&self.pool)
@@ -194,6 +205,8 @@ impl SqliteSessionRepository {
             };
             let parent_session_id: Option<String> = row.try_get("parent_session_id").unwrap_or(None);
             let parent_tool_use_id: Option<String> = row.try_get("parent_tool_use_id").unwrap_or(None);
+            let root_session_id: Option<String> = row.try_get("root_session_id").unwrap_or(None);
+            let ancestor_ids = parse_ancestor_ids(row.try_get("ancestor_ids").unwrap_or(None));
 
             sessions.push((
                 row.get("id"),
@@ -204,6 +217,8 @@ impl SqliteSessionRepository {
                 runtime_control,
                 parent_session_id,
                 parent_tool_use_id,
+                root_session_id,
+                ancestor_ids,
             ));
         }
         Ok(sessions)
@@ -212,7 +227,7 @@ impl SqliteSessionRepository {
     pub async fn find_latest_session_by_agent(&self, agent_id: &str) -> Result<Option<SessionRow>> {
         let row = sqlx::query(
             "SELECT id, title, agent_id, created_at, updated_at, runtime_control, \
-                    parent_session_id, parent_tool_use_id \
+                    parent_session_id, parent_tool_use_id, root_session_id, ancestor_ids \
              FROM sessions \
              WHERE agent_id = ? \
              ORDER BY updated_at DESC \

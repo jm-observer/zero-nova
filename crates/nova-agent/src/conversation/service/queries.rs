@@ -1,15 +1,28 @@
 use super::SessionService;
 use crate::conversation::session::SessionSummary;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+/// 祖先链 walk 的深度上限，防环 / 防退化。skill 委派实际只有 1~2 层。
+const MAX_ANCESTOR_WALK_DEPTH: usize = 64;
 
 impl SessionService {
     /// 启动阶段仅加载会话索引（不加载消息历史）。
     pub async fn load_session_index(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
-        for (id, title, agent_id, created_at, updated_at, runtime_control, parent_session_id, parent_tool_use_id) in
-            rows
+        for (
+            id,
+            title,
+            agent_id,
+            created_at,
+            updated_at,
+            runtime_control,
+            parent_session_id,
+            parent_tool_use_id,
+            root_session_id,
+            ancestor_ids,
+        ) in rows
         {
             let title_state = runtime_control.title_state.clone();
             // 回填 child_session_ids（load 路径，create 路径初始为空——见 plan-1 步骤 5）。
@@ -25,6 +38,8 @@ impl SessionService {
                     title_state,
                     parent_session_id,
                     parent_tool_use_id,
+                    root_session_id,
+                    ancestor_ids,
                     child_session_ids,
                 )
                 .await,
@@ -37,8 +52,7 @@ impl SessionService {
     /// 从数据库加载所有会话到内存（完整 history，测试/迁移辅助）。
     pub async fn load_all(&self) -> Result<()> {
         let rows = self.repository.list_sessions().await?;
-        for (id, _title, _agent_id, _created_at, _updated_at, _runtime_control, _parent_id, _parent_tool_use_id) in rows
-        {
+        for (id, ..) in rows {
             if let Some(session) = self.load_session_from_db(&id).await? {
                 self.cache.insert_loaded(id, session).await;
             }
@@ -50,17 +64,7 @@ impl SessionService {
         &self,
         agent_id: &str,
     ) -> Result<Option<Arc<crate::conversation::session::Session>>> {
-        let Some((
-            session_id,
-            _title,
-            _agent_id,
-            _created_at,
-            _updated_at,
-            _runtime_control,
-            _parent_session_id,
-            _parent_tool_use_id,
-        )) = self.repository.find_latest_session_by_agent(agent_id).await?
-        else {
+        let Some((session_id, ..)) = self.repository.find_latest_session_by_agent(agent_id).await? else {
             return Ok(None);
         };
 
@@ -74,8 +78,18 @@ impl SessionService {
         }
 
         let loaded = self.repository.load_session_meta(id).await?;
-        let Some((id, title, agent_id, created_at, updated_at, runtime_control, parent_session_id, parent_tool_use_id)) =
-            loaded
+        let Some((
+            id,
+            title,
+            agent_id,
+            created_at,
+            updated_at,
+            runtime_control,
+            parent_session_id,
+            parent_tool_use_id,
+            root_session_id,
+            ancestor_ids,
+        )) = loaded
         else {
             return Ok(None);
         };
@@ -93,6 +107,8 @@ impl SessionService {
                 title_state,
                 parent_session_id,
                 parent_tool_use_id,
+                root_session_id,
+                ancestor_ids,
                 child_session_ids,
             )
             .await,
@@ -241,6 +257,8 @@ impl SessionService {
             history,
             parent_session_id,
             parent_tool_use_id,
+            root_session_id,
+            ancestor_ids,
         )) = loaded
         else {
             return Ok(None);
@@ -264,7 +282,66 @@ impl SessionService {
             title_state: tokio::sync::RwLock::new(title_state),
             parent_session_id,
             parent_tool_use_id,
+            root_session_id,
+            ancestor_ids,
             child_session_ids: tokio::sync::RwLock::new(child_session_ids),
         })))
+    }
+
+    /// 解析 session 的顶层 root session id。
+    /// 优先读 root_session_id 列；列为 None（v0.3.14 前的存量行）时降级沿
+    /// parent_session_id 链 walk 到顶。session 不存在返回 Err。
+    pub async fn resolve_session_root(&self, session_id: &str) -> Result<String> {
+        let mut current = session_id.to_string();
+        for _ in 0..MAX_ANCESTOR_WALK_DEPTH {
+            let meta = self
+                .repository
+                .load_session_meta(&current)
+                .await?
+                .with_context(|| format!("session not found: {current}"))?;
+            // meta: (id, title, agent_id, created_at, updated_at, runtime_control,
+            //        parent_session_id, parent_tool_use_id, root_session_id, ancestor_ids)
+            let (.., parent_session_id, _, root_session_id, _) = meta;
+            if let Some(root) = root_session_id {
+                return Ok(root);
+            }
+            match parent_session_id {
+                Some(parent) => current = parent,
+                None => return Ok(current), // 无 parent 即根
+            }
+        }
+        Err(anyhow!("ancestor chain too deep or cyclic from {session_id}"))
+    }
+
+    /// 解析完整祖先链（根在前→直接父在后）。优先读 ancestor_ids 列；
+    /// 列为 None（存量行）时降级 walk。根 session 返回空 Vec。
+    pub async fn resolve_session_ancestors(&self, session_id: &str) -> Result<Vec<String>> {
+        let meta = self
+            .repository
+            .load_session_meta(session_id)
+            .await?
+            .with_context(|| format!("session not found: {session_id}"))?;
+        let (.., parent_session_id, _, _, ancestor_ids) = meta;
+        if let Some(ancestors) = ancestor_ids {
+            return Ok(ancestors);
+        }
+        // 存量行：沿 parent 链 walk，收集顺序为 直接父→…→根，最后反转。
+        let mut chain = Vec::new();
+        let mut current = parent_session_id;
+        while let Some(pid) = current {
+            if chain.len() >= MAX_ANCESTOR_WALK_DEPTH {
+                return Err(anyhow!("ancestor chain too deep or cyclic from {session_id}"));
+            }
+            let pmeta = self
+                .repository
+                .load_session_meta(&pid)
+                .await?
+                .with_context(|| format!("session not found: {pid}"))?;
+            chain.push(pid);
+            let (.., pparent, _, _, _) = pmeta;
+            current = pparent;
+        }
+        chain.reverse();
+        Ok(chain)
     }
 }

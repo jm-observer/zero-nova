@@ -11,6 +11,7 @@ impl SessionService {
             let control = session.control.read().await;
             control.clone()
         };
+        let ancestor_ids_json = session.ancestor_ids.as_ref().map(serde_json::to_string).transpose()?;
 
         self.repository
             .save_session(
@@ -22,6 +23,8 @@ impl SessionService {
                 &runtime_control,
                 session.parent_session_id.as_deref(),
                 session.parent_tool_use_id.as_deref(),
+                session.root_session_id.as_deref(),
+                ancestor_ids_json.as_deref(),
             )
             .await?;
 
@@ -47,6 +50,7 @@ impl SessionService {
             let control = session.control.read().await;
             control.clone()
         };
+        let ancestor_ids_json = session.ancestor_ids.as_ref().map(serde_json::to_string).transpose()?;
 
         self.repository
             .save_session(
@@ -58,6 +62,8 @@ impl SessionService {
                 &runtime_control,
                 session.parent_session_id.as_deref(),
                 session.parent_tool_use_id.as_deref(),
+                session.root_session_id.as_deref(),
+                ancestor_ids_json.as_deref(),
             )
             .await
     }

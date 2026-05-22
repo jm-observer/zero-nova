@@ -30,6 +30,12 @@ fn parse_usage(raw: Option<String>) -> Result<Option<serde_json::Value>> {
         .transpose()
 }
 
+/// 把 ancestor_ids 列的 JSON 数组文本解析为 Vec<String>。
+/// 列为 NULL（存量行）或 JSON 损坏时返回 None——调用方据此走 walk 降级。
+fn parse_ancestor_ids(raw: Option<String>) -> Option<Vec<String>> {
+    raw.and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+}
+
 fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
     let agent_id: String = row.get("agent_id");
     let session_id: String = row.get("id");
@@ -48,6 +54,8 @@ fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
 
     let parent_session_id: Option<String> = row.try_get("parent_session_id").unwrap_or(None);
     let parent_tool_use_id: Option<String> = row.try_get("parent_tool_use_id").unwrap_or(None);
+    let root_session_id: Option<String> = row.try_get("root_session_id").unwrap_or(None);
+    let ancestor_ids = parse_ancestor_ids(row.try_get("ancestor_ids").unwrap_or(None));
 
     Ok((
         session_id,
@@ -58,6 +66,8 @@ fn parse_session_row(row: sqlx::sqlite::SqliteRow) -> Result<SessionRow> {
         runtime_control,
         parent_session_id,
         parent_tool_use_id,
+        root_session_id,
+        ancestor_ids,
     ))
 }
 

@@ -47,7 +47,9 @@ impl SqliteManager {
                 updated_at INTEGER,
                 runtime_control TEXT,
                 parent_session_id TEXT,
-                parent_tool_use_id TEXT
+                parent_tool_use_id TEXT,
+                root_session_id TEXT,
+                ancestor_ids TEXT
             );",
         )
         .execute(&self.pool)
@@ -193,6 +195,48 @@ impl SqliteManager {
         self.migrate_diagnostics_schema().await?;
         self.migrate_workspace_restore_state_schema().await?;
         self.migrate_sessions_parent_child_columns().await?;
+        self.migrate_sessions_root_ancestor_columns().await?;
+
+        Ok(())
+    }
+
+    /// 给 sessions 表补 root_session_id / ancestor_ids 两列（v0.3.14）。
+    /// 存量行不回填——两列对老 session 留 NULL，resolve_session_root 在列为
+    /// NULL 时降级沿 parent_session_id 链 walk。幂等：缺列才 ADD。
+    async fn migrate_sessions_root_ancestor_columns(&self) -> Result<()> {
+        let columns = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to inspect sessions table schema")?;
+
+        let mut has_root_session_id = false;
+        let mut has_ancestor_ids = false;
+        for column in columns {
+            let name: String = Row::get(&column, "name");
+            if name == "root_session_id" {
+                has_root_session_id = true;
+            } else if name == "ancestor_ids" {
+                has_ancestor_ids = true;
+            }
+        }
+
+        if !has_root_session_id {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN root_session_id TEXT")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add root_session_id column to sessions table")?;
+        }
+        if !has_ancestor_ids {
+            sqlx::query("ALTER TABLE sessions ADD COLUMN ancestor_ids TEXT")
+                .execute(&self.pool)
+                .await
+                .context("Failed to add ancestor_ids column to sessions table")?;
+        }
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_root ON sessions(root_session_id)")
+            .execute(&self.pool)
+            .await
+            .context("Failed to create idx_sessions_root index")?;
 
         Ok(())
     }
@@ -768,6 +812,59 @@ mod tests {
             })
             .count();
         assert_eq!(count_parent, 2);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn migration_adds_root_ancestor_columns() -> Result<()> {
+        let dir = tempdir()?;
+        let db_path = dir.path().join("sessions.db");
+        let pool =
+            SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db_path).create_if_missing(true)).await?;
+
+        // 模拟旧库：不含 root_session_id / ancestor_ids 列
+        sqlx::query(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                agent_id TEXT,
+                created_at INTEGER,
+                updated_at INTEGER,
+                runtime_control TEXT
+            );",
+        )
+        .execute(&pool)
+        .await?;
+        pool.close().await;
+
+        // 第一次跑 migration——加 root/ancestor 列 + 索引
+        let manager = SqliteManager::new(dir.path()).await?;
+        let columns = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&manager.pool)
+            .await?;
+        let names: Vec<String> = columns.iter().map(|c| c.get::<String, _>("name")).collect();
+        assert!(names.iter().any(|n| n == "root_session_id"));
+        assert!(names.iter().any(|n| n == "ancestor_ids"));
+        let idx = sqlx::query("PRAGMA index_list(sessions)")
+            .fetch_all(&manager.pool)
+            .await?;
+        assert!(idx.iter().any(|r| r.get::<String, _>("name") == "idx_sessions_root"));
+        manager.pool.close().await;
+
+        // 第二次跑 migration——幂等，列各只有一份
+        let manager2 = SqliteManager::new(dir.path()).await?;
+        let columns2 = sqlx::query("PRAGMA table_info(sessions)")
+            .fetch_all(&manager2.pool)
+            .await?;
+        let count_new = columns2
+            .iter()
+            .filter(|c| {
+                let n: String = c.get::<String, _>("name");
+                n == "root_session_id" || n == "ancestor_ids"
+            })
+            .count();
+        assert_eq!(count_new, 2);
 
         Ok(())
     }

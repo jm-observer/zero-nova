@@ -7,7 +7,7 @@ use async_openai::types::chat::{
     ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessage,
     ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent,
     ChatCompletionRequestUserMessageContentPart, ChatCompletionStreamOptions, ChatCompletionTool, ChatCompletionTools,
-    CompletionUsage, CreateChatCompletionRequest, FinishReason, FunctionCall, FunctionObject, ImageUrl,
+    CompletionUsage, CreateChatCompletionRequest, FinishReason, FunctionCall, FunctionObject, ImageDetail, ImageUrl,
     ReasoningEffort,
 };
 
@@ -61,7 +61,10 @@ pub fn messages_to_openai(messages: &[Message]) -> Vec<ChatCompletionRequestMess
                             image_parts.push(ChatCompletionRequestMessageContentPartImage {
                                 image_url: ImageUrl {
                                     url: format!("data:{};base64,{}", mime, data_base64),
-                                    detail: None,
+                                    // detail 必须显式给值：async-openai 的 ImageUrl.detail
+                                    // 无 skip_serializing_if，None 会序列化成 "detail": null，
+                                    // 严格校验的 OpenAI 兼容服务（pydantic）只接受 auto/low/high。
+                                    detail: Some(ImageDetail::Auto),
                                 },
                             });
                         }

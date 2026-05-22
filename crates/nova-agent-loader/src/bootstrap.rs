@@ -230,6 +230,10 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
     let tools = ToolRegistry::new();
     let agent_prompt_service = build_agent_prompt_service(Arc::new(config.clone()));
     let runtime_builder = build_subagent_runtime_builder(Arc::new(config.clone()));
+    // 克隆一份 builder 句柄给 AgentApplicationImpl。SubagentRuntimeBuilder 的
+    // native deferred 种子表在 Arc 之后，克隆与下方移交给 AgentToolServices
+    // 的那份共享同一张表——宿主经 app 注册的种子对子 Agent 派生路径可见。
+    let subagent_runtime_builder = runtime_builder.clone();
     let conversation_writer = Arc::new(nova_agent::app::conversation_service::ConversationWriteHandle::new(
         session_service.clone(),
     ));
@@ -353,6 +357,7 @@ pub async fn build_application(config: AppConfig) -> Result<Arc<AgentApplication
         config_snapshot_cache,
         config_path,
         orchestrate_task_hook_slot,
+        subagent_runtime_builder,
     )))
 }
 

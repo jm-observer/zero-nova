@@ -29,6 +29,11 @@ pub struct AgentApplicationImpl {
     /// 由 `register_builtin_tools` 在构造工具时产出，注入到 AgentApplicationImpl
     /// 持有，外部宿主通过 `register_orchestrate_task_prompt_hook` 写入。
     orchestrate_task_hook_slot: crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot,
+    /// 子 Agent runtime builder 的克隆句柄。与 `AgentTool` 内部持有的克隆共享
+    /// 同一份种子表（`Arc<RwLock<_>>`），外部宿主通过
+    /// `register_subagent_native_deferred_seed` 写入的种子对子 Agent 派生路径
+    /// 可见。
+    subagent_runtime_builder: crate::tool::builtin::agent::SubagentRuntimeBuilder,
     // voice_service: VoiceService,
 }
 
@@ -40,6 +45,7 @@ impl AgentApplicationImpl {
         config_snapshot_cache: Arc<ArcSwap<Value>>,
         config_path: PathBuf,
         orchestrate_task_hook_slot: crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot,
+        subagent_runtime_builder: crate::tool::builtin::agent::SubagentRuntimeBuilder,
         // voice_service: VoiceService,
     ) -> Self {
         Self {
@@ -50,6 +56,7 @@ impl AgentApplicationImpl {
             config_snapshot_cache,
             config_path,
             orchestrate_task_hook_slot,
+            subagent_runtime_builder,
             // voice_service,
         }
     }
@@ -201,6 +208,20 @@ impl AgentApplicationImpl {
             .tools()
             .register_deferred(name, description, input_schema, factory)
             .await;
+    }
+
+    /// 注册一个 native deferred 工具「种子」，使其在后续每次 `OrchestrateTask`
+    /// 派生的 sub-agent registry 中都被注册（注册为 deferred）。
+    ///
+    /// 与 `register_deferred_tool` 互补：后者只作用于主 Agent registry，子
+    /// Agent 的 registry 由 `SubagentRuntimeBuilder::build_runtime` 每次新建、
+    /// 不继承主 registry。宿主注册一个需要被 skill `preload` 解析的 native
+    /// 工具时，**两个方法都要调**——主 Agent 路径靠前者、子 Agent 路径靠后者。
+    pub async fn register_subagent_native_deferred_seed(
+        &self,
+        seed: crate::tool::builtin::agent::NativeDeferredToolSeed,
+    ) {
+        self.subagent_runtime_builder.register_native_deferred_seed(seed).await;
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<AppSession>> {

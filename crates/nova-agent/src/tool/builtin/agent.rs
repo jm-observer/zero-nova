@@ -152,15 +152,44 @@ impl SubagentPromptService {
     }
 }
 
+/// 宿主通过 Rust API 显式声明、需在每个 sub-agent registry 都注册一遍的
+/// native deferred 工具。
+///
+/// `factory` 用 `Arc` 而非 `Box`，以便在多次 `build_runtime` 之间复用同一
+/// 闭包（`Box<dyn Fn>` 不可 Clone）。每次 `build_runtime` 注册时把 `Arc`
+/// 再包一层 `Box` 透出，以匹配 `ToolRegistry::register_deferred` 的现有签名。
+#[derive(Clone)]
+pub struct NativeDeferredToolSeed {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+    pub factory: Arc<dyn Fn() -> Arc<dyn crate::tool::Tool> + Send + Sync>,
+}
+
 /// Concrete subagent runtime builder service.
 #[derive(Clone)]
 pub struct SubagentRuntimeBuilder {
     config: Arc<AppConfig>,
+    /// 宿主通过 `register_native_deferred_seed` 推入的种子。`Arc<RwLock<_>>`
+    /// 使 builder 保持 `Clone`（被 `AgentToolServices` 持有需要），且任一
+    /// 克隆上的注册对所有克隆可见——`AgentApplicationImpl` 与 `AgentTool`
+    /// 各持一个克隆，共享同一份种子表。
+    native_deferred_seeds: Arc<RwLock<Vec<NativeDeferredToolSeed>>>,
 }
 
 impl SubagentRuntimeBuilder {
     pub fn new(config: Arc<AppConfig>) -> Self {
-        Self { config }
+        Self {
+            config,
+            native_deferred_seeds: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// 注册一个 native deferred 工具种子。此后每次 `build_runtime` 派生的
+    /// sub-agent registry 都会注册该工具（注册为 deferred，与 builtin /
+    /// tools.d 同层级），使命中该工具的 skill `preload` 能 `resolve_deferred`。
+    pub async fn register_native_deferred_seed(&self, seed: NativeDeferredToolSeed) {
+        self.native_deferred_seeds.write().await.push(seed);
     }
 
     pub async fn build_runtime(
@@ -204,6 +233,15 @@ impl SubagentRuntimeBuilder {
         if let Some(tools_dir) = &config.tool.tools_dir {
             let tools_path = config.config_dir.join(tools_dir);
             crate::tool::external::register_external_tools(&sub_registry, &tools_path).await;
+        }
+
+        // native deferred 种子：宿主通过 `register_native_deferred_seed` 显式
+        // 声明的 Rust 工具。主 app 的 `register_deferred_tool` 只作用于主 Agent
+        // registry，不会传播到这里新建的 `sub_registry`——种子表是把同一组
+        // 工具补注册进每个 sub-agent registry 的唯一通道。
+        {
+            let seeds = self.native_deferred_seeds.read().await;
+            apply_native_deferred_seeds(&sub_registry, &seeds).await;
         }
 
         let mut model_config = ModelConfig {
@@ -277,6 +315,25 @@ impl SubagentRuntimeBuilder {
 
         let _ = project_dir;
         Ok((runtime, model_config))
+    }
+}
+
+/// 把一组 native deferred 种子注册进给定 registry（注册为 deferred 工具）。
+///
+/// 抽成独立函数：`build_runtime` 调用它，单测也可绕开整套 runtime 脚手架
+/// 直接对一个空 `ToolRegistry` 验证种子注册行为。
+async fn apply_native_deferred_seeds(registry: &crate::tool::ToolRegistry, seeds: &[NativeDeferredToolSeed]) {
+    for seed in seeds {
+        // `Arc::clone` 廉价；再包一层 `Box` 以匹配 `register_deferred` 现有签名。
+        let factory = seed.factory.clone();
+        registry
+            .register_deferred(
+                seed.name.clone(),
+                seed.description.clone(),
+                seed.input_schema.clone(),
+                Box::new(move || factory()),
+            )
+            .await;
     }
 }
 
@@ -828,13 +885,19 @@ fn decide_child_session_path(
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentTool, PromptRequestInputs};
+    use super::{
+        apply_native_deferred_seeds, AgentTool, NativeDeferredToolSeed, PromptRequestInputs, SubagentRuntimeBuilder,
+    };
     use crate::config::{AgentSpec, AppConfig, ConfiguredAgentModel, GatewayConfig};
     use crate::prompt::{ProjectInstructionProfile, ToolGuidanceMode};
     use crate::provider::types::ToolDefinition;
+    use crate::tool::{RegisteredToolDefinition, Tool, ToolContext, ToolOutput, ToolRegistry};
+    use anyhow::Result;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     fn build_tool() -> AgentTool {
         let mut config = AppConfig::new(PathBuf::from("D:/workspace/.nova"));
@@ -956,5 +1019,97 @@ mod tests {
         let config = AppConfig::new(PathBuf::from("D:/workspace/.nova"));
         let tool = AgentTool::new(config, None);
         assert!(tool.services.is_none());
+    }
+
+    // --- native deferred 种子机制 -----------------------------------------
+
+    /// 计数 factory 调用次数的 mock Tool。
+    struct MockSeedTool {
+        name: String,
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for MockSeedTool {
+        fn definition(&self) -> RegisteredToolDefinition {
+            RegisteredToolDefinition {
+                name: self.name.clone(),
+                description: format!("{} mock", self.name),
+                input_schema: json!({"type": "object"}),
+                defer_loading: true,
+            }
+        }
+
+        async fn execute(&self, _input: serde_json::Value, _context: Option<ToolContext>) -> Result<ToolOutput> {
+            Ok(ToolOutput {
+                content: self.name.clone(),
+                is_error: false,
+            })
+        }
+    }
+
+    fn seed_with_counter(name: &str, calls: Arc<AtomicUsize>) -> NativeDeferredToolSeed {
+        let tool_name = name.to_string();
+        NativeDeferredToolSeed {
+            name: name.to_string(),
+            description: format!("{name} seed"),
+            input_schema: json!({"type": "object"}),
+            factory: Arc::new(move || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Arc::new(MockSeedTool {
+                    name: tool_name.clone(),
+                }) as Arc<dyn Tool>
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn register_native_deferred_seed_appends_to_builder_table() {
+        let builder = SubagentRuntimeBuilder::new(Arc::new(AppConfig::new(PathBuf::from("D:/workspace/.nova"))));
+        assert_eq!(builder.native_deferred_seeds.read().await.len(), 0);
+
+        builder
+            .register_native_deferred_seed(seed_with_counter("session_flag", Arc::new(AtomicUsize::new(0))))
+            .await;
+
+        let seeds = builder.native_deferred_seeds.read().await;
+        assert_eq!(seeds.len(), 1);
+        assert_eq!(seeds[0].name, "session_flag");
+    }
+
+    #[tokio::test]
+    async fn apply_native_deferred_seeds_makes_tool_resolvable() {
+        let registry = ToolRegistry::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seeds = vec![seed_with_counter("session_flag", calls.clone())];
+
+        apply_native_deferred_seeds(&registry, &seeds).await;
+
+        // 注册阶段不实例化 factory（deferred 语义）。
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        // 子 Agent 命中 preload 时 resolve_deferred 应成功，并实例化 factory 一次。
+        assert!(registry.resolve_deferred("sub-session", "session_flag").await);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn apply_empty_native_deferred_seeds_leaves_registry_unchanged() {
+        let registry = ToolRegistry::new();
+        apply_native_deferred_seeds(&registry, &[]).await;
+        assert!(!registry.resolve_deferred("sub-session", "session_flag").await);
+    }
+
+    #[tokio::test]
+    async fn multiple_native_deferred_seeds_all_resolvable() {
+        let registry = ToolRegistry::new();
+        let seeds = vec![
+            seed_with_counter("session_flag", Arc::new(AtomicUsize::new(0))),
+            seed_with_counter("evolution_propose", Arc::new(AtomicUsize::new(0))),
+        ];
+
+        apply_native_deferred_seeds(&registry, &seeds).await;
+
+        assert!(registry.resolve_deferred("sub-session", "session_flag").await);
+        assert!(registry.resolve_deferred("sub-session", "evolution_propose").await);
+        assert!(!registry.resolve_deferred("sub-session", "not_a_seed").await);
     }
 }

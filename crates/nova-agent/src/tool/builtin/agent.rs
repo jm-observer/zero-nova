@@ -1043,6 +1043,7 @@ mod tests {
             Ok(ToolOutput {
                 content: self.name.clone(),
                 is_error: false,
+                child_session: None,
             })
         }
     }

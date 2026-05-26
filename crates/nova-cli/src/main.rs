@@ -596,6 +596,14 @@ impl EventPrinter {
                         println!("\n{}", format!("[orchestration: {kind}] {payload}").bright_black());
                     }
                 }
+                AgentEvent::ChildSessionRequest { tool_name, .. } => {
+                    if self.verbose {
+                        println!(
+                            "\n{}",
+                            format!("[child_session requested by {tool_name}]").bright_black()
+                        );
+                    }
+                }
             },
         }
     }

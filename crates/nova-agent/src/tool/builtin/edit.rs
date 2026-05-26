@@ -37,6 +37,7 @@ impl EditTool {
                 return Err(ToolOutput {
                     content: "Access denied: directory traversal detected".to_string(),
                     is_error: true,
+                    child_session: None,
                 });
             }
 
@@ -44,6 +45,7 @@ impl EditTool {
                 return Err(ToolOutput {
                     content: "Access denied: path is outside of allowed workspace".to_string(),
                     is_error: true,
+                    child_session: None,
                 });
             }
             Ok(full_path)
@@ -52,6 +54,7 @@ impl EditTool {
                 return Err(ToolOutput {
                     content: format!("Error: 'file_path' must be an absolute path: {}", path_str),
                     is_error: true,
+                    child_session: None,
                 });
             }
             Ok(path.to_path_buf())
@@ -99,6 +102,7 @@ impl Tool for EditTool {
             return Ok(ToolOutput {
                 content: format!("File not found: {}", file_path_str),
                 is_error: true,
+                child_session: None,
             });
         }
 
@@ -114,6 +118,7 @@ impl Tool for EditTool {
                         file_path_str
                     ),
                     is_error: true,
+                    child_session: None,
                 });
             }
         }
@@ -124,6 +129,7 @@ impl Tool for EditTool {
                 return Ok(ToolOutput {
                     content: format!("Failed to read file: {}", e),
                     is_error: true,
+                    child_session: None,
                 });
             }
         };
@@ -134,6 +140,7 @@ impl Tool for EditTool {
             return Ok(ToolOutput {
                 content: "Error: 'old_string' not found in file.".to_string(),
                 is_error: true,
+                child_session: None,
             });
         }
 
@@ -144,6 +151,7 @@ impl Tool for EditTool {
                     occurrences
                 ),
                 is_error: true,
+                child_session: None,
             });
         }
 
@@ -160,10 +168,12 @@ impl Tool for EditTool {
                     file_path_str, occurrences
                 ),
                 is_error: false,
+                child_session: None,
             }),
             Err(e) => Ok(ToolOutput {
                 content: format!("Failed to write file: {}", e),
                 is_error: true,
+                child_session: None,
             }),
         }
     }

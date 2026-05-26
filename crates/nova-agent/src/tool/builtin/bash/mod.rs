@@ -149,6 +149,7 @@ impl Tool for BashTool {
                     self.shell.name()
                 ),
                 is_error: true,
+                child_session: None,
             });
         }
         let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(3600000);
@@ -180,6 +181,7 @@ impl Tool for BashTool {
             return Ok(ToolOutput {
                 content: "Command started in background. You will be notified when it completes.".to_string(),
                 is_error: false,
+                child_session: None,
             });
         }
 
@@ -329,11 +331,13 @@ impl Tool for BashTool {
                 Ok(ToolOutput {
                     content,
                     is_error: !status.success(),
+                    child_session: None,
                 })
             }
             Ok(Err(e)) => Ok(ToolOutput {
                 content: format!("Failed to execute command: {}", e),
                 is_error: true,
+                child_session: None,
             }),
             Err(_) => {
                 let _ = child.kill().await;
@@ -349,6 +353,7 @@ impl Tool for BashTool {
                 Ok(ToolOutput {
                     content,
                     is_error: true,
+                    child_session: None,
                 })
             }
         }

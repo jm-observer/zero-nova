@@ -38,6 +38,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
     Ok(ToolOutput {
         content,
         is_error: false,
+        child_session: None,
     })
 }
 
@@ -134,6 +135,7 @@ impl Tool for ToolSearchTool {
         Ok(ToolOutput {
             content: "ToolSearch: use select: or search query".to_string(),
             is_error: false,
+            child_session: None,
         })
     }
 }

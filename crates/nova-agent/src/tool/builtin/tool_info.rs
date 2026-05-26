@@ -61,6 +61,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
         return Ok(ToolOutput {
             content: "Error: 'tool_names' array must contain at least one tool name.".to_string(),
             is_error: true,
+            child_session: None,
         });
     }
 
@@ -99,6 +100,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
     Ok(ToolOutput {
         content: output,
         is_error,
+        child_session: None,
     })
 }
 
@@ -251,6 +253,7 @@ impl Tool for ToolInfoTool {
         Ok(ToolOutput {
             content: "ToolInfo: use tool_names parameter to query".to_string(),
             is_error: false,
+            child_session: None,
         })
     }
 }
@@ -289,6 +292,7 @@ mod tests {
             Ok(ToolOutput {
                 content: self.name.to_string(),
                 is_error: false,
+                child_session: None,
             })
         }
     }

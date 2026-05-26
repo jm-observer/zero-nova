@@ -193,6 +193,7 @@ impl Tool for OrchestrateTaskTool {
             return Ok(ToolOutput {
                 content,
                 is_error: false,
+                child_session: None,
             });
         }
 
@@ -208,6 +209,7 @@ impl Tool for OrchestrateTaskTool {
         Ok(ToolOutput {
             content: serde_json::to_string_pretty(&output)?,
             is_error: false,
+            child_session: None,
         })
     }
 }

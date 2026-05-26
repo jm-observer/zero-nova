@@ -96,6 +96,7 @@ impl Tool for ExternalCommandTool {
         Ok(ToolOutput {
             content,
             is_error: !output.status.success(),
+            child_session: None,
         })
     }
 }

@@ -59,14 +59,17 @@ impl Tool for ProjectManagerTool {
                         if path.exists() { "yes" } else { "no" }
                     ),
                     is_error: false,
+                    child_session: None,
                 }),
                 Ok(None) => Ok(ToolOutput {
                     content: "Project directory: not set (using process working directory as fallback)".to_string(),
                     is_error: false,
+                    child_session: None,
                 }),
                 Err(e) => Ok(ToolOutput {
                     content: format!("Failed to get project directory: {}", e),
                     is_error: true,
+                    child_session: None,
                 }),
             },
             "set" => {
@@ -82,6 +85,7 @@ impl Tool for ProjectManagerTool {
                             path.display()
                         ),
                         is_error: true,
+                        child_session: None,
                     });
                 }
                 if !path.is_dir() {
@@ -91,6 +95,7 @@ impl Tool for ProjectManagerTool {
                             path.display()
                         ),
                         is_error: true,
+                        child_session: None,
                     });
                 }
 
@@ -114,17 +119,20 @@ impl Tool for ProjectManagerTool {
                         Ok(ToolOutput {
                             content,
                             is_error: false,
+                            child_session: None,
                         })
                     }
                     Err(e) => Ok(ToolOutput {
                         content: format!("Failed to set project directory: {}", e),
                         is_error: true,
+                        child_session: None,
                     }),
                 }
             }
             _ => Ok(ToolOutput {
                 content: format!("Unknown action: {}", action),
                 is_error: true,
+                child_session: None,
             }),
         }
     }

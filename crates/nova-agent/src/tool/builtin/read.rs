@@ -41,6 +41,7 @@ impl ReadTool {
                 return Err(ToolOutput {
                     content: "Access denied: path is invalid or outside of workspace".to_string(),
                     is_error: true,
+                    child_session: None,
                 });
             }
             Ok(full_path)
@@ -49,6 +50,7 @@ impl ReadTool {
                 return Err(ToolOutput {
                     content: format!("Error: 'file_path' must be an absolute path: {}", path_str),
                     is_error: true,
+                    child_session: None,
                 });
             }
             Ok(path.to_path_buf())
@@ -70,6 +72,7 @@ impl ReadTool {
                     return Ok(ToolOutput {
                         content: format!("Offset {} is beyond file length ({} lines)", offset, lines.len()),
                         is_error: true,
+                        child_session: None,
                     });
                 }
 
@@ -178,11 +181,13 @@ impl ReadTool {
                 Ok(ToolOutput {
                     content: output,
                     is_error: false,
+                    child_session: None,
                 })
             }
             Err(e) => Ok(ToolOutput {
                 content: format!("Failed to read file: {}", e),
                 is_error: true,
+                child_session: None,
             }),
         }
     }
@@ -192,6 +197,7 @@ impl ReadTool {
         Ok(ToolOutput {
             content: "Image reading not yet supported in this version.".to_string(),
             is_error: true,
+            child_session: None,
         })
     }
 }
@@ -233,6 +239,7 @@ impl Tool for ReadTool {
             return Ok(ToolOutput {
                 content: format!("File not found: {}", file_path_str),
                 is_error: true,
+                child_session: None,
             });
         }
 

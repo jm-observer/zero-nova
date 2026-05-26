@@ -16,6 +16,7 @@ pub(super) fn preprocess_file_tool_input(
         .ok_or_else(|| ToolOutput {
             content: "Missing 'file_path'".to_string(),
             is_error: true,
+            child_session: None,
         })?;
     let Some(ctx) = context else {
         return Ok(());
@@ -35,6 +36,7 @@ pub(super) fn preprocess_file_tool_input(
         .map_err(|err| ToolOutput {
             content: format_path_resolve_error(tool_name, &err),
             is_error: true,
+            child_session: None,
         })?;
         input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
         return Ok(());
@@ -43,6 +45,7 @@ pub(super) fn preprocess_file_tool_input(
         return Err(ToolOutput {
             content: NO_PROJECT_RELATIVE_PATH_ERROR.to_string(),
             is_error: true,
+            child_session: None,
         });
     };
     let project_dir = Path::new(project_dir);
@@ -57,6 +60,7 @@ pub(super) fn preprocess_file_tool_input(
     .map_err(|err| ToolOutput {
         content: format_path_resolve_error(tool_name, &err),
         is_error: true,
+        child_session: None,
     })?;
     input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
     Ok(())

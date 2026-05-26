@@ -203,6 +203,11 @@ impl From<AgentEvent> for AppEvent {
                     stream,
                 }
             }
+            // ChildSessionRequest 是宿主级副作用事件（如 zero 由此触发会话切换），
+            // 不属于 UI/观察层的 AppEvent；这里仅保留一条 SystemLog 作为可观测线索。
+            AgentEvent::ChildSessionRequest { tool_name, .. } => {
+                AppEvent::SystemLog(format!("child_session requested by tool '{tool_name}'"))
+            }
         }
     }
 }

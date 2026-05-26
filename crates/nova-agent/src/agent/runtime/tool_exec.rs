@@ -146,10 +146,10 @@ impl AgentRuntime {
                 )
                 .await;
 
-                let (content, is_error) = match result {
-                    Ok(Ok(out)) => (out.content, out.is_error),
-                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true),
-                    Err(_) => ("Tool execution timed out".to_string(), true),
+                let (content, is_error, child_session) = match result {
+                    Ok(Ok(out)) => (out.content, out.is_error, out.child_session),
+                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true, None),
+                    Err(_) => ("Tool execution timed out".to_string(), true, None),
                 };
                 let content = if let (Some(injector), Some(skill_registry)) =
                     (self.side_channel_injector.as_ref(), self.skill_registry.as_ref())
@@ -167,6 +167,19 @@ impl AgentRuntime {
                         is_error,
                     })
                     .await;
+
+                // 工具声明子会话副作用时额外发一个事件。必须排在 ToolEnd 之后，
+                // 保证消费者按"工具已结束 → 触发副作用"顺序处理。
+                if let Some(req) = child_session {
+                    let _ = tx
+                        .send(AgentEvent::ChildSessionRequest {
+                            tool_use_id: id.clone(),
+                            tool_name: name.clone(),
+                            seed_user_message: req.seed_user_message,
+                            metadata: req.metadata,
+                        })
+                        .await;
+                }
 
                 (
                     call_idx,

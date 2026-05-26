@@ -186,6 +186,7 @@ impl Tool for WebSearchTool {
                     return Ok(ToolOutput {
                         content: format!("Search results for \"{}\":\n\nNo results found.\n", query),
                         is_error: false,
+                        child_session: None,
                     });
                 }
 
@@ -203,6 +204,7 @@ impl Tool for WebSearchTool {
                 Ok(ToolOutput {
                     content,
                     is_error: false,
+                    child_session: None,
                 })
             }
             Err(e) => {
@@ -216,6 +218,7 @@ impl Tool for WebSearchTool {
                 Ok(ToolOutput {
                     content: format!("Web search failed ({}): {}", self.backend.name(), e),
                     is_error: true,
+                    child_session: None,
                 })
             }
         }

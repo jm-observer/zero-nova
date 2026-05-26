@@ -7,6 +7,7 @@ pub(super) fn validate_input_against_schema(tool_name: &str, input: &Value, sche
         return Err(ToolOutput {
             content: format!("Invalid arguments for '{}': input must be a JSON object", tool_name),
             is_error: true,
+            child_session: None,
         });
     };
 
@@ -23,6 +24,7 @@ pub(super) fn validate_input_against_schema(tool_name: &str, input: &Value, sche
                 return Err(ToolOutput {
                     content: format!("Invalid arguments for '{}': unknown field '{}'", tool_name, key),
                     is_error: true,
+                    child_session: None,
                 });
             }
         }
@@ -35,6 +37,7 @@ pub(super) fn validate_input_against_schema(tool_name: &str, input: &Value, sche
                         tool_name, required
                     ),
                     is_error: true,
+                    child_session: None,
                 });
             }
         }
@@ -58,6 +61,7 @@ pub(super) fn validate_input_against_schema(tool_name: &str, input: &Value, sche
                                 tool_name, key, expected_type
                             ),
                             is_error: true,
+                            child_session: None,
                         });
                     }
                 }

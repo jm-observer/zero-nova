@@ -7,7 +7,7 @@ pub mod external;
 pub mod read_cache;
 
 pub use registry::{
-    DeferredResolveOutcome, DeferredToolCategory, DeferredToolEntry, DeferredToolRepresentation, ProjectDirService,
-    RegisteredToolDefinition, Tiny, Tool, ToolContext, ToolOutput, ToolRegistry, TurnToolView,
+    ChildSessionRequest, DeferredResolveOutcome, DeferredToolCategory, DeferredToolEntry, DeferredToolRepresentation,
+    ProjectDirService, RegisteredToolDefinition, Tiny, Tool, ToolContext, ToolOutput, ToolRegistry, TurnToolView,
     UnavailableProjectDirService,
 };

@@ -62,6 +62,7 @@ impl Tool for WebFetchTool {
             return Ok(ToolOutput {
                 content: format!("Failed to fetch URL: HTTP {}", resp.status()),
                 is_error: true,
+                child_session: None,
             });
         }
 
@@ -89,11 +90,13 @@ impl Tool for WebFetchTool {
             Ok(ToolOutput {
                 content: "Fetched page but found no text content.".to_string(),
                 is_error: true,
+                child_session: None,
             })
         } else {
             Ok(ToolOutput {
                 content: truncate(final_text, 50_000),
                 is_error: false,
+                child_session: None,
             })
         }
     }

@@ -391,6 +391,7 @@ impl Tool for TaskCreateTool {
         Ok(ToolOutput {
             content: serde_json::to_string(&task)?,
             is_error: false,
+            child_session: None,
         })
     }
 }
@@ -428,6 +429,7 @@ impl Tool for TaskListTool {
         Ok(ToolOutput {
             content: serde_json::to_string(&tasks)?,
             is_error: false,
+            child_session: None,
         })
     }
 }
@@ -512,6 +514,7 @@ impl Tool for TaskUpdateTool {
         Ok(ToolOutput {
             content: serde_json::to_string(&task)?,
             is_error: false,
+            child_session: None,
         })
     }
 }

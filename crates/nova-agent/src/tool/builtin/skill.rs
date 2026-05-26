@@ -57,6 +57,7 @@ impl Tool for SkillTool {
             Ok(ToolOutput {
                 content: format_skill_output(skill.display_name.as_str(), skill.instructions.as_str(), args),
                 is_error: false,
+                child_session: None,
             })
         } else {
             let available: Vec<String> = self
@@ -72,6 +73,7 @@ impl Tool for SkillTool {
                     available.join(", ")
                 ),
                 is_error: true,
+                child_session: None,
             })
         }
     }

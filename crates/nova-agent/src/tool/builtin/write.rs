@@ -33,6 +33,7 @@ impl WriteTool {
                 return Err(ToolOutput {
                     content: "Access denied: path is invalid or outside of workspace".to_string(),
                     is_error: true,
+                    child_session: None,
                 });
             }
             Ok(full_path)
@@ -41,6 +42,7 @@ impl WriteTool {
                 return Err(ToolOutput {
                     content: format!("Error: 'file_path' must be an absolute path: {}", path_str),
                     is_error: true,
+                    child_session: None,
                 });
             }
             Ok(path.to_path_buf())
@@ -90,6 +92,7 @@ impl Tool for WriteTool {
                             file_path_str
                         ),
                         is_error: true,
+                        child_session: None,
                     });
                 }
             }
@@ -101,6 +104,7 @@ impl Tool for WriteTool {
                 return Ok(ToolOutput {
                     content: format!("Failed to create directory structure: {}", e),
                     is_error: true,
+                    child_session: None,
                 });
             }
         }
@@ -109,10 +113,12 @@ impl Tool for WriteTool {
             Ok(_) => Ok(ToolOutput {
                 content: format!("Successfully written to {}", file_path_str),
                 is_error: false,
+                child_session: None,
             }),
             Err(e) => Ok(ToolOutput {
                 content: format!("Failed to write file: {}", e),
                 is_error: true,
+                child_session: None,
             }),
         }
     }

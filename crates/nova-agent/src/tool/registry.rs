@@ -52,10 +52,26 @@ pub struct RegisteredToolDefinition {
     pub defer_loading: bool,
 }
 
+/// 工具声明"在当前 Agent 之外开启一个子会话承接后续对话"的副作用。
+///
+/// nova SDK 自身不消费此结构（仅透传到 [`AgentEvent::ChildSessionRequest`]）；
+/// 由外部宿主（如 zero）决定具体语义——通常用于把进一步对话隔离到新会话，
+/// 避免污染当前会话上下文。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChildSessionRequest {
+    /// 注入新子会话的种子 user message。
+    pub seed_user_message: String,
+    /// 任意结构化负载，供宿主按需读取（如 `{"flagged_id": 12}`）。
+    pub metadata: Value,
+}
+
 /// Result produced by a tool execution.
+#[derive(Debug, Clone, Default)]
 pub struct ToolOutput {
     pub content: String,
     pub is_error: bool,
+    /// 工具声明"开启子会话"副作用；`None` 表示无副作用（既有行为）。
+    pub child_session: Option<ChildSessionRequest>,
 }
 
 #[async_trait::async_trait]
@@ -696,6 +712,7 @@ impl ToolRegistry {
         Ok(ToolOutput {
             content: format!("Tool '{}' not found", canonical_name),
             is_error: true,
+            child_session: None,
         })
     }
 }
@@ -720,8 +737,8 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::{
-        DeferredResolveOutcome, DeferredToolCategory, RegisteredToolDefinition, Tool, ToolContext, ToolOutput,
-        ToolRegistry,
+        ChildSessionRequest, DeferredResolveOutcome, DeferredToolCategory, RegisteredToolDefinition, Tool, ToolContext,
+        ToolOutput, ToolRegistry,
     };
     use crate::prompt::EnvironmentSnapshot;
     use anyhow::Result;
@@ -731,6 +748,43 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
     use tokio::sync::{mpsc, Mutex};
+
+    #[test]
+    fn tool_output_default_has_no_child_session() {
+        let out = ToolOutput::default();
+        assert!(out.content.is_empty());
+        assert!(!out.is_error);
+        assert!(out.child_session.is_none());
+    }
+
+    #[test]
+    fn child_session_request_serde_roundtrip() {
+        let original = ChildSessionRequest {
+            seed_user_message: "kickoff flagged_id=12 reason=路由错".to_string(),
+            metadata: json!({ "flagged_id": 12, "tag": "review" }),
+        };
+        let s = serde_json::to_string(&original).expect("serialize");
+        let parsed: ChildSessionRequest = serde_json::from_str(&s).expect("deserialize");
+        assert_eq!(parsed.seed_user_message, "kickoff flagged_id=12 reason=路由错");
+        assert_eq!(parsed.metadata["flagged_id"], 12);
+        assert_eq!(parsed.metadata["tag"], "review");
+    }
+
+    #[test]
+    fn tool_output_with_child_session_carries_payload() {
+        let out = ToolOutput {
+            content: "已开启复盘会话".to_string(),
+            is_error: false,
+            child_session: Some(ChildSessionRequest {
+                seed_user_message: "kickoff flagged_id=7".to_string(),
+                metadata: json!({ "flagged_id": 7 }),
+            }),
+        };
+        assert!(!out.is_error);
+        let cs = out.child_session.expect("child_session set");
+        assert_eq!(cs.seed_user_message, "kickoff flagged_id=7");
+        assert_eq!(cs.metadata["flagged_id"], 7);
+    }
 
     struct StaticTool {
         name: &'static str,
@@ -756,6 +810,7 @@ mod tests {
             Ok(ToolOutput {
                 content: self.name.to_string(),
                 is_error: false,
+                child_session: None,
             })
         }
     }
@@ -775,6 +830,7 @@ mod tests {
             Ok(ToolOutput {
                 content: self.name.to_string(),
                 is_error: false,
+                child_session: None,
             })
         }
     }

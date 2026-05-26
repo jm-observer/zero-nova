@@ -113,6 +113,14 @@ pub enum AppEvent {
         log: Option<String>,
         stream: Option<String>,
     },
+    /// 工具声明了开启子会话副作用（来自 [`AgentEvent::ChildSessionRequest`]）。
+    /// 由外部宿主（如 zero）消费以执行实际的会话切换；nova SDK 不自处理。
+    ChildSessionRequested {
+        tool_use_id: String,
+        tool_name: String,
+        seed_user_message: String,
+        metadata: Value,
+    },
     // --- Observability & Control (Plan 1 & 2) ---
     SessionRuntimeUpdated(Box<nova_protocol::observability::SessionRuntimeSnapshot>),
     SessionSummaryUpdated(nova_protocol::session::SessionSummaryUpdatedPayload),
@@ -203,11 +211,19 @@ impl From<AgentEvent> for AppEvent {
                     stream,
                 }
             }
-            // ChildSessionRequest 是宿主级副作用事件（如 zero 由此触发会话切换），
-            // 不属于 UI/观察层的 AppEvent；这里仅保留一条 SystemLog 作为可观测线索。
-            AgentEvent::ChildSessionRequest { tool_name, .. } => {
-                AppEvent::SystemLog(format!("child_session requested by tool '{tool_name}'"))
-            }
+            // ChildSessionRequest 透传为 AppEvent::ChildSessionRequested，
+            // 保留结构化字段供宿主消费（如 zero ClawBridge 据此切到隔离 session）。
+            AgentEvent::ChildSessionRequest {
+                tool_use_id,
+                tool_name,
+                seed_user_message,
+                metadata,
+            } => AppEvent::ChildSessionRequested {
+                tool_use_id,
+                tool_name,
+                seed_user_message,
+                metadata,
+            },
         }
     }
 }

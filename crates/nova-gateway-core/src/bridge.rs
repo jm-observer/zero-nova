@@ -208,6 +208,24 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
         AppEvent::AuditLogsUpdated(payload) => MessageEnvelope::AuditLogsUpdated(payload),
         AppEvent::DiagnosticsUpdated(payload) => MessageEnvelope::DiagnosticsUpdated(payload),
         AppEvent::WorkspaceRestoreAvailable(payload) => MessageEnvelope::WorkspaceRestoreAvailable(payload),
+        // child_session 是宿主级副作用（如 zero 据此切隔离 session），对网关客户端
+        // 作为可观测 progress 暴露，不参与会话状态。
+        AppEvent::ChildSessionRequested {
+            tool_use_id,
+            tool_name,
+            seed_user_message,
+            metadata,
+        } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "child_session_requested".to_string(),
+            session_id: Some(session_id.to_string()),
+            tool_name: Some(tool_name),
+            tool_use_id: Some(tool_use_id),
+            args: Some(serde_json::json!({
+                "seed_user_message": seed_user_message,
+                "metadata": metadata,
+            })),
+            ..Default::default()
+        }),
     };
 
     if request_id.is_empty() {

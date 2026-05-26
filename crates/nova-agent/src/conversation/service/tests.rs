@@ -3,9 +3,58 @@ use super::SessionService;
 use crate::conversation::cache::SessionCache;
 use crate::conversation::control::{TitleSource, TitleState, TitleStatus};
 use crate::conversation::sqlite_manager::SqliteManager;
+use crate::conversation::title_generator::{TitleGenerationError, TitleGenerator};
 use anyhow::Result;
+use async_trait::async_trait;
 use std::sync::Arc;
 use tempfile::tempdir;
+use tokio::sync::Mutex;
+
+/// Mock title generator: 按构造时给定的 outcome 列表逐次返回，列表用尽后保持返回最后一个。
+struct MockTitleGenerator {
+    outcomes: Mutex<Vec<Result<String, TitleGenerationError>>>,
+    calls: Mutex<usize>,
+}
+
+impl MockTitleGenerator {
+    fn new(outcomes: Vec<Result<String, TitleGenerationError>>) -> Arc<Self> {
+        Arc::new(Self {
+            outcomes: Mutex::new(outcomes),
+            calls: Mutex::new(0),
+        })
+    }
+
+    async fn call_count(&self) -> usize {
+        *self.calls.lock().await
+    }
+}
+
+#[async_trait]
+impl TitleGenerator for MockTitleGenerator {
+    async fn generate(&self, _session_id: &str, _user_texts: &[String]) -> Result<String, TitleGenerationError> {
+        *self.calls.lock().await += 1;
+        let mut outcomes = self.outcomes.lock().await;
+        if outcomes.len() > 1 {
+            outcomes.remove(0)
+        } else if outcomes.len() == 1 {
+            // 保留最后一个供后续重复调用复用（消费 + 重新插回）
+            let v = outcomes.remove(0);
+            let cloned = match &v {
+                Ok(s) => Ok(s.clone()),
+                Err(TitleGenerationError::Retryable(e)) => Err(TitleGenerationError::Retryable(anyhow::anyhow!("{e}"))),
+                Err(TitleGenerationError::NonRetryable(e)) => {
+                    Err(TitleGenerationError::NonRetryable(anyhow::anyhow!("{e}")))
+                }
+            };
+            outcomes.push(cloned);
+            v
+        } else {
+            Err(TitleGenerationError::NonRetryable(anyhow::anyhow!(
+                "MockTitleGenerator outcomes exhausted"
+            )))
+        }
+    }
+}
 
 #[test]
 fn merge_skill_bindings_is_idempotent_and_deduplicates_by_skill_id() {
@@ -858,6 +907,149 @@ async fn title_is_not_regenerated_after_success_and_reload() -> Result<()> {
     let loaded_title_state = loaded_session.title_state.read().await;
     assert_eq!(loaded_title_state.attempt_count, 1);
     assert_eq!(loaded_title_state.status, TitleStatus::Succeeded);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// TitleGenerator 注入路径测试（2026-05-26 Plan 1）
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn title_generation_uses_injected_generator() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let mut service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let mock = MockTitleGenerator::new(vec![Ok("自定义标题".to_string())]);
+    service.set_title_generator(mock.clone());
+
+    let session = service
+        .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+        .await?;
+
+    service
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "我想做一个桌面端任务调度工具".to_string(),
+            }],
+            None,
+        )
+        .await?;
+    service
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "要支持重试队列并且按项目分类展示".to_string(),
+            }],
+            None,
+        )
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+    assert_eq!(mock.call_count().await, 1);
+    let title_state = session.title_state.read().await;
+    assert_eq!(title_state.status, TitleStatus::Succeeded);
+    assert_eq!(title_state.source, TitleSource::Ai);
+    drop(title_state);
+    assert_eq!(session.get_name().await, "自定义标题");
+    Ok(())
+}
+
+#[tokio::test]
+async fn title_generation_retryable_error_keeps_failed_state() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let mut service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let mock = MockTitleGenerator::new(vec![Err(TitleGenerationError::Retryable(anyhow::anyhow!("boom")))]);
+    service.set_title_generator(mock);
+
+    let session = service
+        .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+        .await?;
+
+    service
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "我想做一个桌面端任务调度工具".to_string(),
+            }],
+            None,
+        )
+        .await?;
+    service
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "要支持重试队列并且按项目分类展示".to_string(),
+            }],
+            None,
+        )
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+    let title_state = session.title_state.read().await;
+    assert_eq!(title_state.status, TitleStatus::Failed);
+    assert_eq!(title_state.attempt_count, 1);
+    assert!(title_state
+        .last_error
+        .as_deref()
+        .map(|s| s.starts_with("retryable:"))
+        .unwrap_or(false));
+    assert!(title_state.should_retry());
+    Ok(())
+}
+
+#[tokio::test]
+async fn title_generation_non_retryable_error_consumes_attempt() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let mut service = SessionService::new(Arc::new(SessionCache::new()), repository);
+    let mock = MockTitleGenerator::new(vec![Err(TitleGenerationError::NonRetryable(anyhow::anyhow!(
+        "format-bad"
+    )))]);
+    service.set_title_generator(mock);
+
+    let session = service
+        .create_for_agent(None, "agent-1".to_string(), String::new(), None)
+        .await?;
+
+    service
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "我想做一个桌面端任务调度工具".to_string(),
+            }],
+            None,
+        )
+        .await?;
+    service
+        .append_message(
+            &session.id,
+            crate::message::Role::User,
+            vec![crate::message::ContentBlock::Text {
+                text: "要支持重试队列并且按项目分类展示".to_string(),
+            }],
+            None,
+        )
+        .await?;
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+    let title_state = session.title_state.read().await;
+    assert_eq!(title_state.status, TitleStatus::Failed);
+    assert_eq!(title_state.attempt_count, 1);
+    assert!(title_state
+        .last_error
+        .as_deref()
+        .map(|s| s.starts_with("non_retryable:"))
+        .unwrap_or(false));
     Ok(())
 }
 

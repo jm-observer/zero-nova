@@ -5,6 +5,7 @@ use super::{
 };
 use crate::conversation::control::{TitleSource, TitleStatus};
 use crate::conversation::session::Session;
+use crate::conversation::title_generator::TitleGenerationError;
 use crate::message::{ContentBlock, Role};
 use anyhow::Result;
 use std::sync::Arc;
@@ -79,13 +80,14 @@ impl SessionService {
     ) -> Result<()> {
         let generation_result = timeout(
             Duration::from_millis(TITLE_GENERATION_TIMEOUT_MS),
-            Self::generate_title(&user_texts),
+            self.title_generator.generate(&session.id, &user_texts),
         )
         .await;
 
-        let generated = match generation_result {
+        let generated: std::result::Result<String, String> = match generation_result {
             Ok(Ok(title)) => Ok(title),
-            Ok(Err(err)) => Err(format!("non_retryable: {err}")),
+            Ok(Err(TitleGenerationError::Retryable(err))) => Err(format!("retryable: {err}")),
+            Ok(Err(TitleGenerationError::NonRetryable(err))) => Err(format!("non_retryable: {err}")),
             Err(_) => Err(format!("retryable: timeout after {}ms", TITLE_GENERATION_TIMEOUT_MS)),
         };
 
@@ -120,13 +122,5 @@ impl SessionService {
 
         self.persist_session_control(&session).await?;
         Ok(())
-    }
-
-    async fn generate_title(user_texts: &[String]) -> Result<String> {
-        let joined = user_texts.join(" ");
-        if joined.trim().is_empty() {
-            anyhow::bail!("user texts are empty");
-        }
-        Ok(joined)
     }
 }

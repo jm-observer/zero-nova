@@ -13,6 +13,7 @@ mod write;
 
 use super::cache::SessionCache;
 use super::repository::SqliteSessionRepository;
+use super::title_generator::{FallbackTitleGenerator, TitleGenerator};
 use crate::tool::ProjectDirService;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -31,8 +32,8 @@ pub const TITLE_MIN_USER_MESSAGES_SECOND_ATTEMPT: usize = 3;
 pub const TITLE_MAX_ATTEMPTS: u8 = 2;
 /// 最小总字符数（所有用户文本消息的字符总和）
 pub const TITLE_MIN_TOTAL_CHARS: usize = 24;
-/// 标题生成超时时间
-pub const TITLE_GENERATION_TIMEOUT_MS: u64 = 3_000;
+/// 标题生成超时时间（LLM 调用需要充足时间，prompt+网络下 3s 几乎一定 retryable）。
+pub const TITLE_GENERATION_TIMEOUT_MS: u64 = 15_000;
 
 /// 默认会话标题
 const DEFAULT_SESSION_TITLE: &str = "未命名会话";
@@ -43,6 +44,9 @@ pub struct SessionService {
     repository: SqliteSessionRepository,
     /// De-duplicates concurrent cold loads for the same session id.
     loading: Arc<RwLock<LoadingWaiters>>,
+    /// 标题生成器：默认装 `FallbackTitleGenerator`（取首条用户文本单行）；
+    /// 宿主可通过 `set_title_generator` 注入 LLM 实现。
+    pub(super) title_generator: Arc<dyn TitleGenerator>,
 }
 
 impl SessionService {
@@ -51,11 +55,18 @@ impl SessionService {
             cache,
             repository,
             loading: Arc::new(RwLock::new(HashMap::new())),
+            title_generator: Arc::new(FallbackTitleGenerator),
         }
     }
 
     pub fn get_repository(&self) -> SqliteSessionRepository {
         self.repository.clone()
+    }
+
+    /// 注入标题生成器（覆盖默认 `FallbackTitleGenerator`）。
+    /// 由宿主（如 `ConversationService::new`）在装配阶段调用。
+    pub fn set_title_generator(&mut self, generator: Arc<dyn TitleGenerator>) {
+        self.title_generator = generator;
     }
 }
 

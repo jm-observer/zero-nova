@@ -141,10 +141,19 @@ impl ConversationService {
     pub fn new(
         agent: AgentRuntime,
         agent_registry: AgentRegistry,
-        sessions: SessionService,
+        mut sessions: SessionService,
         config: Arc<AppConfig>,
         turn_prompt_service: TurnPromptService,
     ) -> Self {
+        // 装配 LlmTitleGenerator：用 `sessions.clone()` 作为反查句柄（共享底层 cache/repository），
+        // 再把生成器注入 sessions 自身的 title_generator 字段。两个 SessionService 实例共享数据源，
+        // 不形成循环引用——sessions_arc 持有的是一份不会被 set_title_generator 改动的克隆。
+        let sessions_arc = Arc::new(sessions.clone());
+        let title_generator = Arc::new(crate::conversation::LlmTitleGenerator::new(
+            config.clone(),
+            sessions_arc,
+        ));
+        sessions.set_title_generator(title_generator);
         Self {
             agent,
             agent_registry,

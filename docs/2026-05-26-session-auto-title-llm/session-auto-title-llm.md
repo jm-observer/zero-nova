@@ -34,7 +34,7 @@
 | Plan 2 | `LlmTitleGenerator` 实现（复用 active agent binding 调 OpenAiCompatClient） | Plan 1 | 2 | 已完成 |
 | Plan 3 | `ConversationService::new` 装配 `LlmTitleGenerator` 并注入 `SessionService` | Plan 1, 2 | 3 | 已完成 |
 | Plan 4 | 测试覆盖（mock generator + 超时 + 集成 smoke）+ 修复循环 | Plan 1, 2, 3 | 4 | 已完成 |
-| Plan 5 | zero-nova 发新 nova tag；zero 那边 `cargo update -p nova-agent` 升级并跑自身修复循环 | Plan 4 | 5 | 进行中 |
+| Plan 5 | zero-nova 发新 nova tag；zero 那边 `cargo update -p nova-agent` 升级并跑自身修复循环 | Plan 4 | 5 | 已完成（zero-nova v0.3.19 / zero commit 1cef925） |
 
 ## 风险与待定项
 

@@ -712,6 +712,25 @@ impl AgentTool {
                                 .await;
                             logs.lock().await.push(log);
                         }
+                        // 子会话副作用必须**原样**透传到父 runtime，否则宿主收不到。
+                        // 如果不在这里 forward，sub-agent 内工具返回的 ToolOutput.
+                        // child_session 副作用会被本 spawn 任务的 `_ => {}` 分支吞掉，
+                        // 父 runtime 的 event 流永远看不到 ChildSessionRequest。
+                        AgentEvent::ChildSessionRequest {
+                            tool_use_id,
+                            tool_name,
+                            seed_user_message,
+                            metadata,
+                        } => {
+                            let _ = parent_tx
+                                .send(AgentEvent::ChildSessionRequest {
+                                    tool_use_id,
+                                    tool_name,
+                                    seed_user_message,
+                                    metadata,
+                                })
+                                .await;
+                        }
                         _ => {}
                     }
                 }

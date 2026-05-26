@@ -271,8 +271,7 @@ mod tests {
 
         assert!(error.is_err(), "missing context should fail");
         assert!(error
-            .err()
-            .expect("error should exist")
+            .expect_err("error should exist")
             .to_string()
             .contains("requires tool context"));
     }
@@ -342,8 +341,7 @@ mod tests {
 
         assert!(error.is_err());
         assert!(error
-            .err()
-            .expect("error should exist")
+            .expect_err("error should exist")
             .to_string()
             .contains("mutually exclusive"));
     }
@@ -444,6 +442,6 @@ mod tests {
         let error = tool.execute(serde_json::json!({}), Some(test_context(event_tx))).await;
 
         assert!(error.is_err());
-        assert!(error.err().expect("error should exist").to_string().contains("Either"));
+        assert!(error.expect_err("error should exist").to_string().contains("Either"));
     }
 }

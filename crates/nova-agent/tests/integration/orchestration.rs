@@ -861,7 +861,7 @@ async fn error_message_propagates_through_orchestrate_tool() {
         )
         .await;
 
-    let err_msg = result.err().expect("should fail on invalid plan").to_string();
+    let err_msg = result.expect_err("should fail on invalid plan").to_string();
     assert!(
         err_msg.contains("mode"),
         "error should include serde details about missing 'mode': {}",

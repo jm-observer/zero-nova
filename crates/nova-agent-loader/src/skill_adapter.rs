@@ -97,6 +97,20 @@ async fn apply_preload_overrides(package: &mut SkillPackage) {
     }
 }
 
+/// 推导技能目录：SKILL.md 技能的 `source_path` 即目录（无扩展名）；
+/// skill.toml 技能的 `source_path` 为文件（有扩展名），取其父目录。
+/// 用扩展名判定以避免 async 上下文中的同步 fs stat。
+fn skill_dir_of(source_path: &Path) -> Option<PathBuf> {
+    if source_path.as_os_str().is_empty() {
+        return None;
+    }
+    if source_path.extension().is_some() {
+        source_path.parent().map(Path::to_path_buf)
+    } else {
+        Some(source_path.to_path_buf())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::load_skills;
@@ -152,19 +166,5 @@ mod tests {
         let packages = load_skills(tmp.path(), &[]).await.unwrap();
         let skill = packages.iter().find(|p| p.slug == "bad").expect("skill still loaded");
         assert!(skill.preload.is_empty());
-    }
-}
-
-/// 推导技能目录：SKILL.md 技能的 `source_path` 即目录（无扩展名）；
-/// skill.toml 技能的 `source_path` 为文件（有扩展名），取其父目录。
-/// 用扩展名判定以避免 async 上下文中的同步 fs stat。
-fn skill_dir_of(source_path: &Path) -> Option<PathBuf> {
-    if source_path.as_os_str().is_empty() {
-        return None;
-    }
-    if source_path.extension().is_some() {
-        source_path.parent().map(Path::to_path_buf)
-    } else {
-        Some(source_path.to_path_buf())
     }
 }

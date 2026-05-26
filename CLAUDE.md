@@ -84,6 +84,17 @@ pnpm tauri build
 
 > 所有命令均在 workspace 根目录执行，覆盖全部 crate。
 
+### Schema 同步（改协议 DTO 后必须执行）
+
+只要改动了 `nova-protocol` 中导出 schema 的类型（payload / envelope / 工具相关 DTO 等），必须按顺序重新生成两份契约文件并一起提交，否则 CI 的 `schema-check` 或 `frontend-check` 会失败：
+
+1. `cargo run -p nova-protocol --bin export-schema --features export-schema -- --root .`  
+   → 更新 `schemas/registry.json`、`schemas/root/`、`schemas/domains/`、`schemas/domains_snapshot.txt`
+2. `cd deskapp && pnpm generate:schemas`  
+   → 更新 `deskapp/src/generated/{schema-types,schema-validators,generated-types}.ts`
+3. 校验：`git diff --exit-code -- schemas/ deskapp/src/generated/` 应无输出
+4. 与本次协议变更放进同一个 commit 提交（不要单独留到下一次）
+
 ## 架构速览（Big Picture）
 
 Zero-Nova 是三层结构的 Agent Runtime：

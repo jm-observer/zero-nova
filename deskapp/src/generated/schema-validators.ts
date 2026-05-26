@@ -412,6 +412,28 @@ const GatewayMessageGeneratedSchema = {
             "type"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "data_base64": {
+              "type": "string"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data_base64",
+            "mime",
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },

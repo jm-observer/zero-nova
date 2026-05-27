@@ -16,6 +16,7 @@ use std::collections::{HashMap, VecDeque};
 
 const HEADER_SESSION_ID: &str = "x-session-id";
 const HEADER_AGENT_ID: &str = "x-agent-id";
+const HEADER_MESSAGE_ID: &str = "x-message-id";
 
 /// Client for interacting with OpenAI-compatible APIs using async-openai SDK.
 pub struct OpenAiCompatClient {
@@ -109,6 +110,11 @@ impl OpenAiCompatClient {
             headers.push((HEADER_AGENT_ID.to_string(), trimmed_agent.to_string()));
         }
 
+        let trimmed_message = request_context.message_id.trim();
+        if !trimmed_message.is_empty() {
+            headers.push((HEADER_MESSAGE_ID.to_string(), trimmed_message.to_string()));
+        }
+
         headers
     }
 }
@@ -139,14 +145,20 @@ impl LlmClient for OpenAiCompatClient {
             config.extra_body.as_ref(),
         );
 
-        // 构建请求 Header 并注入 x-session-id / x-agent-id
+        // 构建请求 Header 并注入 x-session-id / x-agent-id / x-message-id
         let extra_headers = Self::build_request_headers(request_context);
         let session_injected = extra_headers.iter().any(|(k, _)| k == HEADER_SESSION_ID);
         let agent_injected = extra_headers.iter().any(|(k, _)| k == HEADER_AGENT_ID);
+        let message_id_value = extra_headers
+            .iter()
+            .find(|(k, _)| k == HEADER_MESSAGE_ID)
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("-");
         trace!(
-            "[OUTBOUND] LLM request headers: session_id={}, agent_id={}",
+            "[OUTBOUND] LLM request headers: session_id={}, agent_id={}, message_id={}",
             session_injected,
-            agent_injected
+            agent_injected,
+            message_id_value
         );
 
         let url = format!("{}/chat/completions", base);
@@ -360,9 +372,14 @@ mod tests {
     use super::*;
 
     fn make_context(session: Option<&str>, agent: &str) -> ProviderRequestContext {
+        make_context_with_msg(session, agent, "")
+    }
+
+    fn make_context_with_msg(session: Option<&str>, agent: &str, message_id: &str) -> ProviderRequestContext {
         ProviderRequestContext {
             session_id: session.map(|s| s.to_string()),
             agent_id: agent.to_string(),
+            message_id: message_id.to_string(),
         }
     }
 
@@ -416,6 +433,24 @@ mod tests {
         assert_eq!(headers.len(), 2);
         assert!(headers.iter().any(|(k, v)| k == HEADER_SESSION_ID && v == "sess-123"));
         assert!(headers.iter().any(|(k, v)| k == HEADER_AGENT_ID && v == "agent-456"));
+    }
+
+    #[test]
+    fn test_build_request_headers_includes_message_id() {
+        let ctx = make_context_with_msg(Some("sess-1"), "agent-1", "  msg-abc  ");
+        let headers = OpenAiCompatClient::build_request_headers(&ctx);
+
+        assert_eq!(headers.len(), 3);
+        assert!(headers.iter().any(|(k, v)| k == HEADER_MESSAGE_ID && v == "msg-abc"));
+    }
+
+    #[test]
+    fn test_build_request_headers_blank_message_id_filtered() {
+        let ctx = make_context_with_msg(Some("sess-1"), "agent-1", "   ");
+        let headers = OpenAiCompatClient::build_request_headers(&ctx);
+
+        assert_eq!(headers.len(), 2);
+        assert!(!headers.iter().any(|(k, _)| k == HEADER_MESSAGE_ID));
     }
 
     #[test]

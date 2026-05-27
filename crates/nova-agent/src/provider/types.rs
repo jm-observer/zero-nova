@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-/// 轻量级请求上下文，用于 Provider 出站 HTTP 请求时透传 session_id 与 agent_id。
+/// 轻量级请求上下文，用于 Provider 出站 HTTP 请求时透传 session_id / agent_id / message_id。
+/// `message_id` 为单次 LLM HTTP 请求的唯一标识，调用方应在每次发起 stream 前生成新值
+/// （通常用 `uuid::Uuid::new_v4().to_string()`）；空串视为未设置，不会注入到 Header。
 #[derive(Debug, Clone, Default)]
 pub struct ProviderRequestContext {
     pub session_id: Option<String>,
     pub agent_id: String,
+    pub message_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

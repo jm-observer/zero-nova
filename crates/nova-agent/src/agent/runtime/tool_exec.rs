@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 pub(super) struct ExecuteToolCallsRequest<'a> {
     pub parsed_tool_calls: Vec<(String, String, serde_json::Value)>,
@@ -269,6 +270,7 @@ impl AgentRuntime {
                             Some(session_id.to_string())
                         },
                         agent_id: agent_id.to_string(),
+                        message_id: Uuid::new_v4().to_string(),
                     },
                 )
                 .await

@@ -12,6 +12,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 struct RequestContextCapture {
     session_id: Option<String>,
     agent_id: Option<String>,
+    message_id: Option<String>,
 }
 
 async fn create_mock_server_with_capture(
@@ -29,6 +30,9 @@ async fn create_mock_server_with_capture(
             }
             if let Some(values) = req.headers.get("x-agent-id") {
                 record.agent_id = values.first().map(ToString::to_string);
+            }
+            if let Some(values) = req.headers.get("x-message-id") {
+                record.message_id = values.first().map(ToString::to_string);
             }
 
             if let Ok(mut guard) = captured_clone.lock() {
@@ -58,7 +62,23 @@ async fn create_mock_server_with_capture(
 }
 
 fn make_context(session_id: Option<String>, agent_id: String) -> ProviderRequestContext {
-    ProviderRequestContext { session_id, agent_id }
+    ProviderRequestContext {
+        session_id,
+        agent_id,
+        message_id: String::new(),
+    }
+}
+
+fn make_context_with_message(
+    session_id: Option<String>,
+    agent_id: String,
+    message_id: String,
+) -> ProviderRequestContext {
+    ProviderRequestContext {
+        session_id,
+        agent_id,
+        message_id,
+    }
 }
 
 #[tokio::test]
@@ -124,6 +144,46 @@ async fn 并发请求中header与session一一对应() -> Result<()> {
     for session in expected_sessions {
         assert!(seen.get(&session).copied().unwrap_or(false), "missing session header: {session}");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn header_message_id注入并随每次请求变化() -> Result<()> {
+    let (mock_server, captured) = create_mock_server_with_capture().await;
+    let client = OpenAiCompatClient::new("sk-test".to_string(), mock_server.uri());
+
+    let ctx_a = make_context_with_message(
+        Some("sess-1".into()),
+        "agent-1".into(),
+        "msg-aaa".into(),
+    );
+    let _ = client.stream(&[], &[], &ModelConfig::default(), &ctx_a).await?;
+
+    let ctx_b = make_context_with_message(
+        Some("sess-1".into()),
+        "agent-1".into(),
+        "msg-bbb".into(),
+    );
+    let _ = client.stream(&[], &[], &ModelConfig::default(), &ctx_b).await?;
+
+    let records = captured.lock().map(|g| g.clone()).unwrap_or_default();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].message_id.as_deref(), Some("msg-aaa"));
+    assert_eq!(records[1].message_id.as_deref(), Some("msg-bbb"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn header_message_id为空时不注入() -> Result<()> {
+    let (mock_server, captured) = create_mock_server_with_capture().await;
+    let client = OpenAiCompatClient::new("sk-test".to_string(), mock_server.uri());
+    let ctx = make_context(Some("sess-1".into()), "agent-1".into());
+
+    let _ = client.stream(&[], &[], &ModelConfig::default(), &ctx).await?;
+
+    let records = captured.lock().map(|g| g.clone()).unwrap_or_default();
+    let record = records.first().cloned().unwrap_or_default();
+    assert_eq!(record.message_id, None);
     Ok(())
 }
 

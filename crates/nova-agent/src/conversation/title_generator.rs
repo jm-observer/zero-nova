@@ -152,6 +152,7 @@ impl TitleGenerator for LlmTitleGenerator {
         let request_context = ProviderRequestContext {
             session_id: Some(session_id.to_string()),
             agent_id: format!("title-gen[{agent_id}]"),
+            message_id: uuid::Uuid::new_v4().to_string(),
         };
 
         run_title_stream(&client, &messages, &model_config, &request_context).await
@@ -310,6 +311,7 @@ mod tests {
         ProviderRequestContext {
             session_id: Some("sess-1".into()),
             agent_id: "title-gen[zero]".into(),
+            message_id: "msg-test".into(),
         }
     }
 

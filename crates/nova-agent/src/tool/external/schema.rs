@@ -53,7 +53,10 @@ pub struct CommandExecution {
 pub struct ParamMapping {
     pub name: String,
     pub param_type: String,
-    pub arg: String,
+    /// `Some(flag)` 表示命名参数（如 `--id`）；`None` 表示位置参数（按 `ParamMapping`
+    /// 在 `param_mappings` 中的相对顺序透传 value，不带 flag 前缀）。
+    pub arg: Option<String>,
+    pub required: bool,
 }
 
 impl ToolSpec {
@@ -107,11 +110,14 @@ impl ToolSpec {
     fn build_param_mappings(&self) -> Vec<ParamMapping> {
         self.parameters
             .iter()
-            .filter(|p| !p.arg.is_empty() && !p.arg[0].is_empty())
-            .map(|p| ParamMapping {
-                name: p.name.clone(),
-                param_type: p.param_type.clone(),
-                arg: p.arg[0].clone(),
+            .map(|p| {
+                let arg = p.arg.iter().find(|s| !s.is_empty()).cloned();
+                ParamMapping {
+                    name: p.name.clone(),
+                    param_type: p.param_type.clone(),
+                    arg,
+                    required: p.required,
+                }
             })
             .collect()
     }
@@ -209,10 +215,10 @@ arg = ["--output"]
         let mappings = &def.execution.param_mappings;
         assert_eq!(mappings.len(), 5);
         assert_eq!(mappings[0].name, "url");
-        assert_eq!(mappings[0].arg, "--url");
+        assert_eq!(mappings[0].arg.as_deref(), Some("--url"));
         assert_eq!(mappings[3].name, "days");
         assert_eq!(mappings[3].param_type, "integer");
-        assert_eq!(mappings[3].arg, "--days");
+        assert_eq!(mappings[3].arg.as_deref(), Some("--days"));
     }
 
     #[test]
@@ -249,7 +255,47 @@ arg = ["-p", "--package"]
         assert!(def.execution.cwd);
 
         let mappings = &def.execution.param_mappings;
-        assert_eq!(mappings[0].arg, "-r");
-        assert_eq!(mappings[1].arg, "-p");
+        assert_eq!(mappings[0].arg.as_deref(), Some("-r"));
+        assert_eq!(mappings[1].arg.as_deref(), Some("-p"));
+    }
+
+    #[test]
+    fn test_positional_param_mapping() {
+        // alarm-cli cancel <ID> 这种位置参数：toml 里 `id` 未声明 `arg`
+        let toml_str = r#"
+[[tools]]
+name = "alarm-cli-cancel"
+description = "Cancel an alarm by its UUID."
+type = "command"
+command = "alarm-cli"
+subcommands = ["cancel"]
+cwd = false
+
+[[tools.parameters]]
+name = "id"
+description = "Alarm UUID"
+type = "string"
+required = true
+
+[[tools.parameters]]
+name = "workspace"
+description = "Workspace directory"
+type = "string"
+required = false
+arg = ["--workspace", "-w"]
+"#;
+        let tool_file: ToolFile = toml::from_str(toml_str).unwrap();
+        let spec = tool_file.tools.into_iter().next().unwrap();
+        let def = spec.into_definition();
+
+        let mappings = &def.execution.param_mappings;
+        // 位置参数也必须出现在 mappings 中（旧实现会被 filter 掉，导致执行时静默丢弃）
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[0].name, "id");
+        assert!(mappings[0].arg.is_none(), "id 必须是位置参数（arg=None）");
+        assert!(mappings[0].required);
+        assert_eq!(mappings[1].name, "workspace");
+        assert_eq!(mappings[1].arg.as_deref(), Some("--workspace"));
+        assert!(!mappings[1].required);
     }
 }

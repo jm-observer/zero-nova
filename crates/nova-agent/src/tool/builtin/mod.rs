@@ -132,9 +132,13 @@ async fn register_builtin_tools_inner(
         DeferredToolCategory::System,
     )
     .await;
+    // OrchestrateTask 是 zero 生态的核心委派入口（「大量能力走子 Agent」），
+    // 注册为 always-on 让主 Agent 每轮直接可调，免去每个 session 首次委派前
+    // 多花一轮 ToolSearch 加载（弱模型尤其受益）。其 definition.defer_loading
+    // 本就为 false，此处与之对齐。
     let orchestrate_tool = orchestrate_task::OrchestrateTaskTool::new(shared_agent_tool.clone());
     let prompt_hook_slot = orchestrate_tool.prompt_hook_slot();
-    register_as_deferred(registry, Box::new(orchestrate_tool), DeferredToolCategory::System).await;
+    registry.register(Box::new(orchestrate_tool)).await;
 
     prompt_hook_slot
 }
@@ -176,6 +180,7 @@ mod tests {
             "TaskCreate",
             "TaskList",
             "TaskUpdate",
+            "OrchestrateTask",
         ] {
             assert!(
                 registry.has_loaded_tool(tool_name).await,
@@ -188,7 +193,7 @@ mod tests {
     #[tokio::test]
     async fn deferred_tools_are_registered_but_not_loaded() {
         let registry = make_registry().await;
-        for tool_name in ["WebSearch", "WebFetch", "ProjectManager", "OrchestrateTask"] {
+        for tool_name in ["WebSearch", "WebFetch", "ProjectManager"] {
             let meta = registry.tool_metadata("s1", tool_name).await;
             assert!(meta.is_some(), "deferred tool '{}' should be discoverable", tool_name);
             assert!(

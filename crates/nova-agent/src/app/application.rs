@@ -29,6 +29,9 @@ pub struct AgentApplicationImpl {
     /// 由 `register_builtin_tools` 在构造工具时产出，注入到 AgentApplicationImpl
     /// 持有，外部宿主通过 `register_orchestrate_task_prompt_hook` 写入。
     orchestrate_task_hook_slot: crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot,
+    /// AgentTool 命中 skill 后改写其 system prompt 的 hook slot 共享句柄。
+    /// 来源同上，外部宿主通过 `register_skill_system_prompt_hook` 写入。
+    skill_system_hook_slot: crate::tool::builtin::skill_system_hook::SkillSystemPromptHookSlot,
     /// 子 Agent runtime builder 的克隆句柄。与 `AgentTool` 内部持有的克隆共享
     /// 同一份种子表（`Arc<RwLock<_>>`），外部宿主通过
     /// `register_subagent_native_deferred_seed` 写入的种子对子 Agent 派生路径
@@ -45,6 +48,7 @@ impl AgentApplicationImpl {
         config_snapshot_cache: Arc<ArcSwap<Value>>,
         config_path: PathBuf,
         orchestrate_task_hook_slot: crate::tool::builtin::orchestrate_hook::OrchestrateTaskHookSlot,
+        skill_system_hook_slot: crate::tool::builtin::skill_system_hook::SkillSystemPromptHookSlot,
         subagent_runtime_builder: crate::tool::builtin::agent::SubagentRuntimeBuilder,
         // voice_service: VoiceService,
     ) -> Self {
@@ -56,6 +60,7 @@ impl AgentApplicationImpl {
             config_snapshot_cache,
             config_path,
             orchestrate_task_hook_slot,
+            skill_system_hook_slot,
             subagent_runtime_builder,
             // voice_service,
         }
@@ -112,6 +117,16 @@ impl AgentApplicationImpl {
         hook: Arc<dyn crate::tool::builtin::orchestrate_hook::OrchestrateTaskPromptHook>,
     ) {
         self.orchestrate_task_hook_slot.set(hook).await;
+    }
+
+    /// 注册外部宿主的 `SkillSystemPromptHook`。注册后，所有后续 AgentTool 命中
+    /// skill 后都会通过 hook 改写其 system prompt（默认是 `SkillPackage.instructions`
+    /// 即 SKILL.md 正文）。重复注册静默覆盖。
+    pub async fn register_skill_system_prompt_hook(
+        &self,
+        hook: Arc<dyn crate::tool::builtin::skill_system_hook::SkillSystemPromptHook>,
+    ) {
+        self.skill_system_hook_slot.set(hook).await;
     }
 }
 

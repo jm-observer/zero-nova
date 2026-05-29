@@ -37,6 +37,8 @@ pub use provider::{LlmClient, ModelConfig, ProviderStreamEvent, StreamReceiver};
 pub use skill::{CapabilityPolicy, FileToolPriority, PolicySource, Skill, SkillPackage, SkillRegistry, ToolPolicy};
 pub use tool::builtin::agent::NativeDeferredToolSeed;
 pub use tool::builtin::orchestrate_hook::{OrchestrateTaskHookSlot, OrchestrateTaskPromptHook};
+pub use tool::builtin::skill_system_hook::{SkillSystemPromptHook, SkillSystemPromptHookSlot};
+pub use tool::builtin::BuiltinHookSlots;
 pub use tool::{
     DeferredToolCategory, DeferredToolRepresentation, RegisteredToolDefinition, Tool, ToolContext, ToolRegistry,
 };

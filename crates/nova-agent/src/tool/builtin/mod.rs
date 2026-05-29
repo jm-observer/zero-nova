@@ -6,6 +6,7 @@ pub mod orchestrate_task;
 pub mod project_manager;
 pub mod read;
 pub mod skill;
+pub mod skill_system_hook;
 pub mod task;
 pub mod tool_info;
 pub mod tool_search;
@@ -18,7 +19,17 @@ use crate::network::HttpClients;
 use crate::skill::SkillRegistry;
 use crate::tool::{DeferredToolCategory, ProjectDirService, Tool, ToolRegistry};
 use orchestrate_hook::OrchestrateTaskHookSlot;
+use skill_system_hook::SkillSystemPromptHookSlot;
 use std::sync::Arc;
+
+/// `register_builtin_tools*` 返回的 hook 注册句柄打包。
+#[derive(Clone, Debug)]
+pub struct BuiltinHookSlots {
+    /// `OrchestrateTask` 调用前改写子 Agent first user prompt 的钩子。
+    pub orchestrate_task: OrchestrateTaskHookSlot,
+    /// 命中 skill 后改写子 Agent system prompt（= SKILL.md 正文）的钩子。
+    pub skill_system: SkillSystemPromptHookSlot,
+}
 
 async fn register_as_deferred(registry: &ToolRegistry, tool: Box<dyn Tool>, category: DeferredToolCategory) {
     let def = tool.definition();
@@ -31,9 +42,8 @@ async fn register_as_deferred(registry: &ToolRegistry, tool: Box<dyn Tool>, cate
 
 /// Registers all built-in tools into the provided `ToolRegistry`.
 ///
-/// 返回 `OrchestrateTaskHookSlot`：调用方可把该 slot 传给 `AgentApplicationImpl`
-/// 用于后续注入 `OrchestrateTaskPromptHook`（外部宿主如 zero 用此前置注入
-/// 子 Agent prompt 上下文）。
+/// 返回 [`BuiltinHookSlots`]：调用方把对应 slot 传给 `AgentApplicationImpl`
+/// 用于后续注入两类宿主钩子（OrchestrateTask user prompt 改写、skill system prompt 改写）。
 pub async fn register_builtin_tools(
     registry: &ToolRegistry,
     config: &AppConfig,
@@ -41,7 +51,7 @@ pub async fn register_builtin_tools(
     skill_registry: Arc<SkillRegistry>,
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
-) -> OrchestrateTaskHookSlot {
+) -> BuiltinHookSlots {
     register_builtin_tools_inner(
         registry,
         config,
@@ -64,7 +74,7 @@ pub async fn register_builtin_tools_with_services(
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
     agent_services: Option<agent::AgentToolServices>,
-) -> OrchestrateTaskHookSlot {
+) -> BuiltinHookSlots {
     register_builtin_tools_inner(
         registry,
         config,
@@ -85,8 +95,9 @@ async fn register_builtin_tools_inner(
     project_dir_service: Arc<dyn ProjectDirService>,
     http_clients: &HttpClients,
     agent_services: Option<agent::AgentToolServices>,
-) -> OrchestrateTaskHookSlot {
+) -> BuiltinHookSlots {
     let shared_agent_tool = Arc::new(agent::AgentTool::new(config.clone(), agent_services));
+    let skill_system_slot = shared_agent_tool.skill_system_hook_slot();
 
     // Always-on: core tools available every turn
     registry
@@ -140,7 +151,10 @@ async fn register_builtin_tools_inner(
     let prompt_hook_slot = orchestrate_tool.prompt_hook_slot();
     registry.register(Box::new(orchestrate_tool)).await;
 
-    prompt_hook_slot
+    BuiltinHookSlots {
+        orchestrate_task: prompt_hook_slot,
+        skill_system: skill_system_slot,
+    }
 }
 
 #[cfg(test)]

@@ -367,6 +367,9 @@ pub struct AgentTool {
     agent_types: HashMap<String, AgentSpec>,
     primary_agent_type: String,
     services: Option<AgentToolServices>,
+    /// 外部宿主可注入的 skill 子 Agent system prompt 改写钩子。
+    /// 命中 `skill_slug` 后、`pkg.instructions` 作为完整 system prompt 之前调用。
+    skill_system_hook: crate::tool::builtin::skill_system_hook::SkillSystemPromptHookSlot,
 }
 
 struct PromptRequestInputs {
@@ -415,7 +418,14 @@ impl AgentTool {
             agent_types,
             primary_agent_type,
             services,
+            skill_system_hook: crate::tool::builtin::skill_system_hook::SkillSystemPromptHookSlot::new(),
         }
+    }
+
+    /// 暴露 skill 子 Agent system prompt 改写 hook 的注册槽位。
+    /// 外部宿主（如 zero）通过 `AgentApplicationImpl::register_skill_system_prompt_hook` 注入。
+    pub fn skill_system_hook_slot(&self) -> crate::tool::builtin::skill_system_hook::SkillSystemPromptHookSlot {
+        self.skill_system_hook.clone()
     }
 
     /// Constructor without subagent services — used by tests and metadata-only wiring.
@@ -543,7 +553,24 @@ impl AgentTool {
             {
                 Some(pkg) => {
                     if sys_override.is_none() {
-                        sys_override = Some(pkg.instructions.clone());
+                        // 给外部宿主一次改写 skill 子 Agent system prompt 的机会
+                        // （注入运行时参数等）。hook 失败/未注册都回退到原 instructions。
+                        let base = pkg.instructions.clone();
+                        let transformed = if let Some(hook) = self.skill_system_hook.get().await {
+                            let session_id = context.as_ref().map(|ctx| ctx.session_id.as_str()).unwrap_or("");
+                            match hook.transform_system_prompt(slug, &base, session_id).await {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    log::warn!(
+                                        "SkillSystemPromptHook 失败 skill={slug} session_id={session_id} err={e:#}，使用原 instructions"
+                                    );
+                                    base
+                                }
+                            }
+                        } else {
+                            base
+                        };
+                        sys_override = Some(transformed);
                     }
                     preload_tools = pkg.preload.clone();
                 }

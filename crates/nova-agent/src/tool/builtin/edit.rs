@@ -38,6 +38,7 @@ impl EditTool {
                     content: "Access denied: directory traversal detected".to_string(),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
 
@@ -46,6 +47,7 @@ impl EditTool {
                     content: "Access denied: path is outside of allowed workspace".to_string(),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
             Ok(full_path)
@@ -55,6 +57,7 @@ impl EditTool {
                     content: format!("Error: 'file_path' must be an absolute path: {}", path_str),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
             Ok(path.to_path_buf())
@@ -103,6 +106,7 @@ impl Tool for EditTool {
                 content: format!("File not found: {}", file_path_str),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 
@@ -119,6 +123,7 @@ impl Tool for EditTool {
                     ),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
         }
@@ -130,6 +135,7 @@ impl Tool for EditTool {
                     content: format!("Failed to read file: {}", e),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
         };
@@ -141,6 +147,7 @@ impl Tool for EditTool {
                 content: "Error: 'old_string' not found in file.".to_string(),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 
@@ -152,6 +159,7 @@ impl Tool for EditTool {
                 ),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 
@@ -169,11 +177,13 @@ impl Tool for EditTool {
                 ),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             }),
             Err(e) => Ok(ToolOutput {
                 content: format!("Failed to write file: {}", e),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             }),
         }
     }

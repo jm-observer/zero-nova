@@ -60,16 +60,19 @@ impl Tool for ProjectManagerTool {
                     ),
                     is_error: false,
                     child_session: None,
+                    images: Vec::new(),
                 }),
                 Ok(None) => Ok(ToolOutput {
                     content: "Project directory: not set (using process working directory as fallback)".to_string(),
                     is_error: false,
                     child_session: None,
+                    images: Vec::new(),
                 }),
                 Err(e) => Ok(ToolOutput {
                     content: format!("Failed to get project directory: {}", e),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 }),
             },
             "set" => {
@@ -86,6 +89,7 @@ impl Tool for ProjectManagerTool {
                         ),
                         is_error: true,
                         child_session: None,
+                        images: Vec::new(),
                     });
                 }
                 if !path.is_dir() {
@@ -96,6 +100,7 @@ impl Tool for ProjectManagerTool {
                         ),
                         is_error: true,
                         child_session: None,
+                        images: Vec::new(),
                     });
                 }
 
@@ -120,12 +125,14 @@ impl Tool for ProjectManagerTool {
                             content,
                             is_error: false,
                             child_session: None,
+                            images: Vec::new(),
                         })
                     }
                     Err(e) => Ok(ToolOutput {
                         content: format!("Failed to set project directory: {}", e),
                         is_error: true,
                         child_session: None,
+                        images: Vec::new(),
                     }),
                 }
             }
@@ -133,6 +140,7 @@ impl Tool for ProjectManagerTool {
                 content: format!("Unknown action: {}", action),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             }),
         }
     }

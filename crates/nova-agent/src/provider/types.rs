@@ -63,10 +63,17 @@ pub enum InputContentBlock {
         input: serde_json::Value,
     },
     /// Tool result block, containing the result output and error flag.
+    ///
+    /// `output` 字段映射到 Anthropic wire 协议的 `content`，可以是:
+    /// - 纯文本字符串（无图场景，向后兼容）
+    /// - 混合 content blocks 数组（含图片场景；Anthropic 原生支持 `content: [text, image, ...]`）
+    ///
+    /// 由 provider 序列化层根据 `ContentBlock::ToolResult.images` 是否为空决定走哪种形态。
+    /// 详见 docs/2026-05-29-image-handle-injection/vision-tool-result-design.md。
     ToolResult {
         tool_use_id: String,
         #[serde(rename = "content")]
-        output: String,
+        output: ToolResultBody,
         #[serde(default)]
         is_error: bool,
     },
@@ -77,7 +84,31 @@ pub enum InputContentBlock {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Anthropic `tool_result.content` 的两种形态：纯文本或 blocks 数组。
+/// `untagged` serde:序列化时按当前 variant 自动选 String 或 Array,
+/// 反序列化时尝试匹配(优先 String)。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolResultBody {
+    Plain(String),
+    Blocks(Vec<ToolResultContentBlock>),
+}
+
+impl From<String> for ToolResultBody {
+    fn from(s: String) -> Self {
+        ToolResultBody::Plain(s)
+    }
+}
+
+/// Anthropic `tool_result.content` blocks 数组里允许的元素类型(text / image)。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolResultContentBlock {
+    Text { text: String },
+    Image { source: AnthropicImageSource },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnthropicImageSource {
     #[serde(rename = "type")]
     pub kind: String,
@@ -162,4 +193,78 @@ pub enum StopReason {
     /// Unknown reason (forward compatibility).
     #[serde(other)]
     Unknown,
+}
+
+// ============================================================================
+// P3a-6: Anthropic wire 协议 tool_result 形态测试
+// 详见 docs/2026-05-29-image-handle-injection/vision-tool-result-design.md
+// ============================================================================
+#[cfg(test)]
+mod tool_result_body_tests {
+    use super::{AnthropicImageSource, InputContentBlock, ToolResultBody, ToolResultContentBlock};
+    use serde_json::{json, Value};
+
+    /// 无图 → `content` 字段序列化成 JSON 字符串(向后兼容既有形态)。
+    #[test]
+    fn tool_result_without_image_serializes_to_plain_string() {
+        let block = InputContentBlock::ToolResult {
+            tool_use_id: "call_1".to_string(),
+            output: ToolResultBody::Plain("plain text".to_string()),
+            is_error: false,
+        };
+        let v: Value = serde_json::to_value(&block).unwrap();
+        assert_eq!(v["type"], "tool_result");
+        assert_eq!(v["tool_use_id"], "call_1");
+        assert_eq!(v["content"], json!("plain text"));
+        assert_eq!(v["is_error"], false);
+    }
+
+    /// 有图 → `content` 字段序列化成 blocks 数组(Anthropic 原生格式)。
+    /// 每个 block 自带 `type` 区分 text/image。
+    #[test]
+    fn tool_result_with_image_serializes_to_blocks_array() {
+        let block = InputContentBlock::ToolResult {
+            tool_use_id: "call_1".to_string(),
+            output: ToolResultBody::Blocks(vec![
+                ToolResultContentBlock::Text {
+                    text: "图片已读取".to_string(),
+                },
+                ToolResultContentBlock::Image {
+                    source: AnthropicImageSource {
+                        kind: "base64".to_string(),
+                        media_type: "image/jpeg".to_string(),
+                        data: "FAKE_B64".to_string(),
+                    },
+                },
+            ]),
+            is_error: false,
+        };
+        let v: Value = serde_json::to_value(&block).unwrap();
+        assert_eq!(v["type"], "tool_result");
+        let content = v["content"].as_array().expect("content 应是数组");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "图片已读取");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "image/jpeg");
+        assert_eq!(content[1]["source"]["data"], "FAKE_B64");
+    }
+
+    /// 反序列化兼容性:既能接受字符串形态又能接受数组形态。
+    #[test]
+    fn tool_result_body_deserializes_both_forms() {
+        let from_string: ToolResultBody = serde_json::from_value(json!("hi")).expect("Plain 反序列化");
+        assert!(matches!(from_string, ToolResultBody::Plain(s) if s == "hi"));
+
+        let from_array: ToolResultBody = serde_json::from_value(json!([
+            {"type": "text", "text": "x"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAA"}}
+        ]))
+        .expect("Blocks 反序列化");
+        match from_array {
+            ToolResultBody::Blocks(blocks) => assert_eq!(blocks.len(), 2),
+            other => panic!("应是 Blocks,得到 {other:?}"),
+        }
+    }
 }

@@ -25,15 +25,35 @@ pub enum ContentBlock {
         input: serde_json::Value,
     },
     /// Tool result block, containing the result output and error flag.
+    ///
+    /// `images` 是工具回传的图片列表（空 vec = 无图）。Provider 序列化时按目标
+    /// 协议处理：
+    /// - OpenAI 兼容：tool 角色消息只允许 text part（spec 限制），故图片不能
+    ///   直接挂在 tool 消息上；序列化层会在 tool 消息后**合成一条 user 消息**
+    ///   承载 image_url parts。详见 docs/2026-05-29-image-handle-injection/
+    ///   vision-tool-result-design.md。
+    /// - Anthropic 原生：tool_result content blocks 原生支持 image，直接内嵌。
     ToolResult {
         tool_use_id: String,
         output: String,
         is_error: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<ToolImage>,
     },
     /// Image block carrying base64-encoded bytes plus MIME type. Currently
     /// only used for inbound user content (vision); providers serialize this
     /// to their vendor-specific image part on the wire.
     Image { mime: String, data_base64: String },
+}
+
+/// 工具结果携带的图片项。形态与 `ContentBlock::Image` 同源（mime + base64），
+/// 但作为独立类型存在，避免 `ToolResult.images` 在类型上接受任意 ContentBlock 变体。
+/// 由工具填入 `ToolOutput.images`，经 `tool_exec` 透传到 `ContentBlock::ToolResult.images`，
+/// 最终由 provider 序列化层送进模型。
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ToolImage {
+    pub mime: String,
+    pub data_base64: String,
 }
 
 /// Turn input accepted by `AgentApplicationImpl::start_turn`. The unit `Text`

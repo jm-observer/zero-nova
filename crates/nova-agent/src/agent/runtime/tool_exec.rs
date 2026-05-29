@@ -99,6 +99,7 @@ impl AgentRuntime {
                             tool_use_id: id,
                             output: message,
                             is_error: true,
+                            images: Vec::new(),
                         },
                     ));
                     continue;
@@ -147,10 +148,10 @@ impl AgentRuntime {
                 )
                 .await;
 
-                let (content, is_error, child_session) = match result {
-                    Ok(Ok(out)) => (out.content, out.is_error, out.child_session),
-                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true, None),
-                    Err(_) => ("Tool execution timed out".to_string(), true, None),
+                let (content, is_error, child_session, images) = match result {
+                    Ok(Ok(out)) => (out.content, out.is_error, out.child_session, out.images),
+                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true, None, Vec::new()),
+                    Err(_) => ("Tool execution timed out".to_string(), true, None, Vec::new()),
                 };
                 let content = if let (Some(injector), Some(skill_registry)) =
                     (self.side_channel_injector.as_ref(), self.skill_registry.as_ref())
@@ -188,6 +189,7 @@ impl AgentRuntime {
                         tool_use_id: id,
                         output: self.compact_tool_output(&name, is_error, &content),
                         is_error,
+                        images,
                     },
                 )
             });

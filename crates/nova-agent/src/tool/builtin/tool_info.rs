@@ -62,6 +62,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
             content: "Error: 'tool_names' array must contain at least one tool name.".to_string(),
             is_error: true,
             child_session: None,
+            images: Vec::new(),
         });
     }
 
@@ -101,6 +102,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
         content: output,
         is_error,
         child_session: None,
+        images: Vec::new(),
     })
 }
 
@@ -254,6 +256,7 @@ impl Tool for ToolInfoTool {
             content: "ToolInfo: use tool_names parameter to query".to_string(),
             is_error: false,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }
@@ -293,6 +296,7 @@ mod tests {
                 content: self.name.to_string(),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             })
         }
     }

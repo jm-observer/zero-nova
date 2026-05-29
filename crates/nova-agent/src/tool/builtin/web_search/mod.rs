@@ -187,6 +187,7 @@ impl Tool for WebSearchTool {
                         content: format!("Search results for \"{}\":\n\nNo results found.\n", query),
                         is_error: false,
                         child_session: None,
+                        images: Vec::new(),
                     });
                 }
 
@@ -205,6 +206,7 @@ impl Tool for WebSearchTool {
                     content,
                     is_error: false,
                     child_session: None,
+                    images: Vec::new(),
                 })
             }
             Err(e) => {
@@ -219,6 +221,7 @@ impl Tool for WebSearchTool {
                     content: format!("Web search failed ({}): {}", self.backend.name(), e),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 })
             }
         }

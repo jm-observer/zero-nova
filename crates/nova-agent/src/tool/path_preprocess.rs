@@ -17,6 +17,7 @@ pub(super) fn preprocess_file_tool_input(
             content: "Missing 'file_path'".to_string(),
             is_error: true,
             child_session: None,
+            images: Vec::new(),
         })?;
     let Some(ctx) = context else {
         return Ok(());
@@ -37,6 +38,7 @@ pub(super) fn preprocess_file_tool_input(
             content: format_path_resolve_error(tool_name, &err),
             is_error: true,
             child_session: None,
+            images: Vec::new(),
         })?;
         input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
         return Ok(());
@@ -46,6 +48,7 @@ pub(super) fn preprocess_file_tool_input(
             content: NO_PROJECT_RELATIVE_PATH_ERROR.to_string(),
             is_error: true,
             child_session: None,
+            images: Vec::new(),
         });
     };
     let project_dir = Path::new(project_dir);
@@ -61,6 +64,7 @@ pub(super) fn preprocess_file_tool_input(
         content: format_path_resolve_error(tool_name, &err),
         is_error: true,
         child_session: None,
+        images: Vec::new(),
     })?;
     input["file_path"] = Value::String(resolved.target_path.to_string_lossy().to_string());
     Ok(())

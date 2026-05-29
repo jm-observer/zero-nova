@@ -93,11 +93,38 @@ impl LlmClient for AnthropicClient {
                         tool_use_id,
                         output,
                         is_error,
-                    } => InputContentBlock::ToolResult {
-                        tool_use_id: tool_use_id.clone(),
-                        output: output.clone(),
-                        is_error: *is_error,
-                    },
+                        images,
+                    } => {
+                        // 无图 → 走 Plain 字符串(向后兼容);有图 → 走 Blocks
+                        // 数组,把 output 文字与每张图作为独立 block。Anthropic
+                        // 原生 tool_result 支持此形态。
+                        let body = if images.is_empty() {
+                            crate::provider::types::ToolResultBody::Plain(output.clone())
+                        } else {
+                            let mut blocks: Vec<crate::provider::types::ToolResultContentBlock> =
+                                Vec::with_capacity(images.len() + 1);
+                            if !output.is_empty() {
+                                blocks.push(crate::provider::types::ToolResultContentBlock::Text {
+                                    text: output.clone(),
+                                });
+                            }
+                            for img in images {
+                                blocks.push(crate::provider::types::ToolResultContentBlock::Image {
+                                    source: AnthropicImageSource {
+                                        kind: "base64".to_string(),
+                                        media_type: img.mime.clone(),
+                                        data: img.data_base64.clone(),
+                                    },
+                                });
+                            }
+                            crate::provider::types::ToolResultBody::Blocks(blocks)
+                        };
+                        InputContentBlock::ToolResult {
+                            tool_use_id: tool_use_id.clone(),
+                            output: body,
+                            is_error: *is_error,
+                        }
+                    }
                     ContentBlock::Image { mime, data_base64 } => InputContentBlock::Image {
                         source: AnthropicImageSource {
                             kind: "base64".to_string(),

@@ -392,6 +392,7 @@ impl Tool for TaskCreateTool {
             content: serde_json::to_string(&task)?,
             is_error: false,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }
@@ -430,6 +431,7 @@ impl Tool for TaskListTool {
             content: serde_json::to_string(&tasks)?,
             is_error: false,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }
@@ -515,6 +517,7 @@ impl Tool for TaskUpdateTool {
             content: serde_json::to_string(&task)?,
             is_error: false,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }

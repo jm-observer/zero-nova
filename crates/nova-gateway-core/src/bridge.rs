@@ -275,10 +275,17 @@ pub fn app_message_to_protocol(message: AppMessage) -> MessageDTO {
                 ContentBlock::Text { text } => ContentBlockDTO::Text { text },
                 ContentBlock::Thinking { thinking } => ContentBlockDTO::Thinking { thinking },
                 ContentBlock::ToolUse { id, name, input } => ContentBlockDTO::ToolUse { id, name, input },
+                // ToolResult.images 不通过 gateway DTO 透传——nova-gateway 客户
+                // 端是外部进程消费,而工具回传图(P3a 引入)的设计目标仅在 zero
+                // 内部链路(主 Agent → OrchestrateTask → 子 Agent → read_image →
+                // tool-result 带图)生效;序列化由 provider 层(openai_compat /
+                // anthropic)直接处理,gateway 客户端不参与。若未来 nova-gateway
+                // 客户端有消费工具回传图的需求,补 images 字段到 ContentBlockDTO。
                 ContentBlock::ToolResult {
                     tool_use_id,
                     output,
                     is_error,
+                    images: _,
                 } => ContentBlockDTO::ToolResult {
                     tool_use_id,
                     content: output,

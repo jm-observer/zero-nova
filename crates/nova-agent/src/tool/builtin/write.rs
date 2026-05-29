@@ -34,6 +34,7 @@ impl WriteTool {
                     content: "Access denied: path is invalid or outside of workspace".to_string(),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
             Ok(full_path)
@@ -43,6 +44,7 @@ impl WriteTool {
                     content: format!("Error: 'file_path' must be an absolute path: {}", path_str),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
             Ok(path.to_path_buf())
@@ -93,6 +95,7 @@ impl Tool for WriteTool {
                         ),
                         is_error: true,
                         child_session: None,
+                        images: Vec::new(),
                     });
                 }
             }
@@ -105,6 +108,7 @@ impl Tool for WriteTool {
                     content: format!("Failed to create directory structure: {}", e),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
         }
@@ -114,11 +118,13 @@ impl Tool for WriteTool {
                 content: format!("Successfully written to {}", file_path_str),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             }),
             Err(e) => Ok(ToolOutput {
                 content: format!("Failed to write file: {}", e),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             }),
         }
     }

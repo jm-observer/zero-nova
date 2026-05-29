@@ -39,6 +39,7 @@ pub async fn execute(registry: &ToolRegistry, input: Value, context: Option<&Too
         content,
         is_error: false,
         child_session: None,
+        images: Vec::new(),
     })
 }
 
@@ -136,6 +137,7 @@ impl Tool for ToolSearchTool {
             content: "ToolSearch: use select: or search query".to_string(),
             is_error: false,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }

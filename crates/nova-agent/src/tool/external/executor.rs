@@ -94,6 +94,7 @@ impl Tool for ExternalCommandTool {
                     content: err.to_string(),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
         };
@@ -128,6 +129,7 @@ impl Tool for ExternalCommandTool {
             content,
             is_error: !output.status.success(),
             child_session: None,
+            images: Vec::new(),
         })
     }
 }

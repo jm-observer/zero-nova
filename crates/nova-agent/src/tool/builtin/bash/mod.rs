@@ -150,6 +150,7 @@ impl Tool for BashTool {
                 ),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             });
         }
         let timeout_ms = input["timeout_ms"].as_u64().unwrap_or(3600000);
@@ -182,6 +183,7 @@ impl Tool for BashTool {
                 content: "Command started in background. You will be notified when it completes.".to_string(),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 
@@ -332,12 +334,14 @@ impl Tool for BashTool {
                     content,
                     is_error: !status.success(),
                     child_session: None,
+                    images: Vec::new(),
                 })
             }
             Ok(Err(e)) => Ok(ToolOutput {
                 content: format!("Failed to execute command: {}", e),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             }),
             Err(_) => {
                 let _ = child.kill().await;
@@ -354,6 +358,7 @@ impl Tool for BashTool {
                     content,
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 })
             }
         }

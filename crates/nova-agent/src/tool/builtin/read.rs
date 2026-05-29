@@ -42,6 +42,7 @@ impl ReadTool {
                     content: "Access denied: path is invalid or outside of workspace".to_string(),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
             Ok(full_path)
@@ -51,6 +52,7 @@ impl ReadTool {
                     content: format!("Error: 'file_path' must be an absolute path: {}", path_str),
                     is_error: true,
                     child_session: None,
+                    images: Vec::new(),
                 });
             }
             Ok(path.to_path_buf())
@@ -73,6 +75,7 @@ impl ReadTool {
                         content: format!("Offset {} is beyond file length ({} lines)", offset, lines.len()),
                         is_error: true,
                         child_session: None,
+                        images: Vec::new(),
                     });
                 }
 
@@ -182,12 +185,14 @@ impl ReadTool {
                     content: output,
                     is_error: false,
                     child_session: None,
+                    images: Vec::new(),
                 })
             }
             Err(e) => Ok(ToolOutput {
                 content: format!("Failed to read file: {}", e),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             }),
         }
     }
@@ -198,6 +203,7 @@ impl ReadTool {
             content: "Image reading not yet supported in this version.".to_string(),
             is_error: true,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }
@@ -240,6 +246,7 @@ impl Tool for ReadTool {
                 content: format!("File not found: {}", file_path_str),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 

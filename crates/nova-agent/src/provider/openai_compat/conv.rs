@@ -52,6 +52,13 @@ pub fn messages_to_openai(messages: &[Message]) -> Vec<ChatCompletionRequestMess
                 let mut image_parts: Vec<ChatCompletionRequestMessageContentPartImage> = Vec::new();
                 let mut tool_results = Vec::new();
 
+                // 工具回传的图片(ToolResult.images)需要作为**紧跟 tool 消息后**
+                // 的合成 user 消息承载——OpenAI 协议下 tool 消息 content part 仅
+                // 支持 text(spec 限制 + vLLM/Gemma chat template 也仅支持此形态;
+                // 详见 docs/2026-05-29-image-handle-injection/vision-tool-result-design.md
+                // §2 的真机验证)。与原 user 消息自带的 inline image(ContentBlock::
+                // Image)分开收集,避免顺序错乱。
+                let mut tool_images: Vec<ChatCompletionRequestMessageContentPartImage> = Vec::new();
                 for block in &msg.content {
                     match block {
                         ContentBlock::Text { text } => {
@@ -69,9 +76,20 @@ pub fn messages_to_openai(messages: &[Message]) -> Vec<ChatCompletionRequestMess
                             });
                         }
                         ContentBlock::ToolResult {
-                            tool_use_id, output, ..
+                            tool_use_id,
+                            output,
+                            images,
+                            ..
                         } => {
                             tool_results.push((tool_use_id.clone(), output.clone()));
+                            for img in images {
+                                tool_images.push(ChatCompletionRequestMessageContentPartImage {
+                                    image_url: ImageUrl {
+                                        url: format!("data:{};base64,{}", img.mime, img.data_base64),
+                                        detail: Some(ImageDetail::Auto),
+                                    },
+                                });
+                            }
                         }
                         _ => {} // 跳过 Thinking
                     }
@@ -85,6 +103,21 @@ pub fn messages_to_openai(messages: &[Message]) -> Vec<ChatCompletionRequestMess
                             content: ChatCompletionRequestToolMessageContent::Text(output),
                         }));
                     }
+                }
+
+                // 紧跟 tool 消息后:若工具回传了图片,合成一条 user 消息只含 image_url
+                // parts 把图喂给模型(spec 限制 tool 消息无法直接承载图;真机实测确认
+                // 这是 vLLM/Gemma 接受的唯一可行线格式)。这条合成消息**先于**原 user
+                // 消息(text + inline image)发出,保证图与 tool call 在序列上紧邻。
+                if !tool_images.is_empty() {
+                    let parts: Vec<ChatCompletionRequestUserMessageContentPart> = tool_images
+                        .into_iter()
+                        .map(ChatCompletionRequestUserMessageContentPart::ImageUrl)
+                        .collect();
+                    result.push(ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+                        content: ChatCompletionRequestUserMessageContent::Array(parts),
+                        name: None,
+                    }));
                 }
 
                 let user_content: Option<ChatCompletionRequestUserMessageContent> = if !image_parts.is_empty() {
@@ -313,6 +346,139 @@ mod tests {
         #[allow(deprecated)]
         {
             assert_eq!(request.max_tokens, Some(1024));
+        }
+    }
+
+    // ====================================================================
+    // P3a-6: ToolResult.images → 合成 user 消息带 image_url 测试
+    // 详见 docs/2026-05-29-image-handle-injection/vision-tool-result-design.md
+    // ====================================================================
+    use super::messages_to_openai;
+    use crate::message::{ContentBlock, Message, Role, ToolImage};
+    use async_openai::types::chat::{
+        ChatCompletionRequestMessage, ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessageContent,
+        ChatCompletionRequestUserMessageContentPart, ImageDetail,
+    };
+
+    /// 带 images 的 ToolResult → 紧跟一条合成 user 消息承载 image_url parts。
+    /// OpenAI 协议下 tool 消息 content part 仅支持 text，故图片必须经合成 user
+    /// 消息送达。
+    #[test]
+    fn tool_result_with_image_synthesizes_user_message() {
+        let messages = vec![Message::new(
+            Role::User,
+            vec![ContentBlock::ToolResult {
+                tool_use_id: "call_1".to_string(),
+                output: "[图片已读取]".to_string(),
+                is_error: false,
+                images: vec![ToolImage {
+                    mime: "image/jpeg".to_string(),
+                    data_base64: "FAKE_B64".to_string(),
+                }],
+            }],
+            0,
+        )];
+        let out = messages_to_openai(&messages);
+        // 期望:1 条 Tool 消息 + 1 条 User 消息(只含 image_url part)
+        assert_eq!(out.len(), 2, "应产出 [Tool, User] 两条消息,得到 {out:#?}");
+        assert!(
+            matches!(out[0], ChatCompletionRequestMessage::Tool(_)),
+            "第 1 条应是 Tool 消息"
+        );
+        match &out[1] {
+            ChatCompletionRequestMessage::User(u) => match &u.content {
+                ChatCompletionRequestUserMessageContent::Array(parts) => {
+                    assert_eq!(parts.len(), 1);
+                    match &parts[0] {
+                        ChatCompletionRequestUserMessageContentPart::ImageUrl(img) => {
+                            assert_eq!(img.image_url.url, "data:image/jpeg;base64,FAKE_B64");
+                            assert!(matches!(img.image_url.detail, Some(ImageDetail::Auto)));
+                        }
+                        other => panic!("应是 ImageUrl part,得到 {other:?}"),
+                    }
+                }
+                other => panic!("应是 Array content,得到 {other:?}"),
+            },
+            other => panic!("第 2 条应是 User 消息,得到 {other:?}"),
+        }
+    }
+
+    /// 无 images 的 ToolResult 应保持原行为:只产出 Tool 消息,不合成 user 消息。
+    /// 回归保护——避免本次改动意外影响零图场景。
+    #[test]
+    fn tool_result_without_image_unchanged() {
+        let messages = vec![Message::new(
+            Role::User,
+            vec![ContentBlock::ToolResult {
+                tool_use_id: "call_1".to_string(),
+                output: "plain text result".to_string(),
+                is_error: false,
+                images: Vec::new(),
+            }],
+            0,
+        )];
+        let out = messages_to_openai(&messages);
+        assert_eq!(out.len(), 1, "无图应只产 1 条 Tool 消息,得到 {out:#?}");
+        match &out[0] {
+            ChatCompletionRequestMessage::Tool(t) => match &t.content {
+                ChatCompletionRequestToolMessageContent::Text(s) => {
+                    assert_eq!(s, "plain text result");
+                }
+                other => panic!("应是 Text content,得到 {other:?}"),
+            },
+            other => panic!("应是 Tool 消息,得到 {other:?}"),
+        }
+    }
+
+    /// 多张图(同一 ToolResult)→ 合成 user 消息含多个 image_url part。
+    #[test]
+    fn tool_result_multiple_images_all_in_synthetic_user() {
+        let messages = vec![Message::new(
+            Role::User,
+            vec![ContentBlock::ToolResult {
+                tool_use_id: "call_1".to_string(),
+                output: "[3 images]".to_string(),
+                is_error: false,
+                images: vec![
+                    ToolImage {
+                        mime: "image/png".to_string(),
+                        data_base64: "AAA".to_string(),
+                    },
+                    ToolImage {
+                        mime: "image/jpeg".to_string(),
+                        data_base64: "BBB".to_string(),
+                    },
+                    ToolImage {
+                        mime: "image/webp".to_string(),
+                        data_base64: "CCC".to_string(),
+                    },
+                ],
+            }],
+            0,
+        )];
+        let out = messages_to_openai(&messages);
+        assert_eq!(out.len(), 2);
+        match &out[1] {
+            ChatCompletionRequestMessage::User(u) => match &u.content {
+                ChatCompletionRequestUserMessageContent::Array(parts) => {
+                    assert_eq!(parts.len(), 3, "应有 3 个 image_url parts");
+                    for (i, part) in parts.iter().enumerate() {
+                        match part {
+                            ChatCompletionRequestUserMessageContentPart::ImageUrl(img) => {
+                                assert!(img.image_url.url.starts_with("data:image/"));
+                                let expected_b64 = ["AAA", "BBB", "CCC"][i];
+                                assert!(
+                                    img.image_url.url.ends_with(expected_b64),
+                                    "第 {i} 张图 URL 应以 {expected_b64} 结尾"
+                                );
+                            }
+                            other => panic!("part {i} 应是 ImageUrl,得到 {other:?}"),
+                        }
+                    }
+                }
+                _ => panic!("应是 Array"),
+            },
+            _ => panic!("第 2 条应是 User"),
         }
     }
 }

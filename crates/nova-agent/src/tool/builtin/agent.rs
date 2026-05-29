@@ -1063,6 +1063,7 @@ mod tests {
                 content: self.name.clone(),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             })
         }
     }

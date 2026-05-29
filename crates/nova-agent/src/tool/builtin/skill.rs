@@ -58,6 +58,7 @@ impl Tool for SkillTool {
                 content: format_skill_output(skill.display_name.as_str(), skill.instructions.as_str(), args),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             })
         } else {
             let available: Vec<String> = self
@@ -74,6 +75,7 @@ impl Tool for SkillTool {
                 ),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             })
         }
     }

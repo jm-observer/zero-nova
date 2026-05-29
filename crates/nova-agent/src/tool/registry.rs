@@ -1,4 +1,5 @@
 use crate::event::AgentEvent;
+use crate::message::ToolImage;
 use crate::prompt::EnvironmentSnapshot;
 use crate::provider::types::ToolDefinition as ProviderToolDefinition;
 use crate::skill::{CapabilityPolicy, SkillRegistry};
@@ -72,6 +73,11 @@ pub struct ToolOutput {
     pub is_error: bool,
     /// 工具声明"开启子会话"副作用；`None` 表示无副作用（既有行为）。
     pub child_session: Option<ChildSessionRequest>,
+    /// 工具回传的图片列表（空 vec = 无图，既有行为）。由 `tool_exec` 透传到
+    /// [`ContentBlock::ToolResult.images`](crate::message::ContentBlock::ToolResult)，
+    /// 最终由 provider 序列化层送进模型。详见
+    /// docs/2026-05-29-image-handle-injection/vision-tool-result-design.md。
+    pub images: Vec<ToolImage>,
 }
 
 #[async_trait::async_trait]
@@ -713,6 +719,7 @@ impl ToolRegistry {
             content: format!("Tool '{}' not found", canonical_name),
             is_error: true,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }
@@ -779,6 +786,7 @@ mod tests {
                 seed_user_message: "kickoff flagged_id=7".to_string(),
                 metadata: json!({ "flagged_id": 7 }),
             }),
+            images: Vec::new(),
         };
         assert!(!out.is_error);
         let cs = out.child_session.expect("child_session set");
@@ -811,6 +819,7 @@ mod tests {
                 content: self.name.to_string(),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             })
         }
     }
@@ -831,6 +840,7 @@ mod tests {
                 content: self.name.to_string(),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             })
         }
     }

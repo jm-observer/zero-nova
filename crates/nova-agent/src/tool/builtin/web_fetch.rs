@@ -63,6 +63,7 @@ impl Tool for WebFetchTool {
                 content: format!("Failed to fetch URL: HTTP {}", resp.status()),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 
@@ -91,12 +92,14 @@ impl Tool for WebFetchTool {
                 content: "Fetched page but found no text content.".to_string(),
                 is_error: true,
                 child_session: None,
+                images: Vec::new(),
             })
         } else {
             Ok(ToolOutput {
                 content: truncate(final_text, 50_000),
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             })
         }
     }

@@ -194,6 +194,7 @@ impl Tool for OrchestrateTaskTool {
                 content,
                 is_error: false,
                 child_session: None,
+                images: Vec::new(),
             });
         }
 
@@ -210,6 +211,7 @@ impl Tool for OrchestrateTaskTool {
             content: serde_json::to_string_pretty(&output)?,
             is_error: false,
             child_session: None,
+            images: Vec::new(),
         })
     }
 }

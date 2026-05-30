@@ -19,6 +19,10 @@ pub struct ToolSpec {
     pub cwd: bool,
     #[serde(default)]
     pub parameters: Vec<ParamSpec>,
+    /// 工具执行超时（秒）。未声明时回退到 executor 的 `DEFAULT_TIMEOUT`（30s）。
+    /// 适合 douyin_list_works 这类需要拉多页 / 长时间外部 API 调用的工具。
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +51,8 @@ pub struct CommandExecution {
     pub subcommands: Vec<String>,
     pub cwd: bool,
     pub param_mappings: Vec<ParamMapping>,
+    /// 工具执行超时（秒）。`None` → executor 用 `DEFAULT_TIMEOUT`（30s）。
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +79,7 @@ impl ToolSpec {
                 subcommands: self.subcommands,
                 cwd: self.cwd,
                 param_mappings,
+                timeout_secs: self.timeout_secs,
             },
         }
     }
@@ -297,5 +304,79 @@ arg = ["--workspace", "-w"]
         assert_eq!(mappings[1].name, "workspace");
         assert_eq!(mappings[1].arg.as_deref(), Some("--workspace"));
         assert!(!mappings[1].required);
+    }
+
+    /// 未声明 timeout_secs 时回退 None，执行器侧由 `DEFAULT_TIMEOUT` 兜底。
+    #[test]
+    fn test_parse_timeout_secs_optional_and_default_none() {
+        let toml_str = r#"
+[[tools]]
+name = "fast"
+description = "no explicit timeout"
+type = "command"
+command = "echo"
+cwd = false
+"#;
+        let tool_file: ToolFile = toml::from_str(toml_str).unwrap();
+        let spec = tool_file.tools.into_iter().next().unwrap();
+        assert!(
+            spec.timeout_secs.is_none(),
+            "未声明 timeout_secs 时 ToolSpec.timeout_secs 应为 None"
+        );
+        let def = spec.into_definition();
+        assert!(def.execution.timeout_secs.is_none(), "into_definition 应原样透传 None");
+    }
+
+    /// 显式声明 `timeout_secs = 180`，运行时按 180s 计算。
+    #[test]
+    fn test_parse_timeout_secs_explicit_value() {
+        let toml_str = r#"
+[[tools]]
+name = "long"
+description = "needs 180s, e.g. douyin_list_works pulling 60 pages"
+type = "command"
+command = "douyin"
+subcommands = ["list-works"]
+cwd = false
+timeout_secs = 180
+"#;
+        let tool_file: ToolFile = toml::from_str(toml_str).unwrap();
+        let spec = tool_file.tools.into_iter().next().unwrap();
+        assert_eq!(spec.timeout_secs, Some(180));
+        let def = spec.into_definition();
+        assert_eq!(def.execution.timeout_secs, Some(180));
+    }
+
+    /// `timeout_secs = 0` 合法解析为 Some(0)；语义上"立即超时"，由用户自行承担。
+    #[test]
+    fn test_parse_timeout_secs_zero() {
+        let toml_str = r#"
+[[tools]]
+name = "zero-timeout"
+description = "edge case"
+type = "command"
+command = "true"
+cwd = false
+timeout_secs = 0
+"#;
+        let tool_file: ToolFile = toml::from_str(toml_str).unwrap();
+        let spec = tool_file.tools.into_iter().next().unwrap();
+        assert_eq!(spec.timeout_secs, Some(0));
+    }
+
+    /// `timeout_secs` 写成字符串 → toml 解析失败（u64 类型校验）。防呆。
+    #[test]
+    fn test_parse_timeout_secs_string_rejected() {
+        let toml_str = r#"
+[[tools]]
+name = "bad"
+description = "wrong type"
+type = "command"
+command = "true"
+cwd = false
+timeout_secs = "180"
+"#;
+        let res: Result<ToolFile, _> = toml::from_str(toml_str);
+        assert!(res.is_err(), "字符串型 timeout_secs 应被拒绝");
     }
 }

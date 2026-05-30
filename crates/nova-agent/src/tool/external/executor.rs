@@ -105,9 +105,14 @@ impl Tool for ExternalCommandTool {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let output = tokio::time::timeout(DEFAULT_TIMEOUT, cmd.output())
+        let timeout = self
+            .execution
+            .timeout_secs
+            .map(Duration::from_secs)
+            .unwrap_or(DEFAULT_TIMEOUT);
+        let output = tokio::time::timeout(timeout, cmd.output())
             .await
-            .map_err(|_| anyhow::anyhow!("tool '{}' timed out after {}s", self.name, DEFAULT_TIMEOUT.as_secs()))?
+            .map_err(|_| anyhow::anyhow!("tool '{}' timed out after {}s", self.name, timeout.as_secs()))?
             .map_err(|e| anyhow::anyhow!("failed to execute tool '{}': {}", self.name, e))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -159,6 +164,7 @@ mod tests {
                 subcommands: vec!["sub".to_string()],
                 cwd: false,
                 param_mappings: mappings,
+                timeout_secs: None,
             },
         }
     }

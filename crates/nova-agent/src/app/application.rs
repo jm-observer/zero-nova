@@ -225,6 +225,25 @@ impl AgentApplicationImpl {
             .await;
     }
 
+    /// Register a host-provided native tool **always-on**: 工具实例立即放进主
+    /// Agent registry 的 always-on 集合，每帧推理的 system prompt 都会列出它的
+    /// 描述，主 Agent 可以**直接调用而无需先 `tool_search`**。
+    ///
+    /// 与 `register_deferred_tool` 互补：deferred 工具靠 skill `preload` 解析，
+    /// 主 Agent 不会主动 ToolSearch（弱模型不可靠）；always-on 工具不进 skill
+    /// preload 体系，专为"主 Agent 需要随时可调"的场景设计（如 zero 的
+    /// `send_file_attachment`——主 Agent 看到子 Agent 回包含路径字样后立即投递
+    /// 附件）。
+    ///
+    /// 实例由调用方一次性传入（`Box<dyn Tool>`），reload 时随 app 一同释放；
+    /// 宿主在 reload 后新注册路径里调用本方法重新注入新实例。子 Agent 的
+    /// registry 由 `SubagentRuntimeBuilder::build_runtime` 每次新建、不继承主
+    /// registry——若该工具也要对子 Agent 可见，须额外调
+    /// `register_subagent_native_deferred_seed`。
+    pub async fn register_always_on_tool(&self, tool: Box<dyn crate::tool::Tool>) {
+        self.conversation_service.agent.tools().register(tool).await;
+    }
+
     /// 注册一个 native deferred 工具「种子」，使其在后续每次 `OrchestrateTask`
     /// 派生的 sub-agent registry 中都被注册（注册为 deferred）。
     ///

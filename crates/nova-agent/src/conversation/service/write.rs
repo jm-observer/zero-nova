@@ -125,6 +125,56 @@ impl SessionService {
         Ok(session)
     }
 
+    /// `create_for_agent` 的幂等变体：调用方可指定 session id。
+    /// 若该 id 的 session 已存在（重启后 cache miss），直接加载并返回，不重建。
+    pub async fn create_for_agent_with_id(
+        &self,
+        id: String,
+        name: Option<String>,
+        agent_id: String,
+        system_prompt: String,
+        inherited_project_dir: Option<PathBuf>,
+    ) -> Result<Arc<Session>> {
+        if let Some(existing) = self.get(id.as_str()).await? {
+            return Ok(existing);
+        }
+        let session_name = name.unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string());
+        let now = Utc::now().timestamp_millis();
+        let mut initial_history = Vec::new();
+        if !system_prompt.is_empty() {
+            initial_history.push(Message {
+                id: Uuid::new_v4().to_string(),
+                role: Role::System,
+                content: vec![ContentBlock::Text { text: system_prompt.clone() }],
+                created_at: now,
+                metadata: None,
+            });
+        }
+        let mut control = ControlState::new_with_project_dir(&agent_id, inherited_project_dir);
+        if !system_prompt.is_empty() {
+            control.system_prompt_base_override = Some(system_prompt);
+        }
+        let session = Arc::new(Session {
+            control: tokio::sync::RwLock::new(control),
+            id: id.clone(),
+            name: RwLock::new(session_name),
+            history: RwLock::new(initial_history),
+            created_at: now,
+            updated_at: AtomicI64::new(now),
+            chat_lock: Mutex::new(()),
+            cancellation_token: RwLock::new(None),
+            title_state: RwLock::new(TitleState::new_default()),
+            parent_session_id: None,
+            parent_tool_use_id: None,
+            root_session_id: Some(id.clone()),
+            ancestor_ids: Some(Vec::new()),
+            child_session_ids: RwLock::new(Vec::new()),
+        });
+        self.persist_full_session(&session).await?;
+        self.cache.insert_loaded(id, session.clone()).await;
+        Ok(session)
+    }
+
     pub async fn append_message(
         &self,
         session_id: &str,

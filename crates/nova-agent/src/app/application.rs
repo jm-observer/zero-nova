@@ -357,6 +357,66 @@ impl AgentApplicationImpl {
         })
     }
 
+    pub async fn create_session_with_id(
+        &self,
+        id: String,
+        title: Option<String>,
+        agent_id: String,
+    ) -> Result<AppSession> {
+        let provider = self.conversation_service.prompt_providers.get(&agent_id).await;
+        let template_fallback = || -> String {
+            self.conversation_service
+                .agent_registry
+                .get(&agent_id)
+                .map(|agent| agent.system_prompt_template.clone())
+                .unwrap_or_default()
+        };
+        let system_prompt = match provider {
+            Some(p) => match p.current_system_prompt(&agent_id).await {
+                Ok(prompt) => prompt,
+                Err(err) => {
+                    log::warn!(
+                        "AgentPromptProvider 调用失败 agent_id={agent_id} err={err:#}，fallback 到 system_prompt_template"
+                    );
+                    template_fallback()
+                }
+            },
+            None => template_fallback(),
+        };
+
+        let inherited_project_dir = self
+            .conversation_service
+            .sessions
+            .find_latest_session_by_agent(&agent_id)
+            .await?
+            .and_then(|session| {
+                let control = session.control.try_read().ok()?;
+                control.project_dir.clone()
+            });
+
+        let session = self
+            .conversation_service
+            .sessions
+            .create_for_agent_with_id(id, title, agent_id, system_prompt, inherited_project_dir)
+            .await?;
+
+        let id = session.id.clone();
+        let name = session.get_name().await;
+        let active_agent = session.control.read().await.active_agent.clone();
+        let created_at = session.created_at;
+        let updated_at = session.updated_at.load(std::sync::atomic::Ordering::SeqCst);
+        let message_count = session.history.read().await.len();
+
+        Ok(AppSession {
+            id,
+            title: Some(name),
+            agent_id: active_agent,
+            created_at,
+            updated_at,
+            message_count,
+        })
+    }
+
     pub async fn delete_session(&self, session_id: &str) -> Result<bool> {
         // Plan 3：有子 Session 时拒绝删除（避免造成孤儿子 Session）。
         let children = self

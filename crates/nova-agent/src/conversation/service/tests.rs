@@ -1554,3 +1554,61 @@ async fn build_session_tree_returns_err_for_unknown_root() -> Result<()> {
     assert!(err.unwrap_err().to_string().contains("not found"));
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// create_for_agent_with_id：指定 id + 幂等行为测试
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_for_agent_with_id_uses_provided_id() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let id = "test-session-unique-id-001".to_string();
+    let session = service
+        .create_for_agent_with_id(
+            id.clone(),
+            None,
+            "skill-runner".to_string(),
+            "prompt".to_string(),
+            None,
+        )
+        .await?;
+
+    assert_eq!(session.id, id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_for_agent_with_id_is_idempotent() -> Result<()> {
+    let dir = tempdir()?;
+    let manager = SqliteManager::new(dir.path()).await?;
+    let repository = crate::conversation::repository::SqliteSessionRepository::new(manager.pool.clone());
+    let service = SessionService::new(Arc::new(SessionCache::new()), repository);
+
+    let id = "test-session-idempotent-002".to_string();
+    let s1 = service
+        .create_for_agent_with_id(
+            id.clone(),
+            None,
+            "skill-runner".to_string(),
+            "prompt".to_string(),
+            None,
+        )
+        .await?;
+    let s2 = service
+        .create_for_agent_with_id(
+            id.clone(),
+            None,
+            "skill-runner".to_string(),
+            "prompt2".to_string(),
+            None,
+        )
+        .await?;
+
+    // 同一 id 第二次调用返回相同 session（幂等），不报错
+    assert_eq!(s1.id, s2.id);
+    Ok(())
+}

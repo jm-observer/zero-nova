@@ -39,6 +39,12 @@ pub enum AgentEvent {
     TextDelta(String),
     /// Thinking delta emitted by the LLM.
     ThinkingDelta(String),
+    /// 单次 LLM 调用完成后的完整 HTTP trace（request body + 聚合后的 response body）。
+    /// 供宿主（zero）做全生命周期追踪捕获 LLM body；nova 自身不消费。
+    ProviderHttpTrace {
+        request_body: serde_json::Value,
+        response_body: serde_json::Value,
+    },
     /// Tool invocation start event.
     ToolStart {
         id: String,

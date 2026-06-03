@@ -604,6 +604,8 @@ impl EventPrinter {
                         );
                     }
                 }
+                // 宿主侧全链路追踪事件，CLI 不展示。
+                AgentEvent::ProviderHttpTrace { .. } => {}
             },
         }
     }

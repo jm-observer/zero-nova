@@ -66,6 +66,11 @@ pub enum AppEvent {
     AssistantMessage {
         content: Vec<ContentBlock>,
     },
+    /// 单次 LLM 调用的完整 HTTP trace（request/response body），供宿主全链路追踪捕获。
+    ProviderHttpTrace {
+        request_body: Value,
+        response_body: Value,
+    },
     TurnComplete {
         usage: Usage,
     },
@@ -159,6 +164,13 @@ impl From<AgentEvent> for AppEvent {
             AgentEvent::Iteration { current, total } => AppEvent::Iteration { current, total },
             AgentEvent::IterationLimitReached { iterations } => AppEvent::IterationLimitReached { iterations },
             AgentEvent::AssistantMessage { content } => AppEvent::AssistantMessage { content },
+            AgentEvent::ProviderHttpTrace {
+                request_body,
+                response_body,
+            } => AppEvent::ProviderHttpTrace {
+                request_body,
+                response_body,
+            },
             AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
             AgentEvent::Error(msg) => AppEvent::Error(msg),
             AgentEvent::SystemLog(msg) => AppEvent::SystemLog(msg),

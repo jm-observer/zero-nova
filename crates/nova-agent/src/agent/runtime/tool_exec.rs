@@ -335,6 +335,19 @@ impl AgentRuntime {
             final_provider_request_body = receiver.request_body();
             final_provider_response_body = receiver.response_body();
 
+            // 本次 LLM 调用的完整 HTTP trace 透传给宿主（全链路追踪捕获 body）。
+            if let (Some(req_body), Some(resp_body)) = (
+                final_provider_request_body.as_ref(),
+                final_provider_response_body.as_ref(),
+            ) {
+                let _ = event_tx
+                    .send(AgentEvent::ProviderHttpTrace {
+                        request_body: req_body.clone(),
+                        response_body: resp_body.clone(),
+                    })
+                    .await;
+            }
+
             cumulative_usage.input_tokens += iter_usage.input_tokens;
             cumulative_usage.output_tokens += iter_usage.output_tokens;
             cumulative_usage.cache_creation_input_tokens = match (

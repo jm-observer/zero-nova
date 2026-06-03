@@ -69,6 +69,12 @@ pub fn app_event_to_gateway(event: AppEvent, request_id: &str, session_id: &str)
             session_id: Some(session_id.to_string()),
             ..Default::default()
         }),
+        // 宿主侧全链路追踪事件，网关协议不下发 body，仅作 no-op 进度标记。
+        AppEvent::ProviderHttpTrace { .. } => MessageEnvelope::ChatProgress(ProgressEvent {
+            kind: "provider_http_trace".to_string(),
+            session_id: Some(session_id.to_string()),
+            ..Default::default()
+        }),
         AppEvent::Error(msg) => MessageEnvelope::Error(ErrorPayload {
             message: msg,
             code: Some("AGENT_RUNTIME_ERROR".to_string()),

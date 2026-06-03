@@ -67,9 +67,12 @@ pub enum AppEvent {
         content: Vec<ContentBlock>,
     },
     /// 单次 LLM 调用的完整 HTTP trace（request/response body），供宿主全链路追踪捕获。
+    /// `start_ms`/`end_ms` 是本次调用的 Unix epoch 毫秒，供宿主端 span 时长展示。
     ProviderHttpTrace {
         request_body: Value,
         response_body: Value,
+        start_ms: i64,
+        end_ms: i64,
     },
     TurnComplete {
         usage: Usage,
@@ -167,9 +170,13 @@ impl From<AgentEvent> for AppEvent {
             AgentEvent::ProviderHttpTrace {
                 request_body,
                 response_body,
+                start_ms,
+                end_ms,
             } => AppEvent::ProviderHttpTrace {
                 request_body,
                 response_body,
+                start_ms,
+                end_ms,
             },
             AgentEvent::TurnComplete { usage, .. } => AppEvent::TurnComplete { usage },
             AgentEvent::Error(msg) => AppEvent::Error(msg),

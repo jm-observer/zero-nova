@@ -291,6 +291,9 @@ impl AgentRuntime {
             let mut tool_calls: Vec<(String, String, String)> = Vec::new();
             let mut iter_usage = Usage::default();
             let mut last_stop_reason: Option<StopReason> = None;
+            // 本次 LLM 调用开始时间：宿主拿到 ProviderHttpTrace 事件时已晚于 end，
+            // 无法回推 start，故由这里记下，连同 end 一起 emit 出去（供 trace-hub 算时长）。
+            let iter_started_ms = chrono::Utc::now().timestamp_millis();
 
             while let Some(event) = receiver
                 .next_event()
@@ -344,6 +347,8 @@ impl AgentRuntime {
                     .send(AgentEvent::ProviderHttpTrace {
                         request_body: req_body.clone(),
                         response_body: resp_body.clone(),
+                        start_ms: iter_started_ms,
+                        end_ms: chrono::Utc::now().timestamp_millis(),
                     })
                     .await;
             }

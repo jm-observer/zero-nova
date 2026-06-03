@@ -41,9 +41,13 @@ pub enum AgentEvent {
     ThinkingDelta(String),
     /// 单次 LLM 调用完成后的完整 HTTP trace（request body + 聚合后的 response body）。
     /// 供宿主（zero）做全生命周期追踪捕获 LLM body；nova 自身不消费。
+    /// `start_ms`/`end_ms` 是本次调用的 Unix epoch 毫秒，用于宿主端 span 时长展示
+    /// （宿主拿到事件时已经晚于 end，无法回推 start，故由 nova 这边记下）。
     ProviderHttpTrace {
         request_body: serde_json::Value,
         response_body: serde_json::Value,
+        start_ms: i64,
+        end_ms: i64,
     },
     /// Tool invocation start event.
     ToolStart {

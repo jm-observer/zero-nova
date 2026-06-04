@@ -68,6 +68,16 @@ where
         stage.agents.len()
     );
 
+    // 跨任务透传 traceparent：tokio task-local 不会自动继承到 `tokio::spawn` /
+    // `JoinSet::spawn` 的子任务，故在父任务里先把当前值取出，子任务里再 scope 一次。
+    // 这样 alarm/douyin-ingest 这类经 OrchestrateTask → 子 Agent 跑的工具，其内部
+    // 调到 ExternalCommandTool 时仍能读到 TRACEPARENT，把 W3C 头注入子进程。
+    #[cfg(feature = "trace-propagation")]
+    let parent_traceparent: Option<String> = custom_utils::trace_propagation::CURRENT_TRACEPARENT
+        .try_with(|tp| tp.clone())
+        .ok()
+        .flatten();
+
     for agent in &stage.agents {
         let stage_id = stage.stage_id.clone();
         let req = agent.clone();
@@ -77,6 +87,16 @@ where
             "[scheduler] spawn parallel agent plan_id={} stage_id={} agent_id={}",
             plan_id, stage.stage_id, agent_id
         );
+        #[cfg(feature = "trace-propagation")]
+        {
+            let tp = parent_traceparent.clone();
+            join_set.spawn(async move {
+                custom_utils::trace_propagation::CURRENT_TRACEPARENT
+                    .scope(tp, async move { (agent_id, runner(req, stage_id).await) })
+                    .await
+            });
+        }
+        #[cfg(not(feature = "trace-propagation"))]
         join_set.spawn(async move { (agent_id, runner(req, stage_id).await) });
     }
 

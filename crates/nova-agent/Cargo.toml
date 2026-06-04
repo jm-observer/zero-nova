@@ -34,6 +34,10 @@ nova-agent-config = { workspace = true }
 [features]
 default = []
 mcp-websocket = ["dep:tokio-tungstenite"]
+# 启用工具子进程的 traceparent 透传：读宿主 scope 的 task-local，注入
+# TRACEPARENT env 给 ExternalCommandTool 子进程。需配合 custom-utils 的
+# `trace` feature（由本 feature 转开）。未启用时整段代码缺席、零开销。
+trace-propagation = ["custom-utils/trace"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

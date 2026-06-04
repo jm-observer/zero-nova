@@ -105,6 +105,19 @@ impl Tool for ExternalCommandTool {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // 全链路追踪：宿主（zero）若已 scope `CURRENT_TRACEPARENT`，把当前 turn
+        // 的 W3C traceparent 作 `TRACEPARENT` 环境变量传给子进程。子进程（如
+        // alarm-cli / douyin-cli）据此在出站 HTTP 上加 `traceparent` 头，对端
+        // （alarm-server / douyin worker）服务端无缝续接同一棵 trace。
+        // try_with 在未 scope 时返回 Err（编译期 feature 关时整段 cfg 缺席）；
+        // 出错或 None 都视作"未启用追踪"，cmd 不带该 env，子进程退化为无 trace。
+        #[cfg(feature = "trace-propagation")]
+        if let Ok(Some(tp)) = custom_utils::trace_propagation::CURRENT_TRACEPARENT
+            .try_with(|tp| tp.clone())
+        {
+            cmd.env("TRACEPARENT", tp);
+        }
+
         let timeout = self
             .execution
             .timeout_secs

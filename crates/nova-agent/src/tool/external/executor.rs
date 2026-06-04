@@ -112,10 +112,27 @@ impl Tool for ExternalCommandTool {
         // try_with 在未 scope 时返回 Err（编译期 feature 关时整段 cfg 缺席）；
         // 出错或 None 都视作"未启用追踪"，cmd 不带该 env，子进程退化为无 trace。
         #[cfg(feature = "trace-propagation")]
-        if let Ok(Some(tp)) = custom_utils::trace_propagation::CURRENT_TRACEPARENT
-            .try_with(|tp| tp.clone())
-        {
-            cmd.env("TRACEPARENT", tp);
+        match custom_utils::trace_propagation::CURRENT_TRACEPARENT.try_with(|tp| tp.clone()) {
+            Ok(Some(tp)) => {
+                log::info!(
+                    "[TRACE] external tool '{}' inheriting TRACEPARENT={}",
+                    self.name,
+                    tp
+                );
+                cmd.env("TRACEPARENT", tp);
+            }
+            Ok(None) => {
+                log::info!(
+                    "[TRACE] external tool '{}' scope set but None (追踪未启用)",
+                    self.name
+                );
+            }
+            Err(_) => {
+                log::info!(
+                    "[TRACE] external tool '{}' has no CURRENT_TRACEPARENT scope (call site not wrapped)",
+                    self.name
+                );
+            }
         }
 
         let timeout = self

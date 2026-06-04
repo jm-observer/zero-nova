@@ -174,13 +174,23 @@ impl AgentRuntime {
 
                 let result = timeout(tool_timeout_duration, scoped_future).await;
 
+                let (content, is_error, child_session, images) = match result {
+                    Ok(Ok(out)) => (out.content, out.is_error, out.child_session, out.images),
+                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true, None, Vec::new()),
+                    Err(_) => ("Tool execution timed out".to_string(), true, None, Vec::new()),
+                };
+
                 // emit tool_call span（不论成功失败都记，覆盖 OrchestrateTask 等所有工具）
+                // request_body = tool 入参（input args JSON），response_body = tool 输出
+                // 文本——trace-hub 详情面板会用结构化"请求 / 响应"两栏渲染，无需再翻
+                // 下一条 LLM 调用的 prompt 才能看结果。
                 #[cfg(feature = "trace-propagation")]
                 if let Some(ctx) = tool_ctx_opt.as_ref() {
                     let end_ms = custom_utils::trace::now_ms();
-                    let status = match &result {
-                        Ok(Ok(out)) if !out.is_error => custom_utils::trace::SpanStatus::Ok,
-                        _ => custom_utils::trace::SpanStatus::Error("tool error".to_string()),
+                    let status = if is_error {
+                        custom_utils::trace::SpanStatus::Error("tool error".to_string())
+                    } else {
+                        custom_utils::trace::SpanStatus::Ok
                     };
                     custom_utils::trace::record_span(custom_utils::trace::SpanRecord {
                         trace_id: ctx.trace_id.clone(),
@@ -196,20 +206,21 @@ impl AgentRuntime {
                             "tool": name,
                             "tool_use_id": id,
                             "dur_ms": end_ms - tool_start_ms,
+                            "is_error": is_error,
+                            "output_chars": content.chars().count(),
+                            "images": images.len(),
                         }),
-                        detail: serde_json::json!({ "input": input_val }),
-                        request_body: None,
-                        response_body: None,
+                        detail: if images.is_empty() {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::json!({ "images": images.len() })
+                        },
+                        request_body: Some(serde_json::to_string(&input_val).unwrap_or_default()),
+                        response_body: Some(content.clone()),
                         body_truncated: false,
                         links: Vec::new(),
                     });
                 }
-
-                let (content, is_error, child_session, images) = match result {
-                    Ok(Ok(out)) => (out.content, out.is_error, out.child_session, out.images),
-                    Ok(Err(e)) => (format!("Internal execution error: {}", e), true, None, Vec::new()),
-                    Err(_) => ("Tool execution timed out".to_string(), true, None, Vec::new()),
-                };
                 let content = if let (Some(injector), Some(skill_registry)) =
                     (self.side_channel_injector.as_ref(), self.skill_registry.as_ref())
                 {

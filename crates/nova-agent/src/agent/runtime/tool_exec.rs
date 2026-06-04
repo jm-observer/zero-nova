@@ -172,6 +172,35 @@ impl AgentRuntime {
                 #[cfg(not(feature = "trace-propagation"))]
                 let scoped_future = exec_future;
 
+                // Anchor emit（带 request_body=tool 入参，无 response）：trace-hub UI
+                // 在工具执行期间就能看到调用入参；工具长时间 / 子进程卡住时也能定位。
+                // 完成后下面用同 span_id 再 emit 一次，request 不变、response 补上、
+                // end_ms 更新为真实结束时间，靠 INSERT OR REPLACE 合并。
+                #[cfg(feature = "trace-propagation")]
+                if let Some(ctx) = tool_ctx_opt.as_ref() {
+                    custom_utils::trace::record_span(custom_utils::trace::SpanRecord {
+                        trace_id: ctx.trace_id.clone(),
+                        span_id: ctx.span_id.clone(),
+                        parent_span_id: ctx.parent_span_id.clone(),
+                        service: String::new(),
+                        kind: "tool_call".to_string(),
+                        flow_name: None,
+                        start_ms: tool_start_ms,
+                        end_ms: tool_start_ms, // 进行中：先 0ms，完成后覆盖
+                        status: custom_utils::trace::SpanStatus::Ok,
+                        summary: serde_json::json!({
+                            "tool": name,
+                            "tool_use_id": id,
+                            "state": "in_flight",
+                        }),
+                        detail: serde_json::Value::Null,
+                        request_body: Some(serde_json::to_string(&input_val).unwrap_or_default()),
+                        response_body: None,
+                        body_truncated: false,
+                        links: Vec::new(),
+                    });
+                }
+
                 let result = timeout(tool_timeout_duration, scoped_future).await;
 
                 let (content, is_error, child_session, images) = match result {

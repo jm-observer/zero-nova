@@ -68,15 +68,22 @@ where
         stage.agents.len()
     );
 
-    // 跨任务透传 traceparent：tokio task-local 不会自动继承到 `tokio::spawn` /
-    // `JoinSet::spawn` 的子任务，故在父任务里先把当前值取出，子任务里再 scope 一次。
-    // 这样 alarm/douyin-ingest 这类经 OrchestrateTask → 子 Agent 跑的工具，其内部
-    // 调到 ExternalCommandTool 时仍能读到 TRACEPARENT，把 W3C 头注入子进程。
+    // 跨任务透传 traceparent + zero_session_id：tokio task-local 不会自动继承到
+    // `tokio::spawn` / `JoinSet::spawn` 的子任务，故在父任务里先把当前值取出，
+    // 子任务里再 scope 一次。这样 alarm/douyin-ingest 这类经 OrchestrateTask →
+    // 子 Agent 跑的工具，其内部调到 ExternalCommandTool 时仍能读到 TRACEPARENT
+    // 和 ZERO_SESSION_ID，把它们注入子进程 env。
     #[cfg(feature = "trace-propagation")]
     let parent_traceparent: Option<String> = custom_utils::trace_propagation::CURRENT_TRACEPARENT
         .try_with(|tp| tp.clone())
         .ok()
         .flatten();
+    #[cfg(feature = "trace-propagation")]
+    let parent_zero_session_id: Option<String> =
+        custom_utils::trace_propagation::CURRENT_ZERO_SESSION_ID
+            .try_with(|s| s.clone())
+            .ok()
+            .flatten();
 
     for agent in &stage.agents {
         let stage_id = stage.stage_id.clone();
@@ -90,9 +97,16 @@ where
         #[cfg(feature = "trace-propagation")]
         {
             let tp = parent_traceparent.clone();
+            let sid = parent_zero_session_id.clone();
             join_set.spawn(async move {
                 custom_utils::trace_propagation::CURRENT_TRACEPARENT
-                    .scope(tp, async move { (agent_id, runner(req, stage_id).await) })
+                    .scope(tp, async move {
+                        custom_utils::trace_propagation::CURRENT_ZERO_SESSION_ID
+                            .scope(sid, async move {
+                                (agent_id, runner(req, stage_id).await)
+                            })
+                            .await
+                    })
                     .await
             });
         }

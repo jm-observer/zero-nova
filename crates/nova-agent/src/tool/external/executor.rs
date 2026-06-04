@@ -134,6 +134,14 @@ impl Tool for ExternalCommandTool {
                 );
             }
         }
+        // 也透传顶层用户 session_id：alarm-cli 等子进程据此写 callback_body.metadata.session_id，
+        // alarm-server 持久化 → 触发回调时透传 → zero gateway 入站直接续接原 session（不新建）。
+        #[cfg(feature = "trace-propagation")]
+        if let Ok(Some(sid)) = custom_utils::trace_propagation::CURRENT_ZERO_SESSION_ID
+            .try_with(|s| s.clone())
+        {
+            cmd.env("ZERO_SESSION_ID", sid);
+        }
 
         let timeout = self
             .execution

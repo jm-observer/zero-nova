@@ -58,3 +58,4 @@ nova-gateway-core = { path = "crates/nova-gateway-core" }
 nova-server = { path = "crates/nova-server" }
 nova-cli = { path = "crates/nova-cli" }
 channel-core = { path = "crates/channel-core" }
+

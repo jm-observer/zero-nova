@@ -126,27 +126,84 @@ impl AgentRuntime {
                     })
                     .await;
 
-                let result = timeout(
-                    tool_timeout_duration,
-                    tool_registry.execute(
-                        &name,
-                        input_val,
-                        Some(ToolContext {
-                            event_tx: tx.clone(),
-                            tool_use_id: id.clone(),
-                            session_id,
-                            task_store,
-                            skill_registry,
-                            read_files,
-                            turn_read_state: Some(turn_read_state.clone()),
-                            environment,
-                            shared_environment,
-                            cancellation_token: None,
-                            visible_tool_names,
+                // 全链路追踪：每个 tool 调用包成一个 span，并把 traceparent
+                // re-scope 成当前 tool 的——这样：
+                //   1. 外部服务（alarm-server 等）经请求头取 traceparent 时
+                //      落到本 tool 之下，体现层级；
+                //   2. 嵌套子工具（如 OrchestrateTask 拉子 Agent 再调子工具）
+                //      继续往下嵌套，符合"agent→tool→service"三段式。
+                #[cfg(feature = "trace-propagation")]
+                let tool_ctx_opt: Option<custom_utils::trace::TraceContext> = custom_utils::trace_propagation::CURRENT_TRACEPARENT
+                    .try_with(|tp| tp.clone())
+                    .ok()
+                    .flatten()
+                    .and_then(|tp| custom_utils::trace::TraceContext::from_traceparent(&tp))
+                    .map(|parent| parent.child());
+                #[cfg(feature = "trace-propagation")]
+                let tool_start_ms = custom_utils::trace::now_ms();
+
+                let exec_future = tool_registry.execute(
+                    &name,
+                    input_val.clone(),
+                    Some(ToolContext {
+                        event_tx: tx.clone(),
+                        tool_use_id: id.clone(),
+                        session_id,
+                        task_store,
+                        skill_registry,
+                        read_files,
+                        turn_read_state: Some(turn_read_state.clone()),
+                        environment,
+                        shared_environment,
+                        cancellation_token: None,
+                        visible_tool_names,
+                    }),
+                );
+
+                #[cfg(feature = "trace-propagation")]
+                let scoped_future = match tool_ctx_opt.as_ref() {
+                    Some(ctx) => {
+                        let tp = ctx.to_traceparent();
+                        Box::pin(custom_utils::trace_propagation::CURRENT_TRACEPARENT
+                            .scope(Some(tp), exec_future)) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+                    }
+                    None => Box::pin(exec_future),
+                };
+                #[cfg(not(feature = "trace-propagation"))]
+                let scoped_future = exec_future;
+
+                let result = timeout(tool_timeout_duration, scoped_future).await;
+
+                // emit tool_call span（不论成功失败都记，覆盖 OrchestrateTask 等所有工具）
+                #[cfg(feature = "trace-propagation")]
+                if let Some(ctx) = tool_ctx_opt.as_ref() {
+                    let end_ms = custom_utils::trace::now_ms();
+                    let status = match &result {
+                        Ok(Ok(out)) if !out.is_error => custom_utils::trace::SpanStatus::Ok,
+                        _ => custom_utils::trace::SpanStatus::Error("tool error".to_string()),
+                    };
+                    custom_utils::trace::record_span(custom_utils::trace::SpanRecord {
+                        trace_id: ctx.trace_id.clone(),
+                        span_id: ctx.span_id.clone(),
+                        parent_span_id: ctx.parent_span_id.clone(),
+                        service: String::new(), // 由 trace::init 时的 service 填
+                        kind: "tool_call".to_string(),
+                        flow_name: None,
+                        start_ms: tool_start_ms,
+                        end_ms,
+                        status,
+                        summary: serde_json::json!({
+                            "tool": name,
+                            "tool_use_id": id,
+                            "dur_ms": end_ms - tool_start_ms,
                         }),
-                    ),
-                )
-                .await;
+                        detail: serde_json::json!({ "input": input_val }),
+                        request_body: None,
+                        response_body: None,
+                        body_truncated: false,
+                        links: Vec::new(),
+                    });
+                }
 
                 let (content, is_error, child_session, images) = match result {
                     Ok(Ok(out)) => (out.content, out.is_error, out.child_session, out.images),
@@ -339,16 +396,44 @@ impl AgentRuntime {
             final_provider_response_body = receiver.response_body();
 
             // 本次 LLM 调用的完整 HTTP trace 透传给宿主（全链路追踪捕获 body）。
+            // 同时（trace-propagation 启用时）由 nova 直接 emit `llm_call` span：
+            // 此处的 CURRENT_TRACEPARENT 才是真正的当前父（主 agent 的 turn / 子
+            // agent 的 turn / tool 内部嵌套），bridge-claw 那边的 record_llm_span
+            // 只能看到外层 turn，无法正确表达 subagent 的 llm 该挂哪。
+            let iter_ended_ms = chrono::Utc::now().timestamp_millis();
             if let (Some(req_body), Some(resp_body)) = (
                 final_provider_request_body.as_ref(),
                 final_provider_response_body.as_ref(),
             ) {
+                #[cfg(feature = "trace-propagation")]
+                if let Some(parent) = custom_utils::trace_propagation::CURRENT_TRACEPARENT
+                    .try_with(|tp| tp.clone())
+                    .ok()
+                    .flatten()
+                    .and_then(|tp| custom_utils::trace::TraceContext::from_traceparent(&tp))
+                {
+                    let ctx = parent.child();
+                    let model = req_body
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    custom_utils::trace::record_llm_call(custom_utils::trace::LlmCall {
+                        ctx,
+                        model,
+                        request_body: serde_json::to_string(req_body).unwrap_or_default(),
+                        response_body: serde_json::to_string(resp_body).unwrap_or_default(),
+                        start_ms: iter_started_ms,
+                        end_ms: iter_ended_ms,
+                        status: custom_utils::trace::SpanStatus::Ok,
+                    });
+                }
                 let _ = event_tx
                     .send(AgentEvent::ProviderHttpTrace {
                         request_body: req_body.clone(),
                         response_body: resp_body.clone(),
                         start_ms: iter_started_ms,
-                        end_ms: chrono::Utc::now().timestamp_millis(),
+                        end_ms: iter_ended_ms,
                     })
                     .await;
             }
